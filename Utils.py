@@ -10,3 +10,17 @@ def iota(restart: bool = False) -> int:
     counter = iota_count
     iota_count = iota_count + 1
     return counter
+
+
+def is_skippable(char: str) -> bool:
+    return char == " " or char == "\n" or char == "\t"
+
+
+def is_int(char: str) -> bool:
+    c = ord(char)
+    bounds = [ord('0'), ord('9')]
+    return bounds[0] <= c <= bounds[1]
+
+
+def is_alpha(src: str) -> bool:
+    return src.upper() != src.lower()
