@@ -32,3 +32,6 @@ class TokenType(Enum):
 
     LEFT_CBR = iota()
     RIGHT_CBR = iota()
+
+    # End of file
+    EOF = iota()

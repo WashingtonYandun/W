@@ -3,7 +3,6 @@ from Token import Token
 from TokenType import TokenType
 from Utils import is_skippable
 
-
 # Constant lookup for keywords and known identifiers , datatypes and symbols.
 KEYWORDS = {
     'let': TokenType.LET,
@@ -97,5 +96,7 @@ class Lexer:
             else:
                 print(f"Unrecognized character found in source: {ord(self.current_char)}, {self.current_char}")
                 raise ValueError("Tokenization error")
+
+        tokens.append(Token(None, TokenType.EOF))
 
         return tokens
