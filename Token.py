@@ -1,22 +1,19 @@
-from enum import Enum
-from Utils import iota
+from TokenType import TokenType
 
 
-class Token(Enum):
-    NUMBERS = iota()
-    DATATYPE = iota()
-    IDENTIFIER = iota()
+class Token:
+    def __init__(self, value: object = None, type_: TokenType = None):
+        self.value = value
+        self.type = type_
 
-    # Grouping & Operators
-    BINARY_OPERATOR = iota()
-    EQUALS = iota()
+    def __str__(self):
+        return f"Token({self.value}, {self.type})"
 
-    # Syntax
-    LEFT_PR = iota()
-    RIGHT_PR = iota()
+    def __repr__(self):
+        return self.__str__()
 
-    LEFT_BR = iota()
-    RIGHT_BR = iota()
+    def __eq__(self, other):
+        return self.value == other.value and self.type == other.type
 
-    LEFT_CBR = iota()
-    RIGHT_CBR = iota()
+    def __ne__(self, other):
+        return not self.__eq__(other)
