@@ -5,19 +5,19 @@ NodeType = Union["Program", "NumericLiteral", "Identifier", "BinaryExpr"]
 
 
 # (Statements)
-class Statements:
+class Statement:
     def __init__(self, kind: NodeType):
         self.kind = kind
 
 
-class Program(Statements):
-    def __init__(self, body: list[Statements]):
+class Program(Statement):
+    def __init__(self, body: list[Statement]):
         super().__init__("Program")
         self.body = body
 
 
 # Define la interfaz para expresiones
-class Expr(Statements):
+class Expr(Statement):
     pass
 
 
