@@ -16,8 +16,9 @@ class TokenType(Enum):
     NULL = iota()
 
     # Identifiers
-    LET = iota()
     IDENTIFIER = iota()
+    ASSIGNMENT_OPERATOR = iota()
+
 
     # Grouping & Operators
     BINARY_OPERATOR = iota()

@@ -5,7 +5,6 @@ from Utils import is_skippable
 
 # Constant lookup for keywords and known identifiers , datatypes and symbols.
 KEYWORDS = {
-    'let': TokenType.LET,
     'num': TokenType.NUM_DATA_TYPE,
     'str': TokenType.STR_DATA_TYPE,
     'bool': TokenType.BOOL_DATA_TYPE,
@@ -82,7 +81,7 @@ class Lexer:
                 self.advance()
 
             elif self.current_char == "=":
-                tokens.append(Token(self.current_char, TokenType.EQUALS))
+                tokens.append(Token(self.current_char, TokenType.ASSIGNMENT_OPERATOR))
                 self.advance()
 
             elif self.current_char.isalpha():
