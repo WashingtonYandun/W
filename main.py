@@ -8,10 +8,8 @@ if __name__ == '__main__':
     # TODO: Handle errors
 
     code = """
-    let num x = 45
-    let str y = Hola
-    let bool z = true
-    let null w = null
+    x = 45
+    y = Hola
     """
 
     lexer = Lexer(code)

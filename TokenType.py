@@ -16,8 +16,9 @@ class TokenType(Enum):
     NULL = iota()
 
     # Identifiers
-    LET = iota()
     IDENTIFIER = iota()
+    ASSIGNMENT_OPERATOR = iota()
+
 
     # Grouping & Operators
     BINARY_OPERATOR = iota()
@@ -32,3 +33,6 @@ class TokenType(Enum):
 
     LEFT_CBR = iota()
     RIGHT_CBR = iota()
+
+    # End of file
+    EOF = iota()
