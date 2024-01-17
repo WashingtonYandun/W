@@ -78,6 +78,11 @@ class Parser:
             self.expect(TokenType.RIGHT_PR,
                         "Unexpected token found inside parenthesized expression. Expected closing parenthesis.")
             return value
+        
+        elif tk == TokenType.ASSIGNMENT_OPERATOR:
+            self.eat()
+            value = self.parse_expr()
+            return value
 
         else:
             print("Unexpected token found during parsing!", self.at())
@@ -85,5 +90,5 @@ class Parser:
 
 # Ejemplo de uso:
 parser = Parser()
-ast = parser.produceAST("let num HOLA = 45.67")
+ast = parser.produceAST("hola = 45.67")
 # Puedes acceder a la estructura del árbol AST a través de 'ast'
