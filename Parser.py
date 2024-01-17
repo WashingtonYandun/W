@@ -71,24 +71,21 @@ class Parser:
 
         elif tk == TokenType.NUMBERS:
             return NumericLiteral(float(self.eat().value))
-
+        
         elif tk == TokenType.LEFT_PR:
             self.eat()
-            value = self.parse_expr()
-            self.expect(TokenType.RIGHT_PR,
-                        "Unexpected token found inside parenthesized expression. Expected closing parenthesis.")
-            return value
+            expr = self.parse_expr()
+            self.expect(TokenType.RIGHT_PR, "Expected ')'")
+
+            return expr
         
-        elif tk == TokenType.ASSIGNMENT_OPERATOR:
+        elif tk == TokenType.RIGHT_PR:
             self.eat()
-            value = self.parse_expr()
-            return value
+            expr = self.parse_expr()
+            self.expect(TokenType.LEFT_PR, "Expected '('")
+
+            return expr
 
         else:
             print("Unexpected token found during parsing!", self.at())
             exit(1)
-
-# Ejemplo de uso:
-parser = Parser()
-ast = parser.produceAST("hola = 45.67")
-# Puedes acceder a la estructura del árbol AST a través de 'ast'
