@@ -9,6 +9,7 @@ class TokenType(Enum):
     STR_DATA_TYPE = iota()
     BOOL_DATA_TYPE = iota()
     NULL_DATA_TYPE = iota()
+    LIST_DATA_TYPE = iota()
 
     NUMBERS = iota()
     STRINGS = iota()
@@ -16,9 +17,18 @@ class TokenType(Enum):
     NULL = iota()
 
     # Identifiers
+    LET = iota()
     IDENTIFIER = iota()
     ASSIGNMENT_OPERATOR = iota()
 
+    # Control flow
+    IF = iota()
+    ELSE = iota()
+    ELIF = iota()
+
+    # Loops
+    FOR = iota()
+    WHILE = iota()
 
     # Grouping & Operators
     BINARY_OPERATOR = iota()

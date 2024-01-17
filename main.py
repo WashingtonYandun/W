@@ -1,17 +1,20 @@
 from Lexer import Lexer
+from Parser import Parser
 
 if __name__ == '__main__':
-    # TODO: Handle strings properly, handle booleans, handle null
-    # TODO: Handle comments
-    # TODO: Handle operators
-    # TODO: Handle keywords
-    # TODO: Handle errors
+    parser = Parser()
 
-    code = """
-    x = 45
-    y = Hola
-    """
+    print(">> W (V 0.1 ) -> ")
 
-    lexer = Lexer(code)
-    tokens = lexer.tokenize()
-    print(tokens)
+    while True:
+        try:
+            text = input(">> ")
+        except EOFError:
+            break
+
+        if not text:
+            continue
+
+        ast = parser.produceAST(text)
+        print(ast.body)
+

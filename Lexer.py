@@ -5,20 +5,23 @@ from Utils import is_skippable
 
 # Constant lookup for keywords and known identifiers , datatypes and symbols.
 KEYWORDS = {
+    'let': TokenType.LET,
+
     'num': TokenType.NUM_DATA_TYPE,
-    'str': TokenType.STR_DATA_TYPE,
+    'string': TokenType.STR_DATA_TYPE,
     'bool': TokenType.BOOL_DATA_TYPE,
     'null': TokenType.NULL_DATA_TYPE,
-
-    'true': TokenType.BOOLEANS,
-    'false': TokenType.BOOLEANS,
+    'list': TokenType.LIST_DATA_TYPE,
+    "if": TokenType.IF,
+    'True': TokenType.BOOLEANS,
+    'False': TokenType.BOOLEANS,
 }
 
 
 class Lexer:
     def __init__(self, code):
         self.code = code
-        self.position = -1  # Inicializamos en -1 para que el primer avance coloque el índice en 0
+        self.position = -1
         self.current_char = None
         self.advance()
 
@@ -75,14 +78,31 @@ class Lexer:
             elif self.current_char == "{":
                 tokens.append(Token(self.current_char, TokenType.LEFT_CBR))
                 self.advance()
+            elif self.current_char == "}":
+                tokens.append(Token(self.current_char, TokenType.RIGHT_CBR))
+                self.advance()
 
             elif self.current_char in CONSTANTS.OPERATORS.value:
                 tokens.append(Token(self.current_char, TokenType.BINARY_OPERATOR))
                 self.advance()
 
             elif self.current_char == "=":
-                tokens.append(Token(self.current_char, TokenType.ASSIGNMENT_OPERATOR))
+                if self.code[self.position + 1] == "=":
+                    tokens.append(Token("==", TokenType.EQUALS))
+                    self.advance()
+                    self.advance()
+                else:
+                    tokens.append(Token(self.current_char, TokenType.ASSIGNMENT_OPERATOR))
+                    self.advance()
+                
+            elif self.current_char == '"':
+                string = ""
                 self.advance()
+                while self.current_char is not None and self.current_char != '"':
+                    string += self.current_char
+                    self.advance()
+                self.advance()
+                tokens.append(Token(string, TokenType.STRINGS))
 
             elif self.current_char.isalpha():
                 ident = ""
@@ -94,7 +114,7 @@ class Lexer:
                 tokens.append(Token(ident, reserved) if reserved else Token(ident, TokenType.IDENTIFIER))
             else:
                 print(f"Unrecognized character found in source: {ord(self.current_char)}, {self.current_char}")
-                raise ValueError("Tokenization error")
+                raise ValueError(f"Tokenization error: {self.current_char}")
 
         tokens.append(Token(None, TokenType.EOF))
 
