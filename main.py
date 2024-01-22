@@ -14,6 +14,8 @@ if __name__ == '__main__':
 
         if not text:
             continue
+        elif text == "exit":
+            break
 
         ast = parser.produceAST(text)
         print(ast.body)
