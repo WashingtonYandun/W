@@ -1,7 +1,7 @@
-from Constants import CONSTANTS
-from Token import Token
-from TokenType import TokenType
-from Utils import is_skippable
+from common.constants import OPERATORS
+from token.Token import Token
+from token.TokenType import TokenType
+from common.Utils import is_skippable
 
 # Constant lookup for keywords and known identifiers , datatypes and symbols.
 KEYWORDS = {
@@ -82,7 +82,7 @@ class Lexer:
                 tokens.append(Token(self.current_char, TokenType.RIGHT_CBR))
                 self.advance()
 
-            elif self.current_char in CONSTANTS.OPERATORS.value:
+            elif self.current_char in OPERATORS:
                 tokens.append(Token(self.current_char, TokenType.BINARY_OPERATOR))
                 self.advance()
 
