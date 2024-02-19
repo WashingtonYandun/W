@@ -1,9 +1,12 @@
 from enum import Enum
-
-from Utils import iota
+from common.Utils import iota
 
 
 class TokenType(Enum):
+    """
+    Enum class representing the different types of tokens in a programming language.
+    """
+
     # Keywords
     NUM_DATA_TYPE = iota()
     STR_DATA_TYPE = iota()

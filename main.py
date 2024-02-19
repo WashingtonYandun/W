@@ -1,5 +1,5 @@
-from Lexer import Lexer
-from Parser import Parser
+from lexer.Lexer import Lexer
+from parser.Parser import Parser
 
 if __name__ == '__main__':
     parser = Parser()

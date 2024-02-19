@@ -1,7 +1,7 @@
-from Lexer import Lexer
-from NodeType import Program, Statement, Expr, BinaryExpr, Identifier, NumericLiteral
-from Token import Token
-from TokenType import TokenType
+from lexer.Lexer import Lexer
+from node.NodeType import Program, Statement, Expr, BinaryExpr, Identifier, NumericLiteral
+from token.Token import Token
+from token.TokenType import TokenType
 
 
 class Parser:
