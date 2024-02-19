@@ -6,12 +6,14 @@ from common.Utils import is_skippable
 # Constant lookup for keywords and known identifiers , datatypes and symbols.
 KEYWORDS = {
     'let': TokenType.LET,
+    'def': TokenType.DEF,
 
     'num': TokenType.NUM_DATA_TYPE,
     'string': TokenType.STR_DATA_TYPE,
     'bool': TokenType.BOOL_DATA_TYPE,
     'null': TokenType.NULL_DATA_TYPE,
     'list': TokenType.LIST_DATA_TYPE,
+
     "if": TokenType.IF,
     'True': TokenType.BOOLEANS,
     'False': TokenType.BOOLEANS,

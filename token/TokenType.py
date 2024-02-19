@@ -28,6 +28,7 @@ class TokenType(Enum):
     IF = iota()
     ELSE = iota()
     ELIF = iota()
+    DEF = iota()
 
     # Loops
     FOR = iota()
