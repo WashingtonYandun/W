@@ -1,4 +1,5 @@
 from parser.Parser import Parser
+from runtime.Interpreter import evaluate
 
 def console()->None:
     parser = Parser()
@@ -15,19 +16,24 @@ def console()->None:
         elif text == "exit":
             break
 
-        ast = parser.parse(text)
-        print(ast)
+        program = parser.parse(text)
+        
+        res = evaluate(program)
+
+        print(res)
 
 
 def main() -> None:
-    sourceCode = ""
+    # sourceCode = ""
     
-    with open("test.w", "r") as file:
-        sourceCode = file.read()
+    # with open("test.w", "r") as file:
+    #     sourceCode = file.read()
 
-    parser = Parser()
-    program = parser.parse(sourceCode)
-    print(program)
+    # parser = Parser()
+    # program = parser.parse(sourceCode)
+    # print(program)
+
+    console()
 
 if __name__ == '__main__':
     main()

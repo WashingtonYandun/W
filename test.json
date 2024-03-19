@@ -3,18 +3,28 @@
     "body": [
         {
             "kind": "BinaryExpr",
-            "left": {
+            "left": { "kind": "NumericLiteral", "value": 1.0 },
+            "right": {
                 "kind": "BinaryExpr",
-                "left": { "kind": "NumericLiteral", "value": 1.0 },
+                "left": { "kind": "Identifier", "symbol": "foo" },
                 "right": {
                     "kind": "BinaryExpr",
-                    "left": { "kind": "NumericLiteral", "value": 3.0 },
+                    "left": {
+                        "kind": "BinaryExpr",
+                        "left": {
+                            "kind": "BinaryExpr",
+                            "left": { "kind": "NumericLiteral", "value": 2.0 },
+                            "right": { "kind": "Identifier", "symbol": "x" },
+                            "operator": "-"
+                        },
+                        "right": { "kind": "Identifier", "symbol": "y" },
+                        "operator": "-"
+                    },
                     "right": { "kind": "NumericLiteral", "value": 2.0 },
-                    "operator": "*"
+                    "operator": "+"
                 },
-                "operator": "+"
+                "operator": "*"
             },
-            "right": { "kind": "NumericLiteral", "value": 1.0 },
             "operator": "+"
         }
     ]

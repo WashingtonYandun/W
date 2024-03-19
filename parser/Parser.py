@@ -1,5 +1,5 @@
 from lexer.Lexer import Lexer
-from node.NodeType import Program, Statement, Expr, BinaryExpr, Identifier, NumericLiteral
+from node.NodeType import NoneLiteral, Program, Statement, Expr, BinaryExpr, Identifier, NumericLiteral, StringLiteral
 from token.Token import Token
 from token.TokenType import TokenType
 
@@ -26,7 +26,7 @@ class Parser:
 
         return prev
 
-    def produceAST(self, sourceCode: str) -> Program:
+    def produce_ast(self, sourceCode: str) -> Program:
         lexer = Lexer(sourceCode)
         self.tokens = lexer.tokenize()
 
@@ -66,33 +66,29 @@ class Parser:
     def parse_primary_expr(self) -> Expr:
         tk = self.at().type
 
-        if tk == TokenType.IDENTIFIER:
-            return Identifier(self.eat().value)
+        match tk:
+            case TokenType.IDENTIFIER:
+                return Identifier(self.eat().value)
+            case TokenType.NUMBERS:
+                return NumericLiteral(float(self.eat().value))
+            case TokenType.STRINGS:
+                return StringLiteral(str(self.eat().value))
+            
+            case TokenType.LEFT_PR:
+                self.eat()
+                expr = self.parse_expr()
+                
+                self.expect(TokenType.RIGHT_PR, "Expected closing parenthesis")
+                return expr
+            case TokenType.NONE:
+                self.eat()
+                return NoneLiteral()
+            case _:
+                print("Unexpected token found during parsing!", self.at())
+                exit(1)
 
-        elif tk == TokenType.NUMBERS:
-            return NumericLiteral(float(self.eat().value))
-        
-        elif tk == TokenType.LEFT_PR:
-            self.eat()
-            expr = self.parse_expr()
-            self.expect(TokenType.RIGHT_PR, "Expected ')'")
-
-            return expr
-        
-        elif tk == TokenType.RIGHT_PR:
-            self.eat()
-            expr = self.parse_expr()
-            self.expect(TokenType.LEFT_PR, "Expected '('")
-
-            return expr
-
-        else:
-            print("Unexpected token found during parsing!", self.at())
-            exit(1)
-
-    
     def parse(self, sourceCode: str) -> Program:
-        return self.produceAST(sourceCode)
+        return self.produce_ast(sourceCode)
     
     def __repr__(self):
         return f"{self.__dict__}"

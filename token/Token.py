@@ -6,14 +6,14 @@ class Token:
         self.value = value
         self.type = type_
 
-    def __str__(self):
+    def __str__(self) -> str:
         return f"Token({self.value}, {self.type})"
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return self.__str__()
 
-    def __eq__(self, other):
+    def __eq__(self, other) -> bool:
         return self.value == other.value and self.type == other.type
 
-    def __ne__(self, other):
+    def __ne__(self, other) -> bool:
         return not self.__eq__(other)

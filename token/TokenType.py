@@ -6,21 +6,16 @@ class TokenType(Enum):
     """
     Enum class representing the different types of tokens in a programming language.
     """
-
-    # Keywords
-    NUM_DATA_TYPE = iota()
-    STR_DATA_TYPE = iota()
-    BOOL_DATA_TYPE = iota()
-    NULL_DATA_TYPE = iota()
-    LIST_DATA_TYPE = iota()
-
+    # Data types
     NUMBERS = iota()
     STRINGS = iota()
     BOOLEANS = iota()
-    NULL = iota()
+    LISTS = iota()
+    TUPLES = iota()
+    NONE = iota()
+    COLON = iota()
 
     # Identifiers
-    LET = iota()
     IDENTIFIER = iota()
     ASSIGNMENT_OPERATOR = iota()
 
