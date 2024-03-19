@@ -1,5 +1,5 @@
 from lexer.Lexer import Lexer
-from node.NodeType import NoneLiteral, Program, Statement, Expr, BinaryExpr, Identifier, NumericLiteral, StringLiteral
+from node.NodeType import NoneLiteral, NumericLiteral, Program, Statement, Expr, BinaryExpr, Identifier, StringLiteral
 from token.Token import Token
 from token.TokenType import TokenType
 
@@ -20,6 +20,7 @@ class Parser:
 
     def expect(self, type_: str, err: any) -> Token:
         prev = self.tokens.pop(0)
+
         if not prev or prev.type != type_:
             print("Parser Error:\n", err, prev, " - Expecting: ", type_)
             exit(1)
@@ -70,7 +71,7 @@ class Parser:
             case TokenType.IDENTIFIER:
                 return Identifier(self.eat().value)
             case TokenType.NUMBERS:
-                return NumericLiteral(float(self.eat().value))
+                return NumericLiteral(self.eat().value)
             case TokenType.STRINGS:
                 return StringLiteral(str(self.eat().value))
             
@@ -84,6 +85,7 @@ class Parser:
                 self.eat()
                 return NoneLiteral()
             case _:
+                
                 print("Unexpected token found during parsing!", self.at())
                 exit(1)
 

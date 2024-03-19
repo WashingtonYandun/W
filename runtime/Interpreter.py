@@ -1,22 +1,17 @@
 from node.NodeType import BinaryExpr, Program, Statement
+from runtime.NumberOps import eval_numeric_binary_expr
+from runtime.StringOps import eval_string_binary_expr
 from runtime.Types import NoneVal, RuntimeVal, NumberVal, StringVal
 
-def eval_string_binary_expr(lhs: StringVal, rhs: StringVal, operator: str) -> StringVal:
-    if operator == "+":
-        result = str(lhs.value) + str(rhs.value)
-    else:
-        raise Exception(f"Unsupported operator for strings: {operator}")
-
-    return StringVal(value=result)
-
-def eval_binary_expr(binop: BinaryExpr) -> RuntimeVal:
-    lhs = evaluate(binop.left)
-    rhs = evaluate(binop.right)
+def eval_binary_expr(binary_op: BinaryExpr) -> RuntimeVal:
+    lhs = evaluate(binary_op.left)
+    rhs = evaluate(binary_op.right)
 
     if isinstance(lhs, StringVal) and isinstance(rhs, StringVal):
-        return eval_string_binary_expr(lhs, rhs, binop.operator)
+        return eval_string_binary_expr(lhs, rhs, binary_op.operator)
+    
     elif isinstance(lhs, NumberVal) and isinstance(rhs, NumberVal):
-        return eval_numeric_binary_expr(lhs, rhs, binop.operator)
+        return eval_numeric_binary_expr(lhs, rhs, binary_op.operator)
 
     return NoneVal()
 
@@ -30,33 +25,15 @@ def eval_program(program: Program) -> RuntimeVal:
     return last_evaluated
 
 
-def eval_numeric_binary_expr(lhs: NumberVal, rhs: NumberVal, operator: str) -> NumberVal:
-    if operator == "+":
-        result = lhs.value + rhs.value
-    elif operator == "-":
-        result = lhs.value - rhs.value
-    elif operator == "*":
-        result = lhs.value * rhs.value
-    elif operator == "/":
-        result = lhs.value / rhs.value
-    elif operator == "%":
-        result = lhs.value % rhs.value
-    elif operator == "**":
-        result = lhs.value ** rhs.value
-    else:
-        raise Exception(f"Unrecognized binary operator: {operator}")
-
-    return NumberVal(value=result)
-
-
-def eval_binary_expr(binop: BinaryExpr) -> RuntimeVal:
-    lhs = evaluate(binop.left)
-    rhs = evaluate(binop.right)
+def eval_binary_expr(binary_op: BinaryExpr) -> RuntimeVal:
+    lhs = evaluate(binary_op.left)
+    rhs = evaluate(binary_op.right)
 
     if isinstance(lhs, NumberVal) and isinstance(rhs, NumberVal):
-        return eval_numeric_binary_expr(lhs, rhs, binop.operator)
+        return eval_numeric_binary_expr(lhs, rhs, binary_op.operator)
+    
     elif isinstance(lhs, StringVal) and isinstance(rhs, StringVal):
-        return eval_string_binary_expr(lhs, rhs, binop.operator)
+        return eval_string_binary_expr(lhs, rhs, binary_op.operator)
 
     return NoneVal()
 

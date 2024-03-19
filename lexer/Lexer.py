@@ -1,20 +1,13 @@
-from common.constants import OPERATORS
+from common.constants import OPERATORS, KEYWORDS
+from common.utils import is_skippable
 from token.Token import Token
 from token.TokenType import TokenType
-from common.utils import is_skippable
+from common.Error import Error
+    
 
-# Constant lookup for keywords and known identifiers , datatypes and symbols.
-KEYWORDS = {
-    "def": TokenType.DEF,
-    "None": TokenType.NONE,
-    "true": TokenType.BOOLEANS,
-    "false": TokenType.BOOLEANS,
-    "else": TokenType.ELSE,
-    "elif": TokenType.ELIF,
-    "for": TokenType.FOR,
-    "while": TokenType.WHILE,
-    "if": TokenType.IF,
-}
+class LexerError(Error):
+    def __init__(self, details: str) -> None:
+        super().__init__("Lexer Error", details)
 
 
 class Lexer():
@@ -51,6 +44,19 @@ class Lexer():
             num_str += "0"
 
         return Token(value=float(num_str), type_=TokenType.NUMBERS)
+    
+
+    def gen_string(self) -> Token:
+        string = ""
+        self.advance()
+
+        while self.current_char is not None and self.current_char != '"':
+            string += str(self.current_char)
+            self.advance()
+        self.advance()
+        
+        return Token(value=string, type_=TokenType.STRINGS)
+    
 
     def tokenize(self) -> list[Token]:
         tokens = []
@@ -95,13 +101,7 @@ class Lexer():
                     self.advance()
                 
             elif self.current_char == '"':
-                string = ""
-                self.advance()
-                while self.current_char is not None and self.current_char != '"':
-                    string += str(self.current_char)
-                    self.advance()
-                self.advance()
-                tokens.append(Token(string, TokenType.STRINGS))
+                tokens.append(self.gen_string())
 
             elif self.current_char.isalpha():
                 ident = ""
@@ -112,8 +112,7 @@ class Lexer():
                 reserved = KEYWORDS.get(ident)
                 tokens.append(Token(ident, reserved) if reserved else Token(ident, TokenType.IDENTIFIER))
             else:
-                print(f"Unrecognized character found in source: {ord(self.current_char)}, {self.current_char}")
-                raise ValueError(f"Tokenization error: {self.current_char}")
+                raise LexerError(f"Invalid character '{self.current_char}'")
 
         tokens.append(Token(None, TokenType.EOF))
         return tokens
