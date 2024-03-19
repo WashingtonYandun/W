@@ -1,8 +1,6 @@
 # W
 
-W is an interpreted programming language that is designed to be simple and easy to use. It's a high-level language that is designed to be easy to read and write. It's a dynamically typed
-
-Am trying to make a Python, JavaScript and C# fusion (Not OOP for now).
+W is an interpreted programming language that is designed to be simple and easy to use. It's a high-level language that is designed to be easy to read and write. It's statically typed and has a simple syntax like Python but with obligatory type annotations.
 
 ## Considerations
 
@@ -12,24 +10,45 @@ Am trying to make a Python, JavaScript and C# fusion (Not OOP for now).
 
 ## Syntax
 
-The syntax is designed to be simple and easy to read and write. It's a dynamically typed language. This is how it will look like in the future:
+The syntax is designed to be simple and easy to read and write. This is how it will look like in the future:
 
-```w
-# Comments
-# This is a comment
+```python
+# Normal function
+target: int = 9
+arr: list[int] = [1, 2, 3, 4, 5]
 
-# Variables
-a = 10
-b = 20
-c = a + b
-print(c) # 30
+def two_sum(target: int, arr: list[int]) -> list[int]:
+    for i in range(len(arr)):
+        for j in range(i + 1, len(arr)):
+            if arr[i] + arr[j] == target:
+                return [i, j]
+    return []
 
-# Functions
-def add(a, b) {
-    return a + b
-}
+print(two_sum(target, arr))
 
-print(add(10, 20)) # 30
+# classes and interfaces
+# If there is not access modifier, it's public
+interface Flyer:
+    def fly(self) -> None:
+        pass
+
+interface Swimmer:
+    def swim(self) -> None:
+        pass
+
+class Duck(Animal, Flyer, Swimmer):
+    def __init__(self, name: str) -> None:
+        self.name: str = name
+
+    def fly(self) -> None:
+        print("The duck flies")
+
+    def swim(self) -> None:
+        print("The duck swims")
+
+    private def be_a_duck(self) -> None:
+        print("I am a duck")
+
 ```
 
 ## Goals
@@ -37,12 +56,11 @@ print(add(10, 20)) # 30
 -   [x] Lexer
 -   [x] Parser
 -   [ ] Interpreter
--   [ ] AST
--   [ ] REPL
--   [ ] Functions
--   [ ] Variables
--   [ ] Comments
--   [ ] Control Flow
--   [ ] Error Handling
+-   [ ] Compiler
+
+## Features Goals
+
+-   [ ] OOP and access modifiers, interfaces
+-   [ ] Async and Await
+-   [ ] Exception Handling
 -   [ ] Modules
--   [ ] Classes
