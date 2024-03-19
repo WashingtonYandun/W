@@ -8,6 +8,10 @@ class Statement:
     def __init__(self, kind: NodeType):
         self.kind = kind
 
+    # method to show the data of the node
+    def __repr__(self):
+        return f"{self.__dict__}"
+
 
 class Program(Statement):
     def __init__(self, body: list[Statement] = []):

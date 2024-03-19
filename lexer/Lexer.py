@@ -1,26 +1,20 @@
 from common.constants import OPERATORS
 from token.Token import Token
 from token.TokenType import TokenType
-from common.Utils import is_skippable
+from common.utils import is_skippable
 
 # Constant lookup for keywords and known identifiers , datatypes and symbols.
 KEYWORDS = {
     'let': TokenType.LET,
-    'def': TokenType.DEF,
-
-    'num': TokenType.NUM_DATA_TYPE,
-    'string': TokenType.STR_DATA_TYPE,
-    'bool': TokenType.BOOL_DATA_TYPE,
-    'null': TokenType.NULL_DATA_TYPE,
-    'list': TokenType.LIST_DATA_TYPE,
-
+    "else": TokenType.ELSE,
+    "elif": TokenType.ELIF,
+    "for": TokenType.FOR,
+    "while": TokenType.WHILE,
     "if": TokenType.IF,
-    'True': TokenType.BOOLEANS,
-    'False': TokenType.BOOLEANS,
 }
 
 
-class Lexer:
+class Lexer():
     def __init__(self, code):
         self.code = code
         self.position = -1
