@@ -89,3 +89,10 @@ class Parser:
         else:
             print("Unexpected token found during parsing!", self.at())
             exit(1)
+
+    
+    def parse(self, sourceCode: str) -> Program:
+        return self.produceAST(sourceCode)
+    
+    def __repr__(self):
+        return f"{self.__dict__}"
