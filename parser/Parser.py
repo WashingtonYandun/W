@@ -29,8 +29,8 @@ class Parser:
     def produceAST(self, sourceCode: str) -> Program:
         lexer = Lexer(sourceCode)
         self.tokens = lexer.tokenize()
+
         program = Program()
-        program.body = []
 
         while self.not_eof():
             program.body.append(self.parse_stmt())
@@ -49,7 +49,7 @@ class Parser:
         while self.at().value in ["+", "-"]:
             operator = self.eat().value
             right = self.parse_multiplicative_expr()
-            left = BinaryExpr(left, right, operator)
+            left = BinaryExpr(left=left, right=right, operator=operator)
 
         return left
 
@@ -59,7 +59,7 @@ class Parser:
         while self.at().value in ["/", "*", "%"]:
             operator = self.eat().value
             right = self.parse_primary_expr()
-            left = BinaryExpr(left, right, operator)
+            left = BinaryExpr(left=left, right=right, operator=operator)
 
         return left
 

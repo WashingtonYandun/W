@@ -1,7 +1,7 @@
-from lexer.Lexer import Lexer
 from parser.Parser import Parser
 
-if __name__ == '__main__':
+
+def main() -> None:
     parser = Parser()
 
     print(">> W (V 0.1 ) -> ")
@@ -19,4 +19,8 @@ if __name__ == '__main__':
 
         ast = parser.produceAST(text)
         print(ast.body)
+
+
+if __name__ == '__main__':
+    main()
 
