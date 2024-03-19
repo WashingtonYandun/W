@@ -5,7 +5,10 @@ from common.utils import is_skippable
 
 # Constant lookup for keywords and known identifiers , datatypes and symbols.
 KEYWORDS = {
-    'let': TokenType.LET,
+    "def": TokenType.DEF,
+    "None": TokenType.NONE,
+    "true": TokenType.BOOLEANS,
+    "false": TokenType.BOOLEANS,
     "else": TokenType.ELSE,
     "elif": TokenType.ELIF,
     "for": TokenType.FOR,
@@ -15,17 +18,17 @@ KEYWORDS = {
 
 
 class Lexer():
-    def __init__(self, code):
+    def __init__(self, code: str) -> None:
         self.code = code
         self.position = -1
         self.current_char = None
         self.advance()
 
-    def advance(self):
+    def advance(self) -> None:
         self.position += 1
         self.current_char = self.code[self.position] if self.position < len(self.code) else None
 
-    def gen_number(self):
+    def gen_number(self) -> Token:
         decimal_counter = 0
         num_str = self.current_char
 
@@ -49,7 +52,7 @@ class Lexer():
 
         return Token(value=float(num_str), type_=TokenType.NUMBERS)
 
-    def tokenize(self):
+    def tokenize(self) -> list[Token]:
         tokens = []
 
         while self.current_char is not None:
@@ -95,7 +98,7 @@ class Lexer():
                 string = ""
                 self.advance()
                 while self.current_char is not None and self.current_char != '"':
-                    string += self.current_char
+                    string += str(self.current_char)
                     self.advance()
                 self.advance()
                 tokens.append(Token(string, TokenType.STRINGS))
@@ -113,5 +116,4 @@ class Lexer():
                 raise ValueError(f"Tokenization error: {self.current_char}")
 
         tokens.append(Token(None, TokenType.EOF))
-
         return tokens

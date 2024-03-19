@@ -1,14 +1,13 @@
 from typing import Union
 
 # Possible node types
-NodeType = Union["Program", "NumericLiteral", "Identifier", "BinaryExpr"]
+NodeType = Union["Program", "NumericLiteral", "Identifier", "BinaryExpr", "NoneLiteral", "StringLiteral", "BooleanLiteral", "Statement", "Expr"]
 
 
 class Statement:
     def __init__(self, kind: NodeType):
         self.kind = kind
 
-    # method to show the data of the node
     def __repr__(self):
         return f"{self.__dict__}"
 
@@ -47,4 +46,28 @@ class NumericLiteral(Expr):
         super().__init__("NumericLiteral")
 
         self.kind = "NumericLiteral"
+        self.value = value
+
+
+class NoneLiteral(Expr):
+    def __init__(self):
+        super().__init__("NoneLiteral")
+
+        self.kind = "NoneLiteral"
+        self.value = "None"
+    
+
+class StringLiteral(Expr):
+    def __init__(self, value: str):
+        super().__init__("StringLiteral")
+
+        self.kind = "StringLiteral"
+        self.value = value
+
+
+class BooleanLiteral(Expr):
+    def __init__(self, value: bool):
+        super().__init__("BooleanLiteral")
+
+        self.kind = "BooleanLiteral"
         self.value = value
