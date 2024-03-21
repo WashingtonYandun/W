@@ -6,3 +6,7 @@ class Error(Exception):
 
     def __str__(self) -> str:
         return f"{self.error_message}: {self.details}"
+
+class LexerError(Error):
+    def __init__(self, details: str) -> None:
+        super().__init__("Lexer Error", details)
