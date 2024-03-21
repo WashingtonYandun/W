@@ -1,6 +1,6 @@
 # W
 
-W is an interpreted programming language that is designed to be simple and easy to use. It's a high-level language that is designed to be easy to read and write. It's statically typed and has a simple syntax like Python but with obligatory type annotations.
+W is an interpreted programming language that is designed to be simple and easy to use. It's a high-level language that is designed to be easy to read and write.
 
 ## Considerations
 
