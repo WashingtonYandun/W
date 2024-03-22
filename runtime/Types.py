@@ -4,6 +4,14 @@ ValueType = Literal["None", "number", "string"]
 
 
 class RuntimeVal:
+    """
+    Represents a runtime value. This is the base class for all runtime values which can be stored in the environment.
+
+    Attributes:
+        type (ValueType): The type of the value.
+        value (Union[None, float]): The actual value.
+    """
+
     type: ValueType
     value: Union[None, float]
 
@@ -14,7 +22,7 @@ class RuntimeVal:
 class NoneVal(RuntimeVal):
     def __init__(self):
         self.type = "None"
-        self.value = "None"
+        self.value = None
 
 
 class NumberVal(RuntimeVal):
