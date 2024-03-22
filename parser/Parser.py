@@ -1,5 +1,5 @@
 from lexer.Lexer import Lexer
-from node.NodeType import NoneLiteral, NumericLiteral, Program, Statement, Expr, BinaryExpr, Identifier, StringLiteral
+from node.NodeType import BooleanLiteral, NoneLiteral, NumericLiteral, Program, Statement, Expr, BinaryExpr, Identifier, StringLiteral
 from token.Token import Token
 from token.TokenType import TokenType
 
@@ -64,6 +64,7 @@ class Parser:
 
         return left
 
+
     def parse_primary_expr(self) -> Expr:
         tk = self.at().type
 
@@ -74,11 +75,11 @@ class Parser:
                 return NumericLiteral(self.eat().value)
             case TokenType.STRINGS:
                 return StringLiteral(str(self.eat().value))
-            
+            case TokenType.BOOLEANS:
+                return BooleanLiteral(self.eat().value)
             case TokenType.LEFT_PR:
                 self.eat()
                 expr = self.parse_expr()
-                
                 self.expect(TokenType.RIGHT_PR, "Expected closing parenthesis")
                 return expr
             case TokenType.NONE:

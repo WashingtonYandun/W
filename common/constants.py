@@ -5,8 +5,8 @@ OPERATORS = ["+", "-", "*", "/", "%"]
 KEYWORDS = {
     "def": TokenType.DEF,
     "None": TokenType.NONE,
-    "true": TokenType.BOOLEANS,
-    "false": TokenType.BOOLEANS,
+    "True": TokenType.BOOLEANS,
+    "False": TokenType.BOOLEANS,
     "else": TokenType.ELSE,
     "elif": TokenType.ELIF,
     "for": TokenType.FOR,
