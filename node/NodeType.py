@@ -1,8 +1,6 @@
 from typing import Union
 
-# Possible node types
-NodeType = Union["Program", "NumericLiteral", "Identifier", "BinaryExpr", "NoneLiteral", "StringLiteral", "BooleanLiteral", "Statement", "Expr"]
-
+NodeType = Union["Program", "Statement", "Expr", "Identifier", "NumericLiteral", "NoneLiteral", "StringLiteral", "BooleanLiteral", "BinaryExpr"]
 
 class Statement:
     def __init__(self, kind: NodeType):

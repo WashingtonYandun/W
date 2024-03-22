@@ -1,81 +1,50 @@
-from node.NodeType import BinaryExpr, Program, Statement
+from node.NodeType import BinaryExpr, Identifier, Program, Statement
+from runtime.NumberOps import eval_numeric_binary_expr
+from runtime.StringOps import eval_string_binary_expr
 from runtime.Types import NoneVal, RuntimeVal, NumberVal, StringVal
+from runtime.Environment import Environment
 
-def eval_string_binary_expr(lhs: StringVal, rhs: StringVal, operator: str) -> StringVal:
-    if operator == "+":
-        result = str(lhs.value) + str(rhs.value)
-    else:
-        raise Exception(f"Unsupported operator for strings: {operator}")
-
-    return StringVal(value=result)
-
-def eval_binary_expr(binop: BinaryExpr) -> RuntimeVal:
-    lhs = evaluate(binop.left)
-    rhs = evaluate(binop.right)
-
-    if isinstance(lhs, StringVal) and isinstance(rhs, StringVal):
-        return eval_string_binary_expr(lhs, rhs, binop.operator)
-    elif isinstance(lhs, NumberVal) and isinstance(rhs, NumberVal):
-        return eval_numeric_binary_expr(lhs, rhs, binop.operator)
-
-    return NoneVal()
-
-
-def eval_program(program: Program) -> RuntimeVal:
+def eval_program(program: Program, env: Environment) -> RuntimeVal:
     last_evaluated: RuntimeVal = NoneVal()
-
     for statement in program.body:
-        last_evaluated = evaluate(statement)
-
+        last_evaluated = evaluate(statement, env)
     return last_evaluated
 
 
-def eval_numeric_binary_expr(lhs: NumberVal, rhs: NumberVal, operator: str) -> NumberVal:
-    if operator == "+":
-        result = lhs.value + rhs.value
-    elif operator == "-":
-        result = lhs.value - rhs.value
-    elif operator == "*":
-        result = lhs.value * rhs.value
-    elif operator == "/":
-        result = lhs.value / rhs.value
-    elif operator == "%":
-        result = lhs.value % rhs.value
-    elif operator == "**":
-        result = lhs.value ** rhs.value
-    else:
-        raise Exception(f"Unrecognized binary operator: {operator}")
+def eval_binary_expr(binary_op: BinaryExpr, env: Environment) -> RuntimeVal:
+    lhs = evaluate(binary_op.left, env)
+    rhs = evaluate(binary_op.right, env)
 
-    return NumberVal(value=result)
-
-
-def eval_binary_expr(binop: BinaryExpr) -> RuntimeVal:
-    lhs = evaluate(binop.left)
-    rhs = evaluate(binop.right)
-
+    if isinstance(lhs, StringVal) and isinstance(rhs, StringVal):
+        return eval_string_binary_expr(lhs, rhs, binary_op.operator)
+    
     if isinstance(lhs, NumberVal) and isinstance(rhs, NumberVal):
-        return eval_numeric_binary_expr(lhs, rhs, binop.operator)
-    elif isinstance(lhs, StringVal) and isinstance(rhs, StringVal):
-        return eval_string_binary_expr(lhs, rhs, binop.operator)
+        return eval_numeric_binary_expr(lhs, rhs, binary_op.operator)
 
     return NoneVal()
 
 
-def evaluate(ast_node: Statement) -> RuntimeVal:
+def eval_indentifier(ast_node: Identifier, env: Environment) -> RuntimeVal:
+    return env.lookup_var(ast_node.symbol)
+
+def evaluate(ast_node: Statement, env: Environment) -> RuntimeVal:
     if ast_node.kind == "NumericLiteral":
         return NumberVal(ast_node.value)
     
-    elif ast_node.kind == "NoneLiteral":
+    if ast_node.kind == "NoneLiteral":
         return NoneVal()
     
-    elif ast_node.kind == "StringLiteral":
+    if ast_node.kind == "StringLiteral":
         return StringVal(ast_node.value)
     
-    elif ast_node.kind == "BinaryExpr":
-        return eval_binary_expr(ast_node)
+    if ast_node.kind == "Identifier":
+        return eval_indentifier(ast_node, env)
     
-    elif ast_node.kind == "Program":
-        return eval_program(ast_node)
+    if ast_node.kind == "BinaryExpr":
+        return eval_binary_expr(ast_node, env)
+    
+    if ast_node.kind == "Program":
+        return eval_program(ast_node, env)
 
     print("This AST Node has not yet been set up for interpretation.", ast_node)
     exit(0)

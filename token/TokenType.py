@@ -1,5 +1,5 @@
 from enum import Enum
-from common.utils import iota
+from common.Utils import iota
 
 
 class TokenType(Enum):

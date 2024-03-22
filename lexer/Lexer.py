@@ -1,21 +1,8 @@
-from common.constants import OPERATORS
+from common.constants import OPERATORS, KEYWORDS
+from common.Utils import is_skippable
 from token.Token import Token
 from token.TokenType import TokenType
-from common.utils import is_skippable
-
-# Constant lookup for keywords and known identifiers , datatypes and symbols.
-KEYWORDS = {
-    "def": TokenType.DEF,
-    "None": TokenType.NONE,
-    "true": TokenType.BOOLEANS,
-    "false": TokenType.BOOLEANS,
-    "else": TokenType.ELSE,
-    "elif": TokenType.ELIF,
-    "for": TokenType.FOR,
-    "while": TokenType.WHILE,
-    "if": TokenType.IF,
-}
-
+from error.Error import LexerError
 
 class Lexer():
     def __init__(self, code: str) -> None:
@@ -36,7 +23,7 @@ class Lexer():
 
         while self.current_char is not None and (self.current_char == '.' or self.current_char.isdigit()):
             if decimal_counter > 1:
-                raise Exception(f"Illegal char '{self.current_char}'")
+                raise LexerError(f"Illegal character '{self.current_char}'")
 
             if self.current_char == '.':
                 decimal_counter += 1
@@ -52,68 +39,67 @@ class Lexer():
 
         return Token(value=float(num_str), type_=TokenType.NUMBERS)
 
+    def gen_string(self) -> Token:
+        string = ""
+        self.advance()
+
+        while self.current_char is not None and self.current_char != '"':
+            string += str(self.current_char)
+            self.advance()
+        self.advance()
+
+        return Token(value=string, type_=TokenType.STRINGS)
+    
+    def gen_identifier(self) -> Token:
+        ident = ""
+        while self.current_char is not None and self.current_char.isalnum():
+            ident += self.current_char
+            self.advance()
+
+        reserved = KEYWORDS.get(ident)
+        return Token(ident, reserved) if reserved else Token(ident, TokenType.IDENTIFIER)
+
+    def handle_equals(self) -> Token:
+        if self.code[self.position + 1] == '=':
+            self.advance()
+            return Token("==", TokenType.EQUALS)
+        else:
+            return Token(self.current_char, TokenType.ASSIGNMENT_OPERATOR)
+
+    def handle_brackets(self) -> Token:
+        bracket_type = {
+            '(': TokenType.LEFT_PR,
+            ')': TokenType.RIGHT_PR,
+            '[': TokenType.LEFT_BR,
+            ']': TokenType.RIGHT_BR,
+            '{': TokenType.LEFT_CBR,
+            '}': TokenType.RIGHT_CBR
+        }
+        token_type = bracket_type[self.current_char]
+        self.advance()
+        return Token(self.current_char, token_type)
+
     def tokenize(self) -> list[Token]:
         tokens = []
 
         while self.current_char is not None:
             if is_skippable(self.current_char):
                 self.advance()
-
             elif self.current_char.isdigit() or (self.current_char == '.' and self.code[self.position + 1].isdigit()):
                 tokens.append(self.gen_number())
-
-            elif self.current_char == "(":
-                tokens.append(Token(self.current_char, TokenType.LEFT_PR))
-                self.advance()
-            elif self.current_char == ")":
-                tokens.append(Token(self.current_char, TokenType.RIGHT_PR))
-                self.advance()
-            elif self.current_char == "[":
-                tokens.append(Token(self.current_char, TokenType.LEFT_BR))
-                self.advance()
-            elif self.current_char == "]":
-                tokens.append(Token(self.current_char, TokenType.RIGHT_BR))
-                self.advance()
-            elif self.current_char == "{":
-                tokens.append(Token(self.current_char, TokenType.LEFT_CBR))
-                self.advance()
-            elif self.current_char == "}":
-                tokens.append(Token(self.current_char, TokenType.RIGHT_CBR))
-                self.advance()
-
+            elif self.current_char == '"':
+                tokens.append(self.gen_string())
             elif self.current_char in OPERATORS:
                 tokens.append(Token(self.current_char, TokenType.BINARY_OPERATOR))
                 self.advance()
-
-            elif self.current_char == "=":
-                if self.code[self.position + 1] == "=":
-                    tokens.append(Token("==", TokenType.EQUALS))
-                    self.advance()
-                    self.advance()
-                else:
-                    tokens.append(Token(self.current_char, TokenType.ASSIGNMENT_OPERATOR))
-                    self.advance()
-                
-            elif self.current_char == '"':
-                string = ""
-                self.advance()
-                while self.current_char is not None and self.current_char != '"':
-                    string += str(self.current_char)
-                    self.advance()
-                self.advance()
-                tokens.append(Token(string, TokenType.STRINGS))
-
             elif self.current_char.isalpha():
-                ident = ""
-                while self.current_char is not None and self.current_char.isalnum():
-                    ident += self.current_char
-                    self.advance()
-
-                reserved = KEYWORDS.get(ident)
-                tokens.append(Token(ident, reserved) if reserved else Token(ident, TokenType.IDENTIFIER))
+                tokens.append(self.gen_identifier())
+            elif self.current_char == '=':
+                tokens.append(self.handle_equals())
+            elif self.current_char in '()[]{}':
+                tokens.append(self.handle_brackets())
             else:
-                print(f"Unrecognized character found in source: {ord(self.current_char)}, {self.current_char}")
-                raise ValueError(f"Tokenization error: {self.current_char}")
+                raise LexerError(f"Invalid character '{self.current_char}'")
 
         tokens.append(Token(None, TokenType.EOF))
         return tokens
