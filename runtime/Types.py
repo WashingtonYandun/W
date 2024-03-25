@@ -1,6 +1,6 @@
 from typing import Literal, Union
 
-ValueType = Literal["None", "number", "string"]
+ValueType = Literal["None", "number", "string", "boolean"]
 
 
 class RuntimeVal:
@@ -34,4 +34,10 @@ class NumberVal(RuntimeVal):
 class StringVal(RuntimeVal):
     def __init__(self, value: str):
         self.type = "string"
+        self.value = value
+
+
+class BooleanVal(RuntimeVal):
+    def __init__(self, value: bool):
+        self.type = "boolean"
         self.value = value

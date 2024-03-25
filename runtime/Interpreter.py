@@ -1,7 +1,7 @@
 from node.NodeType import BinaryExpr, Identifier, Program, Statement
 from runtime.NumberOps import eval_numeric_binary_expr
 from runtime.StringOps import eval_string_binary_expr
-from runtime.Types import NoneVal, RuntimeVal, NumberVal, StringVal
+from runtime.Types import BooleanVal, NoneVal, RuntimeVal, NumberVal, StringVal
 from runtime.Environment import Environment
 
 def eval_program(program: Program, env: Environment) -> RuntimeVal:
@@ -37,6 +37,12 @@ def evaluate(ast_node: Statement, env: Environment) -> RuntimeVal:
     if ast_node.kind == "StringLiteral":
         return StringVal(ast_node.value)
     
+    if ast_node.kind == "BooleanLiteral":
+        return BooleanVal(ast_node.value)
+    
+    if ast_node.kind == "VarDeclaration":
+        return env.declare_var(ast_node.identifier.symbol, evaluate(ast_node.initializer, env))
+    
     if ast_node.kind == "Identifier":
         return eval_indentifier(ast_node, env)
     
@@ -45,6 +51,7 @@ def evaluate(ast_node: Statement, env: Environment) -> RuntimeVal:
     
     if ast_node.kind == "Program":
         return eval_program(ast_node, env)
+
 
     print("This AST Node has not yet been set up for interpretation.", ast_node)
     exit(0)

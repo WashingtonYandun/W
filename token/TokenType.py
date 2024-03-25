@@ -15,6 +15,12 @@ class TokenType(Enum):
     NONE = iota()
     COLON = iota()
 
+    # Reserved keywords for datatypes
+    CONST_DATA = iota()
+    DATATYPE_NUM = iota()
+    DATATYPE_STR = iota()
+    DATATYPE_BOOL = iota()
+
     # Identifiers
     IDENTIFIER = iota()
     ASSIGNMENT_OPERATOR = iota()
@@ -45,3 +51,7 @@ class TokenType(Enum):
 
     # End of file
     EOF = iota()
+
+    # New line
+    NEW_LINE = iota()
+    
