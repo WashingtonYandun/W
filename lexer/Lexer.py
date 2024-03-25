@@ -6,7 +6,7 @@ from error.Error import LexerError
 
 class Lexer():
     def __init__(self, code: str) -> None:
-        self.code = code
+        self.code = code + '\n'
         self.position = -1
         self.current_char = None
         self.advance()
@@ -60,11 +60,9 @@ class Lexer():
         return Token(ident, reserved) if reserved else Token(ident, TokenType.IDENTIFIER)
 
     def handle_equals(self) -> Token:
-        if self.code[self.position + 1] == '=':
-            self.advance()
-            return Token("==", TokenType.EQUALS)
-        else:
-            return Token(self.current_char, TokenType.ASSIGNMENT_OPERATOR)
+        token = Token(self.current_char, TokenType.ASSIGNMENT_OPERATOR)
+        self.advance()
+        return token
 
     def handle_brackets(self) -> Token:
         bracket_type = {
@@ -98,6 +96,15 @@ class Lexer():
                 tokens.append(self.handle_equals())
             elif self.current_char in '()[]{}':
                 tokens.append(self.handle_brackets())
+            elif self.current_char == '#':
+                # Skip comments
+                while self.current_char is not None and self.current_char != '\n':
+                    self.advance()
+            elif self.current_char == '\n':
+                self.advance()
+            elif self.current_char == ':':
+                tokens.append(Token(self.current_char, TokenType.COLON))
+                self.advance()
             else:
                 raise LexerError(f"Invalid character '{self.current_char}'")
 

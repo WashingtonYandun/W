@@ -40,6 +40,9 @@ def evaluate(ast_node: Statement, env: Environment) -> RuntimeVal:
     if ast_node.kind == "BooleanLiteral":
         return BooleanVal(ast_node.value)
     
+    if ast_node.kind == "VarDeclaration":
+        return env.declare_var(ast_node.identifier.symbol, evaluate(ast_node.initializer, env))
+    
     if ast_node.kind == "Identifier":
         return eval_indentifier(ast_node, env)
     
@@ -48,6 +51,7 @@ def evaluate(ast_node: Statement, env: Environment) -> RuntimeVal:
     
     if ast_node.kind == "Program":
         return eval_program(ast_node, env)
+
 
     print("This AST Node has not yet been set up for interpretation.", ast_node)
     exit(0)

@@ -1,5 +1,5 @@
 from lexer.Lexer import Lexer
-from node.NodeType import BooleanLiteral, NoneLiteral, NumericLiteral, Program, Statement, Expr, BinaryExpr, Identifier, StringLiteral
+from node.NodeType import BooleanLiteral, NoneLiteral, NumericLiteral, Program, Statement, Expr, BinaryExpr, Identifier, StringLiteral, VarDeclaration
 from token.Token import Token
 from token.TokenType import TokenType
 
@@ -20,26 +20,66 @@ class Parser:
 
     def expect(self, type_: str, err: any) -> Token:
         prev = self.tokens.pop(0)
-
         if not prev or prev.type != type_:
             print("Parser Error:\n", err, prev, " - Expecting: ", type_)
             exit(1)
-
         return prev
+    
+    def peek(self) -> Token:
+        if len(self.tokens) > 1:
+            return self.tokens[1]
+        return Token(None, TokenType.EOF)
 
     def produce_ast(self, sourceCode: str) -> Program:
         lexer = Lexer(sourceCode)
         self.tokens = lexer.tokenize()
-
+        print(self.tokens)
         program = Program()
-
         while self.not_eof():
             program.body.append(self.parse_stmt())
-
         return program
 
     def parse_stmt(self) -> Statement:
-        return self.parse_expr()
+        if self.at().type == TokenType.CONST_DATA:
+            return self.parse_var_declaration()
+        elif self.at().type == TokenType.IDENTIFIER:
+            if self.peek().type == TokenType.COLON:
+                return self.parse_var_declaration()
+            else:
+                return self.parse_expr()
+        else:
+            return self.parse_expr()
+            
+    # (const | None) ident :data = value
+    def parse_var_declaration(self) -> VarDeclaration:
+        const = False
+        identifier = None
+        datatype = None
+
+        if self.at().type == TokenType.CONST_DATA:
+            const = True
+            self.eat()
+
+        identifier_token = self.expect(TokenType.IDENTIFIER, "Expected identifier")
+        identifier = Identifier(identifier_token.value)
+
+        self.expect(TokenType.COLON, "Expected ':' after identifier")
+
+        datatype_token = self.eat()
+        if datatype_token.value not in ["num", "str", "bool"]:
+            print("Unsupported datatype:", datatype_token.value)
+            exit(1)
+
+        self.expect(TokenType.ASSIGNMENT_OPERATOR, "Expected '=' after datatype")
+
+        value = self.parse_expr()
+
+        if self.at().type == TokenType.NEW_LINE:
+            self.eat()
+
+        return VarDeclaration(identifier, value, const, datatype_token.value)
+
+
 
     def parse_expr(self) -> Expr:
         return self.parse_additive_expr()
@@ -85,6 +125,9 @@ class Parser:
             case TokenType.NONE:
                 self.eat()
                 return NoneLiteral()
+            case TokenType.NEW_LINE:
+                self.eat()
+                return self.parse_expr()
             case _:
                 
                 print("Unexpected token found during parsing!", self.at())

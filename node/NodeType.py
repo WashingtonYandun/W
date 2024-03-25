@@ -1,6 +1,18 @@
 from typing import Union
 
-NodeType = Union["Program", "Statement", "Expr", "Identifier", "NumericLiteral", "NoneLiteral", "StringLiteral", "BooleanLiteral", "BinaryExpr"]
+NodeType = Union[
+    "Program", 
+    "Statement",
+    "Expr", 
+    "Identifier", 
+    "VarDeclaration"
+    "NumericLiteral", 
+    "NoneLiteral",
+    "StringLiteral", 
+    "BooleanLiteral",
+    "BinaryExpr"
+    ]
+
 
 class Statement:
     def __init__(self, kind: NodeType):
@@ -21,6 +33,7 @@ class Program(Statement):
 class Expr(Statement):
     pass
 
+
 class BinaryExpr(Expr):
     def __init__(self, left: Expr, right: Expr, operator: str):
         super().__init__("BinaryExpr")
@@ -37,6 +50,17 @@ class Identifier(Expr):
 
         self.kind = "Identifier"
         self.symbol = symbol
+
+
+class VarDeclaration(Statement):
+    def __init__(self, identifier: Identifier, value: Expr, const: bool, datatype: str):
+        super().__init__("VarDeclaration")
+
+        self.kind = "VarDeclaration"
+        self.constant = const
+        self.identifier = identifier
+        self.datatype = datatype
+        self.initializer = value
 
 
 class NumericLiteral(Expr):

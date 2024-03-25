@@ -4,16 +4,11 @@ class Environment:
     def __init__(self, parent_env: 'Environment' = None) -> None:
         self.parent = parent_env
         self.variables = {}
+        self.constants = {}
 
     def declare_var(self, varname: str, value: RuntimeVal) -> RuntimeVal:
-        if varname in self.variables:
-            raise Exception(f"Cannot declare variable {varname}. As it already is defined.")
-    
-        if isinstance(value, RuntimeVal):
-            self.variables[varname] = value
-            return value
-        else:
-            raise Exception(f"Cannot declare variable {varname} with value of type {type(value)}")
+        self.variables[varname] = value
+        return value
 
     def assign_var(self, varname: str, value: any) -> RuntimeVal:
         env = self.resolve(varname)

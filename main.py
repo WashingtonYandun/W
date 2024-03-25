@@ -7,19 +7,6 @@ def console()->None:
     parser = Parser()
     env  = Environment()
 
-    env.declare_var("x", NoneVal())
-    env.declare_var("y", NumberVal(20))
-    env.declare_var("z", StringVal("Hello, World!"))
-
-    env.declare_var("a", NumberVal(10))
-    env.declare_var("b", NumberVal(20))
-    env.declare_var("c", StringVal("Hello, World!"))
-
-    env.assign_var("a", NumberVal(100))
-    env.assign_var("b", NumberVal(200))
-    env.assign_var("c", StringVal("Hello, World!"))
-    env.assign_var("x", NumberVal(1000))
-
     print(">> W (V 0.1 ) -> ")
 
     while True:
@@ -40,17 +27,25 @@ def console()->None:
         print(res)
 
 
+def from_file(file:str)->None:
+    with open(file, "r") as f:
+        text = f.read()
+
+    parser = Parser()
+    env = Environment()
+
+    program = parser.parse(text)
+    res = evaluate(program, env)
+
+    print(res)
+
+
 def main() -> None:
-    # sourceCode = ""
-    
-    # with open("test.w", "r") as file:
-    #     sourceCode = file.read()
-
-    # parser = Parser()
-    # program = parser.parse(sourceCode)
-    # print(program)
-
-    console()
+    import sys
+    if len(sys.argv) > 1:
+        from_file(sys.argv[1])
+    else:
+        console()
 
 if __name__ == '__main__':
     main()
