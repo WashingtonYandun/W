@@ -1,5 +1,5 @@
 from lexer.Lexer import Lexer
-from node.NodeType import BooleanLiteral, NoneLiteral, NumericLiteral, Program, Statement, Expr, BinaryExpr, Identifier, StringLiteral, VarDeclaration, IfStatement, WhileStatement, ForStatement, FunctionDeclaration, CallExpr, AssignmentExpr, ListLiteral, ReturnStatement, IndexExpr, MethodCallExpr
+from node.NodeType import BooleanLiteral, NoneLiteral, NumericLiteral, Program, Statement, Expr, BinaryExpr, Identifier, StringLiteral, VarDeclaration, IfStatement, WhileStatement, ForStatement, FunctionDeclaration, CallExpr, AssignmentExpr, IndexAssignmentExpr, ListLiteral, DictLiteral, ReturnStatement, IndexExpr, MethodCallExpr
 from token.Token import Token
 from token.TokenType import TokenType
 
@@ -57,12 +57,31 @@ class Parser:
         elif self.at().type == TokenType.RETURN:
             return self.parse_return_statement()
         elif self.at().type == TokenType.IDENTIFIER:
+            # Check if this is a variable declaration, assignment, or just an expression
             if self.peek().type == TokenType.COLON:
                 return self.parse_var_declaration()
-            elif self.peek().type == TokenType.ASSIGNMENT_OPERATOR:
-                return self.parse_assignment_expr()
             else:
-                return self.parse_expr()
+                # Parse the expression first, then check if it's an assignment
+                expr = self.parse_expr()
+                
+                # If we have an assignment operator, this is an assignment
+                if self.at().type == TokenType.ASSIGNMENT_OPERATOR:
+                    self.eat()  # consume '='
+                    value = self.parse_expr()
+                    
+                    # Determine the type of assignment
+                    if isinstance(expr, Identifier):
+                        # Simple variable assignment: var = value
+                        return AssignmentExpr(expr, value)
+                    elif isinstance(expr, IndexExpr):
+                        # Index assignment: dict[key] = value or list[index] = value
+                        return IndexAssignmentExpr(expr.object, expr.index, value)
+                    else:
+                        print(f"Invalid assignment target: {expr}")
+                        exit(1)
+                else:
+                    # Just a regular expression
+                    return expr
         else:
             return self.parse_expr()
             
@@ -90,7 +109,7 @@ class Parser:
         return VarDeclaration(identifier, value, const, datatype)
 
     def parse_type(self) -> str:
-        """Parse type annotations like 'int', 'str', 'list[int]', etc."""
+        """Parse type annotations like 'int', 'str', 'list[int]', 'dict[str, int]', etc."""
         if self.at().type in [TokenType.DATATYPE_INT, TokenType.DATATYPE_STR, TokenType.DATATYPE_BOOL]:
             type_token = self.eat()
             return type_token.value
@@ -103,6 +122,14 @@ class Parser:
             inner_type = self.parse_type()
             self.expect(TokenType.RIGHT_BR, "Expected ']' after list type")
             return f"list[{inner_type}]"
+        elif self.at().type == TokenType.DATATYPE_DICT:
+            self.eat()
+            self.expect(TokenType.LEFT_BR, "Expected '[' after 'dict'")
+            key_type = self.parse_type()
+            self.expect(TokenType.COMMA, "Expected ',' between dict key and value types")
+            value_type = self.parse_type()
+            self.expect(TokenType.RIGHT_BR, "Expected ']' after dict types")
+            return f"dict[{key_type}, {value_type}]"
         else:
             print(f"Unsupported datatype: {self.at().value}")
             exit(1)
@@ -110,7 +137,37 @@ class Parser:
 
 
     def parse_expr(self) -> Expr:
-        return self.parse_comparison_expr()
+        return self.parse_logical_or_expr()
+    
+    def parse_logical_or_expr(self) -> Expr:
+        left = self.parse_logical_and_expr()
+        
+        while self.at().type == TokenType.OR:
+            operator = self.eat().value
+            right = self.parse_logical_and_expr()
+            left = BinaryExpr(left=left, right=right, operator=operator)
+        
+        return left
+    
+    def parse_logical_and_expr(self) -> Expr:
+        left = self.parse_equality_expr()
+        
+        while self.at().type == TokenType.AND:
+            operator = self.eat().value
+            right = self.parse_equality_expr()
+            left = BinaryExpr(left=left, right=right, operator=operator)
+        
+        return left
+    
+    def parse_equality_expr(self) -> Expr:
+        left = self.parse_comparison_expr()
+        
+        while self.at().type == TokenType.IS or (self.at().type == TokenType.COMPARISON_OPERATOR and self.at().value in ["==", "!="]):
+            operator = self.eat().value
+            right = self.parse_comparison_expr()
+            left = BinaryExpr(left=left, right=right, operator=operator)
+        
+        return left
 
     def parse_comparison_expr(self) -> Expr:
         left = self.parse_additive_expr()
@@ -133,14 +190,22 @@ class Parser:
         return left
 
     def parse_multiplicative_expr(self) -> Expr:
-        left = self.parse_primary_expr()
+        left = self.parse_unary_expr()
 
         while self.at().value in ["/", "*", "%"]:
             operator = self.eat().value
-            right = self.parse_primary_expr()
+            right = self.parse_unary_expr()
             left = BinaryExpr(left=left, right=right, operator=operator)
 
         return left
+    
+    def parse_unary_expr(self) -> Expr:
+        if self.at().type == TokenType.NOT:
+            self.eat()  # consume 'not'
+            operand = self.parse_unary_expr()
+            return BinaryExpr(left=BooleanLiteral(False), right=operand, operator="not")
+        
+        return self.parse_primary_expr()
 
 
     def parse_primary_expr(self) -> Expr:
@@ -161,7 +226,9 @@ class Parser:
             case TokenType.STRINGS:
                 return StringLiteral(str(self.eat().value))
             case TokenType.BOOLEANS:
-                return BooleanLiteral(self.eat().value)
+                token_value = self.eat().value
+                bool_value = token_value == "True"  # Convert string to boolean
+                return BooleanLiteral(bool_value)
             case TokenType.BINARY_OPERATOR if self.at().value == "-":
                 self.eat()
                 if self.at().type == TokenType.NUMBERS:
@@ -177,6 +244,8 @@ class Parser:
                 return expr
             case TokenType.LEFT_BR:
                 return self.parse_list_literal()
+            case TokenType.LEFT_CBR:
+                return self.parse_dict_literal()
             case TokenType.NONE:
                 self.eat()
                 return NoneLiteral()
@@ -371,6 +440,29 @@ class Parser:
         
         self.expect(TokenType.RIGHT_BR, "Expected ']' after list elements")
         return ListLiteral(elements)
+    
+    def parse_dict_literal(self) -> DictLiteral:
+        self.expect(TokenType.LEFT_CBR, "Expected '{'")
+        
+        pairs = []
+        if self.at().type != TokenType.RIGHT_CBR:
+            # Parse first key-value pair
+            key = self.parse_expr()
+            self.expect(TokenType.COLON, "Expected ':' after dictionary key")
+            value = self.parse_expr()
+            pairs.append((key, value))
+            
+            while self.at().type == TokenType.COMMA:
+                self.eat()  # consume comma
+                if self.at().type == TokenType.RIGHT_CBR:
+                    break  # trailing comma
+                key = self.parse_expr()
+                self.expect(TokenType.COLON, "Expected ':' after dictionary key")
+                value = self.parse_expr()
+                pairs.append((key, value))
+        
+        self.expect(TokenType.RIGHT_CBR, "Expected '}' after dictionary elements")
+        return DictLiteral(pairs)
 
     def parse_return_statement(self) -> ReturnStatement:
         self.expect(TokenType.RETURN, "Expected 'return'")
@@ -395,9 +487,18 @@ class Parser:
     def parse_method_call(self, object: Expr) -> MethodCallExpr:
         self.expect(TokenType.DOT, "Expected '.'")
         
-        if self.at().type not in [TokenType.APPEND, TokenType.INSERT, TokenType.REMOVE, 
-                                 TokenType.POP, TokenType.CLEAR, TokenType.INDEX, 
-                                 TokenType.COUNT, TokenType.SORT, TokenType.REVERSE, TokenType.EXTEND]:
+        # List of all supported method tokens
+        supported_methods = [
+            # List methods
+            TokenType.APPEND, TokenType.INSERT, TokenType.REMOVE, 
+            TokenType.POP, TokenType.CLEAR, TokenType.INDEX, 
+            TokenType.COUNT, TokenType.SORT, TokenType.REVERSE, TokenType.EXTEND,
+            # Dict methods  
+            TokenType.GET, TokenType.KEYS, TokenType.VALUES, 
+            TokenType.ITEMS, TokenType.UPDATE
+        ]
+        
+        if self.at().type not in supported_methods:
             print(f"Unknown method: {self.at().value}")
             exit(1)
             
