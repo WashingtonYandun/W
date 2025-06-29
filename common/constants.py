@@ -1,7 +1,7 @@
 from enum import Enum
 from token.TokenType import TokenType
 
-OPERATORS = ["+", "-", "*", "/", "%", "==", "!=", "<", ">", "<=", ">="]
+OPERATORS = ["+", "-", "*", "/", "%", "==", "!=", "<", ">", "<=", ">=", "and", "or", "not", "is"]
 
 KEYWORDS = {
     "func": TokenType.FUNC,
@@ -21,7 +21,14 @@ KEYWORDS = {
     "str": TokenType.DATATYPE_STR,
     "bool": TokenType.DATATYPE_BOOL,
     "list": TokenType.DATATYPE_LIST,
+    "dict": TokenType.DATATYPE_DICT,
     "const": TokenType.CONST,
+    
+    # Logical operators
+    "and": TokenType.AND,
+    "or": TokenType.OR,
+    "not": TokenType.NOT,
+    "is": TokenType.IS,
 
     "=": TokenType.ASSIGNMENT_OPERATOR,
     
@@ -39,4 +46,11 @@ KEYWORDS = {
     "sort": TokenType.SORT,
     "reverse": TokenType.REVERSE,
     "extend": TokenType.EXTEND,
+    
+    # Dict methods
+    "get": TokenType.GET,
+    "keys": TokenType.KEYS,
+    "values": TokenType.VALUES,
+    "items": TokenType.ITEMS,
+    "update": TokenType.UPDATE,
 }

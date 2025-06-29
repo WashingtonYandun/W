@@ -11,6 +11,7 @@ NodeType = Union[
     "StringLiteral", 
     "BooleanLiteral",
     "ListLiteral",
+    "DictLiteral",
     "IndexExpr",
     "BinaryExpr",
     "IfStatement",
@@ -19,6 +20,7 @@ NodeType = Union[
     "FunctionDeclaration",
     "CallExpr",
     "AssignmentExpr",
+    "IndexAssignmentExpr",
     "ReturnStatement",
     "MethodCallExpr"
     ]
@@ -163,12 +165,30 @@ class AssignmentExpr(Expr):
         self.value = value
 
 
+class IndexAssignmentExpr(Expr):
+    def __init__(self, object: Expr, index: Expr, value: Expr):
+        super().__init__("IndexAssignmentExpr")
+        
+        self.kind = "IndexAssignmentExpr"
+        self.object = object
+        self.index = index
+        self.value = value
+
+
 class ListLiteral(Expr):
     def __init__(self, elements: list[Expr]):
         super().__init__("ListLiteral")
         
         self.kind = "ListLiteral"
         self.elements = elements
+
+
+class DictLiteral(Expr):
+    def __init__(self, pairs: list[tuple[Expr, Expr]]):
+        super().__init__("DictLiteral")
+        
+        self.kind = "DictLiteral"
+        self.pairs = pairs  # List of (key, value) tuples
 
 
 class ReturnStatement(Statement):
