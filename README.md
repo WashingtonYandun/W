@@ -65,10 +65,10 @@ class Duck(Animal, Flyer, Swimmer) {
 
 -   [x] Lexer
 -   [x] Parser
--   [ ] Interpreter
+-   [x] Interpreter
 -   [ ] Compiler
 
-## Features Goals
+## Features Goals (Maybe, maybe not, still thinking about it)
 
 -   [ ] OOP and access modifiers, interfaces
 -   [ ] Async and Await
