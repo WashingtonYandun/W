@@ -37,7 +37,13 @@ class Lexer():
         if num_str.endswith("."):
             num_str += "0"
 
-        return Token(value=float(num_str), type_=TokenType.NUMBERS)
+        # Determine if it's an integer or float
+        if decimal_counter == 0:
+            # No decimal point, it's an integer
+            return Token(value=int(num_str), type_=TokenType.INTEGERS)
+        else:
+            # Has decimal point, it's a float
+            return Token(value=float(num_str), type_=TokenType.FLOATS)
 
     def gen_string(self) -> Token:
         string = ""
@@ -116,6 +122,18 @@ class Lexer():
         self.advance()
         return Token(char, token_type)
 
+    def handle_multiply_or_power(self) -> Token:
+        """Handle multiply operator (*) or power operator (**)"""
+        if self.current_char == '*':
+            self.advance()
+            if self.current_char == '*':
+                self.advance()
+                return Token('**', TokenType.BINARY_OPERATOR)
+            else:
+                return Token('*', TokenType.BINARY_OPERATOR)
+        else:
+            raise LexerError(f"Unexpected character in handle_multiply_or_power: '{self.current_char}'")
+
     def tokenize(self) -> list[Token]:
         tokens = []
 
@@ -128,7 +146,9 @@ class Lexer():
                 tokens.append(self.gen_string())
             elif self.current_char == '-':
                 tokens.append(self.handle_minus_or_arrow())
-            elif self.current_char in ['+', '*', '/', '%']:
+            elif self.current_char == '*':
+                tokens.append(self.handle_multiply_or_power())
+            elif self.current_char in ['+', '/', '%']:
                 tokens.append(Token(self.current_char, TokenType.BINARY_OPERATOR))
                 self.advance()
             elif self.current_char in ['=', '!', '<', '>']:

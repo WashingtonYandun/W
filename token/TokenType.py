@@ -7,11 +7,13 @@ class TokenType(Enum):
     Enum class representing the different types of tokens in a programming language.
     """
     # Data types
-    NUMBERS = iota()
+    INTEGERS = iota()
+    FLOATS = iota()
     STRINGS = iota()
     BOOLEANS = iota()
     LISTS = iota()
     TUPLES = iota()
+    DICTS = iota()
     NONE = iota()
     COLON = iota()
 
@@ -20,9 +22,11 @@ class TokenType(Enum):
     FUNC = iota()
     RETURN = iota()
     DATATYPE_INT = iota()
+    DATATYPE_FLOAT = iota()
     DATATYPE_STR = iota()
     DATATYPE_BOOL = iota()
     DATATYPE_LIST = iota()
+    DATATYPE_DICT = iota()
 
     # Identifiers
     IDENTIFIER = iota()
@@ -42,6 +46,12 @@ class TokenType(Enum):
     BINARY_OPERATOR = iota()
     COMPARISON_OPERATOR = iota()
     EQUALS = iota()
+    
+    # Logical operators
+    AND = iota()
+    OR = iota()
+    NOT = iota()
+    IS = iota()
 
     # Syntax
     LEFT_PR = iota()
@@ -75,4 +85,11 @@ class TokenType(Enum):
     SORT = iota()
     REVERSE = iota()
     EXTEND = iota()
+    
+    # Dict methods
+    GET = iota()
+    KEYS = iota()
+    VALUES = iota()
+    ITEMS = iota()
+    UPDATE = iota()
     
