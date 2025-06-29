@@ -14,4 +14,9 @@ tests/__pycache__
 tests/*.pyc
 tests/*
 
+runtime/__pycache__
+runtime/*.pyc
+runtime/*.pyo
+runtime/*.pyd
 
+run_tests.py
