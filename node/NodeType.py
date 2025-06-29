@@ -7,6 +7,8 @@ NodeType = Union[
     "Identifier", 
     "VarDeclaration",
     "NumericLiteral", 
+    "IntLiteral",
+    "FloatLiteral",
     "NoneLiteral",
     "StringLiteral", 
     "BooleanLiteral",
@@ -81,6 +83,22 @@ class NumericLiteral(Expr):
 
         self.kind = "NumericLiteral"
         self.value = value
+
+
+class IntLiteral(Expr):
+    def __init__(self, value: int):
+        super().__init__("IntLiteral")
+
+        self.kind = "IntLiteral"
+        self.value = int(value)
+
+
+class FloatLiteral(Expr):
+    def __init__(self, value: float):
+        super().__init__("FloatLiteral")
+
+        self.kind = "FloatLiteral"
+        self.value = float(value)
 
 
 class NoneLiteral(Expr):

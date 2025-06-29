@@ -1,7 +1,7 @@
 from node.NodeType import BinaryExpr, Identifier, Program, Statement, AssignmentExpr, IndexAssignmentExpr
 from runtime.NumberOps import eval_numeric_binary_expr
 from runtime.StringOps import eval_string_binary_expr
-from runtime.Types import BooleanVal, NoneVal, RuntimeVal, NumberVal, StringVal, FunctionVal, NativeFunctionVal, ListVal, DictVal
+from runtime.Types import BooleanVal, NoneVal, RuntimeVal, NumberVal, IntVal, FloatVal, StringVal, FunctionVal, NativeFunctionVal, ListVal, DictVal
 from runtime.Environment import Environment
 
 class ReturnValue(Exception):
@@ -63,7 +63,9 @@ def eval_binary_expr(binary_op: BinaryExpr, env: Environment) -> RuntimeVal:
     if isinstance(lhs, StringVal) and isinstance(rhs, StringVal):
         return eval_string_binary_expr(lhs, rhs, binary_op.operator)
     
-    if isinstance(lhs, NumberVal) and isinstance(rhs, NumberVal):
+    # Handle numeric operations for NumberVal (backward compatibility), IntVal, and FloatVal
+    if (lhs.type in ["int", "float"] or isinstance(lhs, NumberVal)) and \
+       (rhs.type in ["int", "float"] or isinstance(rhs, NumberVal)):
         return eval_numeric_binary_expr(lhs, rhs, binary_op.operator)
 
     return NoneVal()
@@ -78,7 +80,8 @@ def eval_comparison_expr(lhs: RuntimeVal, rhs: RuntimeVal, operator: str) -> Boo
         # 'is' checks for object identity (same type and value)
         return BooleanVal(type(lhs) == type(rhs) and lhs.value == rhs.value)
     
-    if isinstance(lhs, NumberVal) and isinstance(rhs, NumberVal):
+    # Handle numeric comparisons for both int and float types
+    if (lhs.type in ["int", "float"]) and (rhs.type in ["int", "float"]):
         if operator == '<':
             return BooleanVal(lhs.value < rhs.value)
         elif operator == '>':
@@ -525,6 +528,12 @@ def eval_dict_methods(obj: DictVal, method_name: str, args: list) -> RuntimeVal:
 def evaluate(ast_node: Statement, env: Environment) -> RuntimeVal:
     if ast_node.kind == "NumericLiteral":
         return NumberVal(ast_node.value)
+    
+    if ast_node.kind == "IntLiteral":
+        return IntVal(ast_node.value)
+    
+    if ast_node.kind == "FloatLiteral":
+        return FloatVal(ast_node.value)
     
     if ast_node.kind == "NoneLiteral":
         return NoneVal()

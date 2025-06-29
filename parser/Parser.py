@@ -1,5 +1,5 @@
 from lexer.Lexer import Lexer
-from node.NodeType import BooleanLiteral, NoneLiteral, NumericLiteral, Program, Statement, Expr, BinaryExpr, Identifier, StringLiteral, VarDeclaration, IfStatement, WhileStatement, ForStatement, FunctionDeclaration, CallExpr, AssignmentExpr, IndexAssignmentExpr, ListLiteral, DictLiteral, ReturnStatement, IndexExpr, MethodCallExpr
+from node.NodeType import BooleanLiteral, NoneLiteral, NumericLiteral, IntLiteral, FloatLiteral, Program, Statement, Expr, BinaryExpr, Identifier, StringLiteral, VarDeclaration, IfStatement, WhileStatement, ForStatement, FunctionDeclaration, CallExpr, AssignmentExpr, IndexAssignmentExpr, ListLiteral, DictLiteral, ReturnStatement, IndexExpr, MethodCallExpr
 from token.Token import Token
 from token.TokenType import TokenType
 
@@ -110,7 +110,7 @@ class Parser:
 
     def parse_type(self) -> str:
         """Parse type annotations like 'int', 'str', 'list[int]', 'dict[str, int]', etc."""
-        if self.at().type in [TokenType.DATATYPE_INT, TokenType.DATATYPE_STR, TokenType.DATATYPE_BOOL]:
+        if self.at().type in [TokenType.DATATYPE_INT, TokenType.DATATYPE_FLOAT, TokenType.DATATYPE_STR, TokenType.DATATYPE_BOOL]:
             type_token = self.eat()
             return type_token.value
         elif self.at().type == TokenType.NONE:
@@ -190,9 +190,19 @@ class Parser:
         return left
 
     def parse_multiplicative_expr(self) -> Expr:
-        left = self.parse_unary_expr()
+        left = self.parse_power_expr()
 
         while self.at().value in ["/", "*", "%"]:
+            operator = self.eat().value
+            right = self.parse_power_expr()
+            left = BinaryExpr(left=left, right=right, operator=operator)
+
+        return left
+    
+    def parse_power_expr(self) -> Expr:
+        left = self.parse_unary_expr()
+
+        while self.at().value == "**":
             operator = self.eat().value
             right = self.parse_unary_expr()
             left = BinaryExpr(left=left, right=right, operator=operator)
@@ -221,8 +231,10 @@ class Parser:
                 elif self.at().type == TokenType.LEFT_BR:
                     return self.parse_index_expr(ident)
                 return ident
-            case TokenType.NUMBERS:
-                return NumericLiteral(self.eat().value)
+            case TokenType.INTEGERS:
+                return IntLiteral(self.eat().value)
+            case TokenType.FLOATS:
+                return FloatLiteral(self.eat().value)
             case TokenType.STRINGS:
                 return StringLiteral(str(self.eat().value))
             case TokenType.BOOLEANS:
@@ -231,12 +243,15 @@ class Parser:
                 return BooleanLiteral(bool_value)
             case TokenType.BINARY_OPERATOR if self.at().value == "-":
                 self.eat()
-                if self.at().type == TokenType.NUMBERS:
+                if self.at().type == TokenType.INTEGERS:
                     num = self.eat().value
-                    return NumericLiteral(-num)
+                    return IntLiteral(-num)
+                elif self.at().type == TokenType.FLOATS:
+                    num = self.eat().value
+                    return FloatLiteral(-num)
                 else:
                     expr = self.parse_primary_expr()
-                    return BinaryExpr(left=NumericLiteral(0), right=expr, operator="-")
+                    return BinaryExpr(left=IntLiteral(0), right=expr, operator="-")
             case TokenType.LEFT_PR:
                 self.eat()
                 expr = self.parse_expr()
