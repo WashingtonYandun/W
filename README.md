@@ -17,7 +17,7 @@ The syntax is designed to be simple and easy to read and write. This is how it w
 const target: int = 9
 arr: list[int] = [1, 2, 3, 4, 5]
 
-func two_sum(target: int, arr: list[int]) -> list[int]{
+func two_sum(target: int, arr: list[int]) -> list[int] {
     for i in range(len(arr)){
         for j in range(i + 1, len(arr)){
             if arr[i] + arr[j] == target {
@@ -32,13 +32,15 @@ print(two_sum(target, arr))
 
 # classes and interfaces
 # If there is not access modifier, it's public
-interface Flyer:
+interface Flyer {
     func fly(self) -> None:
         pass
+}
 
-interface Swimmer:
+interface Swimmer {
     func swim(self) -> None:
         pass
+}
 
 class Duck(Animal, Flyer, Swimmer) {
     func __init__(self, name: str) -> None {
