@@ -1,4 +1,4 @@
-from runtime.Types import NoneVal, RuntimeVal, NativeFunctionVal, NumberVal, ListVal, NativeFunctionVal, NumberVal, ListVal
+from runtime.Types import NoneVal, RuntimeVal, NativeFunctionVal, NumberVal, ListVal, DictVal
 
 class Environment:
     def __init__(self, parent_env: 'Environment' = None) -> None:
@@ -64,6 +64,30 @@ def create_global_env() -> 'Environment':
                         else:
                             print(elem, end="")
                     print("]", end="")
+                elif isinstance(arg, DictVal):
+                    # Print dictionary
+                    print("{", end="")
+                    items = list(arg.pairs.items())
+                    for j, (key, value) in enumerate(items):
+                        if j > 0:
+                            print(", ", end="")
+                        # Print key
+                        if isinstance(key, str):
+                            print(f'"{key}"', end="")
+                        else:
+                            print(key, end="")
+                        print(": ", end="")
+                        # Print value
+                        if hasattr(value, 'value'):
+                            if isinstance(value.value, str):
+                                print(f'"{value.value}"', end="")
+                            elif isinstance(value.value, float) and value.value.is_integer():
+                                print(int(value.value), end="")
+                            else:
+                                print(value.value, end="")
+                        else:
+                            print(value, end="")
+                    print("}", end="")
                 else:
                     print(arg, end="")
             print()
@@ -110,6 +134,8 @@ def create_global_env() -> 'Environment':
         arg = args[0]
         if isinstance(arg, ListVal):
             return NumberVal(float(len(arg.elements)))
+        elif isinstance(arg, DictVal):
+            return NumberVal(float(len(arg.pairs)))
         else:
             print(f"object of type '{type(arg).__name__}' has no len()")
             return NoneVal()
