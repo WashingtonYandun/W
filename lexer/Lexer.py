@@ -52,12 +52,50 @@ class Lexer():
     
     def gen_identifier(self) -> Token:
         ident = ""
-        while self.current_char is not None and self.current_char.isalnum():
+        while self.current_char is not None and (self.current_char.isalnum() or self.current_char == '_'):
             ident += self.current_char
             self.advance()
 
         reserved = KEYWORDS.get(ident)
         return Token(ident, reserved) if reserved else Token(ident, TokenType.IDENTIFIER)
+
+    def handle_comparison_operators(self) -> Token:
+        op = self.current_char
+        self.advance()
+        
+        # Handle two-character operators
+        if op == '=' and self.current_char == '=':
+            self.advance()
+            return Token('==', TokenType.COMPARISON_OPERATOR)
+        elif op == '!' and self.current_char == '=':
+            self.advance()
+            return Token('!=', TokenType.COMPARISON_OPERATOR)
+        elif op == '<' and self.current_char == '=':
+            self.advance()
+            return Token('<=', TokenType.COMPARISON_OPERATOR)
+        elif op == '>' and self.current_char == '=':
+            self.advance()
+            return Token('>=', TokenType.COMPARISON_OPERATOR)
+        elif op == '<':
+            return Token('<', TokenType.COMPARISON_OPERATOR)
+        elif op == '>':
+            return Token('>', TokenType.COMPARISON_OPERATOR)
+        elif op == '=':
+            return Token('=', TokenType.ASSIGNMENT_OPERATOR)
+        else:
+            raise LexerError(f"Unexpected character after '{op}'")
+
+    def handle_minus_or_arrow(self) -> Token:
+        """Handle minus operator or arrow operator (->)"""
+        if self.current_char == '-':
+            self.advance()
+            if self.current_char == '>':
+                self.advance()
+                return Token('->', TokenType.ARROW)
+            else:
+                return Token('-', TokenType.BINARY_OPERATOR)
+        else:
+            raise LexerError(f"Unexpected character in handle_minus_or_arrow: '{self.current_char}'")
 
     def handle_equals(self) -> Token:
         token = Token(self.current_char, TokenType.ASSIGNMENT_OPERATOR)
@@ -74,8 +112,9 @@ class Lexer():
             '}': TokenType.RIGHT_CBR
         }
         token_type = bracket_type[self.current_char]
+        char = self.current_char
         self.advance()
-        return Token(self.current_char, token_type)
+        return Token(char, token_type)
 
     def tokenize(self) -> list[Token]:
         tokens = []
@@ -87,13 +126,15 @@ class Lexer():
                 tokens.append(self.gen_number())
             elif self.current_char == '"':
                 tokens.append(self.gen_string())
-            elif self.current_char in OPERATORS:
+            elif self.current_char == '-':
+                tokens.append(self.handle_minus_or_arrow())
+            elif self.current_char in ['+', '*', '/', '%']:
                 tokens.append(Token(self.current_char, TokenType.BINARY_OPERATOR))
                 self.advance()
-            elif self.current_char.isalpha():
+            elif self.current_char in ['=', '!', '<', '>']:
+                tokens.append(self.handle_comparison_operators())
+            elif self.current_char.isalpha() or self.current_char == '_':
                 tokens.append(self.gen_identifier())
-            elif self.current_char == '=':
-                tokens.append(self.handle_equals())
             elif self.current_char in '()[]{}':
                 tokens.append(self.handle_brackets())
             elif self.current_char == '#':
@@ -101,9 +142,16 @@ class Lexer():
                 while self.current_char is not None and self.current_char != '\n':
                     self.advance()
             elif self.current_char == '\n':
+                tokens.append(Token('\n', TokenType.NEW_LINE))
                 self.advance()
             elif self.current_char == ':':
                 tokens.append(Token(self.current_char, TokenType.COLON))
+                self.advance()
+            elif self.current_char == ',':
+                tokens.append(Token(self.current_char, TokenType.COMMA))
+                self.advance()
+            elif self.current_char == '.':
+                tokens.append(Token(self.current_char, TokenType.DOT))
                 self.advance()
             else:
                 raise LexerError(f"Invalid character '{self.current_char}'")
