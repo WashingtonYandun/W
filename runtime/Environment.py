@@ -1,4 +1,4 @@
-from runtime.Types import NoneVal, RuntimeVal
+from runtime.Types import NoneVal, RuntimeVal, NativeFunctionVal, NumberVal, ListVal, NativeFunctionVal, NumberVal, ListVal
 
 class Environment:
     def __init__(self, parent_env: 'Environment' = None) -> None:
@@ -34,3 +34,87 @@ class Environment:
             raise Exception(f"Cannot resolve '{varname}' as it does not exist.")
         
         return self.parent.resolve(varname)
+
+def create_global_env() -> 'Environment':
+    env = Environment()
+    
+    # Add built-in functions
+    def print_fn(args, env):
+        if len(args) == 0:
+            print()
+        else:
+            for i, arg in enumerate(args):
+                if i > 0:
+                    print(" ", end="")
+                
+                # Handle different types of values for printing
+                if hasattr(arg, 'value'):
+                    print(arg.value, end="")
+                elif isinstance(arg, ListVal):
+                    # Print list
+                    print("[", end="")
+                    for j, elem in enumerate(arg.elements):
+                        if j > 0:
+                            print(", ", end="")
+                        if hasattr(elem, 'value'):
+                            if isinstance(elem.value, float) and elem.value.is_integer():
+                                print(int(elem.value), end="")
+                            else:
+                                print(elem.value, end="")
+                        else:
+                            print(elem, end="")
+                    print("]", end="")
+                else:
+                    print(arg, end="")
+            print()
+        return NoneVal()
+    
+    def range_fn(args, env):
+        if len(args) == 1:
+            stop = int(args[0].value)
+            start = 0
+            step = 1
+        elif len(args) == 2:
+            start = int(args[0].value)
+            stop = int(args[1].value)
+            step = 1
+        elif len(args) == 3:
+            start = int(args[0].value)
+            stop = int(args[1].value)
+            step = int(args[2].value)
+        else:
+            print("range() takes 1 to 3 arguments")
+            return NoneVal()
+        
+        numbers = []
+        current = start
+        if step > 0:
+            while current < stop:
+                numbers.append(NumberVal(float(current)))
+                current += step
+        elif step < 0:
+            while current > stop:
+                numbers.append(NumberVal(float(current)))
+                current += step
+        else:
+            print("range() step cannot be zero")
+            return NoneVal()
+        
+        return ListVal(numbers)
+    
+    def len_fn(args, env):
+        if len(args) != 1:
+            print("len() takes exactly one argument")
+            return NoneVal()
+        
+        arg = args[0]
+        if isinstance(arg, ListVal):
+            return NumberVal(float(len(arg.elements)))
+        else:
+            print(f"object of type '{type(arg).__name__}' has no len()")
+            return NoneVal()
+    
+    env.declare_var("print", NativeFunctionVal("print", print_fn))
+    env.declare_var("range", NativeFunctionVal("range", range_fn))
+    env.declare_var("len", NativeFunctionVal("len", len_fn))
+    return env
