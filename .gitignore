@@ -2,4 +2,16 @@
 *.pyc
 *.txt
 /.idea
+.vscode
+*.log
+*.pyo
+*.pyd
+__pycache__
+
+
+# tests
+tests/__pycache__
+tests/*.pyc
+tests/*
+
 

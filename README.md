@@ -14,41 +14,49 @@ The syntax is designed to be simple and easy to read and write. This is how it w
 
 ```python
 # Normal function
-target: int = 9
+const target: int = 9
 arr: list[int] = [1, 2, 3, 4, 5]
 
-def two_sum(target: int, arr: list[int]) -> list[int]:
-    for i in range(len(arr)):
-        for j in range(i + 1, len(arr)):
-            if arr[i] + arr[j] == target:
+func two_sum(target: int, arr: list[int]) -> list[int]{
+    for i in range(len(arr)){
+        for j in range(i + 1, len(arr)){
+            if arr[i] + arr[j] == target {
                 return [i, j]
+            }
+        }
+    }
     return []
+}
 
 print(two_sum(target, arr))
 
 # classes and interfaces
 # If there is not access modifier, it's public
 interface Flyer:
-    def fly(self) -> None:
+    func fly(self) -> None:
         pass
 
 interface Swimmer:
-    def swim(self) -> None:
+    func swim(self) -> None:
         pass
 
-class Duck(Animal, Flyer, Swimmer):
-    def __init__(self, name: str) -> None:
+class Duck(Animal, Flyer, Swimmer) {
+    func __init__(self, name: str) -> None {
         self.name: str = name
+    }
 
-    def fly(self) -> None:
+    func fly(self) -> None {
         print("The duck flies")
+    }
 
-    def swim(self) -> None:
+    func swim(self) -> None {
         print("The duck swims")
+    }
 
-    private def be_a_duck(self) -> None:
+    private func be_a_duck(self) -> None {
         print("I am a duck")
-
+    }
+}
 ```
 
 ## Goals
