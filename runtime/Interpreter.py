@@ -1,12 +1,29 @@
-from node.NodeType import BinaryExpr, Identifier, Program, Statement, AssignmentExpr
+from node.NodeType import BinaryExpr, Identifier, Program, Statement, AssignmentExpr, IndexAssignmentExpr
 from runtime.NumberOps import eval_numeric_binary_expr
 from runtime.StringOps import eval_string_binary_expr
-from runtime.Types import BooleanVal, NoneVal, RuntimeVal, NumberVal, StringVal, FunctionVal, NativeFunctionVal, ListVal
+from runtime.Types import BooleanVal, NoneVal, RuntimeVal, NumberVal, StringVal, FunctionVal, NativeFunctionVal, ListVal, DictVal
 from runtime.Environment import Environment
 
 class ReturnValue(Exception):
     def __init__(self, value: RuntimeVal):
         self.value = value
+
+def is_truthy(val: RuntimeVal) -> bool:
+    """Determine if a runtime value is truthy"""
+    if isinstance(val, BooleanVal):
+        return val.value
+    elif isinstance(val, NumberVal):
+        return val.value != 0
+    elif isinstance(val, StringVal):
+        return len(val.value) > 0
+    elif isinstance(val, ListVal):
+        return len(val.elements) > 0
+    elif isinstance(val, DictVal):
+        return len(val.pairs) > 0
+    elif isinstance(val, NoneVal):
+        return False
+    else:
+        return True  # Functions and other objects are truthy
 
 def eval_program(program: Program, env: Environment) -> RuntimeVal:
     last_evaluated: RuntimeVal = NoneVal()
@@ -16,10 +33,31 @@ def eval_program(program: Program, env: Environment) -> RuntimeVal:
 
 
 def eval_binary_expr(binary_op: BinaryExpr, env: Environment) -> RuntimeVal:
+    # Handle logical operators with short-circuit evaluation
+    if binary_op.operator == 'and':
+        lhs = evaluate(binary_op.left, env)
+        if not is_truthy(lhs):
+            return BooleanVal(False)
+        rhs = evaluate(binary_op.right, env)
+        return BooleanVal(is_truthy(rhs))
+    
+    if binary_op.operator == 'or':
+        lhs = evaluate(binary_op.left, env)
+        if is_truthy(lhs):
+            return BooleanVal(True)
+        rhs = evaluate(binary_op.right, env)
+        return BooleanVal(is_truthy(rhs))
+    
+    if binary_op.operator == 'not':
+        # For 'not' operator, we only care about the right side
+        # Don't evaluate the left side (which is a dummy BooleanLiteral(False))
+        rhs = evaluate(binary_op.right, env)
+        return BooleanVal(not is_truthy(rhs))
+    
     lhs = evaluate(binary_op.left, env)
     rhs = evaluate(binary_op.right, env)
 
-    if binary_op.operator in ['==', '!=', '<', '>', '<=', '>=']:
+    if binary_op.operator in ['==', '!=', '<', '>', '<=', '>=', 'is']:
         return eval_comparison_expr(lhs, rhs, binary_op.operator)
 
     if isinstance(lhs, StringVal) and isinstance(rhs, StringVal):
@@ -36,6 +74,9 @@ def eval_comparison_expr(lhs: RuntimeVal, rhs: RuntimeVal, operator: str) -> Boo
         return BooleanVal(lhs.value == rhs.value)
     elif operator == '!=':
         return BooleanVal(lhs.value != rhs.value)
+    elif operator == 'is':
+        # 'is' checks for object identity (same type and value)
+        return BooleanVal(type(lhs) == type(rhs) and lhs.value == rhs.value)
     
     if isinstance(lhs, NumberVal) and isinstance(rhs, NumberVal):
         if operator == '<':
@@ -144,6 +185,36 @@ def eval_assignment_expr(assignment: 'AssignmentExpr', env: Environment) -> Runt
     value = evaluate(assignment.value, env)
     return env.assign_var(assignment.assignee.symbol, value)
 
+def eval_index_assignment_expr(assignment: 'IndexAssignmentExpr', env: Environment) -> RuntimeVal:
+    """Evaluate index assignments like dict[key] = value or list[index] = value"""
+    obj = evaluate(assignment.object, env)
+    index = evaluate(assignment.index, env)
+    value = evaluate(assignment.value, env)
+    
+    if isinstance(obj, ListVal):
+        # List assignment: list[index] = value
+        if not isinstance(index, NumberVal):
+            print(f"List indices must be integers, not {type(index).__name__}")
+            return NoneVal()
+        
+        idx = int(index.value)
+        if idx < 0 or idx >= len(obj.elements):
+            print(f"List index out of range: {idx}")
+            return NoneVal()
+        
+        obj.elements[idx] = value
+        return value
+    
+    elif isinstance(obj, DictVal):
+        # Dictionary assignment: dict[key] = value
+        key = index.value if hasattr(index, 'value') else str(index)
+        obj.set(key, value)
+        return value
+    
+    else:
+        print(f"Cannot assign to index of type: {type(obj).__name__}")
+        return NoneVal()
+
 def eval_for_statement(for_stmt, env: Environment) -> RuntimeVal:
     iterable = evaluate(for_stmt.iterable, env)
     
@@ -171,6 +242,19 @@ def eval_list_literal(list_node, env: Environment) -> ListVal:
         elements.append(evaluate(element_node, env))
     return ListVal(elements)
 
+def eval_dict_literal(dict_node, env: Environment) -> DictVal:
+    """Evaluate dictionary literals like {"key": "value"}"""
+    pairs = {}
+    for key_node, value_node in dict_node.pairs:
+        key = evaluate(key_node, env)
+        value = evaluate(value_node, env)
+        # Convert key to appropriate type for dictionary indexing
+        if hasattr(key, 'value'):
+            pairs[key.value] = value
+        else:
+            pairs[str(key)] = value
+    return DictVal(pairs)
+
 def eval_return_statement(return_stmt, env: Environment) -> RuntimeVal:
     """Evaluate return statements"""
     if return_stmt.value:
@@ -180,36 +264,49 @@ def eval_return_statement(return_stmt, env: Environment) -> RuntimeVal:
         raise ReturnValue(NoneVal())
 
 def eval_index_expr(index_node, env: Environment) -> RuntimeVal:
-    """Evaluate index expressions like arr[i]"""
+    """Evaluate index expressions like arr[i] or dict[key]"""
     obj = evaluate(index_node.object, env)
     index = evaluate(index_node.index, env)
     
-    if not isinstance(obj, ListVal):
-        print(f"Cannot index non-list value: {obj}")
-        return NoneVal()
+    if isinstance(obj, ListVal):
+        if not isinstance(index, NumberVal):
+            print(f"List indices must be integers, not {type(index).__name__}")
+            return NoneVal()
+        
+        idx = int(index.value)
+        if idx < 0 or idx >= len(obj.elements):
+            print(f"List index out of range: {idx}")
+            return NoneVal()
+        
+        return obj.elements[idx]
     
-    if not isinstance(index, NumberVal):
-        print(f"List indices must be integers, not {type(index).__name__}")
-        return NoneVal()
+    elif isinstance(obj, DictVal):
+        # For dictionaries, use the value of the index as the key
+        key = index.value if hasattr(index, 'value') else str(index)
+        result = obj.get(key)
+        return result if result is not None else NoneVal()
     
-    idx = int(index.value)
-    if idx < 0 or idx >= len(obj.elements):
-        print(f"List index out of range: {idx}")
+    else:
+        print(f"Cannot index value of type: {type(obj).__name__}")
         return NoneVal()
-    
-    return obj.elements[idx]
 
 
 def eval_method_call_expr(method_call, env: Environment) -> RuntimeVal:
-    """Evaluate method calls like list.append(value), list.pop(), etc."""
+    """Evaluate method calls like list.append(value), dict.get(key), etc."""
     obj = evaluate(method_call.object, env)
-    
-    if not isinstance(obj, ListVal):
-        print(f"Cannot call method on non-list value: {obj}")
-        return NoneVal()
-    
     method_name = method_call.method
     args = [evaluate(arg, env) for arg in method_call.arguments]
+    
+    if isinstance(obj, ListVal):
+        return eval_list_methods(obj, method_name, args)
+    elif isinstance(obj, DictVal):
+        return eval_dict_methods(obj, method_name, args)
+    else:
+        print(f"Cannot call method on value of type: {type(obj).__name__}")
+        return NoneVal()
+
+def eval_list_methods(obj: ListVal, method_name: str, args: list) -> RuntimeVal:
+    """Handle list methods"""
     
     # Implement list methods
     if method_name == "append":
@@ -343,6 +440,88 @@ def elements_equal(a: RuntimeVal, b: RuntimeVal) -> bool:
         return True
     else:
         return False
+
+def eval_dict_methods(obj: DictVal, method_name: str, args: list) -> RuntimeVal:
+    """Handle dictionary methods"""
+    
+    if method_name == "get":
+        if len(args) < 1 or len(args) > 2:
+            print(f"get() takes 1 or 2 arguments ({len(args)} given)")
+            return NoneVal()
+        
+        key = args[0].value if hasattr(args[0], 'value') else str(args[0])
+        default = args[1] if len(args) == 2 else NoneVal()
+        
+        result = obj.get(key)
+        return result if result is not None else default
+    
+    elif method_name == "keys":
+        if len(args) != 0:
+            print(f"keys() takes no arguments ({len(args)} given)")
+            return NoneVal()
+        
+        keys = obj.keys()
+        # Convert keys to appropriate RuntimeVal types
+        key_vals = []
+        for key in keys:
+            if isinstance(key, str):
+                key_vals.append(StringVal(key))
+            elif isinstance(key, (int, float)):
+                key_vals.append(NumberVal(key))
+            else:
+                key_vals.append(StringVal(str(key)))
+        
+        return ListVal(key_vals)
+    
+    elif method_name == "values":
+        if len(args) != 0:
+            print(f"values() takes no arguments ({len(args)} given)")
+            return NoneVal()
+        
+        values = obj.values()
+        return ListVal(values)
+    
+    elif method_name == "items":
+        if len(args) != 0:
+            print(f"items() takes no arguments ({len(args)} given)")
+            return NoneVal()
+        
+        items = obj.items()
+        item_tuples = []
+        for key, value in items:
+            if isinstance(key, str):
+                key_val = StringVal(key)
+            elif isinstance(key, (int, float)):
+                key_val = NumberVal(key)
+            else:
+                key_val = StringVal(str(key))
+            
+            item_tuples.append(ListVal([key_val, value]))
+        
+        return ListVal(item_tuples)
+    
+    elif method_name == "clear":
+        if len(args) != 0:
+            print(f"clear() takes no arguments ({len(args)} given)")
+            return NoneVal()
+        obj.clear()
+        return NoneVal()
+    
+    elif method_name == "update":
+        if len(args) != 1:
+            print(f"update() takes exactly 1 argument ({len(args)} given)")
+            return NoneVal()
+        
+        if not isinstance(args[0], DictVal):
+            print("update() argument must be a dictionary")
+            return NoneVal()
+        
+        obj.update(args[0])
+        return NoneVal()
+    
+    else:
+        print(f"Unknown dict method: {method_name}")
+        return NoneVal()
 def evaluate(ast_node: Statement, env: Environment) -> RuntimeVal:
     if ast_node.kind == "NumericLiteral":
         return NumberVal(ast_node.value)
@@ -358,6 +537,9 @@ def evaluate(ast_node: Statement, env: Environment) -> RuntimeVal:
     
     if ast_node.kind == "ListLiteral":
         return eval_list_literal(ast_node, env)
+    
+    if ast_node.kind == "DictLiteral":
+        return eval_dict_literal(ast_node, env)
     
     if ast_node.kind == "IndexExpr":
         return eval_index_expr(ast_node, env)
@@ -392,14 +574,14 @@ def evaluate(ast_node: Statement, env: Environment) -> RuntimeVal:
     if ast_node.kind == "AssignmentExpr":
         return eval_assignment_expr(ast_node, env)
     
+    if ast_node.kind == "IndexAssignmentExpr":
+        return eval_index_assignment_expr(ast_node, env)
+    
     if ast_node.kind == "ReturnStatement":
         return eval_return_statement(ast_node, env)
     
     if ast_node.kind == "Program":
         return eval_program(ast_node, env)
-
-    if ast_node.kind == "AssignmentExpr":
-        return eval_assignment_expr(ast_node, env)
 
     if ast_node.kind == "ForStatement":
         return eval_for_statement(ast_node, env)
