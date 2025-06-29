@@ -1,6 +1,6 @@
 from typing import Literal, Union
 
-ValueType = Literal["None", "number", "string", "boolean", "function", "native-fn", "list", "dict"]
+ValueType = Literal["None", "int", "float", "string", "boolean", "function", "native-fn", "list", "dict"]
 
 
 class RuntimeVal:
@@ -9,11 +9,11 @@ class RuntimeVal:
 
     Attributes:
         type (ValueType): The type of the value.
-        value (Union[None, float]): The actual value.
+        value (Union[None, int, float, str, bool]): The actual value.
     """
 
     type: ValueType
-    value: Union[None, float]
+    value: Union[None, int, float, str, bool]
 
     def __repr__(self):
         return f"{self.__dict__}"
@@ -25,10 +25,27 @@ class NoneVal(RuntimeVal):
         self.value = None
 
 
-class NumberVal(RuntimeVal):
+class IntVal(RuntimeVal):
+    def __init__(self, value: int):
+        self.type = "int"
+        self.value = int(value)  # Ensure it's an integer
+
+
+class FloatVal(RuntimeVal):
     def __init__(self, value: float):
-        self.type = "number"
-        self.value = value
+        self.type = "float"
+        self.value = float(value)  # Ensure it's a float
+
+
+# Keep NumberVal for backward compatibility, but it will be deprecated
+class NumberVal(RuntimeVal):
+    def __init__(self, value: Union[int, float]):
+        if isinstance(value, int) or (isinstance(value, float) and value.is_integer()):
+            self.type = "int"
+            self.value = int(value)
+        else:
+            self.type = "float"
+            self.value = float(value)
 
 
 class StringVal(RuntimeVal):

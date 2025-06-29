@@ -18,6 +18,7 @@ KEYWORDS = {
     "while": TokenType.WHILE,
 
     "int": TokenType.DATATYPE_INT,
+    "float": TokenType.DATATYPE_FLOAT,
     "str": TokenType.DATATYPE_STR,
     "bool": TokenType.DATATYPE_BOOL,
     "list": TokenType.DATATYPE_LIST,
