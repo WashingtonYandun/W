@@ -1,6 +1,6 @@
 from typing import Literal, Union
 
-ValueType = Literal["None", "number", "string", "boolean"]
+ValueType = Literal["None", "number", "string", "boolean", "function", "native-fn", "list"]
 
 
 class RuntimeVal:
@@ -41,3 +41,25 @@ class BooleanVal(RuntimeVal):
     def __init__(self, value: bool):
         self.type = "boolean"
         self.value = value
+
+
+class FunctionVal(RuntimeVal):
+    def __init__(self, name: str, parameters: list[str], body: list, env):
+        self.type = "function"
+        self.name = name
+        self.parameters = parameters
+        self.body = body
+        self.closure_env = env
+
+
+class NativeFunctionVal(RuntimeVal):
+    def __init__(self, name: str, call_fn):
+        self.type = "native-fn"
+        self.name = name
+        self.call = call_fn
+
+
+class ListVal(RuntimeVal):
+    def __init__(self, elements: list):
+        self.type = "list"
+        self.elements = elements
