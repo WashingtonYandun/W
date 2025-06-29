@@ -2,6 +2,7 @@ from enum import Enum
 from token.TokenType import TokenType
 
 OPERATORS = ["+", "-", "*", "/", "%", "==", "!=", "<", ">", "<=", ">="]
+
 KEYWORDS = {
     "func": TokenType.FUNC,
     "return": TokenType.RETURN,

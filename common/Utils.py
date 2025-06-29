@@ -2,15 +2,6 @@ iota_count = 0
 
 
 def iota(restart: bool = False) -> int:
-    """
-    Returns a unique integer value each time it is called.
-    
-    Args:
-        restart (bool, optional): If True, restarts the counter. Defaults to False.
-    
-    Returns:
-        int: The current value of the counter.
-    """
     global iota_count
 
     if restart:
@@ -22,7 +13,7 @@ def iota(restart: bool = False) -> int:
 
 
 def is_skippable(char: str) -> bool:
-    return char == " " or char == "\n" or char == "\t"
+    return char == " " or char == "\t"
 
 
 def is_int(char: str) -> bool:

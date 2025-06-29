@@ -5,12 +5,22 @@ NodeType = Union[
     "Statement",
     "Expr", 
     "Identifier", 
-    "VarDeclaration"
+    "VarDeclaration",
     "NumericLiteral", 
     "NoneLiteral",
     "StringLiteral", 
     "BooleanLiteral",
-    "BinaryExpr"
+    "ListLiteral",
+    "IndexExpr",
+    "BinaryExpr",
+    "IfStatement",
+    "WhileStatement",
+    "ForStatement",
+    "FunctionDeclaration",
+    "CallExpr",
+    "AssignmentExpr",
+    "ReturnStatement",
+    "MethodCallExpr"
     ]
 
 
@@ -23,11 +33,11 @@ class Statement:
 
 
 class Program(Statement):
-    def __init__(self, body: list[Statement] = []):
+    def __init__(self, body: list[Statement] = None):
         super().__init__("Program")
 
         self.kind = "Program"
-        self.body = body
+        self.body = body if body is not None else []
 
 
 class Expr(Statement):
@@ -93,3 +103,96 @@ class BooleanLiteral(Expr):
 
         self.kind = "BooleanLiteral"
         self.value = value
+
+
+class IfStatement(Statement):
+    def __init__(self, condition: Expr, then_body: list[Statement], else_body: list[Statement] = None):
+        super().__init__("IfStatement")
+        
+        self.kind = "IfStatement"
+        self.condition = condition
+        self.then_body = then_body
+        self.else_body = else_body if else_body is not None else []
+
+
+class WhileStatement(Statement):
+    def __init__(self, condition: Expr, body: list[Statement]):
+        super().__init__("WhileStatement")
+        
+        self.kind = "WhileStatement"
+        self.condition = condition
+        self.body = body
+
+
+class ForStatement(Statement):
+    def __init__(self, variable: str, iterable: Expr, body: list[Statement]):
+        super().__init__("ForStatement")
+        
+        self.kind = "ForStatement"
+        self.variable = variable
+        self.iterable = iterable
+        self.body = body
+
+
+class FunctionDeclaration(Statement):
+    def __init__(self, name: str, parameters: list[tuple[str, str]], body: list[Statement], return_type: str = "None"):
+        super().__init__("FunctionDeclaration")
+        
+        self.kind = "FunctionDeclaration"
+        self.name = name
+        self.parameters = parameters  # List of (param_name, param_type) tuples
+        self.body = body
+        self.return_type = return_type
+
+
+class CallExpr(Expr):
+    def __init__(self, callee: Expr, arguments: list[Expr]):
+        super().__init__("CallExpr")
+        
+        self.kind = "CallExpr"
+        self.callee = callee
+        self.arguments = arguments
+
+
+class AssignmentExpr(Expr):
+    def __init__(self, assignee: Identifier, value: Expr):
+        super().__init__("AssignmentExpr")
+        
+        self.kind = "AssignmentExpr"
+        self.assignee = assignee
+        self.value = value
+
+
+class ListLiteral(Expr):
+    def __init__(self, elements: list[Expr]):
+        super().__init__("ListLiteral")
+        
+        self.kind = "ListLiteral"
+        self.elements = elements
+
+
+class ReturnStatement(Statement):
+    def __init__(self, value: Expr = None):
+        super().__init__("ReturnStatement")
+        
+        self.kind = "ReturnStatement"
+        self.value = value
+
+
+class IndexExpr(Expr):
+    def __init__(self, object: Expr, index: Expr):
+        super().__init__("IndexExpr")
+        
+        self.kind = "IndexExpr"
+        self.object = object
+        self.index = index
+
+
+class MethodCallExpr(Expr):
+    def __init__(self, object: Expr, method: str, arguments: list[Expr] = None):
+        super().__init__("MethodCallExpr")
+        
+        self.kind = "MethodCallExpr"
+        self.object = object
+        self.method = method
+        self.arguments = arguments if arguments is not None else []
