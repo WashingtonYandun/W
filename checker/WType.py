@@ -127,6 +127,73 @@ class FunctionType(WType):
         return f"fn({params_str}) -> {self.ret}"
 
 
+class InterfaceType(WType):
+    def __init__(self, name: str, methods: Optional[Dict[str, FunctionType]] = None):
+        self.name = name
+        self.methods: Dict[str, FunctionType] = methods if methods is not None else {}
+
+    def __eq__(self, other: Any) -> bool:
+        return isinstance(other, InterfaceType) and self.name == other.name
+
+    def __str__(self) -> str:
+        return self.name
+
+
+class ClassFieldInfo:
+    def __init__(self, type: WType, is_public: bool, owner_class: str):
+        self.type = type
+        self.is_public = is_public
+        self.owner_class = owner_class
+
+
+class ClassMethodInfo:
+    def __init__(self, fn_type: FunctionType, is_public: bool, owner_class: str):
+        self.fn_type = fn_type
+        self.is_public = is_public
+        self.owner_class = owner_class
+
+
+class ClassType(WType):
+    def __init__(
+        self,
+        name: str,
+        superclass: Optional['ClassType'] = None,
+        interfaces: Optional[List[InterfaceType]] = None,
+        fields: Optional[Dict[str, ClassFieldInfo]] = None,
+        methods: Optional[Dict[str, ClassMethodInfo]] = None,
+        init_type: Optional[FunctionType] = None,
+    ):
+        self.name = name
+        self.superclass = superclass
+        self.interfaces: List[InterfaceType] = interfaces if interfaces is not None else []
+        self.fields: Dict[str, ClassFieldInfo] = fields if fields is not None else {}
+        self.methods: Dict[str, ClassMethodInfo] = methods if methods is not None else {}
+        self.init_type = init_type
+
+    def is_subclass_of(self, target_class_name: str) -> bool:
+        curr: Optional[ClassType] = self
+        while curr is not None:
+            if curr.name == target_class_name:
+                return True
+            curr = curr.superclass
+        return False
+
+    def implements_interface(self, target_intf_name: str) -> bool:
+        curr: Optional[ClassType] = self
+        while curr is not None:
+            for intf in curr.interfaces:
+                if intf.name == target_intf_name:
+                    return True
+            curr = curr.superclass
+        return False
+
+    def __eq__(self, other: Any) -> bool:
+        return isinstance(other, ClassType) and self.name == other.name
+
+    def __str__(self) -> str:
+        return self.name
+
+
 class ModuleType(WType):
     def __init__(self, name: str, scope: Any):
         self.name = name
@@ -148,7 +215,6 @@ class AnyType(WType):
         return "any"
 
 
-
 def is_assignable(source: WType, target: WType) -> bool:
     """
     Check if a value of type `source` can be assigned to a variable/param of type `target`.
@@ -157,12 +223,25 @@ def is_assignable(source: WType, target: WType) -> bool:
     - An optional T? accepts T and none.
     - A result T ! E accepts T (auto-wrapping ok value).
     - A non-optional T rejects none.
+    - Subclass is assignable to Superclass or implemented Interface.
     """
     if target == AnyType() or source == AnyType():
         return True
 
     if source == target:
         return True
+
+    # OOP Subtyping: Class -> Superclass
+    if isinstance(source, ClassType) and isinstance(target, ClassType):
+        return source.is_subclass_of(target.name)
+
+    # OOP Subtyping: Class -> Interface
+    if isinstance(source, ClassType) and isinstance(target, InterfaceType):
+        return source.implements_interface(target.name)
+
+    # Covariant List subtyping for polymorphic collections (e.g., list[Dog] -> list[Animal])
+    if isinstance(source, ListType) and isinstance(target, ListType):
+        return is_assignable(source.element, target.element)
 
     # An OptionalType(T) accepts T or none
     if isinstance(target, OptionalType):

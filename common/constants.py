@@ -9,6 +9,17 @@ KEYWORDS = {
     "enum": TokenType.ENUM,
     "import": TokenType.IMPORT,
 
+    # Object-Oriented (9)
+    "class": TokenType.CLASS,
+    "interface": TokenType.INTERFACE,
+    "extends": TokenType.EXTENDS,
+    "implements": TokenType.IMPLEMENTS,
+    "new": TokenType.NEW,
+    "this": TokenType.THIS,
+    "super": TokenType.SUPER,
+    "public": TokenType.PUBLIC,
+    "private": TokenType.PRIVATE,
+
     # Control Flow (10)
     "if": TokenType.IF,
     "elif": TokenType.ELIF,

@@ -1,0 +1,31 @@
+# Differential Case 02: Structural Value Equality vs Class Reference Identity
+
+struct Vec2 {
+    x: int
+    y: int
+}
+
+class BoxedId {
+    public id: int
+
+    fn init(id: int) {
+        this.id = id
+    }
+}
+
+fn main() -> unit {
+    let v1 = Vec2 { x: 10, y: 20 }
+    let v2 = Vec2 { x: 10, y: 20 }
+    let v3 = Vec2 { x: 10, y: 99 }
+    print("struct eq:", v1 == v2, v1 != v3)
+
+    let l1 = [1, 2, 3]
+    let l2 = [1, 2, 3]
+    let l3 = [1, 2, 4]
+    print("list eq:", l1 == l2, l1 != l3)
+
+    let c1 = new BoxedId(42)
+    let c2 = new BoxedId(42)
+    let c1_alias = c1
+    print("class eq:", c1 == c2, c1 == c1_alias, c1 != c2)
+}

@@ -4,17 +4,21 @@ from typing import Any, Dict, List, Optional, TextIO, Tuple
 from error.Error import WRuntimeError
 from node.NodeType import (
     Program, Stmt, Expr, ExprStmt, LetDecl, FnDecl, StructDecl, EnumDecl, ImportDecl,
+    InterfaceDecl, ClassDecl, MethodDecl,
     WhileStmt, ForStmt, ReturnStmt, BreakStmt, ContinueStmt, Block,
     IntLiteral, FloatLiteral, StringLiteral, BoolLiteral, NoneLiteral, IdentExpr,
+    ThisExpr, SuperExpr, NewExpr,
     UnaryExpr, BinaryExpr, CoalesceExpr, RangeExpr, PostfixTryExpr, ElseErrExpr, CallExpr,
     MemberExpr, IndexExpr, AssignmentExpr, StructInitExpr, ListExpr, DictExpr, TupleExpr,
     IfExpr, MatchExpr, Pattern, IdentifierPattern, TuplePattern, EnumPattern,
-    LiteralPattern, WildcardPattern
+    LiteralPattern, WildcardPattern,
+    NamedType, OptionalType as AstOptionalType, ListType as AstListType, DictType as AstDictType
 )
 from runtime.Values import (
     WValue, WInt, WFloat, WBool, WStr, WUnit, WNone,
     WList, WDict, WTuple, WRange, WStructInstance, WEnumValue,
     WResult, WOk, WErr, WFunction, WNativeFunction, WBoundMethod,
+    WClassDef, WObjectInstance, WSuperProxy,
     WEnumNamespace, WModule
 )
 
@@ -27,7 +31,7 @@ class Interpreter:
     """
     Canonical Tree-Walking Interpreter for W Language v0.1 (W0).
     Executes AST programs preserving strict value semantics (ARC + CoW)
-    and deterministic control flow.
+    for structs/collections and reference semantics for class instances.
     """
     def __init__(self, stdout: Optional[TextIO] = None, file: str = "<stdin>"):
         self.file = file
@@ -35,12 +39,25 @@ class Interpreter:
         self.global_env = create_global_environment(stdout=self.stdout)
 
     def interpret(self, program: Program) -> WValue:
-        # Pass 1: Register top-level enums, structs, and functions
+        # Pass 1: Register top-level enums, classes, structs, and functions
         for stmt in program.body:
             if isinstance(stmt, EnumDecl):
                 self.global_env.declare(
                     stmt.name,
                     WEnumNamespace(stmt.name, stmt.variants),
+                    is_mut=False
+                )
+            elif isinstance(stmt, ClassDecl):
+                methods_map = {m.name: m for m in stmt.methods}
+                self.global_env.declare(
+                    stmt.name,
+                    WClassDef(
+                        name=stmt.name,
+                        superclass_name=stmt.superclass,
+                        fields=stmt.fields,
+                        methods=methods_map,
+                        closure_env=self.global_env
+                    ),
                     is_mut=False
                 )
             elif isinstance(stmt, FnDecl):
@@ -53,12 +70,12 @@ class Interpreter:
                 self.eval_import_decl(stmt, self.global_env)
 
         # Pass 2: Execute statements
-        non_decls = [s for s in program.body if not isinstance(s, (FnDecl, StructDecl, EnumDecl, ImportDecl))]
+        non_decls = [s for s in program.body if not isinstance(s, (FnDecl, StructDecl, EnumDecl, InterfaceDecl, ClassDecl, ImportDecl))]
         last_val: WValue = WUnit()
 
         if non_decls:
             for stmt in program.body:
-                if not isinstance(stmt, (FnDecl, StructDecl, EnumDecl)):
+                if not isinstance(stmt, (FnDecl, StructDecl, EnumDecl, InterfaceDecl, ClassDecl)):
                     last_val = self.eval_stmt(stmt, self.global_env)
         elif self.global_env.exists("main"):
             main_fn = self.global_env.lookup("main")
@@ -355,6 +372,15 @@ class Interpreter:
                 return self.eval_block(expr.handler, handler_env)
             return val
 
+        if isinstance(expr, ThisExpr):
+            return env.lookup("this")
+
+        if isinstance(expr, SuperExpr):
+            return env.lookup("super")
+
+        if isinstance(expr, NewExpr):
+            return self.instantiate_class(expr.class_name, [self.eval_expr(a, env) for a in expr.args], env, expr.line, expr.col)
+
         if isinstance(expr, AssignmentExpr):
             target = expr.target
             val = self.eval_expr(expr.value, env)
@@ -364,7 +390,7 @@ class Interpreter:
                 return val
 
             if isinstance(target, IndexExpr):
-                obj = self.eval_expr(target.object, env)
+                obj = self.eval_mutable_lvalue(target.object, env)
                 idx = self.eval_expr(target.index, env)
                 if isinstance(obj, WList) and isinstance(idx, WInt):
                     if idx.value < 0 or idx.value >= len(obj):
@@ -378,7 +404,10 @@ class Interpreter:
                 raise WRuntimeError(f"Cannot assign to index of '{type(obj).__name__}'", line=target.line, col=target.col, file=self.file)
 
             if isinstance(target, MemberExpr):
-                obj = self.eval_expr(target.object, env)
+                obj = self.eval_mutable_lvalue(target.object, env)
+                if isinstance(obj, WObjectInstance):
+                    obj.set_field(target.property, val)
+                    return val
                 if isinstance(obj, WStructInstance):
                     obj.set_field(target.property, val)
                     return val
@@ -387,9 +416,18 @@ class Interpreter:
             raise WRuntimeError("Invalid assignment target", line=expr.line, col=expr.col, file=self.file)
 
         if isinstance(expr, MemberExpr):
-            obj = self.eval_expr(expr.object, env)
+            if expr.property in ("append", "pop", "clear"):
+                obj = self.eval_mutable_lvalue(expr.object, env)
+            else:
+                obj = self.eval_expr(expr.object, env)
             if isinstance(obj, WEnumNamespace):
                 return obj.get_variant(expr.property)
+            if isinstance(obj, WSuperProxy):
+                return WBoundMethod(receiver=obj.receiver, method_name=expr.property, target_class_name=obj.superclass_name)
+            if isinstance(obj, WObjectInstance):
+                if expr.property in obj.fields:
+                    return obj.get_field(expr.property)
+                return WBoundMethod(receiver=obj, method_name=expr.property, target_class_name=obj.class_name)
             if isinstance(obj, WStructInstance):
                 return obj.get_field(expr.property)
             if isinstance(obj, (WList, WDict)):
@@ -427,6 +465,8 @@ class Interpreter:
             callee = self.eval_expr(expr.callee, env)
             args = [self.eval_expr(a, env) for a in expr.args]
 
+            if isinstance(callee, WClassDef):
+                return self.instantiate_class(callee.name, args, env, expr.line, expr.col)
             if isinstance(callee, WNativeFunction):
                 return callee.call_fn(args)
             if isinstance(callee, WFunction):
@@ -489,8 +529,140 @@ class Interpreter:
         return WUnit()
 
     # ==========================================
-    # Helper Call Methods
+    # Helper Call & OOP Methods
     # ==========================================
+
+    def eval_mutable_lvalue(self, expr: Expr, env: Environment) -> WValue:
+        if isinstance(expr, IdentExpr):
+            val = env.lookup(expr.name)
+            if isinstance(val, (WList, WDict, WStructInstance)):
+                val.ensure_unique()
+            return val
+
+        if isinstance(expr, ThisExpr):
+            return env.lookup("this")
+
+        if isinstance(expr, IndexExpr):
+            parent = self.eval_mutable_lvalue(expr.object, env)
+            idx = self.eval_expr(expr.index, env)
+            if isinstance(parent, WList):
+                if not isinstance(idx, WInt):
+                    raise WRuntimeError("List index must be int", line=expr.line, col=expr.col, file=self.file)
+                if idx.value < 0 or idx.value >= len(parent):
+                    raise WRuntimeError(f"List index out of bounds: index {idx.value}, length {len(parent)}", line=expr.line, col=expr.col, file=self.file)
+                elem = parent.get(idx.value)
+                if isinstance(elem, (WList, WDict, WStructInstance)):
+                    elem.ensure_unique()
+                return elem
+            if isinstance(parent, WDict):
+                key_raw = idx.value if hasattr(idx, 'value') else idx
+                elem = parent.get(key_raw)
+                if elem is not None and isinstance(elem, (WList, WDict, WStructInstance)):
+                    elem.ensure_unique()
+                return elem if elem is not None else WNone()
+
+        if isinstance(expr, MemberExpr):
+            parent = self.eval_mutable_lvalue(expr.object, env)
+            if isinstance(parent, (WStructInstance, WObjectInstance)):
+                elem = parent.get_field(expr.property)
+                if isinstance(elem, (WList, WDict, WStructInstance)):
+                    elem.ensure_unique()
+                return elem
+
+        return self.eval_expr(expr, env)
+
+    def _default_value_for_type(self, type_ann: Any) -> WValue:
+        if isinstance(type_ann, NamedType):
+            if type_ann.name == "int":
+                return WInt(0)
+            if type_ann.name == "float":
+                return WFloat(0.0)
+            if type_ann.name == "bool":
+                return WBool(False)
+            if type_ann.name == "str":
+                return WStr("")
+        elif isinstance(type_ann, AstOptionalType):
+            return WNone()
+        elif isinstance(type_ann, AstListType):
+            return WList(elements=[])
+        elif isinstance(type_ann, AstDictType):
+            return WDict(pairs={})
+        return WNone()
+
+    def _resolve_class_def(self, class_name: str, env: Environment) -> WClassDef:
+        val = env.lookup(class_name) if env.exists(class_name) else self.global_env.lookup(class_name)
+        if not isinstance(val, WClassDef):
+            raise WRuntimeError(f"Unknown class '{class_name}'", file=self.file)
+        return val
+
+    def _find_method_in_hierarchy(self, start_class_name: str, method_name: str, env: Environment) -> Tuple[WClassDef, MethodDecl]:
+        curr_name: Optional[str] = start_class_name
+        while curr_name is not None:
+            cls_def = self._resolve_class_def(curr_name, env)
+            if method_name in cls_def.methods:
+                return cls_def, cls_def.methods[method_name]
+            curr_name = cls_def.superclass_name
+        raise WRuntimeError(f"Method '{method_name}' not found in class hierarchy starting at '{start_class_name}'", file=self.file)
+
+    def instantiate_class(self, class_name: str, args: List[WValue], env: Environment, line: int = 0, col: int = 0) -> WObjectInstance:
+        cls_def = self._resolve_class_def(class_name, env)
+        # Collect hierarchy from root ancestor down to target class
+        lineage: List[WClassDef] = []
+        curr: Optional[WClassDef] = cls_def
+        while curr is not None:
+            lineage.append(curr)
+            curr = self._resolve_class_def(curr.superclass_name, env) if curr.superclass_name is not None else None
+        lineage.reverse()
+
+        fields_dict: Dict[str, WValue] = {}
+        for ancestor in lineage:
+            for f in ancestor.fields:
+                fields_dict[f.name] = self._default_value_for_type(f.type_ann)
+
+        instance = WObjectInstance(class_name=class_name, fields=fields_dict)
+
+        # Invoke constructor 'init' if present in hierarchy
+        curr_init_cls: Optional[WClassDef] = cls_def
+        while curr_init_cls is not None:
+            if "init" in curr_init_cls.methods:
+                self.call_class_method(curr_init_cls, curr_init_cls.methods["init"], instance, args)
+                break
+            curr_init_cls = self._resolve_class_def(curr_init_cls.superclass_name, env) if curr_init_cls.superclass_name is not None else None
+
+        return instance
+
+    def call_class_method(self, defining_cls: WClassDef, method_decl: MethodDecl, receiver: WObjectInstance, args: List[WValue]) -> WValue:
+        if len(args) != len(method_decl.params):
+            raise WRuntimeError(
+                message=f"Method '{defining_cls.name}.{method_decl.name}' expected {len(method_decl.params)} arguments, got {len(args)}",
+                line=method_decl.line,
+                col=method_decl.col,
+                file=self.file
+            )
+
+        call_env = Environment(parent=defining_cls.closure_env, is_function_boundary=True)
+        call_env.declare("this", receiver, is_mut=False)
+        call_env.declare("self", receiver, is_mut=False)
+        if defining_cls.superclass_name is not None:
+            call_env.declare("super", WSuperProxy(receiver=receiver, superclass_name=defining_cls.superclass_name), is_mut=False)
+
+        for param, arg in zip(method_decl.params, args):
+            call_env.declare(param.name, arg, is_mut=False)
+
+        ret_val: WValue
+        try:
+            ret_val = self.eval_block(method_decl.body, call_env)
+        except ReturnSignal as ret:
+            ret_val = ret.value
+        except PropagationSignal as prop:
+            ret_val = prop.value
+
+        from node.NodeType import ResultType as AstResultType
+        if isinstance(method_decl.return_type, AstResultType):
+            if not isinstance(ret_val, WResult):
+                ret_val = WOk(ret_val)
+
+        return ret_val
 
     def call_function(self, func: WFunction, args: List[WValue]) -> WValue:
         if len(args) != len(func.decl.params):
@@ -524,6 +696,11 @@ class Interpreter:
     def call_bound_method(self, bound: WBoundMethod, args: List[WValue]) -> WValue:
         receiver = bound.receiver
         method = bound.method_name
+
+        if isinstance(receiver, WObjectInstance):
+            start_cls = bound.target_class_name if bound.target_class_name is not None else receiver.class_name
+            defining_cls, method_decl = self._find_method_in_hierarchy(start_cls, method, self.global_env)
+            return self.call_class_method(defining_cls, method_decl, receiver, args)
 
         if isinstance(receiver, WList):
             if method == "append":

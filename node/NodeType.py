@@ -247,6 +247,107 @@ class EnumDecl(Stmt):
             "col": self.col
         }
 
+class InterfaceMethod(Node):
+    def __init__(self, name: str, params: List[Param], return_type: TypeNode, line: int = 1, col: int = 1):
+        super().__init__(line, col)
+        self.name = name
+        self.params = params
+        self.return_type = return_type
+
+    def to_dict(self) -> dict:
+        return {
+            "kind": "InterfaceMethod",
+            "name": self.name,
+            "params": [p.to_dict() for p in self.params],
+            "return_type": self.return_type.to_dict(),
+            "line": self.line,
+            "col": self.col
+        }
+
+class InterfaceDecl(Stmt):
+    def __init__(self, name: str, methods: List[InterfaceMethod], line: int = 1, col: int = 1):
+        super().__init__(line, col)
+        self.name = name
+        self.methods = methods
+
+    def to_dict(self) -> dict:
+        return {
+            "kind": "InterfaceDecl",
+            "name": self.name,
+            "methods": [m.to_dict() for m in self.methods],
+            "line": self.line,
+            "col": self.col
+        }
+
+class ClassField(Node):
+    def __init__(self, name: str, type_ann: TypeNode, is_public: bool = True, line: int = 1, col: int = 1):
+        super().__init__(line, col)
+        self.name = name
+        self.type_ann = type_ann
+        self.is_public = is_public
+
+    def to_dict(self) -> dict:
+        return {
+            "kind": "ClassField",
+            "name": self.name,
+            "type_ann": self.type_ann.to_dict(),
+            "is_public": self.is_public,
+            "line": self.line,
+            "col": self.col
+        }
+
+class MethodDecl(Node):
+    def __init__(self, name: str, params: List[Param], return_type: TypeNode, body: Block, is_public: bool = True, line: int = 1, col: int = 1):
+        super().__init__(line, col)
+        self.name = name
+        self.params = params
+        self.return_type = return_type
+        self.body = body
+        self.is_public = is_public
+
+    def to_dict(self) -> dict:
+        return {
+            "kind": "MethodDecl",
+            "name": self.name,
+            "params": [p.to_dict() for p in self.params],
+            "return_type": self.return_type.to_dict(),
+            "body": self.body.to_dict(),
+            "is_public": self.is_public,
+            "line": self.line,
+            "col": self.col
+        }
+
+class ClassDecl(Stmt):
+    def __init__(
+        self,
+        name: str,
+        superclass: Optional[str],
+        interfaces: List[str],
+        fields: List[ClassField],
+        methods: List[MethodDecl],
+        line: int = 1,
+        col: int = 1
+    ):
+        super().__init__(line, col)
+        self.name = name
+        self.superclass = superclass
+        self.interfaces = interfaces
+        self.fields = fields
+        self.methods = methods
+
+    def to_dict(self) -> dict:
+        return {
+            "kind": "ClassDecl",
+            "name": self.name,
+            "superclass": self.superclass,
+            "interfaces": self.interfaces,
+            "fields": [f.to_dict() for f in self.fields],
+            "methods": [m.to_dict() for m in self.methods],
+            "line": self.line,
+            "col": self.col
+        }
+
+
 class ImportDecl(Stmt):
     def __init__(self, path: str, namespace: str, line: int = 1, col: int = 1):
         super().__init__(line, col)
@@ -385,6 +486,29 @@ class IdentExpr(Expr):
 
     def to_dict(self) -> dict:
         return {"kind": "IdentExpr", "name": self.name, "line": self.line, "col": self.col}
+
+class ThisExpr(Expr):
+    def to_dict(self) -> dict:
+        return {"kind": "ThisExpr", "line": self.line, "col": self.col}
+
+class SuperExpr(Expr):
+    def to_dict(self) -> dict:
+        return {"kind": "SuperExpr", "line": self.line, "col": self.col}
+
+class NewExpr(Expr):
+    def __init__(self, class_name: str, args: List[Expr], line: int = 1, col: int = 1):
+        super().__init__(line, col)
+        self.class_name = class_name
+        self.args = args
+
+    def to_dict(self) -> dict:
+        return {
+            "kind": "NewExpr",
+            "class_name": self.class_name,
+            "args": [a.to_dict() for a in self.args],
+            "line": self.line,
+            "col": self.col
+        }
 
 class UnaryExpr(Expr):
     def __init__(self, op: str, operand: Expr, line: int = 1, col: int = 1):

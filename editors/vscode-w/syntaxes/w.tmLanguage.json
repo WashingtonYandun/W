@@ -50,7 +50,7 @@
           }
         },
         {
-          "match": "\\b(struct|enum)\\s+([A-Za-z_][A-Za-z0-9_]*)\\b",
+          "match": "\\b(struct|enum|class|interface)\\s+([A-Za-z_][A-Za-z0-9_]*)\\b",
           "captures": {
             "1": { "name": "keyword.declaration.type.w" },
             "2": { "name": "entity.name.type.w" }
@@ -66,7 +66,11 @@
         },
         {
           "name": "keyword.declaration.w",
-          "match": "\\b(fn|let|mut|struct|enum|import)\\b"
+          "match": "\\b(fn|let|mut|struct|enum|import|class|interface|extends|implements|public|private|new)\\b"
+        },
+        {
+          "name": "variable.language.w",
+          "match": "\\b(this|super)\\b"
         },
         {
           "name": "keyword.operator.logical.w",

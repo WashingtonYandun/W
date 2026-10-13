@@ -1,0 +1,32 @@
+interface Describable {
+    fn describe() -> str
+}
+
+class Animal {
+    public name: str
+    private energy: int
+
+    fn init(name: str, energy: int) {
+        this.name = name
+        this.energy = energy
+    }
+
+    public fn speak() -> str {
+        return this.name
+    }
+}
+
+class Dog extends Animal implements Describable {
+    public breed: str
+
+    fn init(name: str, breed: str) {
+        super.init(name, 100)
+        this.breed = breed
+    }
+
+    public fn describe() -> str {
+        return this.speak() + ":" + this.breed
+    }
+}
+
+let d = new Dog("Rex", "Husky")

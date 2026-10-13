@@ -1,0 +1,72 @@
+interface Describable {
+    fn describe() -> str
+}
+
+class Account implements Describable {
+    public owner: str
+    private balance: int
+
+    fn init(owner: str, initial: int) {
+        this.owner = owner
+        this.balance = initial
+    }
+
+    public fn deposit(amount: int) {
+        this.balance = this.balance + amount
+    }
+
+    public fn get_balance() -> int {
+        return this.balance
+    }
+
+    public fn describe() -> str {
+        return this.owner + ": " + str(this.balance)
+    }
+}
+
+class SavingsAccount extends Account {
+    private rate_pct: int
+
+    fn init(owner: str, initial: int, rate_pct: int) {
+        super.init(owner, initial)
+        this.rate_pct = rate_pct
+    }
+
+    public fn apply_interest() {
+        let interest = (this.get_balance() * this.rate_pct) / 100
+        this.deposit(interest)
+    }
+
+    public fn describe() -> str {
+        return super.describe() + " (Savings " + str(this.rate_pct) + "%)"
+    }
+}
+
+fn print_description(item: Describable) {
+    print(item.describe())
+}
+
+fn mutate_via_reference(acc: Account) {
+    acc.deposit(25)
+}
+
+fn main() {
+    let a1 = new Account("Alice", 100)
+    let s1 = new SavingsAccount("Bob", 200, 10)
+
+    # Reference semantics: mutating through an alias or function parameter mutates the same instance
+    let alias = a1
+    alias.deposit(50)
+    mutate_via_reference(a1)
+    print(a1.get_balance())
+    print(a1 == alias)
+
+    s1.apply_interest()
+    print(s1.get_balance())
+
+    # Polymorphic list and interface dispatch
+    let accounts: list[Account] = [a1, s1]
+    for acc in accounts {
+        print_description(acc)
+    }
+}

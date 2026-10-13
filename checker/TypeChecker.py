@@ -5,10 +5,13 @@ from node.NodeType import (
     NamedType, OptionalType as AstOptionalType, ListType as AstListType,
     DictType as AstDictType, TupleType as AstTupleType, ResultType as AstResultType,
     IdentifierPattern, TuplePattern, EnumPattern, LiteralPattern, WildcardPattern,
-    FnDecl, Param, StructDecl, StructField, EnumDecl, ImportDecl, LetDecl,
+    FnDecl, Param, StructDecl, StructField, EnumDecl,
+    InterfaceDecl, InterfaceMethod, ClassDecl, ClassField, MethodDecl,
+    ImportDecl, LetDecl,
     WhileStmt, ForStmt, ReturnStmt, BreakStmt, ContinueStmt, ExprStmt,
     IntLiteral, FloatLiteral, StringLiteral, BoolLiteral, NoneLiteral,
-    IdentExpr, UnaryExpr, BinaryExpr, CoalesceExpr, RangeExpr, PostfixTryExpr, ElseErrExpr,
+    IdentExpr, ThisExpr, SuperExpr, NewExpr,
+    UnaryExpr, BinaryExpr, CoalesceExpr, RangeExpr, PostfixTryExpr, ElseErrExpr,
     CallExpr, MemberExpr, IndexExpr, AssignmentExpr,
     StructInitExpr, FieldInit, ListExpr, DictExpr, TupleExpr,
     IfExpr, ElifBranch, MatchExpr, MatchArm
@@ -16,6 +19,7 @@ from node.NodeType import (
 from checker.WType import (
     WType, IntType, FloatType, BoolType, StrType, UnitType, NoneType,
     OptionalType, ListType, DictType, TupleType, StructType, EnumType,
+    InterfaceType, ClassFieldInfo, ClassMethodInfo, ClassType,
     ResultType, FunctionType, ModuleType, AnyType, is_assignable
 )
 from checker.SymbolTable import Scope, Symbol, create_global_scope
@@ -24,8 +28,8 @@ from error.Error import TypeError
 class TypeChecker:
     """
     Two-pass Semantic Analyzer and Type Checker for W Language v0.1.
-    Pass 1: Collect & register all top-level declarations (Enums, Structs, Functions, Imports).
-    Pass 2: Check function bodies, local bindings, assignments, and expressions.
+    Pass 1: Collect & register all top-level declarations (Enums, Structs, Interfaces, Classes, Functions, Imports).
+    Pass 2: Check function/method bodies, local bindings, assignments, and expressions.
     """
     def __init__(
         self,
@@ -37,6 +41,7 @@ class TypeChecker:
         self.global_scope = create_global_scope()
         self.current_scope = self.global_scope
         self.current_fn_ret_type: Optional[WType] = None
+        self.current_class: Optional[ClassType] = None
         self.checked_modules: Dict[str, ModuleType] = checked_modules if checked_modules is not None else {}
         self.active_imports: Set[str] = active_imports if active_imports is not None else set()
 
@@ -96,9 +101,9 @@ class TypeChecker:
         return mod_type
 
     def _pass1_collect_declarations(self, program: Program) -> None:
+        # Step 1a: Pre-register nominal type shells (Enums, Interfaces, Classes, Imports)
         for stmt in program.body:
             if isinstance(stmt, EnumDecl):
-                # Verify unique variants
                 seen_variants: Set[str] = set()
                 for v in stmt.variants:
                     if v in seen_variants:
@@ -113,7 +118,24 @@ class TypeChecker:
                 enum_type = EnumType(name=stmt.name, variants=stmt.variants)
                 self.global_scope.define_type(stmt.name, enum_type, line=stmt.line, col=stmt.col, file=self.file)
 
-            elif isinstance(stmt, StructDecl):
+            elif isinstance(stmt, InterfaceDecl):
+                intf_type = InterfaceType(name=stmt.name)
+                self.global_scope.define_type(stmt.name, intf_type, line=stmt.line, col=stmt.col, file=self.file)
+
+            elif isinstance(stmt, ClassDecl):
+                cls_type = ClassType(name=stmt.name)
+                self.global_scope.define_type(stmt.name, cls_type, line=stmt.line, col=stmt.col, file=self.file)
+
+            elif isinstance(stmt, ImportDecl):
+                mod_type = self._resolve_import(stmt)
+                self.global_scope.define_symbol(
+                    Symbol(stmt.namespace, mod_type, is_mut=False, kind="import", line=stmt.line, col=stmt.col),
+                    file=self.file
+                )
+
+        # Step 1b: Resolve Structs and Interface method signatures
+        for stmt in program.body:
+            if isinstance(stmt, StructDecl):
                 fields_dict: Dict[str, WType] = {}
                 for f in stmt.fields:
                     if f.name in fields_dict:
@@ -129,6 +151,96 @@ class TypeChecker:
                 struct_type = StructType(name=stmt.name, fields=fields_dict)
                 self.global_scope.define_type(stmt.name, struct_type, line=stmt.line, col=stmt.col, file=self.file)
 
+            elif isinstance(stmt, InterfaceDecl):
+                intf_type = self.global_scope.lookup_type(stmt.name)
+                assert isinstance(intf_type, InterfaceType)
+                for m in stmt.methods:
+                    if m.name in intf_type.methods:
+                        raise TypeError(
+                            message=f"Duplicate method '{m.name}' in interface '{stmt.name}'",
+                            line=m.line,
+                            col=m.col,
+                            file=self.file,
+                            code="T008"
+                        )
+                    p_types = [self._resolve_type_node(p.type_ann) for p in m.params]
+                    r_type = self._resolve_type_node(m.return_type)
+                    intf_type.methods[m.name] = FunctionType(params=p_types, ret=r_type)
+
+        # Step 1c: Resolve Class hierarchies, fields, methods, and top-level Functions
+        class_decls: List[ClassDecl] = []
+        for stmt in program.body:
+            if isinstance(stmt, ClassDecl):
+                class_decls.append(stmt)
+                cls_type = self.global_scope.lookup_type(stmt.name)
+                assert isinstance(cls_type, ClassType)
+
+                if stmt.superclass is not None:
+                    sup_t = self.global_scope.lookup_type(stmt.superclass)
+                    if sup_t is None or not isinstance(sup_t, ClassType):
+                        raise TypeError(
+                            message=f"Unknown superclass '{stmt.superclass}' for class '{stmt.name}'",
+                            line=stmt.line,
+                            col=stmt.col,
+                            file=self.file,
+                            code="T002"
+                        )
+                    if sup_t.name == stmt.name or sup_t.is_subclass_of(stmt.name):
+                        raise TypeError(
+                            message=f"Cyclic class inheritance detected involving '{stmt.name}'",
+                            line=stmt.line,
+                            col=stmt.col,
+                            file=self.file,
+                            code="T008"
+                        )
+                    cls_type.superclass = sup_t
+
+                for intf_name in stmt.interfaces:
+                    intf_t = self.global_scope.lookup_type(intf_name)
+                    if intf_t is None or not isinstance(intf_t, InterfaceType):
+                        raise TypeError(
+                            message=f"Unknown interface '{intf_name}' implemented by class '{stmt.name}'",
+                            line=stmt.line,
+                            col=stmt.col,
+                            file=self.file,
+                            code="T002"
+                        )
+                    cls_type.interfaces.append(intf_t)
+
+                # Own fields & methods first
+                seen_own_fields: Set[str] = set()
+                for f in stmt.fields:
+                    if f.name in seen_own_fields:
+                        raise TypeError(
+                            message=f"Duplicate field '{f.name}' in class '{stmt.name}'",
+                            line=f.line,
+                            col=f.col,
+                            file=self.file,
+                            code="T014"
+                        )
+                    seen_own_fields.add(f.name)
+                    f_type = self._resolve_type_node(f.type_ann)
+                    cls_type.fields[f.name] = ClassFieldInfo(type=f_type, is_public=f.is_public, owner_class=stmt.name)
+
+                seen_own_methods: Set[str] = set()
+                for m in stmt.methods:
+                    if m.name in seen_own_methods:
+                        raise TypeError(
+                            message=f"Duplicate method '{m.name}' in class '{stmt.name}'",
+                            line=m.line,
+                            col=m.col,
+                            file=self.file,
+                            code="T008"
+                        )
+                    seen_own_methods.add(m.name)
+                    p_types = [self._resolve_type_node(p.type_ann) for p in m.params]
+                    r_type = self._resolve_type_node(m.return_type)
+                    fn_t = FunctionType(params=p_types, ret=r_type)
+                    if m.name == "init":
+                        cls_type.init_type = fn_t
+                    else:
+                        cls_type.methods[m.name] = ClassMethodInfo(fn_type=fn_t, is_public=m.is_public, owner_class=stmt.name)
+
             elif isinstance(stmt, FnDecl):
                 param_types: List[WType] = [self._resolve_type_node(p.type_ann) for p in stmt.params]
                 ret_type = self._resolve_type_node(stmt.return_type)
@@ -138,12 +250,74 @@ class TypeChecker:
                     file=self.file
                 )
 
-            elif isinstance(stmt, ImportDecl):
-                mod_type = self._resolve_import(stmt)
-                self.global_scope.define_symbol(
-                    Symbol(stmt.namespace, mod_type, is_mut=False, kind="import", line=stmt.line, col=stmt.col),
-                    file=self.file
-                )
+        # Step 1d: Propagate inherited members and verify interface contracts
+        for stmt in class_decls:
+            cls_type = self.global_scope.lookup_type(stmt.name)
+            assert isinstance(cls_type, ClassType)
+
+            # Collect ancestor chain from root superclass down to direct superclass
+            ancestors: List[ClassType] = []
+            curr_sup = cls_type.superclass
+            while curr_sup is not None:
+                ancestors.append(curr_sup)
+                curr_sup = curr_sup.superclass
+            ancestors.reverse()
+
+            merged_fields: Dict[str, ClassFieldInfo] = {}
+            merged_methods: Dict[str, ClassMethodInfo] = {}
+            for anc in ancestors:
+                for fname, finfo in anc.fields.items():
+                    merged_fields[fname] = finfo
+                for mname, minfo in anc.methods.items():
+                    merged_methods[mname] = minfo
+
+            # Apply subclass own fields and methods (checking override compatibility)
+            for fname, finfo in cls_type.fields.items():
+                merged_fields[fname] = finfo
+            for mname, minfo in cls_type.methods.items():
+                if mname in merged_methods:
+                    base_m = merged_methods[mname]
+                    if minfo.fn_type.params != base_m.fn_type.params or not is_assignable(minfo.fn_type.ret, base_m.fn_type.ret):
+                        raise TypeError(
+                            message=f"Method '{mname}' in class '{stmt.name}' has incompatible override signature with superclass '{base_m.owner_class}'",
+                            line=stmt.line,
+                            col=stmt.col,
+                            file=self.file,
+                            code="T003"
+                        )
+                merged_methods[mname] = minfo
+
+            cls_type.fields = merged_fields
+            cls_type.methods = merged_methods
+
+            # Verify all implemented interfaces
+            for intf in cls_type.interfaces:
+                for req_name, req_sig in intf.methods.items():
+                    if req_name not in cls_type.methods:
+                        raise TypeError(
+                            message=f"Class '{stmt.name}' does not implement required method '{req_name}' from interface '{intf.name}'",
+                            line=stmt.line,
+                            col=stmt.col,
+                            file=self.file,
+                            code="T013"
+                        )
+                    impl_info = cls_type.methods[req_name]
+                    if not impl_info.is_public:
+                        raise TypeError(
+                            message=f"Interface method '{req_name}' in class '{stmt.name}' must be public",
+                            line=stmt.line,
+                            col=stmt.col,
+                            file=self.file,
+                            code="T013"
+                        )
+                    if impl_info.fn_type.params != req_sig.params or not is_assignable(impl_info.fn_type.ret, req_sig.ret):
+                        raise TypeError(
+                            message=f"Method '{req_name}' in class '{stmt.name}' does not match signature required by interface '{intf.name}'",
+                            line=stmt.line,
+                            col=stmt.col,
+                            file=self.file,
+                            code="T003"
+                        )
 
 
     # ==========================================
@@ -155,8 +329,11 @@ class TypeChecker:
             self._check_stmt(stmt)
 
     def _check_stmt(self, stmt: Stmt) -> None:
-        if isinstance(stmt, (EnumDecl, StructDecl, ImportDecl)):
+        if isinstance(stmt, (EnumDecl, StructDecl, InterfaceDecl, ImportDecl)):
             return  # Handled in Pass 1
+
+        elif isinstance(stmt, ClassDecl):
+            self._check_class_decl(stmt)
 
         elif isinstance(stmt, FnDecl):
             self._check_fn_decl(stmt)
@@ -204,6 +381,50 @@ class TypeChecker:
         elif isinstance(stmt, ExprStmt):
             self._check_expr(stmt.expr, is_statement_context=True)
 
+    def _check_class_decl(self, stmt: ClassDecl) -> None:
+        cls_type = self.global_scope.lookup_type(stmt.name)
+        assert isinstance(cls_type, ClassType)
+        old_class = self.current_class
+        self.current_class = cls_type
+        try:
+            for m in stmt.methods:
+                fn_type = cls_type.init_type if m.name == "init" else cls_type.methods[m.name].fn_type
+                assert fn_type is not None
+                fn_scope = Scope(parent=self.current_scope, is_function_scope=True)
+                old_scope = self.current_scope
+                old_ret_type = self.current_fn_ret_type
+                self.current_scope = fn_scope
+                self.current_fn_ret_type = fn_type.ret
+                try:
+                    # Also bind 'self' as an alias to 'this' inside methods
+                    fn_scope.define_symbol(
+                        Symbol("self", cls_type, is_mut=False, kind="param", line=m.line, col=m.col),
+                        file=self.file
+                    )
+                    for p, p_type in zip(m.params, fn_type.params):
+                        fn_scope.define_symbol(
+                            Symbol(p.name, p_type, is_mut=False, kind="param", line=p.line, col=p.col),
+                            file=self.file
+                        )
+                    is_unit_ret = (fn_type.ret == UnitType) or (isinstance(fn_type.ret, ResultType) and fn_type.ret.ok == UnitType)
+                    body_ret = self._check_block(m.body, is_statement_context=is_unit_ret)
+                    if not is_unit_ret and not self._block_has_return(m.body):
+                        if body_ret is not None and is_assignable(body_ret, fn_type.ret):
+                            pass
+                        else:
+                            raise TypeError(
+                                message=f"Method '{stmt.name}.{m.name}' missing return statement for type '{fn_type.ret}'",
+                                line=m.line,
+                                col=m.col,
+                                file=self.file,
+                                code="T006"
+                            )
+                finally:
+                    self.current_scope = old_scope
+                    self.current_fn_ret_type = old_ret_type
+        finally:
+            self.current_class = old_class
+
     def _check_fn_decl(self, stmt: FnDecl) -> None:
         sym = self.global_scope.lookup_symbol(stmt.name)
         assert sym is not None and isinstance(sym.type, FunctionType)
@@ -243,18 +464,33 @@ class TypeChecker:
             self.current_scope = old_scope
             self.current_fn_ret_type = old_ret_type
 
+    def _expr_has_return(self, expr: Expr) -> bool:
+        if isinstance(expr, IfExpr):
+            if expr.else_branch is None:
+                return False
+            if not self._block_has_return(expr.then_branch):
+                return False
+            for eb in expr.elif_branches:
+                if not self._block_has_return(eb.body):
+                    return False
+            return self._block_has_return(expr.else_branch)
+        if isinstance(expr, MatchExpr):
+            if not expr.arms:
+                return False
+            for arm in expr.arms:
+                if not isinstance(arm.body, Block) or not self._block_has_return(arm.body):
+                    return False
+            return True
+        return False
+
     def _block_has_return(self, block: Block) -> bool:
         for s in block.statements:
             if isinstance(s, ReturnStmt):
                 return True
-            if isinstance(s, ExprStmt) and isinstance(s.expr, IfExpr):
-                if_expr = s.expr
-                if if_expr.else_branch and self._block_has_return(if_expr.then_branch) and self._block_has_return(if_expr.else_branch):
-                    return True
-        if isinstance(block.tail_expr, IfExpr):
-            if_expr = block.tail_expr
-            if if_expr.else_branch and self._block_has_return(if_expr.then_branch) and self._block_has_return(if_expr.else_branch):
+            if isinstance(s, ExprStmt) and self._expr_has_return(s.expr):
                 return True
+        if block.tail_expr is not None and self._expr_has_return(block.tail_expr):
+            return True
         return False
 
     def _block_diverges(self, block: Block) -> bool:
@@ -262,6 +498,57 @@ class TypeChecker:
             if isinstance(s, (ReturnStmt, BreakStmt, ContinueStmt)):
                 return True
         return self._block_has_return(block)
+
+    def _find_value_root_symbol(self, expr: Expr) -> Optional[Symbol]:
+        if isinstance(expr, IdentExpr):
+            return self.current_scope.lookup_symbol(expr.name)
+        if isinstance(expr, IndexExpr):
+            return self._find_value_root_symbol(expr.object)
+        if isinstance(expr, MemberExpr):
+            obj_t = self._check_expr(expr.object)
+            if isinstance(obj_t, ClassType):
+                return None
+            return self._find_value_root_symbol(expr.object)
+        return None
+
+    def _check_class_instantiation(self, class_t: ClassType, args: List[Expr], line: int, col: int) -> ClassType:
+        init_fn: Optional[FunctionType] = None
+        curr_c: Optional[ClassType] = class_t
+        while curr_c is not None:
+            if curr_c.init_type is not None:
+                init_fn = curr_c.init_type
+                break
+            curr_c = curr_c.superclass
+        if init_fn is not None:
+            expected_params = init_fn.params
+            if len(args) != len(expected_params):
+                raise TypeError(
+                    message=f"Constructor of '{class_t.name}' expects {len(expected_params)} arguments, found {len(args)}",
+                    line=line,
+                    col=col,
+                    file=self.file,
+                    code="T015"
+                )
+            for i, (a_expr, p_type) in enumerate(zip(args, expected_params)):
+                a_type = self._check_expr(a_expr)
+                if not is_assignable(a_type, p_type):
+                    raise TypeError(
+                        message=f"Constructor argument {i + 1} type mismatch: expected '{p_type}', found '{a_type}'",
+                        line=a_expr.line,
+                        col=a_expr.col,
+                        file=self.file,
+                        code="T003"
+                    )
+        else:
+            if len(args) != 0:
+                raise TypeError(
+                    message=f"Default constructor of '{class_t.name}' takes 0 arguments, found {len(args)}",
+                    line=line,
+                    col=col,
+                    file=self.file,
+                    code="T015"
+                )
+        return class_t
 
 
     def _check_block(self, block: Block, is_statement_context: bool = False) -> Optional[WType]:
@@ -468,7 +755,7 @@ class TypeChecker:
                 )
 
             if op in ("==", "!="):
-                if lhs_t != rhs_t and not (lhs_t == NoneType and isinstance(rhs_t, OptionalType)) and not (rhs_t == NoneType and isinstance(lhs_t, OptionalType)):
+                if not is_assignable(lhs_t, rhs_t) and not is_assignable(rhs_t, lhs_t):
                     raise TypeError(
                         message=f"Cannot compare equality of different types '{lhs_t}' and '{rhs_t}'",
                         line=expr.line,
@@ -632,6 +919,48 @@ class TypeChecker:
 
             return unwrapped_t
 
+        if isinstance(expr, ThisExpr):
+            if self.current_class is None:
+                raise TypeError(
+                    message="'this' can only be used inside a class method",
+                    line=expr.line,
+                    col=expr.col,
+                    file=self.file,
+                    code="T001"
+                )
+            return self.current_class
+
+        if isinstance(expr, SuperExpr):
+            if self.current_class is None:
+                raise TypeError(
+                    message="'super' can only be used inside a class method",
+                    line=expr.line,
+                    col=expr.col,
+                    file=self.file,
+                    code="T001"
+                )
+            if self.current_class.superclass is None:
+                raise TypeError(
+                    message=f"Class '{self.current_class.name}' has no superclass",
+                    line=expr.line,
+                    col=expr.col,
+                    file=self.file,
+                    code="T001"
+                )
+            return self.current_class.superclass
+
+        if isinstance(expr, NewExpr):
+            class_t = self.current_scope.lookup_type(expr.class_name)
+            if class_t is None or not isinstance(class_t, ClassType):
+                raise TypeError(
+                    message=f"Unknown class type '{expr.class_name}'",
+                    line=expr.line,
+                    col=expr.col,
+                    file=self.file,
+                    code="T002"
+                )
+            return self._check_class_instantiation(class_t, expr.args, expr.line, expr.col)
+
         if isinstance(expr, AssignmentExpr):
 
             # Target validation
@@ -666,17 +995,16 @@ class TypeChecker:
                 return sym.type
 
             if isinstance(expr.target, IndexExpr):
-                # Target must be mutable binding
-                if isinstance(expr.target.object, IdentExpr):
-                    sym = self.current_scope.lookup_symbol(expr.target.object.name)
-                    if sym and not sym.is_mut:
-                        raise TypeError(
-                            message=f"Cannot mutate elements of immutable binding '{sym.name}'",
-                            line=expr.line,
-                            col=expr.col,
-                            file=self.file,
-                            code="T004"
-                        )
+                # Target value root must be a mutable binding (unless rooted in a reference-type class)
+                sym = self._find_value_root_symbol(expr.target.object)
+                if sym and not sym.is_mut:
+                    raise TypeError(
+                        message=f"Cannot mutate elements of immutable binding '{sym.name}'",
+                        line=expr.line,
+                        col=expr.col,
+                        file=self.file,
+                        code="T004"
+                    )
                 obj_t = self._check_expr(expr.target.object)
                 idx_t = self._check_expr(expr.target.index)
                 if isinstance(obj_t, ListType):
@@ -727,17 +1055,44 @@ class TypeChecker:
 
 
             if isinstance(expr.target, MemberExpr):
-                if isinstance(expr.target.object, IdentExpr):
-                    sym = self.current_scope.lookup_symbol(expr.target.object.name)
-                    if sym and not sym.is_mut:
+                obj_t = self._check_expr(expr.target.object)
+                if isinstance(obj_t, ClassType):
+                    f_info = obj_t.fields.get(expr.target.property)
+                    if f_info is None:
                         raise TypeError(
-                            message=f"Cannot mutate field of immutable binding '{sym.name}'",
+                            message=f"Class '{obj_t.name}' has no field '{expr.target.property}'",
+                            line=expr.target.line,
+                            col=expr.target.col,
+                            file=self.file,
+                            code="T012"
+                        )
+                    if not f_info.is_public and (self.current_class is None or self.current_class.name != f_info.owner_class):
+                        raise TypeError(
+                            message=f"Cannot access private field '{expr.target.property}' of class '{f_info.owner_class}'",
+                            line=expr.target.line,
+                            col=expr.target.col,
+                            file=self.file,
+                            code="T012"
+                        )
+                    if not is_assignable(val_t, f_info.type):
+                        raise TypeError(
+                            message=f"Type mismatch on field '{expr.target.property}': expected '{f_info.type}', found '{val_t}'",
                             line=expr.line,
                             col=expr.col,
                             file=self.file,
-                            code="T004"
+                            code="T003"
                         )
-                obj_t = self._check_expr(expr.target.object)
+                    return f_info.type
+
+                sym = self._find_value_root_symbol(expr.target.object)
+                if sym and not sym.is_mut:
+                    raise TypeError(
+                        message=f"Cannot mutate field of immutable binding '{sym.name}'",
+                        line=expr.line,
+                        col=expr.col,
+                        file=self.file,
+                        code="T004"
+                    )
                 if not isinstance(obj_t, StructType):
                     raise TypeError(
                         message=f"Cannot assign to field of non-struct '{obj_t}'",
@@ -789,6 +1144,58 @@ class TypeChecker:
                     return enum_t
 
             obj_t = self._check_expr(expr.object)
+            if isinstance(obj_t, ClassType):
+                if expr.property == "init" and isinstance(expr.object, SuperExpr):
+                    curr_s: Optional[ClassType] = obj_t
+                    while curr_s is not None:
+                        if curr_s.init_type is not None:
+                            return curr_s.init_type
+                        curr_s = curr_s.superclass
+                    return FunctionType(params=[], ret=UnitType)
+
+                f_info = obj_t.fields.get(expr.property)
+                if f_info is not None:
+                    if not f_info.is_public and (self.current_class is None or self.current_class.name != f_info.owner_class):
+                        raise TypeError(
+                            message=f"Cannot access private field '{expr.property}' of class '{f_info.owner_class}'",
+                            line=expr.line,
+                            col=expr.col,
+                            file=self.file,
+                            code="T012"
+                        )
+                    return f_info.type
+
+                m_info = obj_t.methods.get(expr.property)
+                if m_info is not None:
+                    if not m_info.is_public and (self.current_class is None or self.current_class.name != m_info.owner_class):
+                        raise TypeError(
+                            message=f"Cannot access private method '{expr.property}' of class '{m_info.owner_class}'",
+                            line=expr.line,
+                            col=expr.col,
+                            file=self.file,
+                            code="T012"
+                        )
+                    return m_info.fn_type
+
+                raise TypeError(
+                    message=f"Class '{obj_t.name}' has no member '{expr.property}'",
+                    line=expr.line,
+                    col=expr.col,
+                    file=self.file,
+                    code="T012"
+                )
+
+            if isinstance(obj_t, InterfaceType):
+                if expr.property in obj_t.methods:
+                    return obj_t.methods[expr.property]
+                raise TypeError(
+                    message=f"Interface '{obj_t.name}' has no method '{expr.property}'",
+                    line=expr.line,
+                    col=expr.col,
+                    file=self.file,
+                    code="T012"
+                )
+
             if isinstance(obj_t, StructType):
                 if expr.property not in obj_t.fields:
                     raise TypeError(
@@ -886,21 +1293,28 @@ class TypeChecker:
             )
 
         if isinstance(expr, CallExpr):
-            # Mutating method check on receiver
+            # Support direct constructor call syntax: ClassName(...)
+            if isinstance(expr.callee, IdentExpr):
+                if self.current_scope.lookup_symbol(expr.callee.name) is None:
+                    maybe_cls = self.current_scope.lookup_type(expr.callee.name)
+                    if isinstance(maybe_cls, ClassType):
+                        return self._check_class_instantiation(maybe_cls, expr.args, expr.line, expr.col)
+
+            # Mutating method check on receiver (transitive across value-type paths)
             if isinstance(expr.callee, MemberExpr):
-                if isinstance(expr.callee.object, IdentExpr):
-                    sym = self.current_scope.lookup_symbol(expr.callee.object.name)
-                    callee_t = self._check_expr(expr.callee)
-                    if isinstance(callee_t, FunctionType) and callee_t.is_mutating:
-                        if sym and not sym.is_mut:
-                            raise TypeError(
-                                message=f"Cannot call mutating method '{expr.callee.property}' on immutable binding '{sym.name}'",
-                                line=expr.line,
-                                col=expr.col,
-                                file=self.file,
-                                code="T004"
-                            )
-            callee_t = self._check_expr(expr.callee)
+                callee_t = self._check_expr(expr.callee)
+                if isinstance(callee_t, FunctionType) and callee_t.is_mutating:
+                    sym = self._find_value_root_symbol(expr.callee.object)
+                    if sym and not sym.is_mut:
+                        raise TypeError(
+                            message=f"Cannot call mutating method '{expr.callee.property}' on immutable binding '{sym.name}'",
+                            line=expr.line,
+                            col=expr.col,
+                            file=self.file,
+                            code="T004"
+                        )
+            else:
+                callee_t = self._check_expr(expr.callee)
             if isinstance(callee_t, AnyType):
                 for a in expr.args:
                     self._check_expr(a)
@@ -1054,17 +1468,32 @@ class TypeChecker:
             if len(expr.elements) == 0:
                 return ListType(AnyType())
             elem_types = [self._check_expr(e) for e in expr.elements]
-            first_t = elem_types[0]
+            common_t = elem_types[0]
             for t in elem_types[1:]:
-                if not is_assignable(t, first_t):
-                    raise TypeError(
-                        message=f"List elements must be homogeneous: found '{t}' and '{first_t}'",
-                        line=expr.line,
-                        col=expr.col,
-                        file=self.file,
-                        code="T003"
-                    )
-            return ListType(first_t)
+                if is_assignable(t, common_t):
+                    continue
+                if is_assignable(common_t, t):
+                    common_t = t
+                    continue
+                found_super: Optional[WType] = None
+                if isinstance(common_t, ClassType) and isinstance(t, ClassType):
+                    curr = common_t.superclass
+                    while curr is not None:
+                        if is_assignable(t, curr):
+                            found_super = curr
+                            break
+                        curr = curr.superclass
+                if found_super is not None:
+                    common_t = found_super
+                    continue
+                raise TypeError(
+                    message=f"List elements must be homogeneous: found '{t}' and '{common_t}'",
+                    line=expr.line,
+                    col=expr.col,
+                    file=self.file,
+                    code="T003"
+                )
+            return ListType(common_t)
 
         if isinstance(expr, TupleExpr):
             elem_types = [self._check_expr(e) for e in expr.elements]

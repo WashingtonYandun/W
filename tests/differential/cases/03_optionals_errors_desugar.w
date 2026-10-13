@@ -1,0 +1,46 @@
+# Differential Case 03: Optional Propagation, Error Propagation & Match Exhaustiveness
+
+enum OpMode {
+    Add
+    Mul
+    Sub
+}
+
+fn find_positive(xs: list[int]) -> int? {
+    for x in xs {
+        if x > 0 {
+            return x
+        }
+    }
+    return none
+}
+
+fn double_first_positive(xs: list[int]) -> int? {
+    let v = find_positive(xs)?
+    return v * 2
+}
+
+fn apply_op(mode: OpMode, a: int, b: int) -> int {
+    match mode {
+        OpMode.Add => {
+            return a + b
+        }
+        OpMode.Mul => {
+            return a * b
+        }
+        OpMode.Sub => {
+            return a - b
+        }
+    }
+}
+
+fn main() -> unit {
+    let a = double_first_positive([-5, -2, 7, 10]) ?? -1
+    let b = double_first_positive([-9, -1]) ?? -1
+    print("opt:", a, b)
+
+    let modes = [OpMode.Add, OpMode.Mul, OpMode.Sub]
+    for idx, m in enumerate(modes) {
+        print("mode", idx, apply_op(m, 12, 4))
+    }
+}
