@@ -1,0 +1,7 @@
+case1: true true [1, 2] [1, 2, 3]
+case2: true true [[1], [2]] [[1, 99], [42]]
+case3: Washo ["dev"] Washington ["dev", "compiler"]
+case4: ["dev"] ["dev", "architect"]
+case5: [10, 20] [10, 20, 777]
+case6_ref: [100, 200, 300] [100, 200, 300] true
+case6_val: ["dev"] [100, 200]

@@ -13,7 +13,7 @@ from formatter.Formatter import Formatter
 from codegen.CCodeGen import CCodeGen
 from error.Error import WError
 
-W_VERSION = "0.1.0"
+W_VERSION = "0.1.1"
 
 
 def get_repo_root() -> str:
@@ -248,7 +248,7 @@ def print_help() -> None:
     print("  w tokens <file.w>                           # Emit lexical token stream")
     print("  w emit-c [--selfhost] <file.w> [-o <out.c>] # Transpile W source to C99")
     print("  w build [--selfhost] <file.w> [-o <bin>]    # Compile W source to native binary")
-    print("  w test                                      # Run full conformance & bootstrap suite")
+    print("  w test [--differential [N]] [--fuzz [N]]    # Run conformance, differential, or fuzz suite")
     print("  w version                                   # Show compiler version")
 
 
@@ -270,9 +270,22 @@ def main() -> None:
         subcmd = args[0]
         args = args[1:]
         if subcmd == "test":
-            from run_conformance import run_suite
-            run_suite()
-            return
+            if args and args[0] == "--differential":
+                gen_count = int(args[1]) if len(args) > 1 and args[1].isdigit() else 25
+                repo_root = get_repo_root()
+                w1_bin = ensure_selfhost_w1_binary(repo_root)
+                from tests.differential.differential_test import run_differential_suite
+                ok = run_differential_suite(repo_root, w1_bin, generated_count=gen_count)
+                sys.exit(0 if ok else 1)
+            elif args and args[0] == "--fuzz":
+                fuzz_count = int(args[1]) if len(args) > 1 and args[1].isdigit() else 200
+                from tests.differential.differential_test import run_fuzz_suite
+                ok = run_fuzz_suite(fuzz_count=fuzz_count)
+                sys.exit(0 if ok else 1)
+            else:
+                from run_conformance import run_suite
+                run_suite()
+                return
         elif subcmd == "version":
             print(f"W Language Compiler v{W_VERSION} (W0 + W1 Self-Hosted C99)")
             return

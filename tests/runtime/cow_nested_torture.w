@@ -1,0 +1,64 @@
+# Recursive Observable Copy-on-Write (CoW) Torture Suite
+
+struct Person {
+    name: str
+    tags: list[str]
+}
+
+class TeamHolder {
+    public lead: Person
+    public scores: list[int]
+
+    fn init(lead: Person, scores: list[int]) {
+        this.lead = lead
+        this.scores = scores
+    }
+}
+
+fn try_mutate_param(xs: list[list[int]]) -> list[list[int]] {
+    let mut local = xs
+    local[0].append(777)
+    return local
+}
+
+fn main() -> unit {
+    # 1. Shallow list CoW
+    let a = [1, 2]
+    let mut b = a
+    b.append(3)
+    print("case1:", a == [1, 2], b == [1, 2, 3], a, b)
+
+    # 2. Nested 2D list CoW via .append() and indexed assignment
+    let m1 = [[1], [2]]
+    let mut m2 = m1
+    m2[0].append(99)
+    m2[1][0] = 42
+    print("case2:", m1 == [[1], [2]], m2 == [[1, 99], [42]], m1, m2)
+
+    # 3. Struct containing list[str] mutated via .append()
+    let p1 = Person { name: "Washo", tags: ["dev"] }
+    let mut p2 = p1
+    p2.tags.append("compiler")
+    p2.name = "Washington"
+    print("case3:", p1.name, p1.tags, p2.name, p2.tags)
+
+    # 4. List of structs containing lists
+    let roster1 = [p1]
+    let mut roster2 = roster1
+    roster2[0].tags.append("architect")
+    print("case4:", roster1[0].tags, roster2[0].tags)
+
+    # 5. Function parameter CoW isolation on nested lists
+    let orig_grid = [[10, 20], [30, 40]]
+    let mod_grid = try_mutate_param(orig_grid)
+    print("case5:", orig_grid[0], mod_grid[0])
+
+    # 6. Class (reference semantics) holding value types (struct & list)
+    let t1 = new TeamHolder(p1, [100, 200])
+    let t2 = t1
+    let lead_snapshot = t1.lead
+    let scores_snapshot = t1.scores
+    t2.scores.append(300)
+    print("case6_ref:", t1.scores, t2.scores, t1 == t2)
+    print("case6_val:", lead_snapshot.tags, scores_snapshot)
+}

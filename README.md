@@ -7,7 +7,7 @@
 
 ## Overview
 
-**W (`v0.1`)** is a statically typed, value-semantics programming language with both a reference interpreter (`W0`) and a self-hosting native C99 compiler (`W1` in [`selfhost/w1.w`](selfhost/w1.w)).
+**W (`v0.1.1`)** is a statically typed, value-semantics programming language. W includes a self-hosting compiler written entirely in W ([`selfhost/w1.w`](selfhost/w1.w)), bootstrapped from the Python `W0` reference implementation and emitting portable C99.
 
 ### Core Properties
 1. **31 Keywords:**
@@ -18,8 +18,8 @@
    - Functions declare explicit error channels (`T ! E`) without stack-unwinding exceptions.
    - Unified postfix `?` propagation for both `T?` and `T ! E`, plus inline `else err { ... }` recovery and `??` null-coalescing.
 3. **Dual Value & Reference Semantics (OOP + FP-Ready):**
-   - **Pure Value Semantics (ARC + Copy-on-Write):** Collections (`list[T]`, `dict[K, V]`) and `struct` records behave as independent values that share memory via reference counting (`rc`) and clone on mutation (`w_cow_detach`) when `rc > 1`.
-   - **Java-Style OOP (`class` & `interface`):** Classes support single inheritance (`extends`), multiple interface implementation (`implements`), `public`/`private` field and method encapsulation, constructors (`fn init`), `this`, `super`, reference identity semantics (`new ClassName(...)`), and runtime polymorphism / dynamic method dispatch.
+   - **Pure Value Semantics (Deterministic RC + Copy-on-Write):** Collections (`list[T]`, `dict[K, V]`) and `struct` records behave as independent values that share memory via lightweight single-threaded reference counting (`int32_t refcount`) and clone on mutation (`w_cow_detach`) when `refcount > 1`.
+   - **Java-Style OOP (`class` & `interface`):** Classes support single inheritance (`extends`), multiple interface implementation (`implements`), `public`/`private` field and method encapsulation, constructors (`fn init`), `this`, `super`, reference identity semantics (`ClassName(...)` or `new ClassName(...)`), and runtime polymorphism / dynamic method dispatch.
 4. **UTF-8 Code-Point Strings:**
    - Strings are stored as UTF-8, while `len(s)`, `s[i]`, `slice(s, a, b)`, `ord(s)`, and `chr(c)` operate on Unicode scalar values (`len("José") == 4`, `"José"[3] == "é"`, `len(bytes("José")) == 5`).
 5. **Verified 3-Stage Self-Hosting Fixed Point:**
@@ -134,8 +134,14 @@ The canonical `w` CLI supports interpretation, static type checking, formatting,
 ./w build examples/05_utf8_and_algorithms.w -o app
 ./w build --selfhost examples/05_utf8_and_algorithms.w -o app_w1
 
-# Run the full 10-stage conformance & self-hosting test suite
+# Run the full 13-phase conformance & self-hosting test suite
 ./w test
+
+# Run the three-engine differential oracle (W0 Interpreter == W0 C99 == W1 Native)
+./w test --differential 25
+
+# Run the compiler fuzz suite (0 internal tracebacks invariant)
+./w test --fuzz 200
 ```
 
 ---
@@ -145,7 +151,7 @@ The canonical `w` CLI supports interpretation, static type checking, formatting,
 | Example | Features Demonstrated |
 | :--- | :--- |
 | [`examples/01_hello_world.w`](examples/01_hello_world.w) | Functions, explicit types, inclusive ranges (`1..=limit`), loops |
-| [`examples/02_value_semantics_cow.w`](examples/02_value_semantics_cow.w) | ARC + Copy-on-Write value semantics across `list`, `dict`, and `struct` |
+| [`examples/02_value_semantics_cow.w`](examples/02_value_semantics_cow.w) | Deterministic RC + Copy-on-Write value semantics across `list`, `dict`, and `struct` |
 | [`examples/03_enums_and_match.w`](examples/03_enums_and_match.w) | `enum`, named `struct` initialization, exhaustive `match` expressions, `enumerate()` |
 | [`examples/04_optionals_and_errors.w`](examples/04_optionals_and_errors.w) | `T?`, `??` coalescing, `T ! E` fallible functions, postfix `?`, `else err` recovery |
 | [`examples/05_utf8_and_algorithms.w`](examples/05_utf8_and_algorithms.w) | UTF-8 code-point indexing (`"José"[3] == "é"`), `bytes()`, binary search |
@@ -184,11 +190,12 @@ ln -sfn "$(pwd)/editors/vscode-w" ~/.antigravity/extensions/w-lang-0.1.0
 | [`node/NodeType.py`](node/NodeType.py) | Canonical AST nodes with JSON serialization (`w_ast_version: "0.1"`) |
 | [`checker/TypeChecker.py`](checker/TypeChecker.py) | Two-pass static type checker, OOP subtyping/visibility, nullability/error enforcement, exhaustive `match` |
 | [`formatter/Formatter.py`](formatter/Formatter.py) | Deterministic, idempotent source code formatter (`w fmt`) |
-| [`runtime/Interpreter.py`](runtime/Interpreter.py) | Reference W0 runtime with ARC + Copy-on-Write value semantics and OOP dynamic dispatch |
+| [`runtime/Interpreter.py`](runtime/Interpreter.py) | Reference W0 runtime with deterministic RC + Copy-on-Write value semantics and OOP dynamic dispatch |
 | [`codegen/CCodeGen.py`](codegen/CCodeGen.py) | W0 C99 code generator |
-| [`runtime/w_runtime.h`](runtime/w_runtime.h) | Single-header C99 runtime (ARC + CoW, `W_OBJECT` reference types, UTF-8 code points, collections, I/O) |
-| [`selfhost/w1.w`](selfhost/w1.w) | **Self-hosted W1 compiler** written in 100% pure W |
-| [`run_conformance.py`](run_conformance.py) | Automated 10-stage conformance test runner (181/181 tests) |
+| [`runtime/w_runtime.h`](runtime/w_runtime.h) | Single-header C99 runtime (deterministic RC + CoW, `W_OBJECT` reference types, UTF-8 code points, collections, I/O) |
+| [`selfhost/w1.w`](selfhost/w1.w) | **Self-hosted W1 compiler** written entirely in W |
+| [`run_conformance.py`](run_conformance.py) | Automated 13-phase conformance test runner (190/190 tests) |
+| [`tests/differential/differential_test.py`](tests/differential/differential_test.py) | Three-engine differential oracle & compiler fuzz suite |
 | [`.github/workflows/ci.yml`](.github/workflows/ci.yml) | Cross-platform CI pipeline (Linux & macOS) |
 
 ---
@@ -199,12 +206,18 @@ ln -sfn "$(pwd)/editors/vscode-w" ~/.antigravity/extensions/w-lang-0.1.0
 ./w test
 ```
 
-Verifies all 10 stages (**181 / 181 tests**):
-1. **Lexer Valid (13/13)** & **Lexer Invalid (7/7)**
-2. **Parser Valid (19/19)** & **Parser Invalid (9/9)**
-3. **Checker Valid (14/14)**, **Checker Invalid (22/22)** & **Error Handling (2/2)**
-4. **Formatter Idempotence (`w fmt`) (23/23)**
-5. **Runtime W0 Interpreter (22/22)**
-6. **C99 Native Backend W0 (21/21)**
-7. **W1 Stage-2 Native Compiler Runtime Parity (21/21)**
-8. **Showcase Examples E2E Suite (7/7)** & **3-Stage Fixed-Point Bootstrap (`1/1`)**
+Verifies all **13 phases (190 / 190 tests)**:
+1. **Lexer Valid (13/13)**
+2. **Lexer Invalid (7/7)**
+3. **Parser Valid (19/19)**
+4. **Parser Invalid (9/9)**
+5. **Checker Valid (14/14)**
+6. **Checker Invalid (23/23)**
+7. **Error Handling (2/2)**
+8. **Formatter Idempotence (`w fmt`) (25/25)**
+9. **Runtime W0 Interpreter (24/24)**
+10. **C99 Native Backend W0 (23/23)**
+11. **W1 Stage-2 Native Compiler Runtime Parity (23/23)**
+12. **Showcase Examples E2E Suite (7/7)**
+13. **3-Stage Fixed-Point Bootstrap (`1/1`)**
+

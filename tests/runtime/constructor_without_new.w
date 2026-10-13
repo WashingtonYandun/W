@@ -1,0 +1,35 @@
+class User {
+    public name: str
+    public age: int
+
+    fn init(name: str, age: int) {
+        this.name = name
+        this.age = age
+    }
+
+    public fn describe() -> str {
+        return this.name + ":" + str(this.age)
+    }
+}
+
+class Admin extends User {
+    public role: str
+
+    fn init(name: str, age: int, role: str) {
+        super.init(name, age)
+        this.role = role
+    }
+
+    public fn describe() -> str {
+        return super.describe() + " [" + this.role + "]"
+    }
+}
+
+fn main() -> unit {
+    let u1 = User("Washington", 24)
+    let u2 = new User("Washo", 24)
+    let adm: User = Admin("Sofia", 26, "GM")
+    let u1_alias = u1
+    u1_alias.age = 25
+    print(u1.describe(), u2.describe(), adm.describe(), u1 == u1_alias, u1 == u2)
+}

@@ -464,18 +464,33 @@ class TypeChecker:
             self.current_scope = old_scope
             self.current_fn_ret_type = old_ret_type
 
+    def _expr_has_return(self, expr: Expr) -> bool:
+        if isinstance(expr, IfExpr):
+            if expr.else_branch is None:
+                return False
+            if not self._block_has_return(expr.then_branch):
+                return False
+            for eb in expr.elif_branches:
+                if not self._block_has_return(eb.body):
+                    return False
+            return self._block_has_return(expr.else_branch)
+        if isinstance(expr, MatchExpr):
+            if not expr.arms:
+                return False
+            for arm in expr.arms:
+                if not isinstance(arm.body, Block) or not self._block_has_return(arm.body):
+                    return False
+            return True
+        return False
+
     def _block_has_return(self, block: Block) -> bool:
         for s in block.statements:
             if isinstance(s, ReturnStmt):
                 return True
-            if isinstance(s, ExprStmt) and isinstance(s.expr, IfExpr):
-                if_expr = s.expr
-                if if_expr.else_branch and self._block_has_return(if_expr.then_branch) and self._block_has_return(if_expr.else_branch):
-                    return True
-        if isinstance(block.tail_expr, IfExpr):
-            if_expr = block.tail_expr
-            if if_expr.else_branch and self._block_has_return(if_expr.then_branch) and self._block_has_return(if_expr.else_branch):
+            if isinstance(s, ExprStmt) and self._expr_has_return(s.expr):
                 return True
+        if block.tail_expr is not None and self._expr_has_return(block.tail_expr):
+            return True
         return False
 
     def _block_diverges(self, block: Block) -> bool:
@@ -483,6 +498,57 @@ class TypeChecker:
             if isinstance(s, (ReturnStmt, BreakStmt, ContinueStmt)):
                 return True
         return self._block_has_return(block)
+
+    def _find_value_root_symbol(self, expr: Expr) -> Optional[Symbol]:
+        if isinstance(expr, IdentExpr):
+            return self.current_scope.lookup_symbol(expr.name)
+        if isinstance(expr, IndexExpr):
+            return self._find_value_root_symbol(expr.object)
+        if isinstance(expr, MemberExpr):
+            obj_t = self._check_expr(expr.object)
+            if isinstance(obj_t, ClassType):
+                return None
+            return self._find_value_root_symbol(expr.object)
+        return None
+
+    def _check_class_instantiation(self, class_t: ClassType, args: List[Expr], line: int, col: int) -> ClassType:
+        init_fn: Optional[FunctionType] = None
+        curr_c: Optional[ClassType] = class_t
+        while curr_c is not None:
+            if curr_c.init_type is not None:
+                init_fn = curr_c.init_type
+                break
+            curr_c = curr_c.superclass
+        if init_fn is not None:
+            expected_params = init_fn.params
+            if len(args) != len(expected_params):
+                raise TypeError(
+                    message=f"Constructor of '{class_t.name}' expects {len(expected_params)} arguments, found {len(args)}",
+                    line=line,
+                    col=col,
+                    file=self.file,
+                    code="T015"
+                )
+            for i, (a_expr, p_type) in enumerate(zip(args, expected_params)):
+                a_type = self._check_expr(a_expr)
+                if not is_assignable(a_type, p_type):
+                    raise TypeError(
+                        message=f"Constructor argument {i + 1} type mismatch: expected '{p_type}', found '{a_type}'",
+                        line=a_expr.line,
+                        col=a_expr.col,
+                        file=self.file,
+                        code="T003"
+                    )
+        else:
+            if len(args) != 0:
+                raise TypeError(
+                    message=f"Default constructor of '{class_t.name}' takes 0 arguments, found {len(args)}",
+                    line=line,
+                    col=col,
+                    file=self.file,
+                    code="T015"
+                )
+        return class_t
 
 
     def _check_block(self, block: Block, is_statement_context: bool = False) -> Optional[WType]:
@@ -893,43 +959,7 @@ class TypeChecker:
                     file=self.file,
                     code="T002"
                 )
-            init_fn: Optional[FunctionType] = None
-            curr_c: Optional[ClassType] = class_t
-            while curr_c is not None:
-                if curr_c.init_type is not None:
-                    init_fn = curr_c.init_type
-                    break
-                curr_c = curr_c.superclass
-            if init_fn is not None:
-                expected_params = init_fn.params
-                if len(expr.args) != len(expected_params):
-                    raise TypeError(
-                        message=f"Constructor of '{expr.class_name}' expects {len(expected_params)} arguments, found {len(expr.args)}",
-                        line=expr.line,
-                        col=expr.col,
-                        file=self.file,
-                        code="T015"
-                    )
-                for i, (a_expr, p_type) in enumerate(zip(expr.args, expected_params)):
-                    a_type = self._check_expr(a_expr)
-                    if not is_assignable(a_type, p_type):
-                        raise TypeError(
-                            message=f"Constructor argument {i + 1} type mismatch: expected '{p_type}', found '{a_type}'",
-                            line=a_expr.line,
-                            col=a_expr.col,
-                            file=self.file,
-                            code="T003"
-                        )
-            else:
-                if len(expr.args) != 0:
-                    raise TypeError(
-                        message=f"Default constructor of '{expr.class_name}' takes 0 arguments, found {len(expr.args)}",
-                        line=expr.line,
-                        col=expr.col,
-                        file=self.file,
-                        code="T015"
-                    )
-            return class_t
+            return self._check_class_instantiation(class_t, expr.args, expr.line, expr.col)
 
         if isinstance(expr, AssignmentExpr):
 
@@ -965,17 +995,16 @@ class TypeChecker:
                 return sym.type
 
             if isinstance(expr.target, IndexExpr):
-                # Target must be mutable binding
-                if isinstance(expr.target.object, IdentExpr):
-                    sym = self.current_scope.lookup_symbol(expr.target.object.name)
-                    if sym and not sym.is_mut:
-                        raise TypeError(
-                            message=f"Cannot mutate elements of immutable binding '{sym.name}'",
-                            line=expr.line,
-                            col=expr.col,
-                            file=self.file,
-                            code="T004"
-                        )
+                # Target value root must be a mutable binding (unless rooted in a reference-type class)
+                sym = self._find_value_root_symbol(expr.target.object)
+                if sym and not sym.is_mut:
+                    raise TypeError(
+                        message=f"Cannot mutate elements of immutable binding '{sym.name}'",
+                        line=expr.line,
+                        col=expr.col,
+                        file=self.file,
+                        code="T004"
+                    )
                 obj_t = self._check_expr(expr.target.object)
                 idx_t = self._check_expr(expr.target.index)
                 if isinstance(obj_t, ListType):
@@ -1055,16 +1084,15 @@ class TypeChecker:
                         )
                     return f_info.type
 
-                if isinstance(expr.target.object, IdentExpr):
-                    sym = self.current_scope.lookup_symbol(expr.target.object.name)
-                    if sym and not sym.is_mut:
-                        raise TypeError(
-                            message=f"Cannot mutate field of immutable binding '{sym.name}'",
-                            line=expr.line,
-                            col=expr.col,
-                            file=self.file,
-                            code="T004"
-                        )
+                sym = self._find_value_root_symbol(expr.target.object)
+                if sym and not sym.is_mut:
+                    raise TypeError(
+                        message=f"Cannot mutate field of immutable binding '{sym.name}'",
+                        line=expr.line,
+                        col=expr.col,
+                        file=self.file,
+                        code="T004"
+                    )
                 if not isinstance(obj_t, StructType):
                     raise TypeError(
                         message=f"Cannot assign to field of non-struct '{obj_t}'",
@@ -1265,21 +1293,28 @@ class TypeChecker:
             )
 
         if isinstance(expr, CallExpr):
-            # Mutating method check on receiver
+            # Support direct constructor call syntax: ClassName(...)
+            if isinstance(expr.callee, IdentExpr):
+                if self.current_scope.lookup_symbol(expr.callee.name) is None:
+                    maybe_cls = self.current_scope.lookup_type(expr.callee.name)
+                    if isinstance(maybe_cls, ClassType):
+                        return self._check_class_instantiation(maybe_cls, expr.args, expr.line, expr.col)
+
+            # Mutating method check on receiver (transitive across value-type paths)
             if isinstance(expr.callee, MemberExpr):
-                if isinstance(expr.callee.object, IdentExpr):
-                    sym = self.current_scope.lookup_symbol(expr.callee.object.name)
-                    callee_t = self._check_expr(expr.callee)
-                    if isinstance(callee_t, FunctionType) and callee_t.is_mutating:
-                        if sym and not sym.is_mut:
-                            raise TypeError(
-                                message=f"Cannot call mutating method '{expr.callee.property}' on immutable binding '{sym.name}'",
-                                line=expr.line,
-                                col=expr.col,
-                                file=self.file,
-                                code="T004"
-                            )
-            callee_t = self._check_expr(expr.callee)
+                callee_t = self._check_expr(expr.callee)
+                if isinstance(callee_t, FunctionType) and callee_t.is_mutating:
+                    sym = self._find_value_root_symbol(expr.callee.object)
+                    if sym and not sym.is_mut:
+                        raise TypeError(
+                            message=f"Cannot call mutating method '{expr.callee.property}' on immutable binding '{sym.name}'",
+                            line=expr.line,
+                            col=expr.col,
+                            file=self.file,
+                            code="T004"
+                        )
+            else:
+                callee_t = self._check_expr(expr.callee)
             if isinstance(callee_t, AnyType):
                 for a in expr.args:
                     self._check_expr(a)

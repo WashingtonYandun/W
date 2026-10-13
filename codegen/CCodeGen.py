@@ -19,7 +19,7 @@ from parser.Parser import Parser
 class CCodeGen:
     """
     Canonical W v0.1 to C99 Transpiler Backend.
-    Preserves exact value semantics (ARC + Copy-on-Write via runtime/w_runtime.h),
+    Preserves exact value semantics (Deterministic RC + Copy-on-Write via runtime/w_runtime.h),
     reference semantics for OOP classes, dynamic dispatch, and fallible error handling.
     """
     def __init__(self, file: str = "<stdin>"):
@@ -473,6 +473,11 @@ class CCodeGen:
         out.append(f"WVal {tmp} = {val};")
         return f"&{tmp}"
 
+    def _bind_call(self, c_call: str, out: List[str]) -> str:
+        tmp = self.new_temp()
+        out.append(f"WVal {tmp} = {c_call};")
+        return tmp
+
     def emit_expr(self, expr: Expr, out: List[str]) -> str:
         if isinstance(expr, IntLiteral):
             return f"w_int({expr.value}LL)"
@@ -495,7 +500,7 @@ class CCodeGen:
 
         if isinstance(expr, NewExpr):
             arg_vals = [self.emit_expr(a, out) for a in expr.args]
-            return f"w_new_{expr.class_name}({', '.join(arg_vals)})"
+            return self._bind_call(f"w_new_{expr.class_name}({', '.join(arg_vals)})", out)
 
         if isinstance(expr, IdentExpr):
             return self.c_var(expr.name)
@@ -555,8 +560,8 @@ class CCodeGen:
                 return f"w_bool(!w_eq({lhs}, {rhs}))"
 
         if isinstance(expr, CoalesceExpr):
-            res = self.new_temp()
             lhs = self.emit_expr(expr.left, out)
+            res = self.new_temp()
             out.append(f"WVal {res} = {lhs};")
             out.append(f"if ({res}.tag == W_NONE) {{")
             rhs_stmts = []
@@ -636,11 +641,11 @@ class CCodeGen:
 
                 if fn_name == "print":
                     if not arg_vals:
-                        return "w_builtin_print(0, NULL)"
+                        return self._bind_call("w_builtin_print(0, NULL)", out)
                     arr_tmp = self.new_temp()
                     elems_c = ", ".join(arg_vals)
                     out.append(f"WVal {arr_tmp}[{len(arg_vals)}] = {{ {elems_c} }};")
-                    return f"w_builtin_print({len(arg_vals)}, {arr_tmp})"
+                    return self._bind_call(f"w_builtin_print({len(arg_vals)}, {arr_tmp})", out)
 
                 builtin_1 = {
                     "len": "w_builtin_len",
@@ -655,19 +660,22 @@ class CCodeGen:
                     "read_file": "w_builtin_read_file",
                 }
                 if fn_name in builtin_1 and len(arg_vals) == 1:
-                    return f"{builtin_1[fn_name]}({arg_vals[0]})"
+                    return self._bind_call(f"{builtin_1[fn_name]}({arg_vals[0]})", out)
 
                 if fn_name == "args" and len(arg_vals) == 0:
-                    return "w_builtin_args()"
+                    return self._bind_call("w_builtin_args()", out)
 
                 if fn_name == "write_file" and len(arg_vals) == 2:
-                    return f"w_builtin_write_file({arg_vals[0]}, {arg_vals[1]})"
+                    return self._bind_call(f"w_builtin_write_file({arg_vals[0]}, {arg_vals[1]})", out)
 
                 if fn_name == "slice" and len(arg_vals) == 3:
-                    return f"w_builtin_slice({arg_vals[0]}, {arg_vals[1]}, {arg_vals[2]})"
+                    return self._bind_call(f"w_builtin_slice({arg_vals[0]}, {arg_vals[1]}, {arg_vals[2]})", out)
+
+                if fn_name in self.classes:
+                    return self._bind_call(f"w_new_{fn_name}({', '.join(arg_vals)})", out)
 
                 c_callee = self.c_fn(fn_name)
-                return f"{c_callee}({', '.join(arg_vals)})"
+                return self._bind_call(f"{c_callee}({', '.join(arg_vals)})", out)
 
             # 2. Method call or module function call: obj.method(...)
             if isinstance(expr.callee, MemberExpr):
@@ -682,7 +690,7 @@ class CCodeGen:
                         resolved = self._find_class_method(self.current_class.superclass, method)
                         if resolved is not None:
                             def_cls, _ = resolved
-                            return f"w_method_{def_cls}__{method}({', '.join(call_args)})"
+                            return self._bind_call(f"w_method_{def_cls}__{method}({', '.join(call_args)})", out)
                     return "w_unit()"
 
                 # Check if module call: mod.fn(...)
@@ -690,35 +698,35 @@ class CCodeGen:
                     mod_fn = self.c_fn(method, ns=obj_expr.name)
                     if mod_fn in self.fallible_fns:
                         arg_vals = [self.emit_expr(a, out) for a in expr.args]
-                        return f"{mod_fn}({', '.join(arg_vals)})"
+                        return self._bind_call(f"{mod_fn}({', '.join(arg_vals)})", out)
 
                 # Collection methods
                 if method == "append":
                     lref = self.emit_lvalue_ref(obj_expr, out)
                     arg_v = self.emit_expr(expr.args[0], out)
-                    return f"w_list_append({lref}, {arg_v})"
+                    return self._bind_call(f"w_list_append({lref}, {arg_v})", out)
                 if method == "pop":
                     lref = self.emit_lvalue_ref(obj_expr, out)
-                    return f"w_list_pop({lref})"
+                    return self._bind_call(f"w_list_pop({lref})", out)
                 if method == "clear":
                     lref = self.emit_lvalue_ref(obj_expr, out)
-                    return f"w_list_clear({lref})"
+                    return self._bind_call(f"w_list_clear({lref})", out)
                 if method == "get":
                     obj_v = self.emit_expr(obj_expr, out)
                     arg_v = self.emit_expr(expr.args[0], out)
-                    return f"w_dict_get({obj_v}, {arg_v})"
+                    return self._bind_call(f"w_dict_get({obj_v}, {arg_v})", out)
                 if method == "keys":
                     obj_v = self.emit_expr(obj_expr, out)
-                    return f"w_dict_keys({obj_v})"
+                    return self._bind_call(f"w_dict_keys({obj_v})", out)
                 if method == "values":
                     obj_v = self.emit_expr(obj_expr, out)
-                    return f"w_dict_values({obj_v})"
+                    return self._bind_call(f"w_dict_values({obj_v})", out)
 
                 # OOP dynamic method dispatch
                 obj_v = self.emit_expr(obj_expr, out)
                 arg_vals = [self.emit_expr(a, out) for a in expr.args]
                 call_args = [obj_v] + arg_vals
-                return f"w_dispatch__{method}__{len(arg_vals)}({', '.join(call_args)})"
+                return self._bind_call(f"w_dispatch__{method}__{len(arg_vals)}({', '.join(call_args)})", out)
 
         if isinstance(expr, ListExpr):
             if not expr.elements:
