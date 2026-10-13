@@ -106,7 +106,7 @@ Identifiers must start with an ASCII letter (`a-z`, `A-Z`) or underscore `_`, fo
 ### 4.3 Composite Collections
 * `list[T]`: Dynamically sized contiguous homogeneous array (`[1, 2, 3]`).
 * `dict[K, V]`: Associative key-value table (`{"key": 42}`).
-  - **Key Domain & `float` Restriction:** Dictionary keys `K` must have reflexive equality (`k == k` for every value of `K`) and canonical equivalence. Because IEEE-754 `float` violates reflexivity on `NaN` (`NaN != NaN`) and has signed zeros (`+0.0 == -0.0`), `float` (and any composite type containing `float`) is **disallowed as a dictionary key type `K`** (`dict[float, V]` is a compile-time type error). Valid key types in `v0.1.x` are `int`, `str`, `bool`, and `enum`.
+  - **Key Domain & `float` Restriction (`W2010`):** Dictionary keys `K` must belong to W's predictable key domain (`int`, `str`, `bool`, or `enum`). While some languages permit floating-point dictionary keys by defining custom canonicalization rules for `NaN` bit patterns and signed zeros (`+0.0` vs `-0.0`), W deliberately restricts the dictionary key model for predictability and rejects `float` (and any composite type containing `float`) as a key type `K` at compile time with diagnostic `W2010` (`INVALID_DICT_KEY_TYPE`).
 * `tuple[T1, T2, ...]`: Fixed-size heterogeneous immutable product type (`(1, "ok", true)`).
 
 ### 4.4 Sum Types (`enum`)
@@ -350,13 +350,13 @@ Handling strategies:
    - When a mutating operation occurs (`append`, `pop`, `clear`, indexed assignment, or field assignment on a `struct`), any buffer along the access path with `refcount > 1` is detached (`w_cow_detach`) before applying the mutation.
 3. **Reference Types (`class`):**
    - Unlike `struct`, instances of `class` (`W_OBJECT`) have reference identity semantics: assigning `let b = a` shares the same underlying instance without CoW detachment on field mutation.
-4. **Acyclic Value Graphs:**
-   - **The current W value model does not expose operations capable of constructing cyclic value graphs.**
-   - Copy-on-Write by itself is an internal storage-sharing optimization and does not inherently guarantee acyclicity in arbitrary languages. Rather, pure W value structures (`struct`, `list`, `dict`, `tuple`) are guaranteed to form directed acyclic graphs (DAGs) because:
+4. **Acyclic Value-Storage Subgraph:**
+   - **The subgraph formed exclusively by value storage (`struct`, `enum`, `list`, `dict`, `tuple`) cannot contain cycles.**
+   - Copy-on-Write by itself is an internal storage-sharing optimization and does not inherently guarantee acyclicity in arbitrary languages. Rather, pure W value storage is guaranteed to form a directed acyclic graph (DAG) because:
      1. W provides no raw pointers, addresses, or shared mutable references to value containers;
-     2. Every composite literal construction and every mutating value operation (`xs[i] = v`, `xs.append(v)`, `s.field = v`) captures an independent semantic snapshot of `v` (detaching any shared container along the target lvalue path before writing); and
-     3. Consequently, no value container can ever be mutated to hold a live reference to itself or to an ancestor value container.
-   - Reference cycles can only arise when reference-type objects (`class` instances) hold references to one another.
+     2. Every composite literal construction and every mutating value operation (`xs[i] = v`, `xs.append(v)`, `s.field = v`) captures an independent semantic snapshot of `v` (detaching any shared value container along the target lvalue path before writing); and
+     3. Consequently, no value container can ever be mutated to hold a direct or indirect value-storage path back to itself.
+   - Note that a value (such as a `struct` or `list`) may contain a reference to a `class` instance without losing its own value semantics. If a `class` instance holds a field containing a `struct` that references that `class` instance (`Node(class) -> Wrapper(struct) -> Node(class)`), the cycle crosses a reference-type (`class`) identity boundary; the subgraph formed solely by value storage remains strictly acyclic.
 
 ---
 
@@ -397,13 +397,14 @@ fn compile(source: str) {
        - `W1003`: Module resolution or circular import error
        - `W1004`: Invalid control-flow or lexical context (`break`/`continue`/`return`/`this`/`super`)
      - **`W2xxx` — Type System, Exhaustiveness & Error Channel Diagnostics:**
-       - `W2001`: Type mismatch (including invalid dictionary key types)
+       - `W2001`: Type mismatch
        - `W2002`: Invalid assignment target
        - `W2003`: Non-exhaustive `match` expression
        - `W2004`: Invalid return type or missing `return` statement
        - `W2005`: Invalid call arity or non-callable target
        - `W2006`: Invalid optional (`?`) or fallible (`T ! E` / `else err`) propagation
        - `W2007`: Missing or invalid `struct` initialization field
+       - `W2010`: Invalid dictionary key type
      - **`W3xxx` — Mutability, Ownership & OOP Encapsulation Diagnostics:**
        - `W3001`: Mutation of immutable value binding (`let` vs `let mut`)
        - `W3002`: Invalid member access/mutation or `private` visibility violation
@@ -492,11 +493,13 @@ W evolves in disciplined, semantically verified increments while keeping the can
 
 * **`v0.1.0` — Core + Self-Host + OOP** ✅
 * **`v0.1.1` — Harden & Oracle** ✅
-* **`v0.1.2` — Diagnostics & Stress** (stable diagnostic codes, full-behavior differential oracle, stress fuzzing, benchmark harness, HIR & `TypeId` design specs)
-* **`v0.2` — Generics + Monomorphization** (`v0.2-alpha1` generic functions $\rightarrow$ `v0.2-alpha2` generic structs $\rightarrow$ `v0.2-alpha3` generic enums $\rightarrow$ `v0.2-alpha4` generic classes)
+* **`v0.1.2` — Diagnostics & Stress** ✅
+* **`v0.1.3` — Ownership & Self-Host Parity** (deterministic `CleanupScope` / `w_release` across all exits, standalone `W1` semantic & diagnostic parity, memory stress verification)
+* **`v0.2` — Generics + Monomorphization** (`v0.2-alpha1` generic structs $\rightarrow$ `v0.2-alpha2` generic functions $\rightarrow$ `v0.2-alpha3` generic enums $\rightarrow$ `v0.2-alpha4` generic classes)
 * **`v0.3` — Function Types + Typed HIR**
 * **`v0.4` — Closures + HOFs**
 * **`v0.5` — Modules + Self-Host Split** (modular `.w` compiler passes)
 * **`v0.6` — Stdlib + LSP**
+
 
 
