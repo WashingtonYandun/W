@@ -56,11 +56,11 @@ enum TypeEntry {
 }
 ```
 
-### 2.3 Canonical Interning Guarantee ($O(1)$ Type Equality)
-The `TypeInterner` maintains a hash-consing table mapping structural keys `(tag, child_type_ids...) -> TypeId`:
-- Calling `interner.mk_list(TYPE_INT)` twice returns the **exact same `TypeId`**.
-- **Type equality (`T1 == T2`) is strictly $O(1)$ integer equality (`id1 == id2`).**
-- Nominal declarations (`struct`, `enum`, `interface`, `class`) are identified by their declaration `DefId` plus their interned `type_args: list[TypeId]`. Thus `Pair[int, str]` and `Pair[int, bool]` receive distinct `TypeId`s, while two occurrences of `Pair[int, str]` resolve to the identical `TypeId`.
+### 2.3 Canonical Interning Guarantee ($O(1)$ Comparison vs. $O(\text{structure})$ Interning)
+The `TypeInterner` maintains a hash-consing table mapping structural keys `(tag, child_type_ids...) -> TypeId`. We explicitly distinguish two operations:
+1. **Type Equality Comparison (`T1 == T2`) is $O(1)$:** Once types are interned, comparing any two `TypeId` handles—regardless of nesting depth—is a single 32-bit integer comparison (`id1 == id2`).
+2. **Type Construction / Interning (`intern(entry)`) is $O(\text{structure})$:** Interning a composite type syntax tree traverses its structure bottom-up, computing hashes over the immediate node tag and already-interned child `TypeId`s. Calling `interner.mk_list(TYPE_INT)` twice performs a hash table lookup and returns the **exact same `TypeId`**.
+3. **Nominal Parameterization:** Nominal declarations (`struct`, `enum`, `interface`, `class`) are identified by their declaration `DefId` plus their interned `type_args: list[TypeId]`. Thus `Pair[int, str]` and `Pair[int, bool]` receive distinct `TypeId`s, while two occurrences of `Pair[int, str]` resolve to the identical `TypeId`.
 
 ---
 
@@ -139,4 +139,38 @@ Concretely, even if `Dog <: Animal`:
 ### 5.5 Dictionary Key Validity (`is_valid_dict_key`)
 For `Dict(key: TypeId, val: TypeId)`:
 - `key` must be one of `int`, `str`, `bool`, or `NominalEnum(def_id, [])` (or a `tuple` composed recursively of valid key types once tuple hashing is enabled).
-- `float` (and any composite containing `float`) is statically rejected with `W2001` because IEEE-754 `NaN != NaN` violates key equality reflexivity.
+- `float` (and any composite containing `float`), `list`, `dict`, `struct`, and `class` are statically rejected with **`W2010` (`INVALID_DICT_KEY_TYPE`)**. Excluding `float` is an explicit language predictability design choice to avoid IEEE-754 `NaN` key-lookup anomalies (`NaN != NaN`) and `-0.0` vs. `+0.0` hashing ambiguities.
+
+---
+
+## 6. `TypeCapabilities` Matrix (Ownership, CoW & Generic Contracts)
+
+To bridge static types with deterministic Reference Counting (`v0.1.3`) and future monomorphization (`v0.2`), every `TypeId` exposes a precomputed `TypeCapabilities` descriptor:
+
+```text
+struct TypeCapabilities {
+    needs_retain: bool       # Requires RC increment when duplicating a binding/reference
+    needs_release: bool      # Requires RC decrement & potential deallocation on scope exit
+    is_value: bool           # Exhibits independent value semantics (scalars, str, list, dict, tuple, struct, enum)
+    is_reference: bool       # Exhibits shared identity semantics (class, interface)
+    is_copyable: bool        # Can be assigned/passed by value (all W types are copyable; collections/structs use CoW)
+    has_identity: bool       # Supports shared mutable identity across aliases (true only for class/interface)
+    is_comparable: bool      # Supports == and != operators
+    is_valid_dict_key: bool  # Permitted as K in dict[K, V] (checked by W2010)
+}
+```
+
+### Crucial Orthogonality: `is_value` vs. `needs_release`
+Value semantics (`is_value`) and heap Reference Counting (`needs_retain` / `needs_release`) are **orthogonal axes**:
+
+| Type Example | `is_value` | `is_reference` | `has_identity` | `needs_retain` / `needs_release` | `is_valid_dict_key` | Runtime Representation |
+| :--- | :---: | :---: | :---: | :---: | :---: | :--- |
+| `int`, `bool`, `enum`, `unit` | `true` | `false` | `false` | `false` | `true` (`unit`: `false`) | Immediate unboxed scalar in `WVal` |
+| `float` | `true` | `false` | `false` | `false` | **`false` (`W2010`)** | Immediate unboxed `double` in `WVal` |
+| `str` | `true` | `false` | `false` | `true` | `true` | Immutable UTF-8 buffer |
+| `list[T]`, `dict[K, V]` | `true` | `false` | `false` | `true` | `false` (`W2010`) | Refcounted CoW buffer (`WListBuf*`, `WDictBuf*`) |
+| `tuple[T1, ...]` | `true` | `false` | `false` | `true` | `false` (in `v0.1`) | Refcounted buffer (`WTupleBuf*`) |
+| `Point` (`struct`) | `true` | `false` | `false` | `true` | `false` (`W2010`) | Refcounted CoW buffer (`WStructBuf*`) |
+| `User` (`class` / `interface`) | `false` | `true` | `true` | `true` | `false` (`W2010`) | Refcounted identity object (`WStructBuf*` with `W_OBJECT`) |
+| `T?` / `T ! E` | Inherits | Inherits | Inherits | `true` (`WBoxBuf*`) | `false` (`W2010`) | Tagged `WVal` or refcounted `WBoxBuf*` (`W_OK` / `W_ERR`) |
+

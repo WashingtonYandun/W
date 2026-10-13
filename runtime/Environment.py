@@ -102,6 +102,25 @@ def create_global_environment(stdout: Optional[TextIO] = None) -> Environment:
         out.flush()
         return WUnit()
 
+    def eprint_fn(args: List[WValue]) -> WValue:
+        rendered: List[str] = []
+        for arg in args:
+            if isinstance(arg, WStr):
+                rendered.append(arg.value)
+            else:
+                rendered.append(str(arg))
+        sys.stderr.write(" ".join(rendered) + "\n")
+        sys.stderr.flush()
+        return WUnit()
+
+    def exit_fn(args: List[WValue]) -> WValue:
+        code = int(args[0].value) if args and isinstance(args[0], WInt) else 0
+        sys.exit(code)
+
+    env.declare("print", WNativeFunction("print", print_fn))
+    env.declare("eprint", WNativeFunction("eprint", eprint_fn))
+    env.declare("exit", WNativeFunction("exit", exit_fn))
+
     # 2. Collections: len
     def len_fn(args: List[WValue]) -> WValue:
         if len(args) != 1:

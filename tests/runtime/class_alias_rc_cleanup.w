@@ -1,0 +1,22 @@
+class Counter {
+    public val: int
+    fn init(start: int) {
+        this.val = start
+    }
+    public fn inc() -> unit {
+        this.val = this.val + 1
+    }
+}
+
+fn main() -> unit {
+    let c1 = Counter(10)
+    let c2 = c1
+    if true {
+        let c3 = c2
+        c3.inc()
+    }
+    c2.inc()
+    print("c1 val:", c1.val)
+    print("c2 val:", c2.val)
+    print("same obj:", c1 == c2)
+}

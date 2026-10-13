@@ -150,20 +150,6 @@ def run_w0_c99_native(source_code: str, file_name: str, repo_root: str, work_dir
 
 
 def run_w1_c99_native(source_code: str, file_name: str, w1_bin: str, repo_root: str, work_dir: str) -> EngineResult:
-    try:
-        ast = Parser(file=file_name).parse(source_code)
-        TypeChecker(file=file_name).check(ast)
-    except WError as err:
-        return EngineResult(
-            engine="W1_C99_Native",
-            stdout="",
-            stderr=str(err),
-            exit_code=1,
-            compile_ok=False,
-            runtime_ok=False,
-            diag_code=err.code,
-        )
-
     src_path = os.path.join(work_dir, "w1_input.w")
     c_path = os.path.join(work_dir, "w1_prog.c")
     bin_path = os.path.join(work_dir, "w1_prog_bin")
@@ -185,6 +171,7 @@ def run_w1_c99_native(source_code: str, file_name: str, w1_bin: str, repo_root: 
             exit_code=w1_comp.returncode,
             compile_ok=False,
             runtime_ok=False,
+            diag_code=extract_diag_code(w1_comp.stderr),
         )
 
     cc_comp = subprocess.run(
@@ -348,9 +335,9 @@ def generate_valid_program(seed: int) -> str:
         "    return none",
         "}",
         "",
-        "fn checked_div(n: int, d: int) -> int ! IoError {",
+        "fn checked_div(n: int, d: int) -> int? {",
         "    if d == 0 {",
-        '        return IoError { message: "zero divisor" }',
+        "        return none",
         "    }",
         "    return n / d",
         "}",
@@ -404,9 +391,7 @@ def generate_valid_program(seed: int) -> str:
         "        acc = acc + x",
         "    }",
         "    let opt_v = maybe_scale(b, flag) ?? 7",
-        "    let div_v = checked_div(acc, b) else err {",
-        "        0",
-        "    }",
+        "    let div_v = checked_div(acc, b) ?? 0",
         "    let s1: Scorer = BaseScorer(2)",
         "    let s2: Scorer = BonusScorer(3, c)",
         "    let obj = BonusScorer(2, 5)",

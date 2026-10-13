@@ -1,0 +1,21 @@
+fn parse_num(s: str) -> int? {
+    if len(s) > 0 {
+        return len(s)
+    }
+    return none
+}
+
+fn step_fallible(a: str, b: str) -> int? {
+    let local_arr = [1, 2, 3]
+    let n1 = parse_num(a)?
+    let local_str = "intermediate"
+    let n2 = parse_num(b)?
+    return n1 + n2 + len(local_arr) + len(local_str)
+}
+
+fn main() -> unit {
+    let ok_val = step_fallible("foo", "bar") ?? -1
+    let fail_val = step_fallible("foo", "") ?? -1
+    print("try ok:", ok_val)
+    print("try fail:", fail_val)
+}

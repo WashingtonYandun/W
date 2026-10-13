@@ -44,6 +44,7 @@ typedef struct {
 } WDictBuf;
 
 typedef struct {
+    int32_t refcount;
     int32_t len;
     WVal* items;
 } WTupleBuf;
@@ -61,6 +62,8 @@ typedef struct {
     const char* variant;
 } WEnumVal;
 
+typedef struct WBoxBuf WBoxBuf;
+
 struct WVal {
     WTag tag;
     union {
@@ -73,9 +76,58 @@ struct WVal {
         WTupleBuf* tuple;
         WStructBuf* st;
         WEnumVal en;
-        WVal* box;
+        WBoxBuf* box;
     } as;
 };
+
+struct WBoxBuf {
+    int32_t refcount;
+    WVal val;
+};
+
+/* Deterministic RC & Memory Instrumentation Counters (v0.1.3) */
+static int64_t w_g_alloc_count = 0;
+static int64_t w_g_free_count = 0;
+static int64_t w_g_retain_count = 0;
+static int64_t w_g_release_count = 0;
+static int64_t w_g_live_objects = 0;
+
+static inline void w_mem_on_alloc(void) {
+    w_g_alloc_count++;
+    w_g_live_objects++;
+}
+
+static inline void w_mem_on_free(void) {
+    w_g_free_count++;
+    w_g_live_objects--;
+    if (w_g_live_objects < 0) {
+        fprintf(stderr, "[W4003] RuntimeError: Memory safety violation (live_object_count underflow: %" PRId64 ")\n", w_g_live_objects);
+        exit(1);
+    }
+}
+
+static inline void w_check_refcount(int32_t rc, const char* op) {
+    if (rc <= 0) {
+        fprintf(stderr, "[W4003] RuntimeError: Memory safety violation (%s on object with refcount %" PRId32 ")\n", op, rc);
+        exit(1);
+    }
+}
+
+static inline void w_runtime_cleanup(void) {
+    const char* stats_env = getenv("W_MEM_STATS");
+    if (stats_env && strcmp(stats_env, "1") == 0) {
+        fprintf(stderr, "[W_MEM_STATS] alloc=%" PRId64 " free=%" PRId64 " retain=%" PRId64 " release=%" PRId64 " live=%" PRId64 "\n",
+                w_g_alloc_count, w_g_free_count, w_g_retain_count, w_g_release_count, w_g_live_objects);
+    }
+    const char* check_env = getenv("W_MEM_CHECK");
+    if (check_env && strcmp(check_env, "1") == 0) {
+        if (w_g_live_objects != 0 || w_g_alloc_count != w_g_free_count) {
+            fprintf(stderr, "[W4003] RuntimeError: Memory leak detected at exit (alloc=%" PRId64 ", free=%" PRId64 ", retain=%" PRId64 ", release=%" PRId64 ", live=%" PRId64 ")\n",
+                    w_g_alloc_count, w_g_free_count, w_g_retain_count, w_g_release_count, w_g_live_objects);
+            exit(1);
+        }
+    }
+}
 
 /* Constructors */
 static inline WVal w_unit(void) {
@@ -112,52 +164,195 @@ static inline WVal w_enum(const char* enum_name, const char* variant) {
 
 static inline WVal w_ok(WVal inner) {
     if (inner.tag == W_OK || inner.tag == W_ERR) return inner;
+    WBoxBuf* b = (WBoxBuf*)malloc(sizeof(WBoxBuf));
+    b->refcount = 1;
+    b->val = inner;
+    w_mem_on_alloc();
     WVal v;
     v.tag = W_OK;
-    v.as.box = (WVal*)malloc(sizeof(WVal));
-    *v.as.box = inner;
+    v.as.box = b;
     return v;
 }
 
 static inline WVal w_err(WVal inner) {
+    if (inner.tag == W_ERR) return inner;
+    WBoxBuf* b = (WBoxBuf*)malloc(sizeof(WBoxBuf));
+    b->refcount = 1;
+    b->val = inner;
+    w_mem_on_alloc();
     WVal v;
     v.tag = W_ERR;
-    v.as.box = (WVal*)malloc(sizeof(WVal));
-    *v.as.box = inner;
+    v.as.box = b;
     return v;
 }
 
-/* ARC + Copy-on-Write */
+static inline WVal w_wrap_result(WVal v, const char* err_type) {
+    if (v.tag == W_OK || v.tag == W_ERR) return v;
+    if (err_type && err_type[0] != '\0') {
+        if ((v.tag == W_STRUCT || v.tag == W_OBJECT) && v.as.st && strcmp(v.as.st->name, err_type) == 0) {
+            return w_err(v);
+        }
+        if (v.tag == W_ENUM && strcmp(v.as.en.enum_name, err_type) == 0) {
+            return w_err(v);
+        }
+        if (strcmp(err_type, "str") == 0 && v.tag == W_STR) {
+            return w_err(v);
+        }
+        if (strcmp(err_type, "int") == 0 && v.tag == W_INT) {
+            return w_err(v);
+        }
+        if (strcmp(err_type, "bool") == 0 && v.tag == W_BOOL) {
+            return w_err(v);
+        }
+    }
+    return w_ok(v);
+}
+
+/* Deterministic RC + Copy-on-Write */
 static inline WVal w_clone(WVal v) {
     if (v.tag == W_LIST && v.as.list) {
+        w_check_refcount(v.as.list->refcount, "retain/list");
         v.as.list->refcount++;
+        w_g_retain_count++;
     } else if (v.tag == W_DICT && v.as.dict) {
+        w_check_refcount(v.as.dict->refcount, "retain/dict");
         v.as.dict->refcount++;
+        w_g_retain_count++;
     } else if ((v.tag == W_STRUCT || v.tag == W_OBJECT) && v.as.st) {
+        w_check_refcount(v.as.st->refcount, "retain/struct_or_object");
         v.as.st->refcount++;
+        w_g_retain_count++;
     } else if (v.tag == W_TUPLE && v.as.tuple) {
-        WTupleBuf* old_t = v.as.tuple;
-        WTupleBuf* new_t = (WTupleBuf*)malloc(sizeof(WTupleBuf));
-        new_t->len = old_t->len;
-        new_t->items = (WVal*)malloc(sizeof(WVal) * (old_t->len > 0 ? old_t->len : 1));
-        for (int32_t i = 0; i < old_t->len; i++) {
-            new_t->items[i] = w_clone(old_t->items[i]);
-        }
-        v.as.tuple = new_t;
+        w_check_refcount(v.as.tuple->refcount, "retain/tuple");
+        v.as.tuple->refcount++;
+        w_g_retain_count++;
+    } else if ((v.tag == W_OK || v.tag == W_ERR) && v.as.box) {
+        w_check_refcount(v.as.box->refcount, "retain/box");
+        v.as.box->refcount++;
+        w_g_retain_count++;
     }
     return v;
+}
+
+static inline void w_release(WVal v) {
+    if (v.tag == W_LIST && v.as.list) {
+        WListBuf* b = v.as.list;
+        w_check_refcount(b->refcount, "release/list");
+        w_g_release_count++;
+        b->refcount--;
+        if (b->refcount == 0) {
+            b->refcount = -1;
+            for (int32_t i = 0; i < b->len; i++) {
+                w_release(b->data[i]);
+            }
+            free(b->data);
+            free(b);
+            w_mem_on_free();
+        }
+    } else if (v.tag == W_DICT && v.as.dict) {
+        WDictBuf* d = v.as.dict;
+        w_check_refcount(d->refcount, "release/dict");
+        w_g_release_count++;
+        d->refcount--;
+        if (d->refcount == 0) {
+            d->refcount = -1;
+            for (int32_t i = 0; i < d->len; i++) {
+                w_release(d->keys[i]);
+                w_release(d->vals[i]);
+            }
+            free(d->keys);
+            free(d->vals);
+            free(d);
+            w_mem_on_free();
+        }
+    } else if ((v.tag == W_STRUCT || v.tag == W_OBJECT) && v.as.st) {
+        WStructBuf* st = v.as.st;
+        w_check_refcount(st->refcount, "release/struct_or_object");
+        w_g_release_count++;
+        st->refcount--;
+        if (st->refcount == 0) {
+            st->refcount = -1;
+            for (int32_t i = 0; i < st->len; i++) {
+                w_release(st->vals[i]);
+            }
+            free(st->keys);
+            free(st->vals);
+            free(st);
+            w_mem_on_free();
+        }
+    } else if (v.tag == W_TUPLE && v.as.tuple) {
+        WTupleBuf* t = v.as.tuple;
+        w_check_refcount(t->refcount, "release/tuple");
+        w_g_release_count++;
+        t->refcount--;
+        if (t->refcount == 0) {
+            t->refcount = -1;
+            for (int32_t i = 0; i < t->len; i++) {
+                w_release(t->items[i]);
+            }
+            free(t->items);
+            free(t);
+            w_mem_on_free();
+        }
+    } else if ((v.tag == W_OK || v.tag == W_ERR) && v.as.box) {
+        WBoxBuf* bx = v.as.box;
+        w_check_refcount(bx->refcount, "release/box");
+        w_g_release_count++;
+        bx->refcount--;
+        if (bx->refcount == 0) {
+            bx->refcount = -1;
+            w_release(bx->val);
+            free(bx);
+            w_mem_on_free();
+        }
+    }
+}
+
+static inline void w_release_array(int32_t count, WVal* arr) {
+    for (int32_t i = 0; i < count; i++) {
+        w_release(arr[i]);
+    }
+}
+
+static inline WVal w_move(WVal* src) {
+    WVal v = *src;
+    *src = w_unit();
+    return v;
+}
+
+static inline WVal w_assign(WVal* dst, WVal owned_src) {
+    w_release(*dst);
+    *dst = owned_src;
+    return *dst;
+}
+
+static inline WVal w_unwrap_ok(WVal v) {
+    if (v.tag == W_OK && v.as.box) {
+        return w_clone(v.as.box->val);
+    }
+    return w_clone(v);
+}
+
+static inline WVal w_unwrap_err(WVal v) {
+    if (v.tag == W_ERR && v.as.box) {
+        return w_clone(v.as.box->val);
+    }
+    return w_none();
 }
 
 static inline void w_list_detach(WVal* v) {
     if (v->tag != W_LIST || !v->as.list) return;
     WListBuf* old_b = v->as.list;
+    w_check_refcount(old_b->refcount, "detach/list");
     if (old_b->refcount <= 1) return;
     old_b->refcount--;
+    w_g_release_count++;
     WListBuf* new_b = (WListBuf*)malloc(sizeof(WListBuf));
     new_b->refcount = 1;
     new_b->len = old_b->len;
     new_b->cap = old_b->cap > 0 ? old_b->cap : 4;
     new_b->data = (WVal*)malloc(sizeof(WVal) * new_b->cap);
+    w_mem_on_alloc();
     for (int32_t i = 0; i < old_b->len; i++) {
         new_b->data[i] = w_clone(old_b->data[i]);
     }
@@ -167,14 +362,17 @@ static inline void w_list_detach(WVal* v) {
 static inline void w_dict_detach(WVal* v) {
     if (v->tag != W_DICT || !v->as.dict) return;
     WDictBuf* old_b = v->as.dict;
+    w_check_refcount(old_b->refcount, "detach/dict");
     if (old_b->refcount <= 1) return;
     old_b->refcount--;
+    w_g_release_count++;
     WDictBuf* new_b = (WDictBuf*)malloc(sizeof(WDictBuf));
     new_b->refcount = 1;
     new_b->len = old_b->len;
     new_b->cap = old_b->cap > 0 ? old_b->cap : 4;
     new_b->keys = (WVal*)malloc(sizeof(WVal) * new_b->cap);
     new_b->vals = (WVal*)malloc(sizeof(WVal) * new_b->cap);
+    w_mem_on_alloc();
     for (int32_t i = 0; i < old_b->len; i++) {
         new_b->keys[i] = w_clone(old_b->keys[i]);
         new_b->vals[i] = w_clone(old_b->vals[i]);
@@ -185,14 +383,17 @@ static inline void w_dict_detach(WVal* v) {
 static inline void w_struct_detach(WVal* v) {
     if (v->tag != W_STRUCT || !v->as.st) return;
     WStructBuf* old_b = v->as.st;
+    w_check_refcount(old_b->refcount, "detach/struct");
     if (old_b->refcount <= 1) return;
     old_b->refcount--;
+    w_g_release_count++;
     WStructBuf* new_b = (WStructBuf*)malloc(sizeof(WStructBuf));
     new_b->refcount = 1;
     new_b->name = old_b->name;
     new_b->len = old_b->len;
     new_b->keys = (const char**)malloc(sizeof(const char*) * (old_b->len > 0 ? old_b->len : 1));
     new_b->vals = (WVal*)malloc(sizeof(WVal) * (old_b->len > 0 ? old_b->len : 1));
+    w_mem_on_alloc();
     for (int32_t i = 0; i < old_b->len; i++) {
         new_b->keys[i] = old_b->keys[i];
         new_b->vals[i] = w_clone(old_b->vals[i]);
@@ -255,7 +456,7 @@ static inline bool w_eq(WVal a, WVal b) {
             return a.as.st == b.as.st;
         case W_OK:
         case W_ERR:
-            return w_eq(*a.as.box, *b.as.box);
+            return w_eq(a.as.box->val, b.as.box->val);
     }
     return false;
 }
@@ -267,6 +468,7 @@ static inline WVal w_make_list(int32_t count, const WVal* elems) {
     b->len = count;
     b->cap = count > 4 ? count : 4;
     b->data = (WVal*)malloc(sizeof(WVal) * b->cap);
+    w_mem_on_alloc();
     for (int32_t i = 0; i < count; i++) {
         b->data[i] = w_clone(elems[i]);
     }
@@ -282,6 +484,7 @@ static inline WVal w_make_range(WVal start, WVal end, bool inclusive) {
     b->len = count;
     b->cap = count > 4 ? count : 4;
     b->data = (WVal*)malloc(sizeof(WVal) * b->cap);
+    w_mem_on_alloc();
     for (int32_t i = 0; i < count; i++) {
         b->data[i] = w_int(s + i);
     }
@@ -290,8 +493,10 @@ static inline WVal w_make_range(WVal start, WVal end, bool inclusive) {
 
 static inline WVal w_make_tuple(int32_t count, const WVal* elems) {
     WTupleBuf* t = (WTupleBuf*)malloc(sizeof(WTupleBuf));
+    t->refcount = 1;
     t->len = count;
     t->items = (WVal*)malloc(sizeof(WVal) * (count > 0 ? count : 1));
+    w_mem_on_alloc();
     for (int32_t i = 0; i < count; i++) {
         t->items[i] = w_clone(elems[i]);
     }
@@ -305,11 +510,13 @@ static inline WVal w_make_dict(int32_t count, const WVal* keys, const WVal* vals
     d->cap = count > 4 ? count * 2 : 4;
     d->keys = (WVal*)malloc(sizeof(WVal) * d->cap);
     d->vals = (WVal*)malloc(sizeof(WVal) * d->cap);
+    w_mem_on_alloc();
     WVal v; v.tag = W_DICT; v.as.dict = d;
     for (int32_t i = 0; i < count; i++) {
         bool updated = false;
         for (int32_t j = 0; j < d->len; j++) {
             if (w_eq(d->keys[j], keys[i])) {
+                w_release(d->vals[j]);
                 d->vals[j] = w_clone(vals[i]);
                 updated = true;
                 break;
@@ -331,6 +538,7 @@ static inline WVal w_make_struct(const char* name, int32_t count, const char** k
     st->len = count;
     st->keys = (const char**)malloc(sizeof(const char*) * (count > 0 ? count : 1));
     st->vals = (WVal*)malloc(sizeof(WVal) * (count > 0 ? count : 1));
+    w_mem_on_alloc();
     for (int32_t i = 0; i < count; i++) {
         st->keys[i] = keys[i];
         st->vals[i] = w_clone(vals[i]);
@@ -345,6 +553,7 @@ static inline WVal w_make_object(const char* name, int32_t count, const char** k
     st->len = count;
     st->keys = (const char**)malloc(sizeof(const char*) * (count > 0 ? count : 1));
     st->vals = (WVal*)malloc(sizeof(WVal) * (count > 0 ? count : 1));
+    w_mem_on_alloc();
     for (int32_t i = 0; i < count; i++) {
         st->keys[i] = keys[i];
         st->vals[i] = w_clone(vals[i]);
@@ -517,7 +726,11 @@ static inline WVal w_list_pop(WVal* list_val) {
 
 static inline WVal w_list_clear(WVal* list_val) {
     w_list_detach(list_val);
-    list_val->as.list->len = 0;
+    WListBuf* b = list_val->as.list;
+    for (int32_t i = 0; i < b->len; i++) {
+        w_release(b->data[i]);
+    }
+    b->len = 0;
     return w_unit();
 }
 
@@ -747,7 +960,7 @@ static inline char* w_to_cstr(WVal v, bool quote_str) {
             return buf;
         }
         case W_OK: {
-            char* inner = w_to_cstr(*v.as.box, false);
+            char* inner = w_to_cstr(v.as.box->val, false);
             size_t il = strlen(inner);
             buf = (char*)malloc(il + 5);
             snprintf(buf, il + 5, "Ok(%s)", inner);
@@ -755,7 +968,7 @@ static inline char* w_to_cstr(WVal v, bool quote_str) {
             return buf;
         }
         case W_ERR: {
-            char* inner = w_to_cstr(*v.as.box, false);
+            char* inner = w_to_cstr(v.as.box->val, false);
             size_t il = strlen(inner);
             buf = (char*)malloc(il + 6);
             snprintf(buf, il + 6, "Err(%s)", inner);
@@ -778,6 +991,25 @@ static inline WVal w_builtin_print(int32_t argc, const WVal* argv) {
     }
     fputc('\n', stdout);
     fflush(stdout);
+    return w_unit();
+}
+
+static inline WVal w_builtin_eprint(int32_t argc, const WVal* argv) {
+    for (int32_t i = 0; i < argc; i++) {
+        if (i > 0) fputc(' ', stderr);
+        char* s = w_to_cstr(argv[i], false);
+        fputs(s, stderr);
+        free(s);
+    }
+    fputc('\n', stderr);
+    fflush(stderr);
+    return w_unit();
+}
+
+static inline WVal w_builtin_exit(WVal code) {
+    int c = (code.tag == W_INT) ? (int)code.as.i : 0;
+    w_runtime_cleanup();
+    exit(c);
     return w_unit();
 }
 
@@ -873,6 +1105,7 @@ static inline WVal w_builtin_bytes(WVal s) {
     b->len = (int32_t)slen;
     b->cap = slen > 4 ? (int32_t)slen : 4;
     b->data = (WVal*)malloc(sizeof(WVal) * b->cap);
+    w_mem_on_alloc();
     for (size_t i = 0; i < slen; i++) {
         b->data[i] = w_int((int64_t)(unsigned char)s.as.s[i]);
     }
@@ -886,6 +1119,7 @@ static inline WVal w_builtin_enumerate(WVal list_val) {
     b->len = src->len;
     b->cap = src->len > 4 ? src->len : 4;
     b->data = (WVal*)malloc(sizeof(WVal) * b->cap);
+    w_mem_on_alloc();
     for (int32_t i = 0; i < src->len; i++) {
         WVal pair[2] = { w_int(i), src->data[i] };
         b->data[i] = w_make_tuple(2, pair);
@@ -900,6 +1134,7 @@ static inline WVal w_builtin_dict_items(WVal dict_val) {
     b->len = d->len;
     b->cap = d->len > 4 ? d->len : 4;
     b->data = (WVal*)malloc(sizeof(WVal) * b->cap);
+    w_mem_on_alloc();
     for (int32_t i = 0; i < d->len; i++) {
         WVal pair[2] = { d->keys[i], d->vals[i] };
         b->data[i] = w_make_tuple(2, pair);
@@ -951,6 +1186,7 @@ static inline WVal w_builtin_args(void) {
     b->len = (int32_t)w_g_argc;
     b->cap = w_g_argc > 4 ? (int32_t)w_g_argc : 4;
     b->data = (WVal*)malloc(sizeof(WVal) * b->cap);
+    w_mem_on_alloc();
     for (int i = 0; i < w_g_argc; i++) {
         b->data[i] = w_str(w_g_argv[i]);
     }
