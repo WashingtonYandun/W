@@ -28,6 +28,45 @@ class NamedType(TypeNode):
     def to_dict(self) -> dict:
         return {"kind": "NamedType", "name": self.name, "line": self.line, "col": self.col}
 
+    def __str__(self) -> str:
+        return self.name
+
+class GenericType(TypeNode):
+    def __init__(self, name: str, type_args: List[TypeNode], line: int = 1, col: int = 1):
+        super().__init__(line, col)
+        self.name = name
+        self.type_args = type_args
+
+    def to_dict(self) -> dict:
+        return {
+            "kind": "GenericType",
+            "name": self.name,
+            "type_args": [t.to_dict() for t in self.type_args],
+            "line": self.line,
+            "col": self.col
+        }
+
+    def __str__(self) -> str:
+        args_str = ", ".join(str(a) for a in self.type_args)
+        return f"{self.name}[{args_str}]"
+
+class TypeParam(Node):
+    def __init__(self, name: str, constraint: Optional[TypeNode] = None, line: int = 1, col: int = 1):
+        super().__init__(line, col)
+        self.name = name
+        self.constraint = constraint
+
+    def to_dict(self) -> dict:
+        d = {"kind": "TypeParam", "name": self.name, "line": self.line, "col": self.col}
+        if self.constraint is not None:
+            d["constraint"] = self.constraint.to_dict()
+        return d
+
+    def __str__(self) -> str:
+        if self.constraint:
+            return f"{self.name}: {self.constraint}"
+        return self.name
+
 class OptionalType(TypeNode):
     def __init__(self, inner: TypeNode, line: int = 1, col: int = 1):
         super().__init__(line, col)
@@ -36,6 +75,9 @@ class OptionalType(TypeNode):
     def to_dict(self) -> dict:
         return {"kind": "OptionalType", "inner": self.inner.to_dict(), "line": self.line, "col": self.col}
 
+    def __str__(self) -> str:
+        return f"{self.inner}?"
+
 class ListType(TypeNode):
     def __init__(self, element_type: TypeNode, line: int = 1, col: int = 1):
         super().__init__(line, col)
@@ -43,6 +85,9 @@ class ListType(TypeNode):
 
     def to_dict(self) -> dict:
         return {"kind": "ListType", "element_type": self.element_type.to_dict(), "line": self.line, "col": self.col}
+
+    def __str__(self) -> str:
+        return f"list[{self.element_type}]"
 
 class DictType(TypeNode):
     def __init__(self, key_type: TypeNode, value_type: TypeNode, line: int = 1, col: int = 1):
@@ -190,15 +235,25 @@ class Param(Node):
         return {"kind": "Param", "name": self.name, "type_ann": self.type_ann.to_dict(), "line": self.line, "col": self.col}
 
 class FnDecl(Stmt):
-    def __init__(self, name: str, params: List[Param], return_type: TypeNode, body: Block, line: int = 1, col: int = 1):
+    def __init__(
+        self,
+        name: str,
+        params: List[Param],
+        return_type: TypeNode,
+        body: Block,
+        type_params: Optional[List[Any]] = None,
+        line: int = 1,
+        col: int = 1
+    ):
         super().__init__(line, col)
         self.name = name
         self.params = params
         self.return_type = return_type
         self.body = body
+        self.type_params = type_params or []
 
     def to_dict(self) -> dict:
-        return {
+        d = {
             "kind": "FnDecl",
             "name": self.name,
             "params": [p.to_dict() for p in self.params],
@@ -207,6 +262,9 @@ class FnDecl(Stmt):
             "line": self.line,
             "col": self.col
         }
+        if self.type_params:
+            d["type_params"] = [p.to_dict() if hasattr(p, "to_dict") else p for p in self.type_params]
+        return d
 
 class StructField(Node):
     def __init__(self, name: str, type_ann: TypeNode, line: int = 1, col: int = 1):
@@ -218,19 +276,30 @@ class StructField(Node):
         return {"kind": "StructField", "name": self.name, "type_ann": self.type_ann.to_dict(), "line": self.line, "col": self.col}
 
 class StructDecl(Stmt):
-    def __init__(self, name: str, fields: List[StructField], line: int = 1, col: int = 1):
+    def __init__(
+        self,
+        name: str,
+        fields: List[StructField],
+        type_params: Optional[List[Any]] = None,
+        line: int = 1,
+        col: int = 1
+    ):
         super().__init__(line, col)
         self.name = name
         self.fields = fields
+        self.type_params = type_params or []
 
     def to_dict(self) -> dict:
-        return {
+        d = {
             "kind": "StructDecl",
             "name": self.name,
             "fields": [f.to_dict() for f in self.fields],
             "line": self.line,
             "col": self.col
         }
+        if self.type_params:
+            d["type_params"] = [p.to_dict() if hasattr(p, "to_dict") else p for p in self.type_params]
+        return d
 
 class EnumDecl(Stmt):
     def __init__(self, name: str, variants: List[str], line: int = 1, col: int = 1):
@@ -605,19 +674,23 @@ class ElseErrExpr(Expr):
 
 
 class CallExpr(Expr):
-    def __init__(self, callee: Expr, args: List[Expr], line: int = 1, col: int = 1):
+    def __init__(self, callee: Expr, args: List[Expr], type_args: Optional[List[TypeNode]] = None, line: int = 1, col: int = 1):
         super().__init__(line, col)
         self.callee = callee
         self.args = args
+        self.type_args = type_args or []
 
     def to_dict(self) -> dict:
-        return {
+        d = {
             "kind": "CallExpr",
             "callee": self.callee.to_dict(),
             "args": [a.to_dict() for a in self.args],
             "line": self.line,
             "col": self.col
         }
+        if self.type_args:
+            d["type_args"] = [t.to_dict() for t in self.type_args]
+        return d
 
 class MemberExpr(Expr):
     def __init__(self, object: Expr, property: str, line: int = 1, col: int = 1):
@@ -674,19 +747,23 @@ class FieldInit(Node):
         return {"kind": "FieldInit", "name": self.name, "value": self.value.to_dict(), "line": self.line, "col": self.col}
 
 class StructInitExpr(Expr):
-    def __init__(self, struct_name: str, fields: List[FieldInit], line: int = 1, col: int = 1):
+    def __init__(self, struct_name: str, fields: List[FieldInit], type_args: Optional[List[TypeNode]] = None, line: int = 1, col: int = 1):
         super().__init__(line, col)
         self.struct_name = struct_name
         self.fields = fields
+        self.type_args = type_args or []
 
     def to_dict(self) -> dict:
-        return {
+        d = {
             "kind": "StructInitExpr",
             "struct_name": self.struct_name,
             "fields": [f.to_dict() for f in self.fields],
             "line": self.line,
             "col": self.col
         }
+        if self.type_args:
+            d["type_args"] = [t.to_dict() for t in self.type_args]
+        return d
 
 class ListExpr(Expr):
     def __init__(self, elements: List[Expr], line: int = 1, col: int = 1):

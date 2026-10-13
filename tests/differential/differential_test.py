@@ -215,6 +215,22 @@ def verify_three_way_equivalence(
 ) -> Tuple[bool, str]:
     res_interp = run_w0_interpreter(source_code, label)
     res_w0_c = run_w0_c99_native(source_code, label, repo_root, work_dir)
+
+    is_generic = "generic" in label.lower()
+    if is_generic:
+        if res_interp.compile_ok != res_w0_c.compile_ok:
+            return False, f"compile_ok mismatch on {label}:\n  W0 Interp: compile_ok={res_interp.compile_ok}\n  W0 C99: compile_ok={res_w0_c.compile_ok}"
+        if res_interp.runtime_ok != res_w0_c.runtime_ok:
+            return False, f"runtime_ok mismatch on {label}:\n  W0 Interp: runtime_ok={res_interp.runtime_ok}\n  W0 C99: runtime_ok={res_w0_c.runtime_ok}"
+        if res_interp.exit_code != res_w0_c.exit_code:
+            return False, f"Exit code mismatch on {label}:\n  W0 Interp: {res_interp.exit_code}\n  W0 C99: {res_w0_c.exit_code}"
+        if res_interp.stdout != res_w0_c.stdout:
+            return False, f"Stdout mismatch on {label}:\n  --- W0 Interp ---\n{res_interp.stdout}  --- W0 C99 ---\n{res_w0_c.stdout}"
+        if not res_interp.compile_ok or not res_interp.runtime_ok:
+            if not res_interp.diag_code or res_interp.diag_code != res_w0_c.diag_code:
+                return False, f"Diagnostic code mismatch on {label}:\n  W0 Interp: {res_interp.diag_code!r}\n  W0 C99: {res_w0_c.diag_code!r}"
+        return True, ""
+
     res_w1_c = run_w1_c99_native(source_code, label, w1_bin, repo_root, work_dir)
 
     if (

@@ -4,6 +4,7 @@ from typing import Any, Dict, List, Optional, Tuple, Set
 from node.NodeType import (
     Program, Stmt, Expr, TypeNode, ResultType as AstResultType,
     NamedType, OptionalType as AstOptionalType, ListType as AstListType, DictType as AstDictType,
+    GenericType,
     Pattern, IdentifierPattern, TuplePattern, EnumPattern, LiteralPattern, WildcardPattern,
     Block, ExprStmt, Param, FnDecl, StructDecl, EnumDecl, ImportDecl,
     InterfaceDecl, ClassDecl, ClassField, MethodDecl,
@@ -459,4 +460,22 @@ class HirBuilder:
                 self._get_type_id_from_node(node.ok_type),
                 self._get_type_id_from_node(node.err_type)
             )
+        elif isinstance(node, GenericType):
+            args_mangled = "__".join(self._get_type_name_from_node(a) for a in node.type_args)
+            mangled_name = f"{node.name}__{args_mangled}"
+            if mangled_name in self.structs:
+                return self.interner.mk_struct(mangled_name)
+            return TYPE_ERROR
         return TYPE_ERROR
+
+    def _get_type_name_from_node(self, node: TypeNode) -> str:
+        if isinstance(node, NamedType):
+            return node.name
+        if isinstance(node, GenericType):
+            args = "__".join(self._get_type_name_from_node(a) for a in node.type_args)
+            return f"{node.name}__{args}"
+        if isinstance(node, AstOptionalType):
+            return f"opt__{self._get_type_name_from_node(node.inner)}"
+        if isinstance(node, AstListType):
+            return f"list__{self._get_type_name_from_node(node.element_type)}"
+        return "val"

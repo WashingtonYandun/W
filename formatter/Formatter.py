@@ -1,6 +1,6 @@
 from typing import List, Optional
 from node.NodeType import (
-    Program, Stmt, Expr, TypeNode, NamedType, OptionalType, ListType, DictType, TupleType, ResultType,
+    Program, Stmt, Expr, TypeNode, NamedType, GenericType, TypeParam, OptionalType, ListType, DictType, TupleType, ResultType,
     Pattern, IdentifierPattern, TuplePattern, EnumPattern, LiteralPattern, WildcardPattern,
     Block, ExprStmt, Param, FnDecl, StructField, StructDecl, EnumDecl,
     InterfaceMethod, InterfaceDecl, ClassField, MethodDecl, ClassDecl,
@@ -64,6 +64,9 @@ class Formatter:
     def format_type(self, t: TypeNode) -> str:
         if isinstance(t, NamedType):
             return t.name
+        if isinstance(t, GenericType):
+            args = ", ".join([self.format_type(e) for e in t.type_args])
+            return f"{t.name}[{args}]"
         if isinstance(t, OptionalType):
             return f"{self.format_type(t.inner)}?"
         if isinstance(t, ListType):
@@ -109,13 +112,14 @@ class Formatter:
             return f"{ind}enum {stmt.name} {{ {variants} }}"
 
         if isinstance(stmt, StructDecl):
+            tparams = f"[{', '.join(str(p) for p in stmt.type_params)}]" if stmt.type_params else ""
             if not stmt.fields:
-                return f"{ind}struct {stmt.name} {{}}"
+                return f"{ind}struct {stmt.name}{tparams} {{}}"
             field_lines: List[str] = []
             for f in stmt.fields:
                 field_lines.append(f"{self._indent(level + 1)}{f.name}: {self.format_type(f.type_ann)},")
             body = "\n".join(field_lines)
-            return f"{ind}struct {stmt.name} {{\n{body}\n{ind}}}"
+            return f"{ind}struct {stmt.name}{tparams} {{\n{body}\n{ind}}}"
 
         if isinstance(stmt, InterfaceDecl):
             if not stmt.methods:
@@ -150,10 +154,11 @@ class Formatter:
             return f"{header} {{\n{body}\n{ind}}}"
 
         if isinstance(stmt, FnDecl):
+            tparams = f"[{', '.join(str(p) for p in stmt.type_params)}]" if stmt.type_params else ""
             params_str = ", ".join([f"{p.name}: {self.format_type(p.type_ann)}" for p in stmt.params])
             ret_str = self.format_type(stmt.return_type)
             block_str = self.format_block(stmt.body, level)
-            return f"{ind}fn {stmt.name}({params_str}) -> {ret_str} {block_str}"
+            return f"{ind}fn {stmt.name}{tparams}({params_str}) -> {ret_str} {block_str}"
 
         if isinstance(stmt, LetDecl):
             mut_str = "mut " if stmt.is_mut else ""
@@ -314,8 +319,9 @@ class Formatter:
 
         if isinstance(expr, CallExpr):
             callee_str = self.format_expr(expr.callee, level, parent_prec=15)
+            targs = f"[{', '.join([self.format_type(a) for a in expr.type_args])}]" if getattr(expr, "type_args", None) else ""
             args_str = ", ".join([self.format_expr(a, level) for a in expr.args])
-            return f"{callee_str}({args_str})"
+            return f"{callee_str}{targs}({args_str})"
 
         if isinstance(expr, MemberExpr):
             obj_str = self.format_expr(expr.object, level, parent_prec=15)
@@ -327,10 +333,11 @@ class Formatter:
             return f"{obj_str}[{idx_str}]"
 
         if isinstance(expr, StructInitExpr):
+            targs = f"[{', '.join([self.format_type(a) for a in expr.type_args])}]" if getattr(expr, "type_args", None) else ""
             if not expr.fields:
-                return f"{expr.struct_name} {{}}"
+                return f"{expr.struct_name}{targs} {{}}"
             fields_str = ", ".join([f"{f.name}: {self.format_expr(f.value, level)}" for f in expr.fields])
-            return f"{expr.struct_name} {{ {fields_str} }}"
+            return f"{expr.struct_name}{targs} {{ {fields_str} }}"
 
         if isinstance(expr, ListExpr):
             elems_str = ", ".join([self.format_expr(e, level) for e in expr.elements])
