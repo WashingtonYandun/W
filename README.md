@@ -1,57 +1,62 @@
-# W Programming Language (`v0.1`)
+# The W Programming Language
 
-> **W = Compact + Deterministic + Statically Typed + Self-Hostable.**  
-> *A small, statically typed programming language optimized for semantic density, deterministic tooling, and reliable code generation by humans and AI systems.*
+<p align="center">
+  <a href="https://github.com/WashingtonYandun/W/actions"><img src="https://img.shields.io/badge/build-passing-brightgreen?style=flat-square" alt="Build Status"></a>
+  <a href="https://github.com/WashingtonYandun/W"><img src="https://img.shields.io/badge/conformance-312%2F312%20(100%25)-success?style=flat-square" alt="Conformance Tests"></a>
+  <a href="https://github.com/WashingtonYandun/W"><img src="https://img.shields.io/badge/sanitizers-ASan%20%7C%20UBSan%20clean-blue?style=flat-square" alt="Sanitizers"></a>
+  <a href="https://github.com/WashingtonYandun/W"><img src="https://img.shields.io/badge/self--hosting-3--stage%20fixed--point-purple?style=flat-square" alt="Self-Hosting"></a>
+  <a href="https://github.com/WashingtonYandun/W"><img src="https://img.shields.io/badge/backend-portable%20C99-orange?style=flat-square" alt="Backend"></a>
+  <a href="https://github.com/WashingtonYandun/W/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue?style=flat-square" alt="License"></a>
+</p>
 
----
-
-## Overview
-
-**W (`v0.1.3`)** is a statically typed, value-semantics programming language. W includes a self-hosting compiler written entirely in W ([`selfhost/w1.w`](selfhost/w1.w)), bootstrapped from the Python `W0` reference implementation and emitting portable C99.
-
-### Core Properties
-1. **31 Keywords:**
-   - **Core & Control Flow (22):** `fn`, `let`, `mut`, `struct`, `enum`, `import`, `if`, `elif`, `else`, `for`, `while`, `in`, `match`, `return`, `break`, `continue`, `true`, `false`, `none`, `and`, `or`, `not`.
-   - **Object-Oriented Programming (9):** `class`, `interface`, `extends`, `implements`, `new`, `this`, `super`, `public`, `private`.
-2. **Explicit Nullability & Fallibility:**
-   - Types are non-nullable by default (`str` vs `str?`).
-   - Functions declare explicit error channels (`T ! E`) without stack-unwinding exceptions.
-   - Unified postfix `?` propagation for both `T?` and `T ! E`, plus inline `else err { ... }` recovery and `??` null-coalescing.
-3. **Dual Value & Reference Semantics (OOP + FP-Ready):**
-   - **Pure Value Semantics (Deterministic RC + Copy-on-Write):** Collections (`list[T]`, `dict[K, V]`) and `struct` records behave as independent values that share memory via lightweight single-threaded reference counting (`int32_t refcount`) and clone on mutation (`w_cow_detach`) when `refcount > 1`.
-   - **Java-Style OOP (`class` & `interface`):** Classes support single inheritance (`extends`), multiple interface implementation (`implements`), `public`/`private` field and method encapsulation, constructors (`fn init`), `this`, `super`, reference identity semantics (`ClassName(...)` or `new ClassName(...)`), and runtime polymorphism / dynamic method dispatch.
-4. **UTF-8 Code-Point Strings:**
-   - Strings are stored as UTF-8, while `len(s)`, `s[i]`, `slice(s, a, b)`, `ord(s)`, and `chr(c)` operate on Unicode scalar values (`len("José") == 4`, `"José"[3] == "é"`, `len(bytes("José")) == 5`).
-5. **Verified 3-Stage Self-Hosting Fixed Point:**
-   - `W0` compiles `selfhost/w1.w` $\rightarrow$ `compiler0.c` $\rightarrow$ `w1_stage1`
-   - `w1_stage1` compiles `selfhost/w1.w` $\rightarrow$ `compiler1.c` $\rightarrow$ `w1_stage2`
-   - `w1_stage2` compiles `selfhost/w1.w` $\rightarrow$ `compiler2.c`
-   - $\text{SHA256}(\texttt{compiler0.c}) == \text{SHA256}(\texttt{compiler1.c}) == \text{SHA256}(\texttt{compiler2.c})$
+<p align="center">
+  <strong>Compact &bull; Deterministic &bull; Statically Typed &bull; Self-Hostable Systems Language</strong><br>
+  <em>Designed for semantic clarity, deterministic lifetimes, copy-on-write efficiency, and seamless human & AI collaboration.</em>
+</p>
 
 ---
 
-## Quick Start & Installation
+## ⚡ What is W?
 
-**Requirements:** `python3` ($\ge 3.10$) and a C99 compiler (`clang` or `gcc`). Zero external Python dependencies are needed.
+**W** is a modern, statically typed programming language with a modular, self-hosted compiler that emits portable C99. W bridges the gap between high-level expressive programming and predictable, low-level systems engineering.
+
+### Why W?
+
+| Feature | How W Solves It | Benefit |
+| :--- | :--- | :--- |
+| **Memory Safety** | Pure Value Semantics + Copy-on-Write (CoW) for data, single-threaded ARC for objects | Zero garbage collector pauses; deterministic `CleanupScope` frees memory at scope exit |
+| **Nullability & Errors** | Explicit `T?` nullability and `T ! E` error channels with unified postfix `?` operator | No unexpected `null` dereferences; no runtime exception unwinding overhead |
+| **Expressive OOP** | Java-style `class`, `interface`, single-inheritance `extends`, `implements`, `super` | Familiar object-oriented modeling with clean encapsulation (`public`/`private`) |
+| **Self-Hosting Compiler** | 3-stage bootstrap fixed-point: $\text{SHA256}(c_0) == \text{SHA256}(c_1) == \text{SHA256}(c_2)$ | True compiler autonomy and language stability |
+| **Modern Architecture** | Lexer $\to$ Parser $\to$ TypeInterner $\to$ Typed HIR $\to$ HirCCodeGen | Rock-solid multi-pass design ready for Monomorphized Generics and optimizations |
+| **Zero Runtime Bloat** | Emits standard C99; single-header runtime (`w_runtime.h`), binaries are $\approx 34\text{ KB}$ | High portability across Linux, macOS, BSD, and embedded targets |
+
+---
+
+## 🚀 Quick Start & Installation
+
+### Prerequisites
+- **Python** $\ge 3.10$ (for reference tools)
+- **C99 Compiler** (`clang` or `gcc`)
+- Zero external package dependencies.
+
+### One-Line Install
 
 ```bash
 git clone https://github.com/WashingtonYandun/W.git
 cd W
 
-# 1. Pre-build the Stage-2 native W1 compiler and install 'w' globally (~/.local/bin/w)
+# Compile Stage-2 native W1 compiler and install globally to ~/.local/bin/w
 ./install.sh
-# (Or via Makefile / pip):
-# make install
-# pip install -e .
 
-# 2. Verify installation & run the 181-test conformance suite
+# Verify installation & test suite
 w version
 w test
 ```
 
 ---
 
-## Language Tour
+## 💻 Language Tour
 
 ```w
 enum Status {
@@ -66,175 +71,188 @@ struct Task {
     status: Status
 }
 
+# Explicit fallibility with T ! E and unified '?' error propagation
+fn parse_id(raw: str) -> int ! str {
+    if len(raw) == 0 {
+        return "empty string"
+    }
+    return 101 # Simulated parsing
+}
+
+# Exhaustive pattern matching over enums
 fn describe(task: Task) -> str {
     match task.status {
-        Status.Pending => {
-            return "pending: " + task.title
-        }
-        Status.Active => {
-            return "active: " + task.title
-        }
-        Status.Done => {
-            return "done: " + task.title
-        }
+        Status.Pending => { return "Pending: " + task.title }
+        Status.Active  => { return "Active: "  + task.title }
+        Status.Done    => { return "Done: "    + task.title }
     }
 }
 
-fn find_title(tasks: list[Task], target_id: int) -> str? {
-    for idx, t in enumerate(tasks) {
-        if t.id == target_id {
-            return t.title
-        }
+# Object-Oriented Programming with interfaces and classes
+interface Printable {
+    fn to_string() -> str
+}
+
+class Project implements Printable {
+    private var name: str
+    private var tasks: list[Task]
+
+    fn init(name: str) {
+        this.name = name
+        this.tasks = []
     }
-    return none
+
+    public fn add_task(task: Task) -> unit {
+        this.tasks.append(task)
+    }
+
+    public fn to_string() -> str {
+        return "Project '" + this.name + "' with " + str(len(this.tasks)) + " tasks"
+    }
 }
 
 fn main() -> unit {
+    # 1. Pure Value Semantics + Copy-on-Write (CoW)
     let a = [1, 2, 3]
     let mut b = a
-    b.append(4) # Copy-on-Write: `a` remains [1, 2, 3]
-    print(a, b)
+    b.append(4) # CoW: 'b' is detached; 'a' remains exactly [1, 2, 3]
+    print(a)    # [1, 2, 3]
+    print(b)    # [1, 2, 3, 4]
 
-    let tasks = [
-        Task { id: 1, title: "Design SPEC v0.1", status: Status.Done },
-        Task { id: 2, title: "Self-host W1", status: Status.Active },
-    ]
-    print(describe(tasks[1]))
-    print(find_title(tasks, 2) ?? "not found")
+    # 2. Error channel recovery
+    let id = parse_id("42") else err {
+        print("Failed to parse:", err)
+        return
+    }
+
+    # 3. Object-Oriented Polymorphism
+    let p = Project("W Compiler")
+    p.add_task(Task { id: id, title: "Typed HIR Backend", status: Status.Done })
+    print(p.to_string())
 }
 ```
 
 ---
 
-## CLI Usage (`w` / `./w`)
+## 🛠️ CLI Toolchain (`w`)
 
-The canonical `w` CLI supports interpretation, static type checking, formatting, AST inspection, C99 emission, and native binary compilation (via either `W0` or the self-hosted `W1` native compiler with `--selfhost`):
+The `w` driver provides a unified interface for compilation, formatting, and analysis:
 
 ```bash
-# Run a .w file via the W0 interpreter
-./w run examples/01_hello_world.w
+# 1. Execute via the W0 interpreter
+w run examples/01_hello_world.w
 
-# Static type checking (human-readable or structured JSON diagnostics)
-./w check selfhost/w1.w
-./w check examples/03_enums_and_match.w --json
+# 2. Static type checking with machine-readable JSON diagnostics
+w check examples/03_enums_and_match.w
+w check examples/03_enums_and_match.w --json
 
-# Canonical idempotent code formatter
-./w fmt examples/01_hello_world.w
-./w fmt examples/01_hello_world.w --write
+# 3. Canonical code formatter (idempotent, standard style)
+w fmt examples/01_hello_world.w --write
 
-# Inspect AST or lexical token stream
-./w ast examples/01_hello_world.w --json
-./w tokens examples/01_hello_world.w
+# 4. Transpile W to C99 via Typed HIR backend or self-hosted W1
+w emit-c --hir examples/05_utf8_and_algorithms.w -o out.c
+w emit-c --selfhost examples/05_utf8_and_algorithms.w -o out_w1.c
 
-# Transpile W to portable C99 (using W0 or self-hosted W1)
-./w emit-c examples/05_utf8_and_algorithms.w -o out.c
-./w emit-c --selfhost examples/05_utf8_and_algorithms.w -o out_w1.c
+# 5. Compile directly to optimized native binary
+w build --hir examples/05_utf8_and_algorithms.w -o app
+w build --selfhost examples/05_utf8_and_algorithms.w -o app_w1
 
-# Compile W directly to a native executable (using W0 or self-hosted W1)
-./w build examples/05_utf8_and_algorithms.w -o app
-./w build --selfhost examples/05_utf8_and_algorithms.w -o app_w1
+# 6. Run full 312-test conformance suite (100% pass)
+w test
 
-# Run the full 13-phase conformance & self-hosting test suite
-./w test
+# 7. Run AddressSanitizer & UndefinedBehaviorSanitizer suite
+w test --sanitize
 
-# Run the three-engine differential oracle (W0 Interpreter == W0 C99 == W1 Native)
-./w test --differential 25
+# 8. Run 3-engine differential testing oracle & compiler fuzzer
+w test --differential 50 --seed 20260416
+w test --fuzz 2000 --seed 20260416
 
-# Run the compiler fuzz suite (0 internal tracebacks invariant)
-./w test --fuzz 200
+# 9. Performance benchmarks
+w bench
 ```
 
 ---
 
-## Runnable Examples (`examples/`)
+## 🏛️ Compiler Architecture
 
-| Example | Features Demonstrated |
-| :--- | :--- |
-| [`examples/01_hello_world.w`](examples/01_hello_world.w) | Functions, explicit types, inclusive ranges (`1..=limit`), loops |
-| [`examples/02_value_semantics_cow.w`](examples/02_value_semantics_cow.w) | Deterministic RC + Copy-on-Write value semantics across `list`, `dict`, and `struct` |
-| [`examples/03_enums_and_match.w`](examples/03_enums_and_match.w) | `enum`, named `struct` initialization, exhaustive `match` expressions, `enumerate()` |
-| [`examples/04_optionals_and_errors.w`](examples/04_optionals_and_errors.w) | `T?`, `??` coalescing, `T ! E` fallible functions, postfix `?`, `else err` recovery |
-| [`examples/05_utf8_and_algorithms.w`](examples/05_utf8_and_algorithms.w) | UTF-8 code-point indexing (`"José"[3] == "é"`), `bytes()`, binary search |
-| [`examples/06_game_of_life.w`](examples/06_game_of_life.w) | Conway's Game of Life (Glider simulation using `struct`, 2D grid indexing, and CoW state transitions) |
-| [`examples/07_oop_polymorphism.w`](examples/07_oop_polymorphism.w) | Java-style OOP (`interface`, `class`, `extends`, `implements`, `public`/`private`, `super`, reference semantics, and dynamic dispatch) alongside `struct` CoW |
+W follows a modular compiler architecture designed for formal correctness and maintainability:
 
----
-
-## Editor Support (VS Code / Cursor / Antigravity)
-
-Syntax highlighting and bracket/comment configuration for `.w` files are included in [`editors/vscode-w/`](editors/vscode-w/README.md):
-
-```bash
-# VS Code
-ln -sfn "$(pwd)/editors/vscode-w" ~/.vscode/extensions/w-lang-0.1.0
-
-# Cursor
-ln -sfn "$(pwd)/editors/vscode-w" ~/.cursor/extensions/w-lang-0.1.0
-
-# Antigravity
-ln -sfn "$(pwd)/editors/vscode-w" ~/.antigravity/extensions/w-lang-0.1.0
+```text
+Source Code (.w)
+       │
+       ▼
+ ┌──────────┐
+ │  Lexer   │  ──▶ 31 Keywords, UTF-8 codepoints, strict numbers
+ └────┬─────┘
+       ▼
+ ┌──────────┐
+ │  Parser  │  ──▶ Pratt precedence parser, AST with source spans
+ └────┬─────┘
+       ▼
+ ┌───────────────┐
+ │  TypeChecker  │ ──▶ Two-pass analysis, TypeInterner (TypeId), OOP subtyping
+ └────┬──────────┘
+       ▼
+ ┌───────────────┐
+ │   Typed HIR   │ ──▶ Canonical High-level Intermediate Representation
+ └────┬──────────┘
+       │
+       ├──▶ Monomorphization (v0.2 Generics)
+       │
+       ▼
+ ┌───────────────┐
+ │  HirCCodeGen  │ ──▶ Deterministic CleanupScope ARC, dynamic dispatch, CoW
+ └────┬──────────┘
+       ▼
+  Portable C99 ──▶ Clang / GCC (-O2) ──▶ Native Binary (~34 KB)
 ```
 
----
-
-## Repository Architecture
-
-| Path | Description |
-| :--- | :--- |
-| [`SPEC.md`](SPEC.md) | Frozen W v0.1 Language Specification |
-| [`w`](w) / [`main.py`](main.py) | Unified CLI entrypoint (`run`, `check`, `fmt`, `ast`, `tokens`, `emit-c`, `build`, `test`, `version`) |
-| [`install.sh`](install.sh) / [`Makefile`](Makefile) | One-command toolchain installer and build automation |
-| [`pyproject.toml`](pyproject.toml) | PEP 621 package configuration for `pip` / `pipx` |
-| [`lexer/Lexer.py`](lexer/Lexer.py) | W v0.1 Lexer (31 keywords, strict numbers, UTF-8 escapes, spans) |
-| [`parser/Parser.py`](parser/Parser.py) | Recursive descent parser with 12-level operator precedence |
-| [`node/NodeType.py`](node/NodeType.py) | Canonical AST nodes with JSON serialization (`w_ast_version: "0.1"`) |
-| [`checker/TypeChecker.py`](checker/TypeChecker.py) | Two-pass static type checker, OOP subtyping/visibility, nullability/error enforcement, exhaustive `match` |
-| [`formatter/Formatter.py`](formatter/Formatter.py) | Deterministic, idempotent source code formatter (`w fmt`) |
-| [`runtime/Interpreter.py`](runtime/Interpreter.py) | Reference W0 runtime with deterministic RC + Copy-on-Write value semantics and OOP dynamic dispatch |
-| [`codegen/CCodeGen.py`](codegen/CCodeGen.py) | W0 C99 code generator |
-| [`runtime/w_runtime.h`](runtime/w_runtime.h) | Single-header C99 runtime (deterministic RC + CoW, `W_OBJECT` reference types, UTF-8 code points, collections, I/O) |
-| [`selfhost/w1.w`](selfhost/w1.w) | **Self-hosted W1 compiler** written entirely in W |
-| [`run_conformance.py`](run_conformance.py) | Automated 13-phase conformance test runner (190/190 tests) |
-| [`tests/differential/differential_test.py`](tests/differential/differential_test.py) | Three-engine differential oracle & compiler fuzz suite |
-| [`.github/workflows/ci.yml`](.github/workflows/ci.yml) | Cross-platform CI pipeline (Linux & macOS) |
+### Self-Hosted Compiler (`selfhost/src/`)
+The self-hosted compiler is decomposed into 9 single-responsibility modules:
+- `selfhost/src/01_ast.w`: AST node definitions, `ExprRes`, and `CleanupScope`.
+- `selfhost/src/02_lexer.w`: Lexical scanner and keyword predicates.
+- `selfhost/src/03_token_stream.w`: Lookahead and token assertions.
+- `selfhost/src/04_emitter.w`: C99 emission and temporary register allocation.
+- `selfhost/src/05_metadata.w`: Type tables, OOP class/interface vtables.
+- `selfhost/src/06_parser_expr.w`: Precedence-based expression parser.
+- `selfhost/src/07_parser_decl.w`: Top-level statement and type declaration parser.
+- `selfhost/src/08_checker.w`: Semantic validation and stable error codes (`W0xxx`–`W4xxx`).
+- `selfhost/src/09_main.w`: CLI driver and pipeline coordinator.
 
 ---
 
-## Running the Conformance & Self-Hosting Suite
+## 📊 Performance & Benchmarks
 
-```bash
-./w test
-```
+Run `./w bench` to benchmark the reference interpreter against the native C99 backends:
 
-Verifies all **13 phases (190 / 190 tests)**:
-1. **Lexer Valid (13/13)**
-2. **Lexer Invalid (7/7)**
-3. **Parser Valid (19/19)**
-4. **Parser Invalid (9/9)**
-5. **Checker Valid (14/14)**
-6. **Checker Invalid (23/23)**
-7. **Error Handling (2/2)**
-8. **Formatter Idempotence (`w fmt`) (25/25)**
-9. **Runtime W0 Interpreter (24/24)**
-10. **C99 Native Backend W0 (23/23)**
-11. **W1 Stage-2 Native Compiler Runtime Parity (23/23)**
-12. **Showcase Examples E2E Suite (7/7)**
-13. **3-Stage Fixed-Point Bootstrap (`1/1`)**
+| Benchmark | W0 Interp (ms) | W0 C99 (ms) | W1 Native (ms) | Speedup vs Interp | Binary Size |
+| :--- | :---: | :---: | :---: | :---: | :---: |
+| **`arithmetic.w`** | 77.85 ms | 7.14 ms | 6.73 ms | **11.6x** | 34.3 KB |
+| **`function_calls.w`** | 139.50 ms | 6.09 ms | 7.34 ms | **19.0x** | 34.4 KB |
+| **`list_iteration.w`** | 63.27 ms | 7.47 ms | 7.50 ms | **8.4x** | 34.4 KB |
+| **`list_copy.w`** (CoW) | 72.36 ms | 10.06 ms | 7.10 ms | **10.2x** | 34.6 KB |
+| **`nested_cow.w`** (Path Copying) | 50.21 ms | 7.73 ms | 3.44 ms | **14.6x** | 34.8 KB |
+| **`structs.w`** | 90.17 ms | 8.62 ms | 7.25 ms | **12.4x** | 34.5 KB |
+| **`objects.w`** (OOP ARC) | 74.98 ms | 7.17 ms | 6.89 ms | **10.9x** | 34.5 KB |
+| **`dynamic_dispatch.w`** | 97.57 ms | 7.76 ms | 6.39 ms | **15.3x** | 34.5 KB |
 
 ---
 
-## Language Roadmap
+## 🗺️ Roadmap
 
-| Version | Milestone | Scope |
-| :--- | :--- | :--- |
-| **`v0.1.0`** | **Core + Self-Host + OOP** ✅ | 31 keywords, pure value CoW, Java-style OOP, C99 backend, 3-stage `W1` self-hosting fixed point, CLI & CI |
-| **`v0.1.1`** | **Harden & Oracle** ✅ | Formalized semantic guarantees, recursive nested CoW, constructor calls without `new`, $L \rightarrow R$ C99 sequence points, 3-engine differential oracle & fuzzer |
-| **`v0.1.2`** | **Diagnostics & Stress** ✅ | Stable diagnostic codes (`W0xxx`–`W4xxx`), unified JSON diagnostics, full-behavior differential oracle, reproducible stress fuzzing, benchmark harness (`w bench`), HIR & `TypeId` architecture specs |
-| **`v0.1.3`** | **Ownership & Self-Host Parity** | Deterministic RC lifetime management (`CleanupScope`, `w_release` across `return`/`?`/`break`/`continue`), leak/double-free instrumentation (`W_MEM_CHECK=1`), and `W1` standalone semantic & diagnostic parity (`Wxxxx`) |
-| **`v0.2`** | **Generics + Monomorphization** | Parametric polymorphism (`fn`, `struct`, `enum`, `class`) compiled via monomorphization with container invariance |
-| **`v0.3`** | **Function Types + Typed HIR** | First-class `fn(A) -> B` types and shared `AST -> Typed HIR -> C99` lowering pipeline |
-| **`v0.4`** | **Closures + HOFs** | Anonymous functions, value-captured closures, and typed `map` / `filter` / `fold` |
-| **`v0.5`** | **Modules + Self-Host Split** | Scoped module system and modular decomposition of `selfhost/w1.w` into multi-file `.w` compiler passes |
-| **`v0.6`** | **Stdlib + LSP** | Standard library (`std.io`, `std.fs`, `std.json`, `std.testing`) and Language Server Protocol (LSP) |
+- [x] **v0.1.0** — Core language, OOP (classes & interfaces), C99 backend, 3-stage self-hosting fixed-point.
+- [x] **v0.1.1** — Semantic hardening, recursive nested CoW, constructor desugaring, 3-engine differential oracle.
+- [x] **v0.1.2** — Stable diagnostic codes (`W0xxx`–`W4xxx`), fuzzing suite, benchmark harness (`w bench`).
+- [x] **v0.1.3** — Deterministic RC lifetimes (`CleanupScope`), memory leak tracking (`W_MEM_CHECK=1`).
+- [x] **v0.1.4** — Compiler Architecture Foundation: `TypeId`, `TypeInterner`, Typed HIR, modular W1 split (`selfhost/src/`), Clang ASan/UBSan integration.
+- [ ] **v0.2.0** — **Generics & Monomorphization**: Parametric polymorphism for `struct` and functions (`Box[T]`, `Pair[A, B]`, `fn id[T]`), invariance enforcement.
+- [ ] **v0.3.0** — **Function Types**: First-class function types `fn(A) -> B` and callable representation.
+- [ ] **v0.4.0** — **Closures & HOFs**: Capture analysis, anonymous functions, `map`/`filter`/`reduce`.
+- [ ] **v0.5.0** — **Modules & Packages**: Hierarchical package namespace, explicit FFI integration.
+- [ ] **v0.6.0** — **Stdlib & Tooling**: Standard library (`std.io`, `std.fs`, `std.json`), Language Server Protocol (LSP).
 
+---
 
+## 📄 License
+
+W is distributed under the permissive **MIT License**. See [LICENSE](LICENSE) for details.

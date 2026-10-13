@@ -1,9 +1,11 @@
+import copy
 import os
-from typing import Dict, List, Optional, Set, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple
 from node.NodeType import (
     Node, Program, Stmt, Expr, TypeNode, Pattern, Block,
     NamedType, OptionalType as AstOptionalType, ListType as AstListType,
     DictType as AstDictType, TupleType as AstTupleType, ResultType as AstResultType,
+    GenericType, TypeParam,
     IdentifierPattern, TuplePattern, EnumPattern, LiteralPattern, WildcardPattern,
     FnDecl, Param, StructDecl, StructField, EnumDecl,
     InterfaceDecl, InterfaceMethod, ClassDecl, ClassField, MethodDecl,
@@ -20,9 +22,11 @@ from checker.WType import (
     WType, IntType, FloatType, BoolType, StrType, UnitType, NoneType,
     OptionalType, ListType, DictType, TupleType, StructType, EnumType,
     InterfaceType, ClassFieldInfo, ClassMethodInfo, ClassType,
-    ResultType, FunctionType, ModuleType, AnyType, is_assignable
+    ResultType, FunctionType, ModuleType, AnyType,
+    TypeParamType, GenericStructTemplate, GenericFnTemplate, is_assignable
 )
 from checker.SymbolTable import Scope, Symbol, create_global_scope
+from checker.TypeInterner import TypeInterner
 from error.Error import TypeError
 
 class TypeChecker:
@@ -45,6 +49,14 @@ class TypeChecker:
         self.loop_depth: int = 0
         self.checked_modules: Dict[str, ModuleType] = checked_modules if checked_modules is not None else {}
         self.active_imports: Set[str] = active_imports if active_imports is not None else set()
+        self.interner: TypeInterner = TypeInterner()
+        self.generic_struct_templates: Dict[str, GenericStructTemplate] = {}
+        self.generic_fn_templates: Dict[str, GenericFnTemplate] = {}
+        self.monomorphized_structs: Dict[Tuple[str, Tuple[WType, ...]], StructType] = {}
+        self.monomorphized_fns: Dict[Tuple[str, Tuple[WType, ...]], Symbol] = {}
+        self.monomorphized_struct_decls: List[StructDecl] = []
+        self.monomorphized_fn_decls: List[FnDecl] = []
+        self._monomorphize_depth: int = 0
 
     def check(self, program: Program) -> None:
         # Pass 1: Collect declarations
@@ -52,6 +64,21 @@ class TypeChecker:
 
         # Pass 2: Typecheck bodies & statements
         self._pass2_check_program(program)
+
+        # Filter out uninstantiated generic templates and insert monomorphized declarations
+        filtered_body: List[Stmt] = []
+        for stmt in program.body:
+            if isinstance(stmt, (StructDecl, FnDecl)) and stmt.type_params:
+                continue
+            filtered_body.append(stmt)
+
+        final_body: List[Stmt] = []
+        final_body.extend(self.monomorphized_struct_decls)
+        final_body.extend(self.monomorphized_fn_decls)
+        final_body.extend(filtered_body)
+        program.body = final_body
+
+        program.interner = self.interner
 
     # ==========================================
     # Pass 1: Collect Top-Level Declarations
@@ -137,20 +164,25 @@ class TypeChecker:
         # Step 1b: Resolve Structs and Interface method signatures
         for stmt in program.body:
             if isinstance(stmt, StructDecl):
-                fields_dict: Dict[str, WType] = {}
-                for f in stmt.fields:
-                    if f.name in fields_dict:
-                        raise TypeError(
-                            message=f"Duplicate field '{f.name}' in struct '{stmt.name}'",
-                            line=f.line,
-                            col=f.col,
-                            file=self.file,
-                            code="T014"
-                        )
-                    f_type = self._resolve_type_node(f.type_ann)
-                    fields_dict[f.name] = f_type
-                struct_type = StructType(name=stmt.name, fields=fields_dict)
-                self.global_scope.define_type(stmt.name, struct_type, line=stmt.line, col=stmt.col, file=self.file)
+                if stmt.type_params:
+                    template = GenericStructTemplate(name=stmt.name, type_params=stmt.type_params, ast_decl=stmt)
+                    self.generic_struct_templates[stmt.name] = template
+                    self.global_scope.define_type(stmt.name, template, line=stmt.line, col=stmt.col, file=self.file)
+                else:
+                    fields_dict: Dict[str, WType] = {}
+                    for f in stmt.fields:
+                        if f.name in fields_dict:
+                            raise TypeError(
+                                message=f"Duplicate field '{f.name}' in struct '{stmt.name}'",
+                                line=f.line,
+                                col=f.col,
+                                file=self.file,
+                                code="T014"
+                            )
+                        f_type = self._resolve_type_node(f.type_ann)
+                        fields_dict[f.name] = f_type
+                    struct_type = StructType(name=stmt.name, fields=fields_dict)
+                    self.global_scope.define_type(stmt.name, struct_type, line=stmt.line, col=stmt.col, file=self.file)
 
             elif isinstance(stmt, InterfaceDecl):
                 intf_type = self.global_scope.lookup_type(stmt.name)
@@ -243,13 +275,21 @@ class TypeChecker:
                         cls_type.methods[m.name] = ClassMethodInfo(fn_type=fn_t, is_public=m.is_public, owner_class=stmt.name)
 
             elif isinstance(stmt, FnDecl):
-                param_types: List[WType] = [self._resolve_type_node(p.type_ann) for p in stmt.params]
-                ret_type = self._resolve_type_node(stmt.return_type)
-                fn_type = FunctionType(params=param_types, ret=ret_type)
-                self.global_scope.define_symbol(
-                    Symbol(stmt.name, fn_type, is_mut=False, kind="fn", line=stmt.line, col=stmt.col),
-                    file=self.file
-                )
+                if stmt.type_params:
+                    template = GenericFnTemplate(name=stmt.name, type_params=stmt.type_params, ast_decl=stmt)
+                    self.generic_fn_templates[stmt.name] = template
+                    self.global_scope.define_symbol(
+                        Symbol(stmt.name, template, is_mut=False, kind="fn", line=stmt.line, col=stmt.col),
+                        file=self.file
+                    )
+                else:
+                    param_types: List[WType] = [self._resolve_type_node(p.type_ann) for p in stmt.params]
+                    ret_type = self._resolve_type_node(stmt.return_type)
+                    fn_type = FunctionType(params=param_types, ret=ret_type)
+                    self.global_scope.define_symbol(
+                        Symbol(stmt.name, fn_type, is_mut=False, kind="fn", line=stmt.line, col=stmt.col),
+                        file=self.file
+                    )
 
         # Step 1d: Propagate inherited members and verify interface contracts
         for stmt in class_decls:
@@ -337,6 +377,8 @@ class TypeChecker:
             self._check_class_decl(stmt)
 
         elif isinstance(stmt, FnDecl):
+            if stmt.type_params:
+                return  # Generic templates are typechecked when monomorphized
             self._check_fn_decl(stmt)
 
         elif isinstance(stmt, LetDecl):
@@ -690,6 +732,15 @@ class TypeChecker:
     # ==========================================
 
     def _check_expr(self, expr: Expr, is_statement_context: bool = False) -> WType:
+        wtype = self._check_expr_impl(expr, is_statement_context)
+        try:
+            expr.inferred_type = wtype
+            expr.inferred_type_id = self.interner.from_wtype(wtype)
+        except Exception:
+            pass
+        return wtype
+
+    def _check_expr_impl(self, expr: Expr, is_statement_context: bool = False) -> WType:
         if isinstance(expr, IntLiteral):
             return IntType
         if isinstance(expr, FloatLiteral):
@@ -1323,28 +1374,111 @@ class TypeChecker:
             )
 
         if isinstance(expr, CallExpr):
-            # Support direct constructor call syntax: ClassName(...)
+            # Support generic function calls and generic struct constructors
+            callee_t: Optional[WType] = None
             if isinstance(expr.callee, IdentExpr):
-                if self.current_scope.lookup_symbol(expr.callee.name) is None:
+                callee_name = expr.callee.name
+                if callee_name in self.generic_fn_templates:
+                    template = self.generic_fn_templates[callee_name]
+                    if expr.type_args:
+                        concrete_args = [self._resolve_type_node(a) for a in expr.type_args]
+                    else:
+                        if len(expr.args) != len(template.ast_decl.params):
+                            raise TypeError(
+                                message=f"Expected {len(template.ast_decl.params)} arguments for generic function '{callee_name}', found {len(expr.args)}",
+                                line=expr.line,
+                                col=expr.col,
+                                file=self.file,
+                                code="T015"
+                            )
+                        type_params_set = {p.name if hasattr(p, "name") else str(p) for p in template.type_params}
+                        bindings: Dict[str, WType] = {}
+                        for p_decl, a_expr in zip(template.ast_decl.params, expr.args):
+                            a_type = self._check_expr(a_expr)
+                            self._unify_type(p_decl.type_ann, a_type, type_params_set, bindings)
+                        for p in template.type_params:
+                            p_name = p.name if hasattr(p, "name") else str(p)
+                            if p_name not in bindings:
+                                raise TypeError(
+                                    message=f"Could not infer type parameter '{p_name}' for generic function '{callee_name}'",
+                                    line=expr.line,
+                                    col=expr.col,
+                                    file=self.file,
+                                    code="T003"
+                                )
+                        concrete_args = [bindings[p.name if hasattr(p, "name") else str(p)] for p in template.type_params]
+
+                    fn_sym = self._monomorphize_fn(template, concrete_args, expr.line, expr.col)
+                    expr.callee.name = fn_sym.name
+                    expr.type_args = []
+                    callee_t = fn_sym.type
+
+                elif callee_name in self.generic_struct_templates:
+                    template = self.generic_struct_templates[callee_name]
+                    if expr.type_args:
+                        concrete_args = [self._resolve_type_node(a) for a in expr.type_args]
+                    else:
+                        if len(expr.args) != len(template.ast_decl.fields):
+                            raise TypeError(
+                                message=f"Expected {len(template.ast_decl.fields)} arguments for struct constructor '{callee_name}', found {len(expr.args)}",
+                                line=expr.line,
+                                col=expr.col,
+                                file=self.file,
+                                code="T015"
+                            )
+                        type_params_set = {p.name if hasattr(p, "name") else str(p) for p in template.type_params}
+                        bindings = {}
+                        for f_decl, a_expr in zip(template.ast_decl.fields, expr.args):
+                            a_type = self._check_expr(a_expr)
+                            self._unify_type(f_decl.type_ann, a_type, type_params_set, bindings)
+                        for p in template.type_params:
+                            p_name = p.name if hasattr(p, "name") else str(p)
+                            if p_name not in bindings:
+                                raise TypeError(
+                                    message=f"Could not infer type parameter '{p_name}' for struct constructor '{callee_name}'",
+                                    line=expr.line,
+                                    col=expr.col,
+                                    file=self.file,
+                                    code="T003"
+                                )
+                        concrete_args = [bindings[p.name if hasattr(p, "name") else str(p)] for p in template.type_params]
+
+                    struct_t = self._monomorphize_struct(template, concrete_args, expr.line, expr.col)
+                    expr.callee.name = struct_t.name
+                    expr.type_args = []
+                    ctor_sym = self.global_scope.lookup_symbol(struct_t.name)
+                    callee_t = ctor_sym.type if ctor_sym else FunctionType([struct_t.fields[f.name] for f in template.ast_decl.fields], struct_t)
+
+                elif expr.type_args:
+                    raise TypeError(
+                        message=f"Symbol '{callee_name}' is not a generic function or struct",
+                        line=expr.line,
+                        col=expr.col,
+                        file=self.file,
+                        code="T002"
+                    )
+
+                elif self.current_scope.lookup_symbol(expr.callee.name) is None:
                     maybe_cls = self.current_scope.lookup_type(expr.callee.name)
                     if isinstance(maybe_cls, ClassType):
                         return self._check_class_instantiation(maybe_cls, expr.args, expr.line, expr.col)
 
             # Mutating method check on receiver (transitive across value-type paths)
-            if isinstance(expr.callee, MemberExpr):
-                callee_t = self._check_expr(expr.callee)
-                if isinstance(callee_t, FunctionType) and callee_t.is_mutating:
-                    sym = self._find_value_root_symbol(expr.callee.object)
-                    if sym and not sym.is_mut:
-                        raise TypeError(
-                            message=f"Cannot call mutating method '{expr.callee.property}' on immutable binding '{sym.name}'",
-                            line=expr.line,
-                            col=expr.col,
-                            file=self.file,
-                            code="T004"
-                        )
-            else:
-                callee_t = self._check_expr(expr.callee)
+            if callee_t is None:
+                if isinstance(expr.callee, MemberExpr):
+                    callee_t = self._check_expr(expr.callee)
+                    if isinstance(callee_t, FunctionType) and callee_t.is_mutating:
+                        sym = self._find_value_root_symbol(expr.callee.object)
+                        if sym and not sym.is_mut:
+                            raise TypeError(
+                                message=f"Cannot call mutating method '{expr.callee.property}' on immutable binding '{sym.name}'",
+                                line=expr.line,
+                                col=expr.col,
+                                file=self.file,
+                                code="T004"
+                            )
+                else:
+                    callee_t = self._check_expr(expr.callee)
             if isinstance(callee_t, AnyType):
                 for a in expr.args:
                     self._check_expr(a)
@@ -1441,15 +1575,51 @@ class TypeChecker:
             return callee_t.ret
 
         if isinstance(expr, StructInitExpr):
-            struct_t = self.current_scope.lookup_type(expr.struct_name)
-            if struct_t is None or not isinstance(struct_t, StructType):
-                raise TypeError(
-                    message=f"Unknown struct type '{expr.struct_name}'",
-                    line=expr.line,
-                    col=expr.col,
-                    file=self.file,
-                    code="T002"
-                )
+            template = self.generic_struct_templates.get(expr.struct_name)
+            if template is not None:
+                if expr.type_args:
+                    concrete_args = [self._resolve_type_node(a) for a in expr.type_args]
+                else:
+                    type_params_set = {p.name if hasattr(p, "name") else str(p) for p in template.type_params}
+                    bindings: Dict[str, WType] = {}
+                    template_fields = {f.name: f.type_ann for f in template.ast_decl.fields}
+                    for f in expr.fields:
+                        if f.name in template_fields:
+                            a_t = self._check_expr(f.value)
+                            self._unify_type(template_fields[f.name], a_t, type_params_set, bindings)
+                    for p in template.type_params:
+                        p_name = p.name if hasattr(p, "name") else str(p)
+                        if p_name not in bindings:
+                            raise TypeError(
+                                message=f"Cannot infer type argument for type parameter '{p_name}' in struct '{template.name}'",
+                                line=expr.line,
+                                col=expr.col,
+                                file=self.file,
+                                code="T003"
+                            )
+                    concrete_args = [bindings[p.name if hasattr(p, "name") else str(p)] for p in template.type_params]
+
+                struct_t = self._monomorphize_struct(template, concrete_args, expr.line, expr.col)
+                expr.struct_name = struct_t.name
+                expr.type_args = []
+            else:
+                if expr.type_args:
+                    raise TypeError(
+                        message=f"Struct '{expr.struct_name}' is not generic",
+                        line=expr.line,
+                        col=expr.col,
+                        file=self.file,
+                        code="T002"
+                    )
+                struct_t = self.current_scope.lookup_type(expr.struct_name)
+                if struct_t is None or not isinstance(struct_t, StructType):
+                    raise TypeError(
+                        message=f"Unknown struct type '{expr.struct_name}'",
+                        line=expr.line,
+                        col=expr.col,
+                        file=self.file,
+                        code="T002"
+                    )
 
             seen_fields: Set[str] = set()
             for f in expr.fields:
@@ -1690,6 +1860,420 @@ class TypeChecker:
         return UnitType
 
     # ==========================================
+    # Generics and Monomorphization Helpers
+    # ==========================================
+
+    def _mangle_type_name(self, t: WType) -> str:
+        if t == IntType:
+            return "int"
+        if t == FloatType:
+            return "float"
+        if t == BoolType:
+            return "bool"
+        if t == StrType:
+            return "str"
+        if t == UnitType:
+            return "unit"
+        if t == NoneType:
+            return "none"
+        if isinstance(t, StructType):
+            return t.name
+        if isinstance(t, EnumType):
+            return t.name
+        if isinstance(t, ClassType):
+            return t.name
+        if isinstance(t, InterfaceType):
+            return t.name
+        if isinstance(t, OptionalType):
+            return f"opt__{self._mangle_type_name(t.inner)}"
+        if isinstance(t, ListType):
+            return f"list__{self._mangle_type_name(t.element)}"
+        if isinstance(t, DictType):
+            return f"dict__{self._mangle_type_name(t.key)}__{self._mangle_type_name(t.value)}"
+        if isinstance(t, TupleType):
+            elems = "__".join(self._mangle_type_name(e) for e in t.elements)
+            return f"tuple__{elems}"
+        if isinstance(t, ResultType):
+            return f"res__{self._mangle_type_name(t.ok)}__{self._mangle_type_name(t.err)}"
+        if isinstance(t, TypeParamType):
+            return t.name
+        return str(t).replace("[", "__").replace("]", "").replace(", ", "__").replace(" ", "_")
+
+    def _wtype_to_type_node(self, t: WType) -> TypeNode:
+        if t == IntType:
+            return NamedType("int")
+        if t == FloatType:
+            return NamedType("float")
+        if t == BoolType:
+            return NamedType("bool")
+        if t == StrType:
+            return NamedType("str")
+        if t == UnitType:
+            return NamedType("unit")
+        if t == NoneType:
+            return NamedType("none")
+        if isinstance(t, StructType):
+            return NamedType(t.name)
+        if isinstance(t, EnumType):
+            return NamedType(t.name)
+        if isinstance(t, ClassType):
+            return NamedType(t.name)
+        if isinstance(t, InterfaceType):
+            return NamedType(t.name)
+        if isinstance(t, OptionalType):
+            return AstOptionalType(self._wtype_to_type_node(t.inner))
+        if isinstance(t, ListType):
+            return AstListType(self._wtype_to_type_node(t.element))
+        if isinstance(t, DictType):
+            return AstDictType(self._wtype_to_type_node(t.key), self._wtype_to_type_node(t.value))
+        if isinstance(t, TupleType):
+            return AstTupleType([self._wtype_to_type_node(e) for e in t.elements])
+        if isinstance(t, ResultType):
+            return AstResultType(self._wtype_to_type_node(t.ok), self._wtype_to_type_node(t.err))
+        if isinstance(t, TypeParamType):
+            return NamedType(t.name)
+        return NamedType(str(t))
+
+    def _substitute_type_node(self, node: TypeNode, subst: Dict[str, WType]) -> TypeNode:
+        if isinstance(node, NamedType):
+            if node.name in subst:
+                return self._wtype_to_type_node(subst[node.name])
+            return NamedType(node.name, line=node.line, col=node.col)
+        if isinstance(node, GenericType):
+            new_args = [self._substitute_type_node(a, subst) for a in node.type_args]
+            return GenericType(node.name, new_args, line=node.line, col=node.col)
+        if isinstance(node, AstOptionalType):
+            return AstOptionalType(self._substitute_type_node(node.inner, subst), line=node.line, col=node.col)
+        if isinstance(node, AstListType):
+            return AstListType(self._substitute_type_node(node.element_type, subst), line=node.line, col=node.col)
+        if isinstance(node, AstDictType):
+            return AstDictType(
+                self._substitute_type_node(node.key_type, subst),
+                self._substitute_type_node(node.value_type, subst),
+                line=node.line,
+                col=node.col
+            )
+        if isinstance(node, AstTupleType):
+            return AstTupleType([self._substitute_type_node(e, subst) for e in node.element_types], line=node.line, col=node.col)
+        if isinstance(node, AstResultType):
+            return AstResultType(
+                self._substitute_type_node(node.ok_type, subst),
+                self._substitute_type_node(node.err_type, subst),
+                line=node.line,
+                col=node.col
+            )
+        return node
+
+    def _substitute_ast_types(self, node: Any, subst: Dict[str, WType]) -> None:
+        if node is None:
+            return
+        if isinstance(node, LetDecl):
+            if node.type_ann is not None:
+                node.type_ann = self._substitute_type_node(node.type_ann, subst)
+            self._substitute_ast_types(node.init, subst)
+        elif isinstance(node, StructInitExpr):
+            if node.type_args:
+                node.type_args = [self._substitute_type_node(a, subst) for a in node.type_args]
+            for f in node.fields:
+                self._substitute_ast_types(f.value, subst)
+        elif isinstance(node, CallExpr):
+            if node.type_args:
+                node.type_args = [self._substitute_type_node(a, subst) for a in node.type_args]
+            self._substitute_ast_types(node.callee, subst)
+            for a in node.args:
+                self._substitute_ast_types(a, subst)
+        elif isinstance(node, Block):
+            for s in node.statements:
+                self._substitute_ast_types(s, subst)
+            if node.tail_expr:
+                self._substitute_ast_types(node.tail_expr, subst)
+        elif isinstance(node, ExprStmt):
+            self._substitute_ast_types(node.expr, subst)
+        elif isinstance(node, ReturnStmt):
+            if node.value:
+                self._substitute_ast_types(node.value, subst)
+        elif isinstance(node, WhileStmt):
+            self._substitute_ast_types(node.condition, subst)
+            self._substitute_ast_types(node.body, subst)
+        elif isinstance(node, ForStmt):
+            self._substitute_ast_types(node.iterable, subst)
+            self._substitute_ast_types(node.body, subst)
+        elif isinstance(node, IfExpr):
+            self._substitute_ast_types(node.condition, subst)
+            self._substitute_ast_types(node.then_branch, subst)
+            for eb in node.elif_branches:
+                self._substitute_ast_types(eb.condition, subst)
+                self._substitute_ast_types(eb.body, subst)
+            if node.else_branch:
+                self._substitute_ast_types(node.else_branch, subst)
+        elif isinstance(node, MatchExpr):
+            self._substitute_ast_types(node.subject, subst)
+            for arm in node.arms:
+                if arm.guard:
+                    self._substitute_ast_types(arm.guard, subst)
+                self._substitute_ast_types(arm.body, subst)
+        elif isinstance(node, BinaryExpr):
+            self._substitute_ast_types(node.left, subst)
+            self._substitute_ast_types(node.right, subst)
+        elif isinstance(node, UnaryExpr):
+            self._substitute_ast_types(node.operand, subst)
+        elif isinstance(node, MemberExpr):
+            self._substitute_ast_types(node.object, subst)
+        elif isinstance(node, IndexExpr):
+            self._substitute_ast_types(node.object, subst)
+            self._substitute_ast_types(node.index, subst)
+        elif isinstance(node, AssignmentExpr):
+            self._substitute_ast_types(node.target, subst)
+            self._substitute_ast_types(node.value, subst)
+        elif isinstance(node, ListExpr):
+            for e in node.elements:
+                self._substitute_ast_types(e, subst)
+        elif isinstance(node, DictExpr):
+            for e in node.entries:
+                if hasattr(e, "key"):
+                    self._substitute_ast_types(e.key, subst)
+                    self._substitute_ast_types(e.value, subst)
+                elif isinstance(e, (list, tuple)) and len(e) == 2:
+                    self._substitute_ast_types(e[0], subst)
+                    self._substitute_ast_types(e[1], subst)
+        elif isinstance(node, TupleExpr):
+            for e in node.elements:
+                self._substitute_ast_types(e, subst)
+        elif isinstance(node, RangeExpr):
+            self._substitute_ast_types(node.start, subst)
+            self._substitute_ast_types(node.end, subst)
+        elif isinstance(node, PostfixTryExpr):
+            self._substitute_ast_types(node.operand, subst)
+        elif isinstance(node, ElseErrExpr):
+            self._substitute_ast_types(node.operand, subst)
+            self._substitute_ast_types(node.handler, subst)
+        elif isinstance(node, CoalesceExpr):
+            self._substitute_ast_types(node.left, subst)
+            self._substitute_ast_types(node.right, subst)
+
+    def _unify_type(
+        self,
+        param_type_node: TypeNode,
+        arg_wtype: WType,
+        type_params: Set[str],
+        bindings: Dict[str, WType]
+    ) -> bool:
+        if isinstance(param_type_node, NamedType) and param_type_node.name in type_params:
+            p_name = param_type_node.name
+            if p_name in bindings:
+                return bindings[p_name] == arg_wtype
+            bindings[p_name] = arg_wtype
+            return True
+
+        if isinstance(param_type_node, AstOptionalType) and isinstance(arg_wtype, OptionalType):
+            return self._unify_type(param_type_node.inner, arg_wtype.inner, type_params, bindings)
+
+        if isinstance(param_type_node, AstListType) and isinstance(arg_wtype, ListType):
+            return self._unify_type(param_type_node.element_type, arg_wtype.element, type_params, bindings)
+
+        if isinstance(param_type_node, AstDictType) and isinstance(arg_wtype, DictType):
+            return (self._unify_type(param_type_node.key_type, arg_wtype.key, type_params, bindings) and
+                    self._unify_type(param_type_node.value_type, arg_wtype.value, type_params, bindings))
+
+        if isinstance(param_type_node, AstTupleType) and isinstance(arg_wtype, TupleType):
+            if len(param_type_node.element_types) != len(arg_wtype.elements):
+                return False
+            return all(self._unify_type(pt, at, type_params, bindings)
+                       for pt, at in zip(param_type_node.element_types, arg_wtype.elements))
+
+        if isinstance(param_type_node, AstResultType) and isinstance(arg_wtype, ResultType):
+            return (self._unify_type(param_type_node.ok_type, arg_wtype.ok, type_params, bindings) and
+                    self._unify_type(param_type_node.err_type, arg_wtype.err, type_params, bindings))
+
+        if isinstance(param_type_node, GenericType) and isinstance(arg_wtype, StructType):
+            tmpl_name = getattr(arg_wtype, "template_name", None)
+            tmpl_args = getattr(arg_wtype, "type_args", None)
+            if tmpl_name == param_type_node.name and tmpl_args and len(tmpl_args) == len(param_type_node.type_args):
+                return all(self._unify_type(pt, at, type_params, bindings)
+                           for pt, at in zip(param_type_node.type_args, tmpl_args))
+
+        return True
+
+    def _check_type_constraint(self, type_arg: WType, constraint: Optional[TypeNode], line: int, col: int) -> None:
+        if constraint is None:
+            return
+        c_name = constraint.name if isinstance(constraint, NamedType) else str(constraint)
+        c_type = self.global_scope.lookup_type(c_name)
+        if isinstance(c_type, InterfaceType):
+            if isinstance(type_arg, ClassType):
+                if not type_arg.implements_interface(c_name):
+                    raise TypeError(
+                        message=f"Type '{type_arg}' does not implement interface constraint '{c_name}'",
+                        line=line,
+                        col=col,
+                        file=self.file,
+                        code="T003"
+                    )
+            elif isinstance(type_arg, StructType):
+                for m_name, _ in c_type.methods.items():
+                    if m_name not in type_arg.fields:
+                        raise TypeError(
+                            message=f"Struct '{type_arg}' does not satisfy interface constraint '{c_name}'",
+                            line=line,
+                            col=col,
+                            file=self.file,
+                            code="T003"
+                        )
+            else:
+                raise TypeError(
+                    message=f"Type '{type_arg}' cannot satisfy interface constraint '{c_name}'",
+                    line=line,
+                    col=col,
+                    file=self.file,
+                    code="T003"
+                )
+
+    def _monomorphize_struct(
+        self,
+        template: GenericStructTemplate,
+        concrete_args: List[WType],
+        line: int,
+        col: int
+    ) -> StructType:
+        if self._monomorphize_depth > 64:
+            raise TypeError(
+                message=f"Monomorphization recursion depth limit exceeded for struct '{template.name}'",
+                line=line,
+                col=col,
+                file=self.file,
+                code="W2011"
+            )
+        if len(concrete_args) != len(template.type_params):
+            raise TypeError(
+                message=f"Generic struct '{template.name}' expects {len(template.type_params)} type arguments, found {len(concrete_args)}",
+                line=line,
+                col=col,
+                file=self.file,
+                code="T003"
+            )
+
+        key = (template.name, tuple(self._mangle_type_name(a) for a in concrete_args))
+        if key in self.monomorphized_structs:
+            return self.monomorphized_structs[key]
+
+        subst: Dict[str, WType] = {}
+        for p, arg in zip(template.type_params, concrete_args):
+            p_name = p.name if hasattr(p, "name") else str(p)
+            p_constraint = getattr(p, "constraint", None)
+            if p_constraint:
+                self._check_type_constraint(arg, p_constraint, line, col)
+            subst[p_name] = arg
+
+        mangled = f"{template.name}__{'__'.join(self._mangle_type_name(a) for a in concrete_args)}"
+
+        struct_t = StructType(name=mangled, fields={})
+        struct_t.template_name = template.name
+        struct_t.type_args = concrete_args
+        self.monomorphized_structs[key] = struct_t
+        self.global_scope.define_type(mangled, struct_t, line=line, col=col, file=self.file)
+
+        self._monomorphize_depth += 1
+        try:
+            new_fields: List[StructField] = []
+            fields_dict: Dict[str, WType] = {}
+            for f in template.ast_decl.fields:
+                subst_ann = self._substitute_type_node(f.type_ann, subst)
+                f_type = self._resolve_type_node(subst_ann)
+                fields_dict[f.name] = f_type
+                new_fields.append(StructField(name=f.name, type_ann=subst_ann, line=f.line, col=f.col))
+            struct_t.fields = fields_dict
+
+            concrete_decl = StructDecl(name=mangled, fields=new_fields, type_params=[], line=template.ast_decl.line, col=template.ast_decl.col)
+            self.monomorphized_struct_decls.append(concrete_decl)
+
+            # Synthesize constructor function: fn mangled(f1, f2, ...) -> mangled
+            ctor_params = [Param(f.name, f.type_ann, line=f.line, col=f.col) for f in new_fields]
+            ctor_inits = [FieldInit(f.name, IdentExpr(f.name, line=f.line, col=f.col), line=f.line, col=f.col) for f in new_fields]
+            ctor_ret = StructInitExpr(struct_name=mangled, fields=ctor_inits, line=template.ast_decl.line, col=template.ast_decl.col)
+            ctor_body = Block(statements=[ReturnStmt(value=ctor_ret, line=template.ast_decl.line, col=template.ast_decl.col)], line=template.ast_decl.line, col=template.ast_decl.col)
+            ctor_fn = FnDecl(
+                name=mangled,
+                params=ctor_params,
+                return_type=NamedType(mangled, line=template.ast_decl.line, col=template.ast_decl.col),
+                body=ctor_body,
+                type_params=[],
+                line=template.ast_decl.line,
+                col=template.ast_decl.col
+            )
+            ctor_p_types = [fields_dict[f.name] for f in new_fields]
+            ctor_type = FunctionType(params=ctor_p_types, ret=struct_t)
+            ctor_sym = Symbol(mangled, ctor_type, is_mut=False, kind="fn", line=template.ast_decl.line, col=template.ast_decl.col)
+            self.global_scope.define_symbol(ctor_sym, file=self.file)
+            self.monomorphized_fn_decls.append(ctor_fn)
+
+            return struct_t
+        finally:
+            self._monomorphize_depth -= 1
+
+    def _monomorphize_fn(
+        self,
+        template: GenericFnTemplate,
+        concrete_args: List[WType],
+        line: int,
+        col: int
+    ) -> Symbol:
+        if self._monomorphize_depth > 64:
+            raise TypeError(
+                message=f"Monomorphization recursion depth limit exceeded for function '{template.name}'",
+                line=line,
+                col=col,
+                file=self.file,
+                code="W2011"
+            )
+        if len(concrete_args) != len(template.type_params):
+            raise TypeError(
+                message=f"Generic function '{template.name}' expects {len(template.type_params)} type arguments, found {len(concrete_args)}",
+                line=line,
+                col=col,
+                file=self.file,
+                code="T003"
+            )
+
+        key = (template.name, tuple(self._mangle_type_name(a) for a in concrete_args))
+        if key in self.monomorphized_fns:
+            return self.monomorphized_fns[key]
+
+        subst: Dict[str, WType] = {}
+        for p, arg in zip(template.type_params, concrete_args):
+            p_name = p.name if hasattr(p, "name") else str(p)
+            p_constraint = getattr(p, "constraint", None)
+            if p_constraint:
+                self._check_type_constraint(arg, p_constraint, line, col)
+            subst[p_name] = arg
+
+        mangled = f"{template.name}__{'__'.join(self._mangle_type_name(a) for a in concrete_args)}"
+
+        cloned_fn = copy.deepcopy(template.ast_decl)
+        cloned_fn.name = mangled
+        cloned_fn.type_params = []
+        cloned_fn.return_type = self._substitute_type_node(cloned_fn.return_type, subst)
+        cloned_fn.params = [
+            Param(p.name, self._substitute_type_node(p.type_ann, subst), line=p.line, col=p.col)
+            for p in cloned_fn.params
+        ]
+        self._substitute_ast_types(cloned_fn.body, subst)
+
+        p_types = [self._resolve_type_node(p.type_ann) for p in cloned_fn.params]
+        ret_t = self._resolve_type_node(cloned_fn.return_type)
+        fn_type = FunctionType(params=p_types, ret=ret_t)
+        fn_sym = Symbol(mangled, fn_type, is_mut=False, kind="fn", line=line, col=col)
+        self.monomorphized_fns[key] = fn_sym
+        self.global_scope.define_symbol(fn_sym, file=self.file)
+        self.monomorphized_fn_decls.append(cloned_fn)
+
+        self._monomorphize_depth += 1
+        try:
+            self._check_fn_decl(cloned_fn)
+            return fn_sym
+        finally:
+            self._monomorphize_depth -= 1
+
+    # ==========================================
     # Type Node Resolution
     # ==========================================
 
@@ -1714,6 +2298,21 @@ class TypeChecker:
                     code="T002"
                 )
             return resolved
+
+        if isinstance(node, GenericType):
+            lookup = self.current_scope.lookup_type(node.name)
+            if lookup is None:
+                lookup = self.generic_struct_templates.get(node.name)
+            if isinstance(lookup, GenericStructTemplate):
+                resolved_args = [self._resolve_type_node(a) for a in node.type_args]
+                return self._monomorphize_struct(lookup, resolved_args, node.line, node.col)
+            raise TypeError(
+                message=f"Unknown generic type '{node.name}'",
+                line=node.line,
+                col=node.col,
+                file=self.file,
+                code="T002"
+            )
 
         if isinstance(node, AstOptionalType):
             inner = self._resolve_type_node(node.inner)

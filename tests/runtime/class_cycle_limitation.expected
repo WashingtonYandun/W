@@ -1,0 +1,5 @@
+a.id: 1
+b.id: 2
+a has next: true
+a.next.id: 2
+cycle broken successfully

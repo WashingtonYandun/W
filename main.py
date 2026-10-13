@@ -11,9 +11,11 @@ from runtime.Interpreter import Interpreter
 from runtime.Values import WUnit
 from formatter.Formatter import Formatter
 from codegen.CCodeGen import CCodeGen
+from hir.HirBuilder import HirBuilder
+from hir.HirCCodeGen import HirCCodeGen
 from error.Error import WError
 
-W_VERSION = "0.1.3"
+W_VERSION = "0.1.4"
 
 
 def get_repo_root() -> str:
@@ -83,6 +85,8 @@ def run_pipeline(
     emit_c_path: Optional[str] = None,
     build_bin_path: Optional[str] = None,
     use_selfhost: bool = False,
+    use_hir: bool = False,
+    sanitize: bool = False,
 ) -> int:
     try:
         # 1. Lexing
@@ -146,6 +150,10 @@ def run_pipeline(
                 finally:
                     if os.path.exists(tmp_w1_c_path):
                         os.remove(tmp_w1_c_path)
+            elif use_hir:
+                builder = HirBuilder(checker.interner, file_path=file_name)
+                hir_mod = builder.lower(ast)
+                c_code = HirCCodeGen(checker.interner, file_path=file_name).generate(hir_mod)
             else:
                 c_code = CCodeGen(file=file_name).generate(ast)
 
@@ -160,7 +168,8 @@ def run_pipeline(
                     tmp_c.write(c_code)
                     tmp_c_path = tmp_c.name
                 try:
-                    cmd = ["cc", "-std=c99", "-O2", f"-I{repo_root}", tmp_c_path, "-o", build_bin_path]
+                    san_flags = ["-fsanitize=address,undefined", "-fno-omit-frame-pointer"] if sanitize else []
+                    cmd = ["cc", "-std=c99", "-O2", f"-I{repo_root}"] + san_flags + [tmp_c_path, "-o", build_bin_path]
                     proc = subprocess.run(cmd, capture_output=True, text=True)
                     if proc.returncode != 0:
                         print(f"[C Compiler Error]\n{proc.stderr}", file=sys.stderr)
@@ -253,11 +262,11 @@ def print_help() -> None:
     print("  w fmt [--write] <file.w>                    # Canonical deterministic formatter")
     print("  w ast [--json] <file.w>                     # Emit canonical JSON AST (v0.1)")
     print("  w tokens <file.w>                           # Emit lexical token stream")
-    print("  w emit-c [--selfhost] <file.w> [-o <out.c>] # Transpile W source to C99")
-    print("  w build [--selfhost] <file.w> [-o <bin>]    # Compile W source to native binary")
-    print("  w test [--differential [N]] [--fuzz [N]]    # Run conformance, differential, or fuzz suite")
-    print("  w bench [--update-baseline]                 # Run W0/W1 performance benchmark harness")
-    print("  w version                                   # Show compiler version")
+    print("  w emit-c [--hir] [--selfhost] <file.w> [-o <out.c>] # Transpile W source to C99")
+    print("  w build [--hir] [--selfhost] <file.w> [-o <bin>]    # Compile W source to native binary")
+    print("  w test [--differential [N]] [--fuzz [N]]            # Run conformance, differential, or fuzz suite")
+    print("  w bench [--update-baseline]                         # Run W0/W1 performance benchmark harness")
+    print("  w version                                           # Show compiler version")
 
 
 def main() -> None:
@@ -269,10 +278,12 @@ def main() -> None:
     fmt_only = False
     fmt_write = False
     use_selfhost = False
+    use_hir = False
     emit_c_path: Optional[str] = None
     build_bin_path: Optional[str] = None
     subcmd: Optional[str] = None
     file_to_run: Optional[str] = None
+    sanitize = False
 
     if args and args[0] in ("run", "check", "fmt", "ast", "tokens", "emit-c", "build", "test", "bench", "version"):
         subcmd = args[0]
@@ -321,6 +332,8 @@ def main() -> None:
                 ok = run_fuzz_suite(fuzz_count=fuzz_count, base_seed=base_seed, repo_root=repo_root)
                 sys.exit(0 if ok else 1)
             else:
+                if args and ("--sanitize" in args or "-s" in args):
+                    os.environ["W_SANITIZE"] = "1"
                 from run_conformance import run_suite
                 run_suite()
                 return
@@ -353,6 +366,8 @@ def main() -> None:
             fmt_write = True
         elif arg == "--selfhost":
             use_selfhost = True
+        elif arg == "--hir":
+            use_hir = True
         elif arg in ("--version", "-v"):
             print(f"W Language Compiler v{W_VERSION} (W0 + W1 Self-Hosted C99)")
             sys.exit(0)
@@ -373,6 +388,8 @@ def main() -> None:
                     build_bin_path = args[i]
                 else:
                     build_bin_path = args[i]
+        elif arg in ("--sanitize", "-s"):
+            sanitize = True
         elif arg in ("--help", "-h"):
             print_help()
             sys.exit(0)
@@ -405,6 +422,8 @@ def main() -> None:
             emit_c_path=emit_c_path,
             build_bin_path=build_bin_path,
             use_selfhost=use_selfhost,
+            use_hir=use_hir,
+            sanitize=sanitize,
         )
         sys.exit(code)
     else:

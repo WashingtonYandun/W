@@ -1,0 +1,41 @@
+class Node {
+    public id: int
+    public next: Node?
+
+    fn init(id: int) {
+        this.id = id
+        this.next = none
+    }
+
+    public fn set_next(target: Node?) -> unit {
+        this.next = target
+    }
+
+    public fn has_next() -> bool {
+        return this.next != none
+    }
+}
+
+fn test_cycle_management() -> unit {
+    let a = Node(1)
+    let b = Node(2)
+
+    # Establish mutual references (cycle A <-> B)
+    a.set_next(b)
+    b.set_next(a)
+
+    print("a.id:", a.id)
+    print("b.id:", b.id)
+    print("a has next:", a.has_next())
+
+    let fallback = Node(0)
+    let next_node = a.next ?? fallback
+    print("a.next.id:", next_node.id)
+
+    # Explicit cycle break ensures ARC reference count returns to zero on scope exit
+    b.set_next(none)
+    a.set_next(none)
+    print("cycle broken successfully")
+}
+
+test_cycle_management()

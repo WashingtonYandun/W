@@ -1,0 +1,989 @@
+"""
+hir/HirCCodeGen.py - Direct C99 Code Generator from Typed HIR.
+
+Translates a verified HirModule directly into clean, portable, and memory-safe C99 code.
+Guarantees:
+1. Exact reference counting (ARC) and deterministic LIFO lifetime management via CleanupScope.
+2. Direct lowering from typed HIR nodes without AST re-interpretation.
+3. OOP dynamic method dispatch and inheritance preservation.
+4. Fallible error handling (T ! E) and Optional (T?) propagation.
+"""
+
+from typing import Any, Dict, List, Optional, Set, Tuple
+from checker.TypeInterner import (
+    TypeInterner, TYPE_ERROR, TYPE_UNIT, TYPE_BOOL, TYPE_INT, TYPE_FLOAT, TYPE_STR, TYPE_NONE
+)
+from hir.HirNodes import (
+    Span, HirNode, HirExpr, HirStmt, HirParam, HirBlock, HirFieldDef,
+    HirFnDecl, HirStructDecl, HirEnumDecl, HirInterfaceDecl, HirClassDecl, HirModule,
+    HirLet, HirBindTemp, HirAssign, HirWhile, HirForList, HirReturn, HirBreak, HirContinue, HirExprStmt,
+    HirConstInt, HirConstFloat, HirConstBool, HirConstStr, HirConstNone, HirConstUnit,
+    HirLocalRef, HirThisRef, HirUnaryOp, HirBinaryOp,
+    HirConstructStruct, HirConstructEnum, HirConstructObject, HirConstructList, HirConstructDict, HirConstructTuple,
+    HirDirectCall, HirBuiltinCall, HirMethodCall, HirFieldRead, HirIndexRead,
+    HirTryPropagate, HirCoalesce, HirElseHandle, HirIf, HirMatch, HirMatchArm, HirRange, HirSuperRef
+)
+from node.NodeType import (
+    Pattern, IdentifierPattern, TuplePattern, EnumPattern, LiteralPattern, WildcardPattern
+)
+
+
+class CleanupScope:
+    def __init__(self, kind: str) -> None:
+        self.kind = kind  # "fn" | "loop" | "block"
+        self.vars: List[str] = []
+
+
+class HirCCodeGen:
+    def __init__(self, interner: Optional[TypeInterner] = None, file_path: str = "<stdin>"):
+        self.interner = interner
+        self.file_path = file_path
+        self.temp_counter = 0
+        self.aux_counter = 0
+        self.is_top_level = False
+        self.enum_names: Set[str] = set()
+        self.classes: Dict[str, HirClassDecl] = {}
+        self.class_order: List[str] = []
+        self.dispatch_methods: List[Tuple[str, int]] = []
+        self.current_class: Optional[HirClassDecl] = None
+        self.fallible_fns: Dict[str, bool] = {}
+        self.fn_err_types: Dict[str, str] = {}
+        self.current_fn_fallible: bool = False
+        self.current_fn_err_type: str = ""
+        self.global_vars: List[str] = []
+        self.fn_prototypes: List[str] = []
+        self.fn_definitions: List[str] = []
+        self.scope_stack: List[CleanupScope] = []
+
+    def new_temp(self) -> str:
+        name = f"_t{self.temp_counter}"
+        self.temp_counter += 1
+        return name
+
+    def new_aux(self, prefix: str = "_aux") -> str:
+        name = f"{prefix}{self.aux_counter}"
+        self.aux_counter += 1
+        return name
+
+    # -------------------------------------------------------------
+    # Lifetime & Scope Management
+    # -------------------------------------------------------------
+
+    def _push_scope(self, kind: str) -> None:
+        self.scope_stack.append(CleanupScope(kind))
+
+    def _register_var(self, var_name: str) -> None:
+        if self.scope_stack:
+            self.scope_stack[-1].vars.append(var_name)
+
+    def _declare_owned_var(self, var_name: str, init_c_expr: str, out: List[str]) -> str:
+        out.append(f"WVal {var_name} = {init_c_expr};")
+        self._register_var(var_name)
+        return var_name
+
+    def _pop_scope(self, out: List[str]) -> None:
+        if not self.scope_stack:
+            return
+        scope = self.scope_stack.pop()
+        for v in reversed(scope.vars):
+            out.append(f"w_release({v});")
+
+    def _emit_cleanup_until_fn(self, out: List[str]) -> None:
+        for scope in reversed(self.scope_stack):
+            for v in reversed(scope.vars):
+                out.append(f"w_release({v});")
+            if scope.kind == "fn":
+                break
+
+    def _emit_cleanup_until_loop(self, out: List[str]) -> None:
+        for scope in reversed(self.scope_stack):
+            for v in reversed(scope.vars):
+                out.append(f"w_release({v});")
+            if scope.kind == "loop":
+                break
+
+    def _own_expr(self, val_expr: str) -> str:
+        if val_expr.startswith("_t"):
+            return f"w_move(&{val_expr})"
+        if val_expr.startswith("w_make_") or val_expr.startswith("w_new_") or val_expr.startswith("w_clone("):
+            return val_expr
+        return f"w_clone({val_expr})"
+
+    def _bind_call(self, c_call: str, out: List[str]) -> str:
+        tmp = self.new_temp()
+        self._declare_owned_var(tmp, c_call, out)
+        return tmp
+
+    def _is_local_var(self, c_name: str) -> bool:
+        for scope in reversed(self.scope_stack):
+            if c_name in scope.vars:
+                return True
+        return False
+
+    def c_var(self, name: str) -> str:
+        local_name = f"v_{name}"
+        if self._is_local_var(local_name):
+            return local_name
+        if local_name in self.global_vars:
+            return local_name
+        return local_name
+
+    def escape_c_str(self, s: str) -> str:
+        out: List[str] = ['"']
+        for ch in s:
+            code = ord(ch)
+            if code == 34:
+                out.append('\\"')
+            elif code == 92:
+                out.append("\\\\")
+            elif code == 10:
+                out.append("\\n")
+            elif code == 13:
+                out.append("\\r")
+            elif code == 9:
+                out.append("\\t")
+            elif code == 0:
+                out.append("\\0")
+            else:
+                out.append(ch)
+        out.append('"')
+        return "".join(out)
+
+    # -------------------------------------------------------------
+    # Primary Lowering Driver
+    # -------------------------------------------------------------
+
+    def generate(self, module: HirModule) -> str:
+        # 1. Collect declarations
+        for en in module.enums:
+            self.enum_names.add(en.name)
+
+        for cl in module.classes:
+            if cl.name not in self.classes:
+                self.classes[cl.name] = cl
+                self.class_order.append(cl.name)
+            for m in cl.methods:
+                if m.name != "init":
+                    key = (m.name, len(m.params))
+                    if key not in self.dispatch_methods:
+                        self.dispatch_methods.append(key)
+
+        for fn in module.functions:
+            c_name = f"w_fn_{fn.name}"
+            self.fallible_fns[c_name] = fn.is_fallible
+            self.fn_err_types[c_name] = fn.err_type_name
+            params_sig = ", ".join([f"WVal v_{p.name}" for p in fn.params]) if fn.params else "void"
+            self.fn_prototypes.append(f"static WVal {c_name}({params_sig});")
+
+        for stmt in module.top_level_stmts:
+            if isinstance(stmt, HirLet):
+                gv_name = f"v_{stmt.name}"
+                if gv_name not in self.global_vars:
+                    self.global_vars.append(gv_name)
+
+        # 2. OOP Prototypes
+        for cls_name in self.class_order:
+            cdecl = self.classes[cls_name]
+            for m in cdecl.methods:
+                params = ["WVal v_self"] + [f"WVal v_{p.name}" for p in m.params]
+                self.fn_prototypes.append(f"static WVal w_method_{cls_name}__{m.name}({', '.join(params)});")
+            init_res = self._find_class_method(cls_name, "init")
+            if init_res is not None:
+                _, init_m = init_res
+                init_sig = ", ".join([f"WVal v_{p.name}" for p in init_m.params]) if init_m.params else "void"
+            else:
+                init_sig = "void"
+            self.fn_prototypes.append(f"static WVal w_new_{cls_name}({init_sig});")
+
+        for mname, arity in self.dispatch_methods:
+            params = ["WVal v_self"] + [f"WVal _a{i}" for i in range(arity)]
+            self.fn_prototypes.append(f"static WVal w_dispatch__{mname}__{arity}({', '.join(params)});")
+
+        # 3. Emit functions and class methods
+        for cl in module.classes:
+            self._emit_class(cl)
+
+        for fn in module.functions:
+            self._emit_function(fn)
+
+        # 4. Emit Top-Level executable statements into main
+        main_stmts: List[str] = []
+        self._push_scope("fn")
+        self.is_top_level = True
+        for stmt in module.top_level_stmts:
+            self.emit_stmt(stmt, main_stmts)
+        self.is_top_level = False
+
+        if not module.top_level_stmts and "w_fn_main" in self.fallible_fns:
+            main_stmts.append("w_release(w_fn_main());")
+
+        self._pop_scope(main_stmts)
+        self._emit_oop_dispatchers()
+
+        # 5. Assemble final C99 file
+        lines: List[str] = [
+            '#include "runtime/w_runtime.h"',
+            ""
+        ]
+
+        if self.global_vars:
+            for gv in self.global_vars:
+                lines.append(f"static WVal {gv};")
+            lines.append("")
+
+        if self.fn_prototypes:
+            lines.extend(self.fn_prototypes)
+            lines.append("")
+
+        if self.fn_definitions:
+            for fd in self.fn_definitions:
+                lines.append(fd)
+                lines.append("")
+
+        lines.append("int main(int argc, char** argv) {")
+        lines.append("    w_init_args(argc, argv);")
+        for s in main_stmts:
+            lines.append(f"    {s}")
+        for gv in reversed(self.global_vars):
+            lines.append(f"    w_release({gv});")
+        lines.append("    w_runtime_cleanup();")
+        lines.append("    return 0;")
+        lines.append("}")
+
+        return "\n".join(lines) + "\n"
+
+    # -------------------------------------------------------------
+    # Class & OOP Emission
+    # -------------------------------------------------------------
+
+    def _find_class_method(self, class_name: str, method_name: str) -> Optional[Tuple[str, HirFnDecl]]:
+        curr: Optional[str] = class_name
+        while curr is not None and curr in self.classes:
+            cdecl = self.classes[curr]
+            for m in cdecl.methods:
+                if m.name == method_name:
+                    return (curr, m)
+            curr = cdecl.superclass
+        return None
+
+    def _collect_class_fields(self, class_name: str) -> List[HirFieldDef]:
+        lineage: List[HirClassDecl] = []
+        curr: Optional[str] = class_name
+        while curr is not None and curr in self.classes:
+            lineage.append(self.classes[curr])
+            curr = self.classes[curr].superclass
+        lineage.reverse()
+        fields: List[HirFieldDef] = []
+        seen: Set[str] = set()
+        for cdecl in lineage:
+            for f in cdecl.fields:
+                if f.name not in seen:
+                    seen.add(f.name)
+                    fields.append(f)
+        return fields
+
+    def _default_c_expr_for_type_id(self, type_id: int) -> str:
+        if type_id == TYPE_INT:
+            return "w_int(0LL)"
+        if type_id == TYPE_FLOAT:
+            return "w_float(0.0)"
+        if type_id == TYPE_BOOL:
+            return "w_bool(false)"
+        if type_id == TYPE_STR:
+            return 'w_str("")'
+        if type_id == TYPE_NONE:
+            return "w_none()"
+        if type_id == TYPE_UNIT:
+            return "w_unit()"
+        return "w_none()"
+
+    def _emit_class(self, cl: HirClassDecl) -> None:
+        prev_cls = self.current_class
+        self.current_class = cl
+        try:
+            for m in cl.methods:
+                c_name = f"w_method_{cl.name}__{m.name}"
+                params = ["WVal v_self"] + [f"WVal v_{p.name}" for p in m.params]
+                prev_fallible = self.current_fn_fallible
+                prev_err_type = self.current_fn_err_type
+                self.current_fn_fallible = m.is_fallible
+                self.current_fn_err_type = m.err_type_name
+
+                body_stmts: List[str] = []
+                self._push_scope("fn")
+                ret_expr = self.emit_block_value(m.body, body_stmts)
+                ret_hold = self.new_aux("_ret")
+                body_stmts.append(f"WVal {ret_hold} = {self._own_expr(ret_expr)};")
+                self._pop_scope(body_stmts)
+                if self.current_fn_fallible:
+                    body_stmts.append(f'return w_wrap_result({ret_hold}, "{self.current_fn_err_type}");')
+                else:
+                    body_stmts.append(f"return {ret_hold};")
+
+                fn_lines = [f"static WVal {c_name}({', '.join(params)}) {{"]
+                for s in body_stmts:
+                    fn_lines.append(f"    {s}")
+                fn_lines.append("}")
+                self.fn_definitions.append("\n".join(fn_lines))
+                self.current_fn_fallible = prev_fallible
+                self.current_fn_err_type = prev_err_type
+
+            # w_new_<ClassName>
+            all_fields = self._collect_class_fields(cl.name)
+            init_res = self._find_class_method(cl.name, "init")
+            if init_res is not None:
+                init_cls, init_m = init_res
+                init_sig = ", ".join([f"WVal v_{p.name}" for p in init_m.params]) if init_m.params else "void"
+                init_args = ["v_self"] + [f"v_{p.name}" for p in init_m.params]
+            else:
+                init_cls = ""
+                init_m = None
+                init_sig = "void"
+                init_args = []
+
+            new_lines = [f"static WVal w_new_{cl.name}({init_sig}) {{"]
+            if all_fields:
+                f_names = ", ".join([f'"{f.name}"' for f in all_fields])
+                f_defaults = ", ".join([self._default_c_expr_for_type_id(f.type_id) for f in all_fields])
+                new_lines.append(f"    const char* _k[{len(all_fields)}] = {{ {f_names} }};")
+                new_lines.append(f"    WVal _v[{len(all_fields)}] = {{ {f_defaults} }};")
+                new_lines.append(f'    WVal v_self = w_make_object("{cl.name}", {len(all_fields)}, _k, _v);')
+                new_lines.append(f"    w_release_array({len(all_fields)}, _v);")
+            else:
+                new_lines.append(f'    WVal v_self = w_make_object("{cl.name}", 0, NULL, NULL);')
+            if init_m is not None:
+                new_lines.append(f"    w_release(w_method_{init_cls}__init({', '.join(init_args)}));")
+            new_lines.append("    return v_self;")
+            new_lines.append("}")
+            self.fn_definitions.append("\n".join(new_lines))
+        finally:
+            self.current_class = prev_cls
+
+    def _emit_oop_dispatchers(self) -> None:
+        for mname, arity in self.dispatch_methods:
+            params = ["WVal v_self"] + [f"WVal _a{i}" for i in range(arity)]
+            call_args = ["v_self"] + [f"_a{i}" for i in range(arity)]
+            d_lines = [f"static WVal w_dispatch__{mname}__{arity}({', '.join(params)}) {{"]
+            for cls_name in self.class_order:
+                resolved = self._find_class_method(cls_name, mname)
+                if resolved is not None:
+                    def_cls, m_decl = resolved
+                    if len(m_decl.params) == arity:
+                        d_lines.append(
+                            f'    if (v_self.tag == W_OBJECT && strcmp(v_self.as.st->name, "{cls_name}") == 0) '
+                            f'return w_method_{def_cls}__{mname}({", ".join(call_args)});'
+                        )
+            d_lines.append("    return w_none();")
+            d_lines.append("}")
+            self.fn_definitions.append("\n".join(d_lines))
+
+    def _emit_function(self, fn: HirFnDecl) -> None:
+        c_name = f"w_fn_{fn.name}"
+        params_sig = ", ".join([f"WVal v_{p.name}" for p in fn.params]) if fn.params else "void"
+        prev_fallible = self.current_fn_fallible
+        prev_err_type = self.current_fn_err_type
+        self.current_fn_fallible = fn.is_fallible
+        self.current_fn_err_type = fn.err_type_name
+
+        body_stmts: List[str] = []
+        self._push_scope("fn")
+        ret_expr = self.emit_block_value(fn.body, body_stmts)
+        ret_hold = self.new_aux("_ret")
+        body_stmts.append(f"WVal {ret_hold} = {self._own_expr(ret_expr)};")
+        self._pop_scope(body_stmts)
+        if self.current_fn_fallible:
+            body_stmts.append(f'return w_wrap_result({ret_hold}, "{self.current_fn_err_type}");')
+        else:
+            body_stmts.append(f"return {ret_hold};")
+
+        fn_lines = [f"static WVal {c_name}({params_sig}) {{"]
+        for s in body_stmts:
+            fn_lines.append(f"    {s}")
+        fn_lines.append("}")
+        self.fn_definitions.append("\n".join(fn_lines))
+        self.current_fn_fallible = prev_fallible
+        self.current_fn_err_type = prev_err_type
+
+    # -------------------------------------------------------------
+    # Statement Emission
+    # -------------------------------------------------------------
+
+    def emit_block_value(self, block: HirBlock, out: List[str]) -> str:
+        res_var = self.new_temp()
+        self._declare_owned_var(res_var, "w_unit()", out)
+        inner: List[str] = []
+        self._push_scope("block")
+        for s in block.statements:
+            self.emit_stmt(s, inner)
+        if getattr(block, "tail_expr", None) is not None:
+            tail_val = self.emit_expr(block.tail_expr, inner)
+            inner.append(f"w_assign(&{res_var}, {self._own_expr(tail_val)});")
+        self._pop_scope(inner)
+        out.append("{")
+        for line in inner:
+            out.append(f"    {line}")
+        out.append("}")
+        return res_var
+
+    def emit_stmt(self, stmt: HirStmt, out: List[str]) -> None:
+        if isinstance(stmt, HirExprStmt):
+            val = self.emit_expr(stmt.expr, out)
+            out.append(f"(void){val};")
+            return
+
+        if isinstance(stmt, HirLet):
+            val = self.emit_expr(stmt.init_expr, out)
+            c_name = f"v_{stmt.name}"
+            if self.is_top_level:
+                out.append(f"w_assign(&{c_name}, {self._own_expr(val)});")
+            else:
+                self._declare_owned_var(c_name, self._own_expr(val), out)
+            return
+
+        if isinstance(stmt, HirBindTemp):
+            val = self.emit_expr(stmt.init_expr, out)
+            self._declare_owned_var(stmt.temp_name, self._own_expr(val), out)
+            return
+
+        if isinstance(stmt, HirAssign):
+            val = self.emit_expr(stmt.value, out)
+            rhs_hold = self.new_aux("_rhs")
+            out.append(f"WVal {rhs_hold} = {self._own_expr(val)};")
+            if isinstance(stmt.target, HirLocalRef):
+                c_target = self.c_var(stmt.target.name)
+                out.append(f"w_assign(&{c_target}, {rhs_hold});")
+            elif isinstance(stmt.target, HirFieldRead):
+                obj_lref = self.emit_lvalue_ref(stmt.target.object, out)
+                out.append(f'w_assign(w_member_ref({obj_lref}, "{stmt.target.field_name}"), {rhs_hold});')
+            elif isinstance(stmt.target, HirIndexRead):
+                obj_lref = self.emit_lvalue_ref(stmt.target.object, out)
+                idx_val = self.emit_expr(stmt.target.index, out)
+                out.append(f"w_assign(w_index_ref({obj_lref}, {idx_val}), {rhs_hold});")
+            else:
+                lref = self.emit_lvalue_ref(stmt.target, out)
+                out.append(f"w_assign({lref}, {rhs_hold});")
+            return
+
+        if isinstance(stmt, HirReturn):
+            val = self.emit_expr(stmt.value_expr, out)
+            ret_hold = self.new_aux("_ret")
+            out.append(f"WVal {ret_hold} = {self._own_expr(val)};")
+            self._emit_cleanup_until_fn(out)
+            if self.current_fn_fallible:
+                out.append(f'return w_wrap_result({ret_hold}, "{self.current_fn_err_type}");')
+            else:
+                out.append(f"return {ret_hold};")
+            return
+
+        if isinstance(stmt, HirBreak):
+            self._emit_cleanup_until_loop(out)
+            out.append("break;")
+            return
+
+        if isinstance(stmt, HirContinue):
+            self._emit_cleanup_until_loop(out)
+            out.append("continue;")
+            return
+
+        if isinstance(stmt, HirWhile):
+            out.append("while (1) {")
+            self._push_scope("loop")
+            loop_inner: List[str] = []
+            cond_val = self.emit_expr(stmt.cond_expr, loop_inner)
+            cond_b = self.new_aux("_cond")
+            loop_inner.append(f"bool {cond_b} = ({cond_val}).as.b;")
+            cond_cleanup: List[str] = []
+            self._emit_cleanup_until_loop(cond_cleanup)
+            if cond_cleanup:
+                loop_inner.append(f"if (!{cond_b}) {{")
+                for cl in cond_cleanup:
+                    loop_inner.append(f"    {cl}")
+                loop_inner.append("    break;")
+                loop_inner.append("}")
+            else:
+                loop_inner.append(f"if (!{cond_b}) break;")
+            body_v = self.emit_block_value(stmt.body, loop_inner)
+            loop_inner.append(f"(void){body_v};")
+            self._pop_scope(loop_inner)
+            for line in loop_inner:
+                out.append(f"    {line}")
+            out.append("}")
+            return
+
+        if isinstance(stmt, HirForList):
+            out.append("{")
+            self._push_scope("block")
+            for_outer: List[str] = []
+            iter_val = self.emit_expr(stmt.list_expr, for_outer)
+            iter_tmp = self.new_temp()
+            idx_tmp = self.new_aux("_idx")
+            item_tmp = self.new_aux("_item")
+            self._declare_owned_var(iter_tmp, self._own_expr(iter_val), for_outer)
+            for_outer.append(f"for (int32_t {idx_tmp} = 0; {idx_tmp} < {iter_tmp}.as.list->len; {idx_tmp}++) {{")
+            self._push_scope("loop")
+            loop_inner = [f"WVal {item_tmp} = {iter_tmp}.as.list->data[{idx_tmp}];"]
+            if hasattr(stmt, "pattern") and isinstance(stmt.pattern, Pattern):
+                self._emit_pattern_bindings(stmt.pattern, item_tmp, loop_inner)
+            else:
+                self._declare_owned_var(f"v_{stmt.elem_name}", f"w_clone({item_tmp})", loop_inner)
+            body_v = self.emit_block_value(stmt.body, loop_inner)
+            loop_inner.append(f"(void){body_v};")
+            self._pop_scope(loop_inner)
+            for line in loop_inner:
+                for_outer.append(f"    {line}")
+            for_outer.append("}")
+            self._pop_scope(for_outer)
+            for line in for_outer:
+                out.append(f"    {line}")
+            out.append("}")
+            return
+
+    # -------------------------------------------------------------
+    # Expression Emission
+    # -------------------------------------------------------------
+
+    def emit_lvalue_ref(self, target: HirExpr, out: List[str]) -> str:
+        if isinstance(target, HirThisRef):
+            return "&v_self"
+        if isinstance(target, HirLocalRef):
+            return f"&{self.c_var(target.name)}"
+        if isinstance(target, HirIndexRead):
+            obj_ref = self.emit_lvalue_ref(target.object, out)
+            idx_val = self.emit_expr(target.index, out)
+            return f"w_index_ref({obj_ref}, {idx_val})"
+        if isinstance(target, HirFieldRead):
+            obj_ref = self.emit_lvalue_ref(target.object, out)
+            return f'w_member_ref({obj_ref}, "{target.field_name}")'
+        val = self.emit_expr(target, out)
+        if val.startswith("_t"):
+            return f"&{val}"
+        tmp = self.new_temp()
+        self._declare_owned_var(tmp, self._own_expr(val), out)
+        return f"&{tmp}"
+
+    def emit_expr(self, expr: HirExpr, out: List[str]) -> str:
+        if isinstance(expr, HirConstInt):
+            return f"w_int({expr.value}LL)"
+
+        if isinstance(expr, HirConstFloat):
+            return f"w_float({repr(expr.value)})"
+
+        if isinstance(expr, HirConstStr):
+            return f"w_str({self.escape_c_str(expr.value)})"
+
+        if isinstance(expr, HirConstBool):
+            return "w_bool(true)" if expr.value else "w_bool(false)"
+
+        if isinstance(expr, HirConstNone):
+            return "w_none()"
+
+        if isinstance(expr, HirConstUnit):
+            return "w_unit()"
+
+        if isinstance(expr, HirLocalRef):
+            return self.c_var(expr.name)
+
+        if isinstance(expr, HirThisRef):
+            return "v_self"
+
+        if isinstance(expr, HirUnaryOp):
+            op_val = self.emit_expr(expr.operand, out)
+            if expr.op == "-":
+                return f"w_neg({op_val})"
+            if expr.op == "not":
+                return f"w_bool(!({op_val}).as.b)"
+
+        if isinstance(expr, HirBinaryOp):
+            if expr.op == "and":
+                lhs = self.emit_expr(expr.left, out)
+                res = self.new_temp()
+                self._declare_owned_var(res, "w_bool(false)", out)
+                out.append(f"if (({lhs}).as.b) {{")
+                self._push_scope("block")
+                rhs_stmts: List[str] = []
+                rhs = self.emit_expr(expr.right, rhs_stmts)
+                rhs_stmts.append(f"{res} = w_bool(({rhs}).as.b);")
+                self._pop_scope(rhs_stmts)
+                for s in rhs_stmts:
+                    out.append(f"    {s}")
+                out.append("}")
+                return res
+
+            if expr.op == "or":
+                lhs = self.emit_expr(expr.left, out)
+                res = self.new_temp()
+                self._declare_owned_var(res, "w_bool(true)", out)
+                out.append(f"if (!({lhs}).as.b) {{")
+                self._push_scope("block")
+                rhs_stmts: List[str] = []
+                rhs = self.emit_expr(expr.right, rhs_stmts)
+                rhs_stmts.append(f"{res} = w_bool(({rhs}).as.b);")
+                self._pop_scope(rhs_stmts)
+                for s in rhs_stmts:
+                    out.append(f"    {s}")
+                out.append("}")
+                return res
+
+            lhs = self.emit_expr(expr.left, out)
+            rhs = self.emit_expr(expr.right, out)
+            op_map = {
+                "+": "w_add", "-": "w_sub", "*": "w_mul", "/": "w_div", "%": "w_mod",
+                "<": "w_lt", "<=": "w_le", ">": "w_gt", ">=": "w_ge",
+            }
+            if expr.op in op_map:
+                return f"{op_map[expr.op]}({lhs}, {rhs})"
+            if expr.op == "==":
+                return f"w_bool(w_eq({lhs}, {rhs}))"
+            if expr.op == "!=":
+                return f"w_bool(!w_eq({lhs}, {rhs}))"
+
+        if isinstance(expr, HirConstructStruct):
+            if not expr.fields:
+                return f'w_make_struct("{expr.struct_name}", 0, NULL, NULL)'
+            f_names = [f'"{fname}"' for fname, _ in expr.fields]
+            f_vals = [self.emit_expr(fval, out) for _, fval in expr.fields]
+            k_tmp = self.new_aux("_k")
+            v_tmp = self.new_aux("_v")
+            out.append(f"const char* {k_tmp}[{len(f_names)}] = {{ {', '.join(f_names)} }};")
+            out.append(f"WVal {v_tmp}[{len(f_vals)}] = {{ {', '.join(f_vals)} }};")
+            return self._bind_call(f'w_make_struct("{expr.struct_name}", {len(f_names)}, {k_tmp}, {v_tmp})', out)
+
+        if isinstance(expr, HirConstructEnum):
+            return f'w_enum("{expr.enum_name}", "{expr.variant_name}")'
+
+        if isinstance(expr, HirConstructObject):
+            arg_vals = [self.emit_expr(a, out) for a in expr.args]
+            return self._bind_call(f"w_new_{expr.class_name}({', '.join(arg_vals)})", out)
+
+        if isinstance(expr, HirConstructList):
+            if not expr.elems:
+                return "w_make_list(0, NULL)"
+            elem_vals = [self.emit_expr(e, out) for e in expr.elems]
+            arr_tmp = self.new_aux("_arr")
+            out.append(f"WVal {arr_tmp}[{len(elem_vals)}] = {{ {', '.join(elem_vals)} }};")
+            return self._bind_call(f"w_make_list({len(elem_vals)}, {arr_tmp})", out)
+
+        if isinstance(expr, HirConstructTuple):
+            if not expr.elems:
+                return "w_make_tuple(0, NULL)"
+            elem_vals = [self.emit_expr(e, out) for e in expr.elems]
+            arr_tmp = self.new_aux("_arr")
+            out.append(f"WVal {arr_tmp}[{len(elem_vals)}] = {{ {', '.join(elem_vals)} }};")
+            return self._bind_call(f"w_make_tuple({len(elem_vals)}, {arr_tmp})", out)
+
+        if isinstance(expr, HirConstructDict):
+            if not expr.entries:
+                return "w_make_dict(0, NULL, NULL)"
+            k_vals = [self.emit_expr(k, out) for k, _ in expr.entries]
+            v_vals = [self.emit_expr(v, out) for _, v in expr.entries]
+            k_tmp = self.new_aux("_k")
+            v_tmp = self.new_aux("_v")
+            out.append(f"WVal {k_tmp}[{len(k_vals)}] = {{ {', '.join(k_vals)} }};")
+            out.append(f"WVal {v_tmp}[{len(v_vals)}] = {{ {', '.join(v_vals)} }};")
+            return self._bind_call(f"w_make_dict({len(k_vals)}, {k_tmp}, {v_tmp})", out)
+
+        if isinstance(expr, HirRange):
+            s_val = self.emit_expr(expr.start, out)
+            e_val = self.emit_expr(expr.end, out)
+            inc = "true" if expr.inclusive else "false"
+            return f"w_make_range({s_val}, {e_val}, {inc})"
+
+        if isinstance(expr, HirFieldRead):
+            if isinstance(expr.object, HirLocalRef) and expr.object.name in self.enum_names:
+                return f'w_enum("{expr.object.name}", "{expr.field_name}")'
+            obj_val = self.emit_expr(expr.object, out)
+            return f'w_member_get({obj_val}, "{expr.field_name}")'
+
+        if isinstance(expr, HirIndexRead):
+            obj_val = self.emit_expr(expr.object, out)
+            idx_val = self.emit_expr(expr.index, out)
+            return f"w_index_get({obj_val}, {idx_val})"
+
+        if isinstance(expr, HirDirectCall):
+            arg_vals = [self.emit_expr(a, out) for a in expr.args]
+            return self._bind_call(f"w_fn_{expr.fn_name}({', '.join(arg_vals)})", out)
+
+        if isinstance(expr, HirBuiltinCall):
+            name = expr.builtin_name
+            arg_vals = [self.emit_expr(a, out) for a in expr.args]
+
+            if name == "print":
+                if not arg_vals:
+                    return self._bind_call("w_builtin_print(0, NULL)", out)
+                arr_tmp = self.new_aux("_arr")
+                out.append(f"WVal {arr_tmp}[{len(arg_vals)}] = {{ {', '.join(arg_vals)} }};")
+                return self._bind_call(f"w_builtin_print({len(arg_vals)}, {arr_tmp})", out)
+
+            if name == "eprint":
+                if not arg_vals:
+                    return self._bind_call("w_builtin_eprint(0, NULL)", out)
+                arr_tmp = self.new_aux("_arr")
+                out.append(f"WVal {arr_tmp}[{len(arg_vals)}] = {{ {', '.join(arg_vals)} }};")
+                return self._bind_call(f"w_builtin_eprint({len(arg_vals)}, {arr_tmp})", out)
+
+            builtin_1 = {
+                "len": "w_builtin_len", "str": "w_builtin_str", "int": "w_builtin_int",
+                "float": "w_builtin_float", "ord": "w_builtin_ord", "chr": "w_builtin_chr",
+                "bytes": "w_builtin_bytes", "enumerate": "w_builtin_enumerate",
+                "dict_items": "w_builtin_dict_items", "read_file": "w_builtin_read_file",
+                "exit": "w_builtin_exit"
+            }
+            if name in builtin_1 and len(arg_vals) == 1:
+                return self._bind_call(f"{builtin_1[name]}({arg_vals[0]})", out)
+
+            if name == "args" and len(arg_vals) == 0:
+                return self._bind_call("w_builtin_args()", out)
+
+            if name == "write_file" and len(arg_vals) == 2:
+                return self._bind_call(f"w_builtin_write_file({arg_vals[0]}, {arg_vals[1]})", out)
+
+            if name == "slice" and len(arg_vals) == 3:
+                return self._bind_call(f"w_builtin_slice({arg_vals[0]}, {arg_vals[1]}, {arg_vals[2]})", out)
+
+            return self._bind_call(f"w_builtin_{name}({', '.join(arg_vals)})", out)
+
+        if isinstance(expr, HirMethodCall):
+            method = expr.method_name
+            # super.init(...) or super.method(...)
+            if isinstance(expr.receiver, HirSuperRef):
+                arg_vals = [self.emit_expr(a, out) for a in expr.args]
+                call_args = ["v_self"] + arg_vals
+                if self.current_class is not None and self.current_class.superclass is not None:
+                    resolved = self._find_class_method(self.current_class.superclass, method)
+                    if resolved is not None:
+                        def_cls, _ = resolved
+                        return self._bind_call(f"w_method_{def_cls}__{method}({', '.join(call_args)})", out)
+                return "w_unit()"
+
+            # List/Dict built-in methods
+            if method == "append" and len(expr.args) == 1:
+                lref = self.emit_lvalue_ref(expr.receiver, out)
+                arg_v = self.emit_expr(expr.args[0], out)
+                return self._bind_call(f"w_list_append({lref}, {arg_v})", out)
+            if method == "pop" and len(expr.args) == 0:
+                lref = self.emit_lvalue_ref(expr.receiver, out)
+                return self._bind_call(f"w_list_pop({lref})", out)
+            if method == "clear" and len(expr.args) == 0:
+                lref = self.emit_lvalue_ref(expr.receiver, out)
+                return self._bind_call(f"w_list_clear({lref})", out)
+            if method == "get" and len(expr.args) == 1:
+                obj_v = self.emit_expr(expr.receiver, out)
+                arg_v = self.emit_expr(expr.args[0], out)
+                return self._bind_call(f"w_dict_get({obj_v}, {arg_v})", out)
+            if method == "keys" and len(expr.args) == 0:
+                obj_v = self.emit_expr(expr.receiver, out)
+                return self._bind_call(f"w_dict_keys({obj_v})", out)
+            if method == "values" and len(expr.args) == 0:
+                obj_v = self.emit_expr(expr.receiver, out)
+                return self._bind_call(f"w_dict_values({obj_v})", out)
+
+            # Dynamic dispatch
+            obj_v = self.emit_expr(expr.receiver, out)
+            arg_vals = [self.emit_expr(a, out) for a in expr.args]
+            call_args = [obj_v] + arg_vals
+            return self._bind_call(f"w_dispatch__{method}__{len(arg_vals)}({', '.join(call_args)})", out)
+
+        if isinstance(expr, HirTryPropagate):
+            op_val = self.emit_expr(expr.operand, out)
+            tmp = self.new_temp()
+            self._declare_owned_var(tmp, self._own_expr(op_val), out)
+
+            none_cleanup: List[str] = []
+            self._emit_cleanup_until_fn(none_cleanup)
+            out.append(f"if ({tmp}.tag == W_NONE) {{")
+            for cl in none_cleanup:
+                out.append(f"    {cl}")
+            out.append("    return w_none();")
+            out.append("}")
+
+            err_hold = self.new_aux("_err")
+            err_cleanup: List[str] = []
+            self._emit_cleanup_until_fn(err_cleanup)
+            out.append(f"if ({tmp}.tag == W_ERR) {{")
+            out.append(f"    WVal {err_hold} = w_clone({tmp});")
+            for cl in err_cleanup:
+                out.append(f"    {cl}")
+            out.append(f"    return {err_hold};")
+            out.append("}")
+
+            unwrapped = self.new_temp()
+            self._declare_owned_var(unwrapped, f"w_unwrap_ok({tmp})", out)
+            return unwrapped
+
+        if isinstance(expr, HirCoalesce):
+            lhs = self.emit_expr(expr.opt_expr, out)
+            res = self.new_temp()
+            self._declare_owned_var(res, self._own_expr(lhs), out)
+            out.append(f"if ({res}.tag == W_NONE) {{")
+            self._push_scope("block")
+            rhs_stmts: List[str] = []
+            rhs = self.emit_expr(expr.fallback_expr, rhs_stmts)
+            rhs_stmts.append(f"w_assign(&{res}, {self._own_expr(rhs)});")
+            self._pop_scope(rhs_stmts)
+            for s in rhs_stmts:
+                out.append(f"    {s}")
+            out.append("}")
+            return res
+
+        if isinstance(expr, HirElseHandle):
+            op_val = self.emit_expr(expr.operand, out)
+            tmp = self.new_temp()
+            self._declare_owned_var(tmp, self._own_expr(op_val), out)
+            res = self.new_temp()
+            self._declare_owned_var(res, "w_unit()", out)
+            out.append(f"if ({tmp}.tag == W_ERR || {tmp}.tag == W_NONE) {{")
+            self._push_scope("block")
+            handler_stmts: List[str] = []
+            if expr.err_var is not None:
+                self._declare_owned_var(f"v_{expr.err_var}", f"w_unwrap_err({tmp})", handler_stmts)
+            h_val = self.emit_block_value(expr.handler, handler_stmts)
+            handler_stmts.append(f"w_assign(&{res}, {self._own_expr(h_val)});")
+            self._pop_scope(handler_stmts)
+            for s in handler_stmts:
+                out.append(f"    {s}")
+            out.append("} else {")
+            out.append(f"    w_assign(&{res}, w_unwrap_ok({tmp}));")
+            out.append("}")
+            return res
+
+        if isinstance(expr, HirIf):
+            res = self.new_temp()
+            self._declare_owned_var(res, "w_unit()", out)
+            cond_v = self.emit_expr(expr.cond, out)
+            out.append(f"if (({cond_v}).as.b) {{")
+            self._push_scope("block")
+            then_stmts: List[str] = []
+            then_v = self.emit_block_value(expr.then_block, then_stmts)
+            then_stmts.append(f"w_assign(&{res}, {self._own_expr(then_v)});")
+            self._pop_scope(then_stmts)
+            for s in then_stmts:
+                out.append(f"    {s}")
+            out.append("}")
+            self._emit_elifs(expr.elifs, 0, expr.else_block, res, out)
+            return res
+
+        if isinstance(expr, HirMatch):
+            subj_v = self.emit_expr(expr.subject, out)
+            subj_tmp = self.new_temp()
+            self._declare_owned_var(subj_tmp, self._own_expr(subj_v), out)
+            res = self.new_temp()
+            self._declare_owned_var(res, "w_unit()", out)
+            self._emit_match_arms(expr.arms, 0, subj_tmp, res, out)
+            return res
+
+        return "w_unit()"
+
+    def _emit_elifs(
+        self,
+        elifs: List[Tuple[HirExpr, HirBlock]],
+        idx: int,
+        else_block: Optional[HirBlock],
+        res_var: str,
+        out: List[str]
+    ) -> None:
+        if idx < len(elifs):
+            cond_expr, body_block = elifs[idx]
+            out.append("else {")
+            self._push_scope("block")
+            inner: List[str] = []
+            eb_cond = self.emit_expr(cond_expr, inner)
+            inner.append(f"if (({eb_cond}).as.b) {{")
+            self._push_scope("block")
+            eb_stmts: List[str] = []
+            eb_v = self.emit_block_value(body_block, eb_stmts)
+            eb_stmts.append(f"w_assign(&{res_var}, {self._own_expr(eb_v)});")
+            self._pop_scope(eb_stmts)
+            for s in eb_stmts:
+                inner.append(f"    {s}")
+            inner.append("}")
+            self._emit_elifs(elifs, idx + 1, else_block, res_var, inner)
+            self._pop_scope(inner)
+            for s in inner:
+                out.append(f"    {s}")
+            out.append("}")
+        elif else_block is not None:
+            out.append("else {")
+            self._push_scope("block")
+            else_stmts: List[str] = []
+            else_v = self.emit_block_value(else_block, else_stmts)
+            else_stmts.append(f"w_assign(&{res_var}, {self._own_expr(else_v)});")
+            self._pop_scope(else_stmts)
+            for s in else_stmts:
+                out.append(f"    {s}")
+            out.append("}")
+
+    def _emit_match_arms(self, arms: List[HirMatchArm], idx: int, subj_tmp: str, res_var: str, out: List[str]) -> None:
+        if idx >= len(arms):
+            return
+        arm = arms[idx]
+        cond_str = self._emit_pattern_cond(arm.pattern, subj_tmp, out)
+        if cond_str == "true":
+            out.append("{")
+            self._push_scope("block")
+            inner: List[str] = []
+            self._emit_pattern_bindings(arm.pattern, subj_tmp, inner)
+            arm_v = self.emit_block_value(arm.body, inner)
+            inner.append(f"w_assign(&{res_var}, {self._own_expr(arm_v)});")
+            self._pop_scope(inner)
+            for s in inner:
+                out.append(f"    {s}")
+            out.append("}")
+            return
+
+        out.append(f"if ({cond_str}) {{")
+        self._push_scope("block")
+        arm_stmts: List[str] = []
+        self._emit_pattern_bindings(arm.pattern, subj_tmp, arm_stmts)
+        arm_v = self.emit_block_value(arm.body, arm_stmts)
+        arm_stmts.append(f"w_assign(&{res_var}, {self._own_expr(arm_v)});")
+        self._pop_scope(arm_stmts)
+        for s in arm_stmts:
+            out.append(f"    {s}")
+        out.append("} else {")
+        self._push_scope("block")
+        else_stmts: List[str] = []
+        self._emit_match_arms(arms, idx + 1, subj_tmp, res_var, else_stmts)
+        self._pop_scope(else_stmts)
+        for s in else_stmts:
+            out.append(f"    {s}")
+        out.append("}")
+
+    def _emit_pattern_bindings(self, pattern: Pattern, val_expr: str, out: List[str]) -> None:
+        if isinstance(pattern, IdentifierPattern):
+            self._declare_owned_var(f"v_{pattern.name}", f"w_clone({val_expr})", out)
+        elif isinstance(pattern, TuplePattern):
+            for idx, elem_pat in enumerate(pattern.elements):
+                sub_expr = f"({val_expr}).as.tuple->items[{idx}]"
+                self._emit_pattern_bindings(elem_pat, sub_expr, out)
+
+    def _emit_pattern_cond(self, pattern: Pattern, val_expr: str, out: List[str]) -> str:
+        if isinstance(pattern, (WildcardPattern, IdentifierPattern)):
+            return "true"
+        if isinstance(pattern, LiteralPattern):
+            lit_v = self.emit_expr(self._literal_to_hir(pattern.literal), out)
+            return f"w_eq({val_expr}, {lit_v})"
+        if isinstance(pattern, EnumPattern):
+            en_v = f'w_enum("{pattern.enum_name}", "{pattern.variant}")'
+            return f"w_eq({val_expr}, {en_v})"
+        if isinstance(pattern, TuplePattern):
+            conds: List[str] = [f"(({val_expr}).tag == W_TUPLE && ({val_expr}).as.tuple->len == {len(pattern.elements)})"]
+            for idx, elem_pat in enumerate(pattern.elements):
+                sub_c = self._emit_pattern_cond(elem_pat, f"({val_expr}).as.tuple->items[{idx}]", out)
+                if sub_c != "true":
+                    conds.append(sub_c)
+            return "(" + " && ".join(conds) + ")"
+        return "true"
+
+    def _literal_to_hir(self, lit: Any) -> HirExpr:
+        from node.NodeType import IntLiteral, FloatLiteral, StringLiteral, BoolLiteral, NoneLiteral
+        if isinstance(lit, IntLiteral):
+            return HirConstInt(lit.value, TYPE_INT, Span(lit.line, lit.col))
+        if isinstance(lit, FloatLiteral):
+            return HirConstFloat(lit.value, TYPE_FLOAT, Span(lit.line, lit.col))
+        if isinstance(lit, StringLiteral):
+            return HirConstStr(lit.value, TYPE_STR, Span(lit.line, lit.col))
+        if isinstance(lit, BoolLiteral):
+            return HirConstBool(lit.value, TYPE_BOOL, Span(lit.line, lit.col))
+        if isinstance(lit, NoneLiteral):
+            return HirConstNone(TYPE_NONE, Span(lit.line, lit.col))
+        return HirConstUnit(TYPE_UNIT, Span())
