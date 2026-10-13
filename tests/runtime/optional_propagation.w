@@ -1,0 +1,10 @@
+fn try_double(x: int?) -> int? {
+    let unwrapped = x?
+    return unwrapped * 2
+}
+
+let res1 = try_double(21)
+let res2 = try_double(none)
+
+print(res1 ?? 0)
+print(res2 ?? 999)

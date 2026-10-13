@@ -1,599 +1,597 @@
-from node.NodeType import BinaryExpr, Identifier, Program, Statement, AssignmentExpr, IndexAssignmentExpr
-from runtime.NumberOps import eval_numeric_binary_expr
-from runtime.StringOps import eval_string_binary_expr
-from runtime.Types import BooleanVal, NoneVal, RuntimeVal, NumberVal, IntVal, FloatVal, StringVal, FunctionVal, NativeFunctionVal, ListVal, DictVal
-from runtime.Environment import Environment
+import os
+import sys
+from typing import Any, Dict, List, Optional, TextIO, Tuple
+from error.Error import WRuntimeError
+from node.NodeType import (
+    Program, Stmt, Expr, ExprStmt, LetDecl, FnDecl, StructDecl, EnumDecl, ImportDecl,
+    WhileStmt, ForStmt, ReturnStmt, BreakStmt, ContinueStmt, Block,
+    IntLiteral, FloatLiteral, StringLiteral, BoolLiteral, NoneLiteral, IdentExpr,
+    UnaryExpr, BinaryExpr, CoalesceExpr, RangeExpr, PostfixTryExpr, ElseErrExpr, CallExpr,
+    MemberExpr, IndexExpr, AssignmentExpr, StructInitExpr, ListExpr, DictExpr, TupleExpr,
+    IfExpr, MatchExpr, Pattern, IdentifierPattern, TuplePattern, EnumPattern,
+    LiteralPattern, WildcardPattern
+)
+from runtime.Values import (
+    WValue, WInt, WFloat, WBool, WStr, WUnit, WNone,
+    WList, WDict, WTuple, WRange, WStructInstance, WEnumValue,
+    WResult, WOk, WErr, WFunction, WNativeFunction, WBoundMethod,
+    WEnumNamespace, WModule
+)
 
-class ReturnValue(Exception):
-    def __init__(self, value: RuntimeVal):
-        self.value = value
+from runtime.Environment import (
+    Environment, ReturnSignal, BreakSignal, ContinueSignal,
+    PropagationSignal, create_global_environment
+)
 
-def is_truthy(val: RuntimeVal) -> bool:
-    """Determine if a runtime value is truthy"""
-    if isinstance(val, BooleanVal):
-        return val.value
-    elif isinstance(val, NumberVal):
-        return val.value != 0
-    elif isinstance(val, StringVal):
-        return len(val.value) > 0
-    elif isinstance(val, ListVal):
-        return len(val.elements) > 0
-    elif isinstance(val, DictVal):
-        return len(val.pairs) > 0
-    elif isinstance(val, NoneVal):
-        return False
-    else:
-        return True  # Functions and other objects are truthy
+class Interpreter:
+    """
+    Canonical Tree-Walking Interpreter for W Language v0.1 (W0).
+    Executes AST programs preserving strict value semantics (ARC + CoW)
+    and deterministic control flow.
+    """
+    def __init__(self, stdout: Optional[TextIO] = None, file: str = "<stdin>"):
+        self.file = file
+        self.stdout = stdout if stdout is not None else sys.stdout
+        self.global_env = create_global_environment(stdout=self.stdout)
 
-def eval_program(program: Program, env: Environment) -> RuntimeVal:
-    last_evaluated: RuntimeVal = NoneVal()
-    for statement in program.body:
-        last_evaluated = evaluate(statement, env)
-    return last_evaluated
+    def interpret(self, program: Program) -> WValue:
+        # Pass 1: Register top-level enums, structs, and functions
+        for stmt in program.body:
+            if isinstance(stmt, EnumDecl):
+                self.global_env.declare(
+                    stmt.name,
+                    WEnumNamespace(stmt.name, stmt.variants),
+                    is_mut=False
+                )
+            elif isinstance(stmt, FnDecl):
+                self.global_env.declare(
+                    stmt.name,
+                    WFunction(decl=stmt, closure_env=self.global_env),
+                    is_mut=False
+                )
+            elif isinstance(stmt, ImportDecl):
+                self.eval_import_decl(stmt, self.global_env)
 
+        # Pass 2: Execute statements
+        non_decls = [s for s in program.body if not isinstance(s, (FnDecl, StructDecl, EnumDecl, ImportDecl))]
+        last_val: WValue = WUnit()
 
-def eval_binary_expr(binary_op: BinaryExpr, env: Environment) -> RuntimeVal:
-    # Handle logical operators with short-circuit evaluation
-    if binary_op.operator == 'and':
-        lhs = evaluate(binary_op.left, env)
-        if not is_truthy(lhs):
-            return BooleanVal(False)
-        rhs = evaluate(binary_op.right, env)
-        return BooleanVal(is_truthy(rhs))
-    
-    if binary_op.operator == 'or':
-        lhs = evaluate(binary_op.left, env)
-        if is_truthy(lhs):
-            return BooleanVal(True)
-        rhs = evaluate(binary_op.right, env)
-        return BooleanVal(is_truthy(rhs))
-    
-    if binary_op.operator == 'not':
-        # For 'not' operator, we only care about the right side
-        # Don't evaluate the left side (which is a dummy BooleanLiteral(False))
-        rhs = evaluate(binary_op.right, env)
-        return BooleanVal(not is_truthy(rhs))
-    
-    lhs = evaluate(binary_op.left, env)
-    rhs = evaluate(binary_op.right, env)
+        if non_decls:
+            for stmt in program.body:
+                if not isinstance(stmt, (FnDecl, StructDecl, EnumDecl)):
+                    last_val = self.eval_stmt(stmt, self.global_env)
+        elif self.global_env.exists("main"):
+            main_fn = self.global_env.lookup("main")
+            if isinstance(main_fn, WFunction):
+                last_val = self.call_function(main_fn, [])
 
-    if binary_op.operator in ['==', '!=', '<', '>', '<=', '>=', 'is']:
-        return eval_comparison_expr(lhs, rhs, binary_op.operator)
+        return last_val
 
-    if isinstance(lhs, StringVal) and isinstance(rhs, StringVal):
-        return eval_string_binary_expr(lhs, rhs, binary_op.operator)
-    
-    # Handle numeric operations for NumberVal (backward compatibility), IntVal, and FloatVal
-    if (lhs.type in ["int", "float"] or isinstance(lhs, NumberVal)) and \
-       (rhs.type in ["int", "float"] or isinstance(rhs, NumberVal)):
-        return eval_numeric_binary_expr(lhs, rhs, binary_op.operator)
+    # ==========================================
+    # Statement Dispatch
+    # ==========================================
 
-    return NoneVal()
+    def eval_stmt(self, stmt: Stmt, env: Environment) -> WValue:
+        if isinstance(stmt, ExprStmt):
+            return self.eval_expr(stmt.expr, env)
 
+        if isinstance(stmt, LetDecl):
+            val = self.eval_expr(stmt.initializer, env)
+            env.declare(stmt.name, val, is_mut=stmt.is_mut)
+            return val
 
-def eval_comparison_expr(lhs: RuntimeVal, rhs: RuntimeVal, operator: str) -> BooleanVal:
-    if operator == '==':
-        return BooleanVal(lhs.value == rhs.value)
-    elif operator == '!=':
-        return BooleanVal(lhs.value != rhs.value)
-    elif operator == 'is':
-        # 'is' checks for object identity (same type and value)
-        return BooleanVal(type(lhs) == type(rhs) and lhs.value == rhs.value)
-    
-    # Handle numeric comparisons for both int and float types
-    if (lhs.type in ["int", "float"]) and (rhs.type in ["int", "float"]):
-        if operator == '<':
-            return BooleanVal(lhs.value < rhs.value)
-        elif operator == '>':
-            return BooleanVal(lhs.value > rhs.value)
-        elif operator == '<=':
-            return BooleanVal(lhs.value <= rhs.value)
-        elif operator == '>=':
-            return BooleanVal(lhs.value >= rhs.value)
-    
-    return BooleanVal(False)
+        if isinstance(stmt, WhileStmt):
+            while True:
+                cond_val = self.eval_expr(stmt.condition, env)
+                if not isinstance(cond_val, WBool) or not cond_val.value:
+                    break
+                try:
+                    self.eval_block(stmt.body, env)
+                except ContinueSignal:
+                    continue
+                except BreakSignal:
+                    break
+            return WUnit()
 
-
-def eval_indentifier(ast_node: Identifier, env: Environment) -> RuntimeVal:
-    return env.lookup_var(ast_node.symbol)
-
-def eval_if_statement(if_stmt, env: Environment) -> RuntimeVal:
-    condition = evaluate(if_stmt.condition, env)
-    
-    is_truthy = False
-    if isinstance(condition, BooleanVal):
-        is_truthy = condition.value
-    elif isinstance(condition, NumberVal):
-        is_truthy = condition.value != 0
-    elif isinstance(condition, StringVal):
-        is_truthy = len(condition.value) > 0
-    
-    if is_truthy:
-        last_evaluated = NoneVal()
-        for stmt in if_stmt.then_body:
-            last_evaluated = evaluate(stmt, env)
-        return last_evaluated
-    else:
-        last_evaluated = NoneVal()
-        for stmt in if_stmt.else_body:
-            last_evaluated = evaluate(stmt, env)
-        return last_evaluated
-
-
-def eval_while_statement(while_stmt, env: Environment) -> RuntimeVal:
-    last_evaluated = NoneVal()
-    
-    while True:
-        condition = evaluate(while_stmt.condition, env)
-        
-        is_truthy = False
-        if isinstance(condition, BooleanVal):
-            is_truthy = condition.value
-        elif isinstance(condition, NumberVal):
-            is_truthy = condition.value != 0
-        elif isinstance(condition, StringVal):
-            is_truthy = len(condition.value) > 0
-        
-        if not is_truthy:
-            break
-        
-        for stmt in while_stmt.body:
-            last_evaluated = evaluate(stmt, env)
-    
-    return last_evaluated
-
-
-def eval_function_declaration(func_decl, env: Environment) -> RuntimeVal:
-    param_names = [param[0] for param in func_decl.parameters]
-    function = FunctionVal(func_decl.name, param_names, func_decl.body, env)
-    return env.declare_var(func_decl.name, function)
-
-
-def eval_call_expr(call_expr, env: Environment) -> RuntimeVal:
-    func = evaluate(call_expr.callee, env)
-    
-    if isinstance(func, NativeFunctionVal):
-        args = []
-        for arg in call_expr.arguments:
-            args.append(evaluate(arg, env))
-        return func.call(args, env)
-    
-    if not isinstance(func, FunctionVal):
-        print(f"Cannot call non-function value: {func}")
-        return NoneVal()
-    
-    args = []
-    for arg in call_expr.arguments:
-        args.append(evaluate(arg, env))
-    
-    if len(args) != len(func.parameters):
-        print(f"Function {func.name} expects {len(func.parameters)} arguments, got {len(args)}")
-        return NoneVal()
-    
-    func_env = Environment(func.closure_env)
-    
-    for i, param in enumerate(func.parameters):
-        func_env.declare_var(param, args[i])
-    
-    last_evaluated = NoneVal()
-    try:
-        for stmt in func.body:
-            last_evaluated = evaluate(stmt, func_env)
-    except ReturnValue as ret:
-        return ret.value
-    
-    return last_evaluated
-
-def eval_assignment_expr(assignment: 'AssignmentExpr', env: Environment) -> RuntimeVal:
-    value = evaluate(assignment.value, env)
-    return env.assign_var(assignment.assignee.symbol, value)
-
-def eval_index_assignment_expr(assignment: 'IndexAssignmentExpr', env: Environment) -> RuntimeVal:
-    """Evaluate index assignments like dict[key] = value or list[index] = value"""
-    obj = evaluate(assignment.object, env)
-    index = evaluate(assignment.index, env)
-    value = evaluate(assignment.value, env)
-    
-    if isinstance(obj, ListVal):
-        # List assignment: list[index] = value
-        if not isinstance(index, NumberVal):
-            print(f"List indices must be integers, not {type(index).__name__}")
-            return NoneVal()
-        
-        idx = int(index.value)
-        if idx < 0 or idx >= len(obj.elements):
-            print(f"List index out of range: {idx}")
-            return NoneVal()
-        
-        obj.elements[idx] = value
-        return value
-    
-    elif isinstance(obj, DictVal):
-        # Dictionary assignment: dict[key] = value
-        key = index.value if hasattr(index, 'value') else str(index)
-        obj.set(key, value)
-        return value
-    
-    else:
-        print(f"Cannot assign to index of type: {type(obj).__name__}")
-        return NoneVal()
-
-def eval_for_statement(for_stmt, env: Environment) -> RuntimeVal:
-    iterable = evaluate(for_stmt.iterable, env)
-    
-    if not isinstance(iterable, ListVal):
-        print(f"Cannot iterate over non-list value: {iterable}")
-        return NoneVal()
-    
-    last_evaluated = NoneVal()
-    
-    # Create a new scope for the for loop
-    loop_env = Environment(env)
-    
-    for element in iterable.elements:
-        loop_env.declare_var(for_stmt.variable, element)
-        
-        for stmt in for_stmt.body:
-            last_evaluated = evaluate(stmt, loop_env)
-    
-    return last_evaluated
-
-def eval_list_literal(list_node, env: Environment) -> ListVal:
-    """Evaluate list literals like [1, 2, 3]"""
-    elements = []
-    for element_node in list_node.elements:
-        elements.append(evaluate(element_node, env))
-    return ListVal(elements)
-
-def eval_dict_literal(dict_node, env: Environment) -> DictVal:
-    """Evaluate dictionary literals like {"key": "value"}"""
-    pairs = {}
-    for key_node, value_node in dict_node.pairs:
-        key = evaluate(key_node, env)
-        value = evaluate(value_node, env)
-        # Convert key to appropriate type for dictionary indexing
-        if hasattr(key, 'value'):
-            pairs[key.value] = value
-        else:
-            pairs[str(key)] = value
-    return DictVal(pairs)
-
-def eval_return_statement(return_stmt, env: Environment) -> RuntimeVal:
-    """Evaluate return statements"""
-    if return_stmt.value:
-        value = evaluate(return_stmt.value, env)
-        raise ReturnValue(value)
-    else:
-        raise ReturnValue(NoneVal())
-
-def eval_index_expr(index_node, env: Environment) -> RuntimeVal:
-    """Evaluate index expressions like arr[i] or dict[key]"""
-    obj = evaluate(index_node.object, env)
-    index = evaluate(index_node.index, env)
-    
-    if isinstance(obj, ListVal):
-        if not isinstance(index, NumberVal):
-            print(f"List indices must be integers, not {type(index).__name__}")
-            return NoneVal()
-        
-        idx = int(index.value)
-        if idx < 0 or idx >= len(obj.elements):
-            print(f"List index out of range: {idx}")
-            return NoneVal()
-        
-        return obj.elements[idx]
-    
-    elif isinstance(obj, DictVal):
-        # For dictionaries, use the value of the index as the key
-        key = index.value if hasattr(index, 'value') else str(index)
-        result = obj.get(key)
-        return result if result is not None else NoneVal()
-    
-    else:
-        print(f"Cannot index value of type: {type(obj).__name__}")
-        return NoneVal()
-
-
-def eval_method_call_expr(method_call, env: Environment) -> RuntimeVal:
-    """Evaluate method calls like list.append(value), dict.get(key), etc."""
-    obj = evaluate(method_call.object, env)
-    method_name = method_call.method
-    args = [evaluate(arg, env) for arg in method_call.arguments]
-    
-    if isinstance(obj, ListVal):
-        return eval_list_methods(obj, method_name, args)
-    elif isinstance(obj, DictVal):
-        return eval_dict_methods(obj, method_name, args)
-    else:
-        print(f"Cannot call method on value of type: {type(obj).__name__}")
-        return NoneVal()
-
-def eval_list_methods(obj: ListVal, method_name: str, args: list) -> RuntimeVal:
-    """Handle list methods"""
-    
-    # Implement list methods
-    if method_name == "append":
-        if len(args) != 1:
-            print(f"append() takes exactly 1 argument ({len(args)} given)")
-            return NoneVal()
-        obj.elements.append(args[0])
-        return NoneVal()
-    
-    elif method_name == "insert":
-        if len(args) != 2:
-            print(f"insert() takes exactly 2 arguments ({len(args)} given)")
-            return NoneVal()
-        if not isinstance(args[0], NumberVal):
-            print("insert() index must be an integer")
-            return NoneVal()
-        idx = int(args[0].value)
-        if idx < 0:
-            idx = 0
-        elif idx > len(obj.elements):
-            idx = len(obj.elements)
-        obj.elements.insert(idx, args[1])
-        return NoneVal()
-    
-    elif method_name == "remove":
-        if len(args) != 1:
-            print(f"remove() takes exactly 1 argument ({len(args)} given)")
-            return NoneVal()
-        try:
-            for i, element in enumerate(obj.elements):
-                if elements_equal(element, args[0]):
-                    obj.elements.pop(i)
-                    return NoneVal()
-            print(f"list.remove(x): x not in list")
-            return NoneVal()
-        except:
-            print(f"list.remove(x): x not in list")
-            return NoneVal()
-    
-    elif method_name == "pop":
-        if len(args) > 1:
-            print(f"pop() takes at most 1 argument ({len(args)} given)")
-            return NoneVal()
-        if len(obj.elements) == 0:
-            print("pop from empty list")
-            return NoneVal()
-        
-        if len(args) == 0:
-            return obj.elements.pop()
-        else:
-            if not isinstance(args[0], NumberVal):
-                print("pop() index must be an integer")
-                return NoneVal()
-            idx = int(args[0].value)
-            if idx < 0 or idx >= len(obj.elements):
-                print(f"pop index out of range")
-                return NoneVal()
-            return obj.elements.pop(idx)
-    
-    elif method_name == "clear":
-        if len(args) != 0:
-            print(f"clear() takes no arguments ({len(args)} given)")
-            return NoneVal()
-        obj.elements.clear()
-        return NoneVal()
-    
-    elif method_name == "index":
-        if len(args) != 1:
-            print(f"index() takes exactly 1 argument ({len(args)} given)")
-            return NoneVal()
-        for i, element in enumerate(obj.elements):
-            if elements_equal(element, args[0]):
-                return NumberVal(i)
-        print(f"x is not in list")
-        return NoneVal()
-    
-    elif method_name == "count":
-        if len(args) != 1:
-            print(f"count() takes exactly 1 argument ({len(args)} given)")
-            return NoneVal()
-        count = 0
-        for element in obj.elements:
-            if elements_equal(element, args[0]):
-                count += 1
-        return NumberVal(count)
-    
-    elif method_name == "sort":
-        if len(args) != 0:
-            print(f"sort() takes no arguments ({len(args)} given)")
-            return NoneVal()
-        try:
-            obj.elements.sort(key=lambda x: x.value if hasattr(x, 'value') else 0)
-        except:
-            print("sort() requires comparable elements")
-        return NoneVal()
-    
-    elif method_name == "reverse":
-        if len(args) != 0:
-            print(f"reverse() takes no arguments ({len(args)} given)")
-            return NoneVal()
-        obj.elements.reverse()
-        return NoneVal()
-    
-    elif method_name == "extend":
-        if len(args) != 1:
-            print(f"extend() takes exactly 1 argument ({len(args)} given)")
-            return NoneVal()
-        if not isinstance(args[0], ListVal):
-            print("extend() argument must be a list")
-            return NoneVal()
-        obj.elements.extend(args[0].elements)
-        return NoneVal()
-    
-    else:
-        print(f"Unknown list method: {method_name}")
-        return NoneVal()
-
-
-def elements_equal(a: RuntimeVal, b: RuntimeVal) -> bool:
-    """Helper function to compare two runtime values for equality"""
-    if type(a) != type(b):
-        return False
-    
-    if isinstance(a, NumberVal):
-        return a.value == b.value
-    elif isinstance(a, StringVal):
-        return a.value == b.value
-    elif isinstance(a, BooleanVal):
-        return a.value == b.value
-    elif isinstance(a, NoneVal):
-        return True
-    else:
-        return False
-
-def eval_dict_methods(obj: DictVal, method_name: str, args: list) -> RuntimeVal:
-    """Handle dictionary methods"""
-    
-    if method_name == "get":
-        if len(args) < 1 or len(args) > 2:
-            print(f"get() takes 1 or 2 arguments ({len(args)} given)")
-            return NoneVal()
-        
-        key = args[0].value if hasattr(args[0], 'value') else str(args[0])
-        default = args[1] if len(args) == 2 else NoneVal()
-        
-        result = obj.get(key)
-        return result if result is not None else default
-    
-    elif method_name == "keys":
-        if len(args) != 0:
-            print(f"keys() takes no arguments ({len(args)} given)")
-            return NoneVal()
-        
-        keys = obj.keys()
-        # Convert keys to appropriate RuntimeVal types
-        key_vals = []
-        for key in keys:
-            if isinstance(key, str):
-                key_vals.append(StringVal(key))
-            elif isinstance(key, (int, float)):
-                key_vals.append(NumberVal(key))
+        if isinstance(stmt, ForStmt):
+            iter_val = self.eval_expr(stmt.iterable, env)
+            elements: List[WValue]
+            if isinstance(iter_val, WList):
+                elements = list(iter_val.storage.data)
+            elif isinstance(iter_val, WRange):
+                elements = list(iter_val)
             else:
-                key_vals.append(StringVal(str(key)))
-        
-        return ListVal(key_vals)
-    
-    elif method_name == "values":
-        if len(args) != 0:
-            print(f"values() takes no arguments ({len(args)} given)")
-            return NoneVal()
-        
-        values = obj.values()
-        return ListVal(values)
-    
-    elif method_name == "items":
-        if len(args) != 0:
-            print(f"items() takes no arguments ({len(args)} given)")
-            return NoneVal()
-        
-        items = obj.items()
-        item_tuples = []
-        for key, value in items:
-            if isinstance(key, str):
-                key_val = StringVal(key)
-            elif isinstance(key, (int, float)):
-                key_val = NumberVal(key)
-            else:
-                key_val = StringVal(str(key))
-            
-            item_tuples.append(ListVal([key_val, value]))
-        
-        return ListVal(item_tuples)
-    
-    elif method_name == "clear":
-        if len(args) != 0:
-            print(f"clear() takes no arguments ({len(args)} given)")
-            return NoneVal()
-        obj.clear()
-        return NoneVal()
-    
-    elif method_name == "update":
-        if len(args) != 1:
-            print(f"update() takes exactly 1 argument ({len(args)} given)")
-            return NoneVal()
-        
-        if not isinstance(args[0], DictVal):
-            print("update() argument must be a dictionary")
-            return NoneVal()
-        
-        obj.update(args[0])
-        return NoneVal()
-    
-    else:
-        print(f"Unknown dict method: {method_name}")
-        return NoneVal()
-def evaluate(ast_node: Statement, env: Environment) -> RuntimeVal:
-    if ast_node.kind == "NumericLiteral":
-        return NumberVal(ast_node.value)
-    
-    if ast_node.kind == "IntLiteral":
-        return IntVal(ast_node.value)
-    
-    if ast_node.kind == "FloatLiteral":
-        return FloatVal(ast_node.value)
-    
-    if ast_node.kind == "NoneLiteral":
-        return NoneVal()
-    
-    if ast_node.kind == "StringLiteral":
-        return StringVal(ast_node.value)
-    
-    if ast_node.kind == "BooleanLiteral":
-        return BooleanVal(ast_node.value)
-    
-    if ast_node.kind == "ListLiteral":
-        return eval_list_literal(ast_node, env)
-    
-    if ast_node.kind == "DictLiteral":
-        return eval_dict_literal(ast_node, env)
-    
-    if ast_node.kind == "IndexExpr":
-        return eval_index_expr(ast_node, env)
-    
-    if ast_node.kind == "MethodCallExpr":
-        return eval_method_call_expr(ast_node, env)
+                raise WRuntimeError(
+                    message=f"Cannot iterate over type '{type(iter_val).__name__}'",
+                    line=stmt.line,
+                    col=stmt.col,
+                    file=self.file
+                )
 
-    if ast_node.kind == "VarDeclaration":
-        return env.declare_var(ast_node.identifier.symbol, evaluate(ast_node.initializer, env))
-    
-    if ast_node.kind == "Identifier":
-        return eval_indentifier(ast_node, env)
-    
-    if ast_node.kind == "BinaryExpr":
-        return eval_binary_expr(ast_node, env)
-    
-    if ast_node.kind == "IfStatement":
-        return eval_if_statement(ast_node, env)
-    
-    if ast_node.kind == "WhileStatement":
-        return eval_while_statement(ast_node, env)
-    
-    if ast_node.kind == "ForStatement":
-        return eval_for_statement(ast_node, env)
-    
-    if ast_node.kind == "FunctionDeclaration":
-        return eval_function_declaration(ast_node, env)
-    
-    if ast_node.kind == "CallExpr":
-        return eval_call_expr(ast_node, env)
-    
-    if ast_node.kind == "AssignmentExpr":
-        return eval_assignment_expr(ast_node, env)
-    
-    if ast_node.kind == "IndexAssignmentExpr":
-        return eval_index_assignment_expr(ast_node, env)
-    
-    if ast_node.kind == "ReturnStatement":
-        return eval_return_statement(ast_node, env)
-    
-    if ast_node.kind == "Program":
-        return eval_program(ast_node, env)
+            for item in elements:
+                loop_env = Environment(parent=env)
+                self.bind_pattern(stmt.pattern, item, loop_env)
+                try:
+                    self.eval_block(stmt.body, loop_env)
+                except ContinueSignal:
+                    continue
+                except BreakSignal:
+                    break
+            return WUnit()
 
-    if ast_node.kind == "ForStatement":
-        return eval_for_statement(ast_node, env)
+        if isinstance(stmt, ReturnStmt):
+            ret_val = self.eval_expr(stmt.value, env) if stmt.value is not None else WUnit()
+            raise ReturnSignal(ret_val)
 
-    print("This AST Node has not yet been set up for interpretation.", ast_node)
-    exit(0)
+        if isinstance(stmt, BreakStmt):
+            raise BreakSignal()
+
+        if isinstance(stmt, ContinueStmt):
+            raise ContinueSignal()
+
+        if isinstance(stmt, ImportDecl):
+            return self.eval_import_decl(stmt, env)
+
+        return WUnit()
+
+    def eval_block(self, block: Block, env: Environment) -> WValue:
+        block_env = Environment(parent=env)
+        for s in block.statements:
+            self.eval_stmt(s, block_env)
+        if block.tail_expr is not None:
+            return self.eval_expr(block.tail_expr, block_env)
+        return WUnit()
+
+    def eval_import_decl(self, stmt: ImportDecl, env: Environment) -> WValue:
+        # Resolve path relative to source file directory or cwd
+        current_dir = os.path.dirname(os.path.abspath(self.file)) if self.file != "<stdin>" else os.getcwd()
+        resolved_path = os.path.join(current_dir, stmt.path)
+        if not os.path.exists(resolved_path):
+            # Fallback to direct path
+            resolved_path = stmt.path
+
+        if not os.path.exists(resolved_path):
+            raise WRuntimeError(
+                message=f"Module not found: '{stmt.path}'",
+                line=stmt.line,
+                col=stmt.col,
+                file=self.file
+            )
+
+        with open(resolved_path, "r", encoding="utf-8") as f:
+            code = f.read()
+
+        from parser.Parser import Parser
+
+        ast = Parser(file=resolved_path).parse(code)
+
+
+        sub_interpreter = Interpreter(stdout=self.stdout, file=resolved_path)
+        sub_interpreter.interpret(ast)
+
+        mod = WModule(name=stmt.namespace, env=sub_interpreter.global_env)
+        env.declare(stmt.namespace, mod, is_mut=False)
+        return mod
+
+    def bind_pattern(self, pattern: Pattern, value: WValue, env: Environment) -> None:
+        if isinstance(pattern, IdentifierPattern):
+            env.declare(pattern.name, value, is_mut=False)
+        elif isinstance(pattern, TuplePattern):
+            if not isinstance(value, WTuple) or len(pattern.elements) != len(value.elements):
+                raise WRuntimeError(
+                    message="Cannot destructure tuple: length mismatch",
+                    line=pattern.line,
+                    col=pattern.col,
+                    file=self.file
+                )
+            for p, elem in zip(pattern.elements, value.elements):
+                self.bind_pattern(p, elem, env)
+        elif isinstance(pattern, WildcardPattern):
+            pass
+
+    # ==========================================
+    # Expression Dispatch
+    # ==========================================
+
+    def eval_expr(self, expr: Expr, env: Environment) -> WValue:
+        if isinstance(expr, IntLiteral):
+            return WInt(expr.value)
+
+        if isinstance(expr, FloatLiteral):
+            return WFloat(expr.value)
+
+        if isinstance(expr, StringLiteral):
+            return WStr(expr.value)
+
+        if isinstance(expr, BoolLiteral):
+            return WBool(expr.value)
+
+        if isinstance(expr, NoneLiteral):
+            return WNone()
+
+        if isinstance(expr, IdentExpr):
+            return env.lookup(expr.name)
+
+        if isinstance(expr, UnaryExpr):
+            operand_val = self.eval_expr(expr.operand, env)
+            if expr.op == "-":
+                if isinstance(operand_val, WInt):
+                    return WInt(-operand_val.value)
+                if isinstance(operand_val, WFloat):
+                    return WFloat(-operand_val.value)
+            if expr.op == "not":
+                if isinstance(operand_val, WBool):
+                    return WBool(not operand_val.value)
+            raise WRuntimeError(
+                message=f"Invalid unary operator '{expr.op}' on '{operand_val}'",
+                line=expr.line,
+                col=expr.col,
+                file=self.file
+            )
+
+        if isinstance(expr, BinaryExpr):
+            # Short-circuit logical operators
+            if expr.op == "and":
+                lhs = self.eval_expr(expr.left, env)
+                if not isinstance(lhs, WBool):
+                    raise WRuntimeError("Expected bool operand for 'and'", line=expr.line, col=expr.col, file=self.file)
+                if not lhs.value:
+                    return WBool(False)
+                rhs = self.eval_expr(expr.right, env)
+                if not isinstance(rhs, WBool):
+                    raise WRuntimeError("Expected bool operand for 'and'", line=expr.line, col=expr.col, file=self.file)
+                return WBool(rhs.value)
+
+            if expr.op == "or":
+                lhs = self.eval_expr(expr.left, env)
+                if not isinstance(lhs, WBool):
+                    raise WRuntimeError("Expected bool operand for 'or'", line=expr.line, col=expr.col, file=self.file)
+                if lhs.value:
+                    return WBool(True)
+                rhs = self.eval_expr(expr.right, env)
+                if not isinstance(rhs, WBool):
+                    raise WRuntimeError("Expected bool operand for 'or'", line=expr.line, col=expr.col, file=self.file)
+                return WBool(rhs.value)
+
+            lhs = self.eval_expr(expr.left, env)
+            rhs = self.eval_expr(expr.right, env)
+
+            if expr.op == "+":
+                if isinstance(lhs, WInt) and isinstance(rhs, WInt):
+                    return WInt(lhs.value + rhs.value)
+                if isinstance(lhs, WFloat) and isinstance(rhs, WFloat):
+                    return WFloat(lhs.value + rhs.value)
+                if isinstance(lhs, WStr) and isinstance(rhs, WStr):
+                    return WStr(lhs.value + rhs.value)
+
+            if expr.op == "-":
+                if isinstance(lhs, WInt) and isinstance(rhs, WInt):
+                    return WInt(lhs.value - rhs.value)
+                if isinstance(lhs, WFloat) and isinstance(rhs, WFloat):
+                    return WFloat(lhs.value - rhs.value)
+
+            if expr.op == "*":
+                if isinstance(lhs, WInt) and isinstance(rhs, WInt):
+                    return WInt(lhs.value * rhs.value)
+                if isinstance(lhs, WFloat) and isinstance(rhs, WFloat):
+                    return WFloat(lhs.value * rhs.value)
+
+            if expr.op == "/":
+                if isinstance(lhs, WInt) and isinstance(rhs, WInt):
+                    if rhs.value == 0:
+                        raise WRuntimeError("Division by zero", line=expr.line, col=expr.col, file=self.file)
+                    return WInt(lhs.value // rhs.value)
+                if isinstance(lhs, WFloat) and isinstance(rhs, WFloat):
+                    if rhs.value == 0.0:
+                        raise WRuntimeError("Division by zero", line=expr.line, col=expr.col, file=self.file)
+                    return WFloat(lhs.value / rhs.value)
+
+            if expr.op == "%":
+                if isinstance(lhs, WInt) and isinstance(rhs, WInt):
+                    if rhs.value == 0:
+                        raise WRuntimeError("Modulo by zero", line=expr.line, col=expr.col, file=self.file)
+                    return WInt(lhs.value % rhs.value)
+
+            if expr.op == "==":
+                return WBool(lhs == rhs)
+
+            if expr.op == "!=":
+                return WBool(lhs != rhs)
+
+            if expr.op == "<":
+                return WBool(lhs.value < rhs.value)
+
+            if expr.op == "<=":
+                return WBool(lhs.value <= rhs.value)
+
+            if expr.op == ">":
+                return WBool(lhs.value > rhs.value)
+
+            if expr.op == ">=":
+                return WBool(lhs.value >= rhs.value)
+
+            raise WRuntimeError(
+                message=f"Binary operator '{expr.op}' not supported for '{lhs}' and '{rhs}'",
+                line=expr.line,
+                col=expr.col,
+                file=self.file
+            )
+
+        if isinstance(expr, CoalesceExpr):
+            lhs = self.eval_expr(expr.left, env)
+            if isinstance(lhs, WNone):
+                return self.eval_expr(expr.right, env)
+            return lhs
+
+        if isinstance(expr, RangeExpr):
+            start_val = self.eval_expr(expr.start, env)
+            end_val = self.eval_expr(expr.end, env)
+            if not isinstance(start_val, WInt) or not isinstance(end_val, WInt):
+                raise WRuntimeError("Range bounds must be integers", line=expr.line, col=expr.col, file=self.file)
+            stop = end_val.value + 1 if expr.inclusive else end_val.value
+            return WList(elements=[WInt(i) for i in range(start_val.value, stop)])
+
+        if isinstance(expr, PostfixTryExpr):
+            val = self.eval_expr(expr.operand, env)
+            if isinstance(val, WNone):
+                raise PropagationSignal(WNone())
+            if isinstance(val, WErr):
+                raise PropagationSignal(val, is_error=True)
+            if isinstance(val, WOk):
+                return val.value
+            return val
+
+        if isinstance(expr, ElseErrExpr):
+            val = self.eval_expr(expr.operand, env)
+            if isinstance(val, WOk):
+                return val.value
+            if isinstance(val, WErr):
+                handler_env = Environment(parent=env)
+                if expr.err_name is not None:
+                    handler_env.declare(expr.err_name, val.error, is_mut=False)
+                return self.eval_block(expr.handler, handler_env)
+            if isinstance(val, WNone):
+                handler_env = Environment(parent=env)
+                return self.eval_block(expr.handler, handler_env)
+            return val
+
+        if isinstance(expr, AssignmentExpr):
+            target = expr.target
+            val = self.eval_expr(expr.value, env)
+
+            if isinstance(target, IdentExpr):
+                env.assign(target.name, val)
+                return val
+
+            if isinstance(target, IndexExpr):
+                obj = self.eval_expr(target.object, env)
+                idx = self.eval_expr(target.index, env)
+                if isinstance(obj, WList) and isinstance(idx, WInt):
+                    if idx.value < 0 or idx.value >= len(obj):
+                        raise WRuntimeError(f"List index out of bounds: {idx.value}", line=target.line, col=target.col, file=self.file)
+                    obj.set(idx.value, val)
+                    return val
+                if isinstance(obj, WDict):
+                    key_raw = idx.value if hasattr(idx, 'value') else idx
+                    obj.set(key_raw, val)
+                    return val
+                raise WRuntimeError(f"Cannot assign to index of '{type(obj).__name__}'", line=target.line, col=target.col, file=self.file)
+
+            if isinstance(target, MemberExpr):
+                obj = self.eval_expr(target.object, env)
+                if isinstance(obj, WStructInstance):
+                    obj.set_field(target.property, val)
+                    return val
+                raise WRuntimeError(f"Cannot assign to property of '{type(obj).__name__}'", line=target.line, col=target.col, file=self.file)
+
+            raise WRuntimeError("Invalid assignment target", line=expr.line, col=expr.col, file=self.file)
+
+        if isinstance(expr, MemberExpr):
+            obj = self.eval_expr(expr.object, env)
+            if isinstance(obj, WEnumNamespace):
+                return obj.get_variant(expr.property)
+            if isinstance(obj, WStructInstance):
+                return obj.get_field(expr.property)
+            if isinstance(obj, (WList, WDict)):
+                return WBoundMethod(receiver=obj, method_name=expr.property)
+            if isinstance(obj, WModule):
+                return obj.get_member(expr.property)
+            raise WRuntimeError(f"Cannot access property '{expr.property}' on '{obj}'", line=expr.line, col=expr.col, file=self.file)
+
+        if isinstance(expr, IndexExpr):
+            obj = self.eval_expr(expr.object, env)
+            idx = self.eval_expr(expr.index, env)
+
+            if isinstance(obj, WList):
+                if not isinstance(idx, WInt):
+                    raise WRuntimeError("List index must be int", line=expr.line, col=expr.col, file=self.file)
+                if idx.value < 0 or idx.value >= len(obj):
+                    raise WRuntimeError(f"List index out of bounds: index {idx.value}, length {len(obj)}", line=expr.line, col=expr.col, file=self.file)
+                return obj.get(idx.value)
+
+            if isinstance(obj, WStr):
+                if not isinstance(idx, WInt):
+                    raise WRuntimeError("String index must be int", line=expr.line, col=expr.col, file=self.file)
+                if idx.value < 0 or idx.value >= len(obj.value):
+                    raise WRuntimeError(f"String index out of bounds: index {idx.value}, length {len(obj.value)}", line=expr.line, col=expr.col, file=self.file)
+                return WStr(obj.value[idx.value])
+
+            if isinstance(obj, WDict):
+                key_raw = idx.value if hasattr(idx, 'value') else idx
+                res = obj.get(key_raw)
+                return res if res is not None else WNone()
+
+            raise WRuntimeError(f"Cannot index type '{type(obj).__name__}'", line=expr.line, col=expr.col, file=self.file)
+
+        if isinstance(expr, CallExpr):
+            callee = self.eval_expr(expr.callee, env)
+            args = [self.eval_expr(a, env) for a in expr.args]
+
+            if isinstance(callee, WNativeFunction):
+                return callee.call_fn(args)
+            if isinstance(callee, WFunction):
+                return self.call_function(callee, args)
+            if isinstance(callee, WBoundMethod):
+                return self.call_bound_method(callee, args)
+
+            raise WRuntimeError(f"Cannot call non-function '{callee}'", line=expr.line, col=expr.col, file=self.file)
+
+        if isinstance(expr, StructInitExpr):
+            field_dict = {}
+            for f in expr.fields:
+                field_dict[f.name] = self.eval_expr(f.value, env)
+            return WStructInstance(expr.struct_name, fields=field_dict)
+
+        if isinstance(expr, ListExpr):
+            return WList(elements=[self.eval_expr(e, env) for e in expr.elements])
+
+        if isinstance(expr, DictExpr):
+            pairs = {}
+            for entry in expr.entries:
+                k = self.eval_expr(entry.key, env)
+                v = self.eval_expr(entry.value, env)
+                key_raw = k.value if hasattr(k, 'value') else k
+                pairs[key_raw] = v
+            return WDict(pairs=pairs)
+
+        if isinstance(expr, TupleExpr):
+            return WTuple(elements=[self.eval_expr(e, env) for e in expr.elements])
+
+        if isinstance(expr, IfExpr):
+            cond_val = self.eval_expr(expr.condition, env)
+            if not isinstance(cond_val, WBool):
+                raise WRuntimeError("Condition of 'if' must be bool", line=expr.line, col=expr.col, file=self.file)
+            if cond_val.value:
+                return self.eval_block(expr.then_branch, env)
+
+            for elif_b in expr.elif_branches:
+                elif_cond = self.eval_expr(elif_b.condition, env)
+                if not isinstance(elif_cond, WBool):
+                    raise WRuntimeError("Condition of 'elif' must be bool", line=elif_b.line, col=elif_b.col, file=self.file)
+                if elif_cond.value:
+                    return self.eval_block(elif_b.body, env)
+
+            if expr.else_branch is not None:
+                return self.eval_block(expr.else_branch, env)
+            return WUnit()
+
+        if isinstance(expr, MatchExpr):
+            subj_val = self.eval_expr(expr.subject, env)
+            for arm in expr.arms:
+                matched, arm_bindings = self.match_pattern(arm.pattern, subj_val)
+                if matched:
+                    arm_env = Environment(parent=env)
+                    for k, v in arm_bindings.items():
+                        arm_env.declare(k, v, is_mut=False)
+                    return self.eval_block(arm.body, arm_env)
+            raise WRuntimeError("Non-exhaustive match at runtime", line=expr.line, col=expr.col, file=self.file)
+
+        return WUnit()
+
+    # ==========================================
+    # Helper Call Methods
+    # ==========================================
+
+    def call_function(self, func: WFunction, args: List[WValue]) -> WValue:
+        if len(args) != len(func.decl.params):
+            raise WRuntimeError(
+                message=f"Function '{func.decl.name}' expected {len(func.decl.params)} arguments, got {len(args)}",
+                line=func.decl.line,
+                col=func.decl.col,
+                file=self.file
+            )
+
+        call_env = Environment(parent=func.closure_env, is_function_boundary=True)
+        for param, arg in zip(func.decl.params, args):
+            call_env.declare(param.name, arg, is_mut=False)
+
+        ret_val: WValue
+        try:
+            ret_val = self.eval_block(func.decl.body, call_env)
+        except ReturnSignal as ret:
+            ret_val = ret.value
+        except PropagationSignal as prop:
+            ret_val = prop.value
+
+        from node.NodeType import ResultType as AstResultType
+        if isinstance(func.decl.return_type, AstResultType):
+            if not isinstance(ret_val, WResult):
+                ret_val = WOk(ret_val)
+
+        return ret_val
+
+
+    def call_bound_method(self, bound: WBoundMethod, args: List[WValue]) -> WValue:
+        receiver = bound.receiver
+        method = bound.method_name
+
+        if isinstance(receiver, WList):
+            if method == "append":
+                if len(args) != 1:
+                    raise WRuntimeError("append() takes 1 argument", file=self.file)
+                receiver.append(args[0])
+                return WUnit()
+            if method == "pop":
+                if len(args) == 0:
+                    return receiver.pop()
+                if len(args) == 1 and isinstance(args[0], WInt):
+                    return receiver.pop(args[0].value)
+                raise WRuntimeError("pop() invalid argument", file=self.file)
+            if method == "clear":
+                receiver.clear()
+                return WUnit()
+
+        if isinstance(receiver, WDict):
+            if method == "get":
+                if len(args) != 1:
+                    raise WRuntimeError("get() takes 1 argument", file=self.file)
+                key_raw = args[0].value if hasattr(args[0], 'value') else args[0]
+                val = receiver.get(key_raw)
+                return val if val is not None else WNone()
+            if method == "keys":
+                return WList(elements=receiver.keys())
+            if method == "values":
+                return WList(elements=receiver.values())
+
+        raise WRuntimeError(f"Method '{method}' not found on '{receiver}'", file=self.file)
+
+    def match_pattern(self, pattern: Pattern, value: WValue) -> Tuple[bool, Dict[str, WValue]]:
+        if isinstance(pattern, WildcardPattern):
+            return True, {}
+
+        if isinstance(pattern, LiteralPattern):
+            lit_val = self.eval_expr(pattern.literal, self.global_env)
+            return lit_val == value, {}
+
+        if isinstance(pattern, EnumPattern):
+            if isinstance(value, WEnumValue) and value.enum_name == pattern.enum_name and value.variant == pattern.variant:
+                return True, {}
+            return False, {}
+
+        if isinstance(pattern, IdentifierPattern):
+            return True, {pattern.name: value}
+
+        if isinstance(pattern, TuplePattern):
+            if not isinstance(value, WTuple) or len(pattern.elements) != len(value.elements):
+                return False, {}
+            all_bindings: Dict[str, WValue] = {}
+            for p, elem in zip(pattern.elements, value.elements):
+                matched, sub_b = self.match_pattern(p, elem)
+                if not matched:
+                    return False, {}
+                all_bindings.update(sub_b)
+            return True, all_bindings
+
+        return False, {}
+
+
+# Backward compatibility helper
+def evaluate(node: Any, env: Environment) -> WValue:
+    interpreter = Interpreter()
+    if isinstance(node, Program):
+        return interpreter.interpret(node)
+    if isinstance(node, Stmt):
+        return interpreter.eval_stmt(node, env)
+    if isinstance(node, Expr):
+        return interpreter.eval_expr(node, env)
+    return WUnit()
