@@ -464,18 +464,33 @@ class TypeChecker:
             self.current_scope = old_scope
             self.current_fn_ret_type = old_ret_type
 
+    def _expr_has_return(self, expr: Expr) -> bool:
+        if isinstance(expr, IfExpr):
+            if expr.else_branch is None:
+                return False
+            if not self._block_has_return(expr.then_branch):
+                return False
+            for eb in expr.elif_branches:
+                if not self._block_has_return(eb.body):
+                    return False
+            return self._block_has_return(expr.else_branch)
+        if isinstance(expr, MatchExpr):
+            if not expr.arms:
+                return False
+            for arm in expr.arms:
+                if not isinstance(arm.body, Block) or not self._block_has_return(arm.body):
+                    return False
+            return True
+        return False
+
     def _block_has_return(self, block: Block) -> bool:
         for s in block.statements:
             if isinstance(s, ReturnStmt):
                 return True
-            if isinstance(s, ExprStmt) and isinstance(s.expr, IfExpr):
-                if_expr = s.expr
-                if if_expr.else_branch and self._block_has_return(if_expr.then_branch) and self._block_has_return(if_expr.else_branch):
-                    return True
-        if isinstance(block.tail_expr, IfExpr):
-            if_expr = block.tail_expr
-            if if_expr.else_branch and self._block_has_return(if_expr.then_branch) and self._block_has_return(if_expr.else_branch):
+            if isinstance(s, ExprStmt) and self._expr_has_return(s.expr):
                 return True
+        if block.tail_expr is not None and self._expr_has_return(block.tail_expr):
+            return True
         return False
 
     def _block_diverges(self, block: Block) -> bool:
