@@ -1,0 +1,4 @@
+env1: 127.0.0.1:9000
+env2: localhost:8080
+env3: missing HOST
+config: default_config=true (recovered from IoError)
