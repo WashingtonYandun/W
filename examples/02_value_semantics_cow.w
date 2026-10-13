@@ -1,0 +1,34 @@
+## 02_value_semantics_cow.w
+## Pure Value Semantics powered by ARC + Copy-on-Write (CoW).
+
+struct Config {
+    host: str
+    port: int
+}
+
+fn main() -> unit {
+    # 1. Lists have value semantics
+    let original_list = [10, 20, 30]
+    let mut cloned_list = original_list
+    cloned_list.append(40)
+    cloned_list[0] = 99
+    print("original_list:", original_list)
+    print("cloned_list:  ", cloned_list)
+
+    # 2. Dicts have value semantics
+    let base_scores = {"alice": 100, "bob": 85}
+    let mut updated_scores = base_scores
+    updated_scores["alice"] = 120
+    print("base_scores[alice]:   ", base_scores["alice"])
+    print("updated_scores[alice]:", updated_scores["alice"])
+
+    # 3. Structs have value semantics
+    let prod_cfg = Config {
+        host: "0.0.0.0",
+        port: 8080,
+    }
+    let mut dev_cfg = prod_cfg
+    dev_cfg.port = 3000
+    print("prod_cfg.port:", prod_cfg.port)
+    print("dev_cfg.port: ", dev_cfg.port)
+}

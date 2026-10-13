@@ -1,95 +1,103 @@
-from enum import Enum
-from common.Utils import iota
-
+from enum import Enum, auto
 
 class TokenType(Enum):
-    """
-    Enum class representing the different types of tokens in a programming language.
-    """
-    # Data types
-    INTEGERS = iota()
-    FLOATS = iota()
-    STRINGS = iota()
-    BOOLEANS = iota()
-    LISTS = iota()
-    TUPLES = iota()
-    DICTS = iota()
-    NONE = iota()
-    COLON = iota()
+    # 22 Reserved Keywords (SPEC v0.1)
+    FN = auto()
+    LET = auto()
+    MUT = auto()
+    STRUCT = auto()
+    ENUM = auto()
+    IMPORT = auto()
 
-    # Reserved keywords for datatypes
-    CONST = iota()
-    FUNC = iota()
-    RETURN = iota()
-    DATATYPE_INT = iota()
-    DATATYPE_FLOAT = iota()
-    DATATYPE_STR = iota()
-    DATATYPE_BOOL = iota()
-    DATATYPE_LIST = iota()
-    DATATYPE_DICT = iota()
+    IF = auto()
+    ELIF = auto()
+    ELSE = auto()
+    FOR = auto()
+    WHILE = auto()
+    IN = auto()
+    MATCH = auto()
+    RETURN = auto()
+    BREAK = auto()
+    CONTINUE = auto()
 
-    # Identifiers
-    IDENTIFIER = iota()
-    ASSIGNMENT_OPERATOR = iota()
+    TRUE = auto()
+    FALSE = auto()
+    NONE = auto()
 
-    # Control flow
-    IF = iota()
-    ELSE = iota()
-    ELIF = iota()
+    AND = auto()
+    OR = auto()
+    NOT = auto()
 
-    # Loops
-    FOR = iota()
-    WHILE = iota()
-    IN = iota()
+    # Literals
+    INT = auto()
+    FLOAT = auto()
+    STR = auto()
+    IDENTIFIER = auto()
 
-    # Grouping & Operators
-    BINARY_OPERATOR = iota()
-    COMPARISON_OPERATOR = iota()
-    EQUALS = iota()
-    
-    # Logical operators
-    AND = iota()
-    OR = iota()
-    NOT = iota()
-    IS = iota()
+    # Arithmetic Operators
+    PLUS = auto()              # +
+    MINUS = auto()             # -
+    STAR = auto()              # *
+    SLASH = auto()             # /
+    PERCENT = auto()           # %
 
-    # Syntax
-    LEFT_PR = iota()
-    RIGHT_PR = iota()
-    LEFT_BR = iota()
-    RIGHT_BR = iota()
-    LEFT_CBR = iota()
-    RIGHT_CBR = iota()
-    
-    # Arrow for function return types
-    ARROW = iota()            # ->
+    # Relational & Equality Operators
+    ASSIGN = auto()            # =
+    EQ = auto()                # ==
+    NOT_EQ = auto()            # !=
+    LT = auto()                # <
+    LTE = auto()               # <=
+    GT = auto()                # >
+    GTE = auto()               # >=
 
-    # End of file
-    EOF = iota()
-    NEW_LINE = iota()
-    
-    # Comma
-    COMMA = iota()
-    
-    # Dot operator for method calls
-    DOT = iota()
-    
-    # List methods
-    APPEND = iota()
-    INSERT = iota()
-    REMOVE = iota()
-    POP = iota()
-    CLEAR = iota()
-    INDEX = iota()
-    COUNT = iota()
-    SORT = iota()
-    REVERSE = iota()
-    EXTEND = iota()
-    
-    # Dict methods
-    GET = iota()
-    KEYS = iota()
-    VALUES = iota()
-    ITEMS = iota()
-    UPDATE = iota()
-    
+    # Arrows
+    ARROW = auto()             # ->
+    FAT_ARROW = auto()         # =>
+
+    # Ranges
+    DOT_DOT = auto()           # ..
+    DOT_DOT_EQ = auto()        # ..=
+
+    # Optionals & Error Propagation
+    QUESTION = auto()          # ?
+    QUESTION_QUESTION = auto() # ??
+    EXCLAMATION = auto()       # !
+
+    # Punctuation & Delimiters
+    DOT = auto()               # .
+    COLON = auto()             # :
+    COMMA = auto()             # ,
+    LPAREN = auto()            # (
+    RPAREN = auto()            # )
+    LBRACE = auto()            # {
+    RBRACE = auto()            # }
+    LBRACKET = auto()          # [
+    RBRACKET = auto()          # ]
+
+    # Stream End
+    EOF = auto()
+
+    # Backward compatibility aliases for legacy parser (will be phased out)
+    INTEGERS = INT
+    FLOATS = FLOAT
+    STRINGS = STR
+    BOOLEANS = TRUE
+    FUNC = FN
+    CONST = LET
+    LEFT_PR = LPAREN
+    RIGHT_PR = RPAREN
+    LEFT_BR = LBRACKET
+    RIGHT_BR = RBRACKET
+    LEFT_CBR = LBRACE
+    RIGHT_CBR = RBRACE
+    BINARY_OPERATOR = PLUS
+    COMPARISON_OPERATOR = EQ
+    ASSIGNMENT_OPERATOR = ASSIGN
+    NEW_LINE = auto()
+    DATATYPE_INT = IDENTIFIER
+    DATATYPE_FLOAT = IDENTIFIER
+    DATATYPE_STR = IDENTIFIER
+    DATATYPE_BOOL = IDENTIFIER
+    DATATYPE_LIST = IDENTIFIER
+    DATATYPE_DICT = IDENTIFIER
+    IS = EQ

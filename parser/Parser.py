@@ -1,535 +1,636 @@
-from lexer.Lexer import Lexer
-from node.NodeType import BooleanLiteral, NoneLiteral, NumericLiteral, IntLiteral, FloatLiteral, Program, Statement, Expr, BinaryExpr, Identifier, StringLiteral, VarDeclaration, IfStatement, WhileStatement, ForStatement, FunctionDeclaration, CallExpr, AssignmentExpr, IndexAssignmentExpr, ListLiteral, DictLiteral, ReturnStatement, IndexExpr, MethodCallExpr
+import os
+from typing import List, Optional
 from token.Token import Token
 from token.TokenType import TokenType
+from lexer.Lexer import Lexer
+from error.Error import ParserError
+from node.NodeType import (
+    Node, Program, Stmt, Expr, TypeNode, Pattern, Block,
+    NamedType, OptionalType, ListType, DictType, TupleType, ResultType,
+    IdentifierPattern, TuplePattern, EnumPattern, LiteralPattern, WildcardPattern,
+    FnDecl, Param, StructDecl, StructField, EnumDecl, ImportDecl, LetDecl,
+    WhileStmt, ForStmt, ReturnStmt, BreakStmt, ContinueStmt, ExprStmt,
+    IntLiteral, FloatLiteral, StringLiteral, BoolLiteral, NoneLiteral,
+    IdentExpr, UnaryExpr, BinaryExpr, CoalesceExpr, RangeExpr, PostfixTryExpr, ElseErrExpr,
+    CallExpr, MemberExpr, IndexExpr, AssignmentExpr,
+    StructInitExpr, FieldInit, ListExpr, DictExpr, DictEntry, TupleExpr,
+    IfExpr, ElifBranch, MatchExpr, MatchArm
+)
 
+
+# Infix Precedence Binding Power (higher = binds tighter)
+PRECEDENCE = {
+    TokenType.ASSIGN: 1,             # '=' (right-associative)
+    TokenType.QUESTION_QUESTION: 2,  # '??' (right-associative)
+    TokenType.OR: 3,                 # 'or'
+    TokenType.AND: 4,                # 'and'
+    TokenType.EQ: 5,                 # '=='
+    TokenType.NOT_EQ: 5,             # '!='
+    TokenType.LT: 6,                 # '<'
+    TokenType.LTE: 6,                # '<='
+    TokenType.GT: 6,                 # '>'
+    TokenType.GTE: 6,                # '>='
+    TokenType.DOT_DOT: 7,            # '..'
+    TokenType.DOT_DOT_EQ: 7,         # '..='
+    TokenType.PLUS: 8,               # '+'
+    TokenType.MINUS: 8,              # '-'
+    TokenType.STAR: 9,               # '*'
+    TokenType.SLASH: 9,              # '/'
+    TokenType.PERCENT: 9,            # '%'
+}
 
 class Parser:
-    def __init__(self):
-        self.tokens = []
+    """
+    Recursive Descent + Pratt Parser for W Language v0.1.
+    Never calls exit(); raises ParserError with exact diagnostic codes and positions.
+    """
+    def __init__(self, file: str = "<stdin>") -> None:
+        self.file = file
+        self.tokens: List[Token] = []
+        self.pos = 0
 
-    def not_eof(self) -> bool:
-        return self.tokens[0].type != TokenType.EOF
-
-    def at(self) -> Token:
-        return self.tokens[0]
-
-    def eat(self) -> Token:
-        prev = self.tokens.pop(0)
-        return prev
-
-    def expect(self, type_: str, err: any) -> Token:
-        prev = self.tokens.pop(0)
-        if not prev or prev.type != type_:
-            print("Parser Error:\n", err, prev, " - Expecting: ", type_)
-            exit(1)
-        return prev
-    
-    def peek(self) -> Token:
-        if len(self.tokens) > 1:
-            return self.tokens[1]
-        return Token(None, TokenType.EOF)
-
-    def produce_ast(self, sourceCode: str, show_tokens: bool = False) -> Program:
-        lexer = Lexer(sourceCode)
+    def parse(self, source: str, show_tokens: bool = False) -> Program:
+        lexer = Lexer(source, file=self.file)
         self.tokens = lexer.tokenize()
+        self.pos = 0
         if show_tokens:
             print("Tokens:", self.tokens)
-        program = Program()
-        while self.not_eof():
-            if self.at().type == TokenType.NEW_LINE:
-                self.eat()
-                continue
-            program.body.append(self.parse_stmt())
-        return program
+        return self.produce_ast()
 
-    def parse_stmt(self) -> Statement:
-        if self.at().type == TokenType.CONST:
-            return self.parse_var_declaration()
-        elif self.at().type == TokenType.IF:
-            return self.parse_if_statement()
-        elif self.at().type == TokenType.FOR:
-            return self.parse_for_statement()
-        elif self.at().type == TokenType.WHILE:
-            return self.parse_while_statement()
-        elif self.at().type == TokenType.FUNC:
-            return self.parse_function_declaration()
-        elif self.at().type == TokenType.RETURN:
-            return self.parse_return_statement()
-        elif self.at().type == TokenType.IDENTIFIER:
-            # Check if this is a variable declaration, assignment, or just an expression
-            if self.peek().type == TokenType.COLON:
-                return self.parse_var_declaration()
+    def produce_ast(self) -> Program:
+        start_line = self.at().line
+        start_col = self.at().col
+        body: List[Stmt] = []
+
+        while not self.is_at_end():
+            stmt = self.parse_stmt()
+            if stmt is not None:
+                body.append(stmt)
+
+        return Program(body=body, line=start_line, col=start_col)
+
+    # ==========================================
+    # Stream Navigation Helpers
+    # ==========================================
+
+    def at(self) -> Token:
+        if self.pos < len(self.tokens):
+            return self.tokens[self.pos]
+        return self.tokens[-1]
+
+    def peek(self, offset: int = 1) -> Token:
+        idx = self.pos + offset
+        if idx < len(self.tokens):
+            return self.tokens[idx]
+        return self.tokens[-1]
+
+    def advance(self) -> Token:
+        curr = self.at()
+        if not self.is_at_end():
+            self.pos += 1
+        return curr
+
+    def is_at_end(self) -> bool:
+        return self.at().type == TokenType.EOF
+
+    def check(self, type_: TokenType) -> bool:
+        if self.is_at_end():
+            return False
+        return self.at().type == type_
+
+    def match(self, *types: TokenType) -> bool:
+        for t in types:
+            if self.check(t):
+                self.advance()
+                return True
+        return False
+
+    def expect(self, type_: TokenType, code: str = "P002", msg: str = None) -> Token:
+        if self.check(type_):
+            return self.advance()
+        token = self.at()
+        err_msg = msg if msg else f"Expected token '{type_.name}', found '{token.type.name}'"
+        raise ParserError(message=err_msg, line=token.line, col=token.col, file=self.file, code=code)
+
+    # ==========================================
+    # Type Annotation Parsing
+    # ==========================================
+
+    def parse_type(self) -> TypeNode:
+        token = self.at()
+        if not self.check(TokenType.IDENTIFIER):
+            raise ParserError(
+                message=f"Expected type name, found '{token.type.name}'",
+                line=token.line,
+                col=token.col,
+                file=self.file,
+                code="P006"
+            )
+
+        name_tok = self.advance()
+        name = name_tok.value
+        line = name_tok.line
+        col = name_tok.col
+
+        inner_type: TypeNode
+        if self.match(TokenType.LBRACKET):
+            if name == "list":
+                elem_type = self.parse_type()
+                self.expect(TokenType.RBRACKET, code="P006", msg="Expected ']' after list type")
+                inner_type = ListType(element_type=elem_type, line=line, col=col)
+            elif name == "dict":
+                key_type = self.parse_type()
+                self.expect(TokenType.COMMA, code="P006", msg="Expected ',' between dict key and value types")
+                val_type = self.parse_type()
+                self.expect(TokenType.RBRACKET, code="P006", msg="Expected ']' after dict types")
+                inner_type = DictType(key_type=key_type, value_type=val_type, line=line, col=col)
+            elif name == "tuple":
+                elem_types: List[TypeNode] = []
+                if not self.check(TokenType.RBRACKET):
+                    elem_types.append(self.parse_type())
+                    while self.match(TokenType.COMMA):
+                        if self.check(TokenType.RBRACKET):
+                            break
+                        elem_types.append(self.parse_type())
+                self.expect(TokenType.RBRACKET, code="P006", msg="Expected ']' after tuple types")
+                inner_type = TupleType(element_types=elem_types, line=line, col=col)
             else:
-                # Parse the expression first, then check if it's an assignment
-                expr = self.parse_expr()
-                
-                # If we have an assignment operator, this is an assignment
-                if self.at().type == TokenType.ASSIGNMENT_OPERATOR:
-                    self.eat()  # consume '='
-                    value = self.parse_expr()
-                    
-                    # Determine the type of assignment
-                    if isinstance(expr, Identifier):
-                        # Simple variable assignment: var = value
-                        return AssignmentExpr(expr, value)
-                    elif isinstance(expr, IndexExpr):
-                        # Index assignment: dict[key] = value or list[index] = value
-                        return IndexAssignmentExpr(expr.object, expr.index, value)
-                    else:
-                        print(f"Invalid assignment target: {expr}")
-                        exit(1)
-                else:
-                    # Just a regular expression
-                    return expr
+                # Generic custom type
+                generic_arg = self.parse_type()
+                self.expect(TokenType.RBRACKET, code="P006", msg="Expected ']' after generic type")
+                inner_type = NamedType(name=f"{name}[{generic_arg}]", line=line, col=col)
         else:
-            return self.parse_expr()
-            
-    def parse_var_declaration(self) -> VarDeclaration:
-        const = False
+            inner_type = NamedType(name=name, line=line, col=col)
 
-        if self.at().type == TokenType.CONST:
-            const = True
-            self.eat()
+        # Check for optional postfix '?'
+        if self.match(TokenType.QUESTION):
+            inner_type = OptionalType(inner=inner_type, line=line, col=col)
 
-        identifier_token = self.expect(TokenType.IDENTIFIER, "Expected identifier")
-        identifier = Identifier(identifier_token.value)
+        # Check for fallible return type '!'
+        if self.match(TokenType.EXCLAMATION):
+            err_type = self.parse_type()
+            inner_type = ResultType(ok_type=inner_type, err_type=err_type, line=line, col=col)
 
-        self.expect(TokenType.COLON, "Expected ':' after identifier")
+        return inner_type
 
-        datatype = self.parse_type()
+    # ==========================================
+    # Pattern Parsing
+    # ==========================================
 
-        self.expect(TokenType.ASSIGNMENT_OPERATOR, "Expected '=' after datatype")
+    def parse_pattern(self) -> Pattern:
+        token = self.at()
 
-        value = self.parse_expr()
+        if self.match(TokenType.IDENTIFIER):
+            first_name = token.value
+            # Check for EnumPattern: EnumName.Variant
+            if self.match(TokenType.DOT):
+                variant_tok = self.expect(TokenType.IDENTIFIER, code="P002", msg="Expected enum variant name after '.'")
+                return EnumPattern(enum_name=first_name, variant=variant_tok.value, line=token.line, col=token.col)
 
-        if self.at().type == TokenType.NEW_LINE:
-            self.eat()
+            # Check for TuplePattern: a, b
+            if self.check(TokenType.COMMA):
+                elements: List[Pattern] = [IdentifierPattern(first_name, line=token.line, col=token.col)]
+                while self.match(TokenType.COMMA):
+                    next_tok = self.expect(TokenType.IDENTIFIER, code="P002", msg="Expected identifier in tuple pattern")
+                    elements.append(IdentifierPattern(next_tok.value, line=next_tok.line, col=next_tok.col))
+                return TuplePattern(elements=elements, line=token.line, col=token.col)
 
-        return VarDeclaration(identifier, value, const, datatype)
+            return IdentifierPattern(name=first_name, line=token.line, col=token.col)
 
-    def parse_type(self) -> str:
-        """Parse type annotations like 'int', 'str', 'list[int]', 'dict[str, int]', etc."""
-        if self.at().type in [TokenType.DATATYPE_INT, TokenType.DATATYPE_FLOAT, TokenType.DATATYPE_STR, TokenType.DATATYPE_BOOL]:
-            type_token = self.eat()
-            return type_token.value
-        elif self.at().type == TokenType.NONE:
-            self.eat()
-            return "None"
-        elif self.at().type == TokenType.DATATYPE_LIST:
-            self.eat()
-            self.expect(TokenType.LEFT_BR, "Expected '[' after 'list'")
-            inner_type = self.parse_type()
-            self.expect(TokenType.RIGHT_BR, "Expected ']' after list type")
-            return f"list[{inner_type}]"
-        elif self.at().type == TokenType.DATATYPE_DICT:
-            self.eat()
-            self.expect(TokenType.LEFT_BR, "Expected '[' after 'dict'")
-            key_type = self.parse_type()
-            self.expect(TokenType.COMMA, "Expected ',' between dict key and value types")
-            value_type = self.parse_type()
-            self.expect(TokenType.RIGHT_BR, "Expected ']' after dict types")
-            return f"dict[{key_type}, {value_type}]"
-        else:
-            print(f"Unsupported datatype: {self.at().value}")
-            exit(1)
+        if self.match(TokenType.INT):
+            lit = IntLiteral(token.value, line=token.line, col=token.col)
+            return LiteralPattern(literal=lit, line=token.line, col=token.col)
 
+        if self.match(TokenType.STR):
+            lit = StringLiteral(token.value, line=token.line, col=token.col)
+            return LiteralPattern(literal=lit, line=token.line, col=token.col)
 
+        if self.match(TokenType.TRUE, TokenType.FALSE):
+            lit = BoolLiteral(token.value, line=token.line, col=token.col)
+            return LiteralPattern(literal=lit, line=token.line, col=token.col)
 
-    def parse_expr(self) -> Expr:
-        return self.parse_logical_or_expr()
-    
-    def parse_logical_or_expr(self) -> Expr:
-        left = self.parse_logical_and_expr()
-        
-        while self.at().type == TokenType.OR:
-            operator = self.eat().value
-            right = self.parse_logical_and_expr()
-            left = BinaryExpr(left=left, right=right, operator=operator)
-        
-        return left
-    
-    def parse_logical_and_expr(self) -> Expr:
-        left = self.parse_equality_expr()
-        
-        while self.at().type == TokenType.AND:
-            operator = self.eat().value
-            right = self.parse_equality_expr()
-            left = BinaryExpr(left=left, right=right, operator=operator)
-        
-        return left
-    
-    def parse_equality_expr(self) -> Expr:
-        left = self.parse_comparison_expr()
-        
-        while self.at().type == TokenType.IS or (self.at().type == TokenType.COMPARISON_OPERATOR and self.at().value in ["==", "!="]):
-            operator = self.eat().value
-            right = self.parse_comparison_expr()
-            left = BinaryExpr(left=left, right=right, operator=operator)
-        
-        return left
+        raise ParserError(
+            message=f"Invalid pattern syntax, found '{token.type.name}'",
+            line=token.line,
+            col=token.col,
+            file=self.file,
+            code="P003"
+        )
 
-    def parse_comparison_expr(self) -> Expr:
-        left = self.parse_additive_expr()
+    # ==========================================
+    # Statement & Declaration Parsing
+    # ==========================================
 
-        while self.at().type == TokenType.COMPARISON_OPERATOR:
-            operator = self.eat().value
-            right = self.parse_additive_expr()
-            left = BinaryExpr(left=left, right=right, operator=operator)
+    def parse_stmt(self) -> Stmt:
+        if self.check(TokenType.FN):
+            return self.parse_fn_decl()
+        if self.check(TokenType.LET):
+            return self.parse_let_decl()
+        if self.check(TokenType.STRUCT):
+            return self.parse_struct_decl()
+        if self.check(TokenType.ENUM):
+            return self.parse_enum_decl()
+        if self.check(TokenType.IMPORT):
+            return self.parse_import_decl()
+        if self.check(TokenType.WHILE):
+            return self.parse_while_stmt()
+        if self.check(TokenType.FOR):
+            return self.parse_for_stmt()
+        if self.check(TokenType.RETURN):
+            return self.parse_return_stmt()
+        if self.check(TokenType.BREAK):
+            tok = self.advance()
+            return BreakStmt(line=tok.line, col=tok.col)
+        if self.check(TokenType.CONTINUE):
+            tok = self.advance()
+            return ContinueStmt(line=tok.line, col=tok.col)
 
-        return left
+        # Expression statement (including if/match used as statement)
+        expr = self.parse_expr()
+        return ExprStmt(expr=expr, line=expr.line, col=expr.col)
 
-    def parse_additive_expr(self) -> Expr:
-        left = self.parse_multiplicative_expr()
+    def parse_fn_decl(self) -> FnDecl:
+        start_tok = self.expect(TokenType.FN, code="P004", msg="Expected 'fn'")
+        name_tok = self.expect(TokenType.IDENTIFIER, code="P004", msg="Expected function name after 'fn'")
+        self.expect(TokenType.LPAREN, code="P002", msg="Expected '(' after function name")
 
-        while self.at().value in ["+", "-"]:
-            operator = self.eat().value
-            right = self.parse_multiplicative_expr()
-            left = BinaryExpr(left=left, right=right, operator=operator)
+        params: List[Param] = []
+        if not self.check(TokenType.RPAREN):
+            p_name = self.expect(TokenType.IDENTIFIER, code="P002", msg="Expected parameter name")
+            self.expect(TokenType.COLON, code="P002", msg="Expected ':' after parameter name")
+            p_type = self.parse_type()
+            params.append(Param(p_name.value, p_type, line=p_name.line, col=p_name.col))
 
-        return left
+            while self.match(TokenType.COMMA):
+                if self.check(TokenType.RPAREN):
+                    break
+                p_name = self.expect(TokenType.IDENTIFIER, code="P002", msg="Expected parameter name")
+                self.expect(TokenType.COLON, code="P002", msg="Expected ':' after parameter name")
+                p_type = self.parse_type()
+                params.append(Param(p_name.value, p_type, line=p_name.line, col=p_name.col))
 
-    def parse_multiplicative_expr(self) -> Expr:
-        left = self.parse_power_expr()
+        self.expect(TokenType.RPAREN, code="P002", msg="Expected ')' after parameters")
 
-        while self.at().value in ["/", "*", "%"]:
-            operator = self.eat().value
-            right = self.parse_power_expr()
-            left = BinaryExpr(left=left, right=right, operator=operator)
-
-        return left
-    
-    def parse_power_expr(self) -> Expr:
-        left = self.parse_unary_expr()
-
-        while self.at().value == "**":
-            operator = self.eat().value
-            right = self.parse_unary_expr()
-            left = BinaryExpr(left=left, right=right, operator=operator)
-
-        return left
-    
-    def parse_unary_expr(self) -> Expr:
-        if self.at().type == TokenType.NOT:
-            self.eat()  # consume 'not'
-            operand = self.parse_unary_expr()
-            return BinaryExpr(left=BooleanLiteral(False), right=operand, operator="not")
-        
-        return self.parse_primary_expr()
-
-
-    def parse_primary_expr(self) -> Expr:
-        tk = self.at().type
-
-        match tk:
-            case TokenType.IDENTIFIER:
-                ident = Identifier(self.eat().value)
-                if self.at().type == TokenType.DOT:
-                    return self.parse_method_call(ident)
-                elif self.at().type == TokenType.LEFT_PR:
-                    return self.parse_call_expr(ident)
-                elif self.at().type == TokenType.LEFT_BR:
-                    return self.parse_index_expr(ident)
-                return ident
-            case TokenType.INTEGERS:
-                return IntLiteral(self.eat().value)
-            case TokenType.FLOATS:
-                return FloatLiteral(self.eat().value)
-            case TokenType.STRINGS:
-                return StringLiteral(str(self.eat().value))
-            case TokenType.BOOLEANS:
-                token_value = self.eat().value
-                bool_value = token_value == "True"  # Convert string to boolean
-                return BooleanLiteral(bool_value)
-            case TokenType.BINARY_OPERATOR if self.at().value == "-":
-                self.eat()
-                if self.at().type == TokenType.INTEGERS:
-                    num = self.eat().value
-                    return IntLiteral(-num)
-                elif self.at().type == TokenType.FLOATS:
-                    num = self.eat().value
-                    return FloatLiteral(-num)
-                else:
-                    expr = self.parse_primary_expr()
-                    return BinaryExpr(left=IntLiteral(0), right=expr, operator="-")
-            case TokenType.LEFT_PR:
-                self.eat()
-                expr = self.parse_expr()
-                self.expect(TokenType.RIGHT_PR, "Expected closing parenthesis")
-                return expr
-            case TokenType.LEFT_BR:
-                return self.parse_list_literal()
-            case TokenType.LEFT_CBR:
-                return self.parse_dict_literal()
-            case TokenType.NONE:
-                self.eat()
-                return NoneLiteral()
-            case TokenType.NEW_LINE:
-                self.eat()
-                return self.parse_expr()
-            case _:
-                print("Unexpected token found during parsing!", self.at())
-                exit(1)
-
-    def parse_call_expr(self, callee: Expr) -> CallExpr:
-        self.expect(TokenType.LEFT_PR, "Expected '('")
-        
-        arguments = []
-        if self.at().type != TokenType.RIGHT_PR:
-            arguments.append(self.parse_expr())
-            while self.at().type == TokenType.COMMA:
-                self.eat()
-                arguments.append(self.parse_expr())
-        
-        self.expect(TokenType.RIGHT_PR, "Expected ')' after arguments")
-        return CallExpr(callee, arguments)
-
-    def parse(self, sourceCode: str, show_tokens: bool = False) -> Program:
-        return self.produce_ast(sourceCode, show_tokens)
-    
-    def parse_if_statement(self) -> IfStatement:
-        self.expect(TokenType.IF, "Expected 'if'")
-        condition = self.parse_expr()
-        self.expect(TokenType.LEFT_CBR, "Expected '{' after if condition")
-        
-        if self.at().type == TokenType.NEW_LINE:
-            self.eat()
-        
-        then_body = []
-        while self.not_eof() and self.at().type != TokenType.RIGHT_CBR:
-            if self.at().type == TokenType.NEW_LINE:
-                self.eat()
-                continue
-            then_body.append(self.parse_stmt())
-        
-        self.expect(TokenType.RIGHT_CBR, "Expected '}' to close if body")
-        
-        else_body = []
-        if self.at().type == TokenType.ELSE:
-            self.eat()
-            self.expect(TokenType.LEFT_CBR, "Expected '{' after 'else'")
-            
-            if self.at().type == TokenType.NEW_LINE:
-                self.eat()
-            
-            while self.not_eof() and self.at().type != TokenType.RIGHT_CBR:
-                if self.at().type == TokenType.NEW_LINE:
-                    self.eat()
-                    continue
-                else_body.append(self.parse_stmt())
-            
-            self.expect(TokenType.RIGHT_CBR, "Expected '}' to close else body")
-        
-        if self.at().type == TokenType.NEW_LINE:
-            self.eat()
-        
-        return IfStatement(condition, then_body, else_body)
-
-    def parse_while_statement(self) -> WhileStatement:
-        self.expect(TokenType.WHILE, "Expected 'while'")
-        condition = self.parse_expr()
-        self.expect(TokenType.LEFT_CBR, "Expected '{' after while condition")
-        
-        if self.at().type == TokenType.NEW_LINE:
-            self.eat()
-        
-        body = []
-        while self.not_eof() and self.at().type != TokenType.RIGHT_CBR:
-            if self.at().type == TokenType.NEW_LINE:
-                self.eat()
-                continue
-            body.append(self.parse_stmt())
-        
-        self.expect(TokenType.RIGHT_CBR, "Expected '}' to close while body")
-        
-        if self.at().type == TokenType.NEW_LINE:
-            self.eat()
-        
-        return WhileStatement(condition, body)
-
-    def parse_function_declaration(self) -> FunctionDeclaration:
-        self.expect(TokenType.FUNC, "Expected 'func'")
-        
-        name_token = self.expect(TokenType.IDENTIFIER, "Expected function name")
-        name = name_token.value
-        
-        self.expect(TokenType.LEFT_PR, "Expected '(' after function name")
-        
-        # Parse parameters with types: param: type
-        parameters = []
-        if self.at().type != TokenType.RIGHT_PR:
-            # Parse first parameter
-            param_name = self.expect(TokenType.IDENTIFIER, "Expected parameter name").value
-            self.expect(TokenType.COLON, "Expected ':' after parameter name")
-            param_type = self.parse_type()
-            parameters.append((param_name, param_type))
-            
-            # Parse additional parameters
-            while self.at().type == TokenType.COMMA:
-                self.eat()  # consume comma
-                param_name = self.expect(TokenType.IDENTIFIER, "Expected parameter name").value
-                self.expect(TokenType.COLON, "Expected ':' after parameter name")
-                param_type = self.parse_type()
-                parameters.append((param_name, param_type))
-        
-        self.expect(TokenType.RIGHT_PR, "Expected ')' after parameters")
-        
-        # Parse return type annotation: -> type
-        return_type = "None"
-        if self.at().type == TokenType.ARROW:
-            self.eat()
+        # Return type: defaults to unit if omitted
+        return_type = NamedType("unit", line=name_tok.line, col=name_tok.col)
+        if self.match(TokenType.ARROW):
             return_type = self.parse_type()
-        
-        self.expect(TokenType.LEFT_CBR, "Expected '{' to start function body")
-        
-        if self.at().type == TokenType.NEW_LINE:
-            self.eat()
-        
-        body = []
-        while self.not_eof() and self.at().type != TokenType.RIGHT_CBR:
-            if self.at().type == TokenType.NEW_LINE:
-                self.eat()
-                continue
-            body.append(self.parse_stmt())
-        
-        self.expect(TokenType.RIGHT_CBR, "Expected '}' to end function body")
-        
-        if self.at().type == TokenType.NEW_LINE:
-            self.eat()
-        
-        return FunctionDeclaration(name, parameters, body, return_type)
-    
-    def parse_assignment_expr(self) -> AssignmentExpr:
-        assignee_token = self.expect(TokenType.IDENTIFIER, "Expected identifier")
-        assignee = Identifier(assignee_token.value)
-        
-        self.expect(TokenType.ASSIGNMENT_OPERATOR, "Expected '='")
-        
-        value = self.parse_expr()
-        
-        if self.at().type == TokenType.NEW_LINE:
-            self.eat()
-        
-        return AssignmentExpr(assignee, value)
 
-    def parse_for_statement(self) -> ForStatement:
-        self.expect(TokenType.FOR, "Expected 'for'")
-        
-        var_token = self.expect(TokenType.IDENTIFIER, "Expected variable name")
-        variable = var_token.value
-        
-        self.expect(TokenType.IN, "Expected 'in' after for variable")
-        
-        iterable = self.parse_expr()
-        
-        self.expect(TokenType.LEFT_CBR, "Expected '{' after for iterable")
-        
-        if self.at().type == TokenType.NEW_LINE:
-            self.eat()
-        
-        body = []
-        while self.not_eof() and self.at().type != TokenType.RIGHT_CBR:
-            if self.at().type == TokenType.NEW_LINE:
-                self.eat()
-                continue
-            body.append(self.parse_stmt())
-        
-        self.expect(TokenType.RIGHT_CBR, "Expected '}' to close for body")
-        
-        if self.at().type == TokenType.NEW_LINE:
-            self.eat()
-        
-        return ForStatement(variable, iterable, body)
+        body = self.parse_block()
+        return FnDecl(name=name_tok.value, params=params, return_type=return_type, body=body, line=start_tok.line, col=start_tok.col)
 
-    def parse_list_literal(self) -> ListLiteral:
-        self.expect(TokenType.LEFT_BR, "Expected '['")
-        
-        elements = []
-        if self.at().type != TokenType.RIGHT_BR:
-            elements.append(self.parse_expr())
-            while self.at().type == TokenType.COMMA:
-                self.eat()  # consume comma
-                if self.at().type == TokenType.RIGHT_BR:
-                    break  # trailing comma
+    def parse_let_decl(self) -> LetDecl:
+        start_tok = self.expect(TokenType.LET, code="P004", msg="Expected 'let'")
+        is_mut = self.match(TokenType.MUT)
+
+        name_tok = self.expect(TokenType.IDENTIFIER, code="P004", msg="Expected variable name after 'let'")
+        type_ann: Optional[TypeNode] = None
+        if self.match(TokenType.COLON):
+            type_ann = self.parse_type()
+
+        self.expect(TokenType.ASSIGN, code="P004", msg="Expected '=' after variable declaration")
+        initializer = self.parse_expr()
+
+        return LetDecl(name=name_tok.value, is_mut=is_mut, type_ann=type_ann, initializer=initializer, line=start_tok.line, col=start_tok.col)
+
+    def parse_struct_decl(self) -> StructDecl:
+        start_tok = self.expect(TokenType.STRUCT, code="P004", msg="Expected 'struct'")
+        name_tok = self.expect(TokenType.IDENTIFIER, code="P004", msg="Expected struct name")
+        self.expect(TokenType.LBRACE, code="P002", msg="Expected '{' to start struct body")
+
+        fields: List[StructField] = []
+        while not self.check(TokenType.RBRACE) and not self.is_at_end():
+            f_name = self.expect(TokenType.IDENTIFIER, code="P004", msg="Expected struct field name")
+            self.expect(TokenType.COLON, code="P004", msg="Expected ':' after struct field name")
+            f_type = self.parse_type()
+            fields.append(StructField(f_name.value, f_type, line=f_name.line, col=f_name.col))
+            self.match(TokenType.COMMA)
+
+        self.expect(TokenType.RBRACE, code="P007", msg="Unterminated struct body, expected '}'")
+        return StructDecl(name=name_tok.value, fields=fields, line=start_tok.line, col=start_tok.col)
+
+    def parse_enum_decl(self) -> EnumDecl:
+        start_tok = self.expect(TokenType.ENUM, code="P004", msg="Expected 'enum'")
+        name_tok = self.expect(TokenType.IDENTIFIER, code="P004", msg="Expected enum name")
+        self.expect(TokenType.LBRACE, code="P002", msg="Expected '{' to start enum body")
+
+        variants: List[str] = []
+        while not self.check(TokenType.RBRACE) and not self.is_at_end():
+            v_tok = self.expect(TokenType.IDENTIFIER, code="P004", msg="Expected enum variant identifier")
+            variants.append(v_tok.value)
+            self.match(TokenType.COMMA)
+
+        self.expect(TokenType.RBRACE, code="P007", msg="Unterminated enum body, expected '}'")
+        return EnumDecl(name=name_tok.value, variants=variants, line=start_tok.line, col=start_tok.col)
+
+    def parse_import_decl(self) -> ImportDecl:
+        start_tok = self.expect(TokenType.IMPORT, code="P004", msg="Expected 'import'")
+        path_tok = self.expect(TokenType.STR, code="P004", msg="Expected string path for import")
+
+        # Derive namespace from filename (e.g. "lexer.w" -> "lexer")
+        raw_path = str(path_tok.value)
+        base = os.path.basename(raw_path)
+        namespace = base.split(".")[0] if "." in base else base
+
+        return ImportDecl(path=raw_path, namespace=namespace, line=start_tok.line, col=start_tok.col)
+
+    def parse_while_stmt(self) -> WhileStmt:
+        start_tok = self.expect(TokenType.WHILE, code="P004", msg="Expected 'while'")
+        condition = self.parse_expr(allow_struct_init=False)
+        body = self.parse_block()
+        return WhileStmt(condition=condition, body=body, line=start_tok.line, col=start_tok.col)
+
+    def parse_for_stmt(self) -> ForStmt:
+        start_tok = self.expect(TokenType.FOR, code="P004", msg="Expected 'for'")
+        pattern = self.parse_pattern()
+        self.expect(TokenType.IN, code="P004", msg="Expected 'in' after for loop pattern")
+        iterable = self.parse_expr(allow_struct_init=False)
+        body = self.parse_block()
+        return ForStmt(pattern=pattern, iterable=iterable, body=body, line=start_tok.line, col=start_tok.col)
+
+    def parse_return_stmt(self) -> ReturnStmt:
+        start_tok = self.expect(TokenType.RETURN, code="P004", msg="Expected 'return'")
+        if self.check(TokenType.RBRACE) or self.is_at_end():
+            return ReturnStmt(value=None, line=start_tok.line, col=start_tok.col)
+        val = self.parse_expr()
+        return ReturnStmt(value=val, line=start_tok.line, col=start_tok.col)
+
+    def parse_block(self) -> Block:
+        start_tok = self.expect(TokenType.LBRACE, code="P002", msg="Expected '{' to start block")
+        statements: List[Stmt] = []
+        tail_expr: Optional[Expr] = None
+
+        while not self.check(TokenType.RBRACE) and not self.is_at_end():
+            stmt = self.parse_stmt()
+            statements.append(stmt)
+
+        self.expect(TokenType.RBRACE, code="P007", msg="Unterminated block, expected '}'")
+
+        # If the last statement is an ExprStmt, it serves as the tail expression of the block
+        if statements and isinstance(statements[-1], ExprStmt):
+            tail_expr = statements.pop().expr
+
+        return Block(statements=statements, tail_expr=tail_expr, line=start_tok.line, col=start_tok.col)
+
+
+    # ==========================================
+    # Expression Parsing (Pratt Parser)
+    # ==========================================
+
+    def parse_expr(self, min_prec: int = 0, allow_struct_init: bool = True) -> Expr:
+        left = self.parse_prefix_expr(allow_struct_init=allow_struct_init)
+
+        # Postfix and Infix loop
+        while True:
+            # 1. Postfix operators (Calls, Member access, Indexing, Postfix '?')
+            while True:
+                if self.check(TokenType.LPAREN):
+                    # Call expression
+                    paren = self.advance()
+                    args: List[Expr] = []
+                    if not self.check(TokenType.RPAREN):
+                        args.append(self.parse_expr())
+                        while self.match(TokenType.COMMA):
+                            if self.check(TokenType.RPAREN):
+                                break
+                            args.append(self.parse_expr())
+                    self.expect(TokenType.RPAREN, code="P002", msg="Expected ')' after call arguments")
+                    left = CallExpr(callee=left, args=args, line=paren.line, col=paren.col)
+
+                elif self.check(TokenType.DOT):
+                    # Member access
+                    dot = self.advance()
+                    prop_tok = self.expect(TokenType.IDENTIFIER, code="P002", msg="Expected property name after '.'")
+                    left = MemberExpr(object=left, property=prop_tok.value, line=dot.line, col=dot.col)
+
+                elif self.check(TokenType.LBRACKET):
+                    # Indexing
+                    bracket = self.advance()
+                    index_expr = self.parse_expr()
+                    self.expect(TokenType.RBRACKET, code="P002", msg="Expected ']' after index")
+                    left = IndexExpr(object=left, index=index_expr, line=bracket.line, col=bracket.col)
+
+                elif self.check(TokenType.QUESTION):
+                    # Postfix try / unwrap
+                    q_tok = self.advance()
+                    left = PostfixTryExpr(operand=left, line=q_tok.line, col=q_tok.col)
+
+                elif self.check(TokenType.ELSE):
+                    # In-place error/optional handling: expr else err { ... } or expr else { ... }
+                    else_tok = self.advance()
+                    err_name: Optional[str] = None
+                    if self.check(TokenType.IDENTIFIER):
+                        err_tok = self.advance()
+                        err_name = err_tok.value
+                    handler_block = self.parse_block()
+                    left = ElseErrExpr(operand=left, err_name=err_name, handler=handler_block, line=else_tok.line, col=else_tok.col)
+
+                else:
+                    break
+
+
+            # 2. Infix operators check
+            op_tok = self.at()
+            prec = PRECEDENCE.get(op_tok.type, 0)
+            if prec <= min_prec:
+                break
+
+            self.advance()  # consume operator token
+
+            # Right associativity for assignment (=) and coalesce (??)
+            next_min_prec = prec - 1 if op_tok.type in (TokenType.ASSIGN, TokenType.QUESTION_QUESTION) else prec
+            right = self.parse_expr(min_prec=next_min_prec, allow_struct_init=allow_struct_init)
+
+
+            if op_tok.type == TokenType.ASSIGN:
+                # Target validation
+                if not isinstance(left, (IdentExpr, IndexExpr, MemberExpr)):
+                    raise ParserError(
+                        message=f"Invalid assignment target '{left.__class__.__name__}'",
+                        line=op_tok.line,
+                        col=op_tok.col,
+                        file=self.file,
+                        code="P005"
+                    )
+                left = AssignmentExpr(target=left, value=right, line=op_tok.line, col=op_tok.col)
+
+            elif op_tok.type == TokenType.QUESTION_QUESTION:
+                left = CoalesceExpr(left=left, right=right, line=op_tok.line, col=op_tok.col)
+
+            elif op_tok.type in (TokenType.DOT_DOT, TokenType.DOT_DOT_EQ):
+                inclusive = (op_tok.type == TokenType.DOT_DOT_EQ)
+                left = RangeExpr(start=left, end=right, inclusive=inclusive, line=op_tok.line, col=op_tok.col)
+
+            else:
+                left = BinaryExpr(left=left, op=op_tok.value, right=right, line=op_tok.line, col=op_tok.col)
+
+        return left
+
+    def parse_prefix_expr(self, allow_struct_init: bool = True) -> Expr:
+        token = self.at()
+
+        # Literals
+        if self.match(TokenType.INT):
+            return IntLiteral(value=token.value, line=token.line, col=token.col)
+
+        if self.match(TokenType.FLOAT):
+            return FloatLiteral(value=token.value, line=token.line, col=token.col)
+
+        if self.match(TokenType.STR):
+            return StringLiteral(value=token.value, line=token.line, col=token.col)
+
+        if self.match(TokenType.TRUE):
+            return BoolLiteral(value=True, line=token.line, col=token.col)
+
+        if self.match(TokenType.FALSE):
+            return BoolLiteral(value=False, line=token.line, col=token.col)
+
+        if self.match(TokenType.NONE):
+            return NoneLiteral(line=token.line, col=token.col)
+
+        # Identifiers & Named Struct Initializations
+        if self.match(TokenType.IDENTIFIER):
+            ident_name = token.value
+
+            # Check if this is a Struct Initialization: Identifier { field: val, ... }
+            if allow_struct_init and self.check(TokenType.LBRACE):
+                # Disambiguate struct init from block: next must be IDENTIFIER followed by COLON, or empty RBRACE
+                if self.peek(1).type == TokenType.RBRACE or (self.peek(1).type == TokenType.IDENTIFIER and self.peek(2).type == TokenType.COLON):
+                    self.advance()  # consume '{'
+                    fields: List[FieldInit] = []
+                    while not self.check(TokenType.RBRACE) and not self.is_at_end():
+                        f_tok = self.expect(TokenType.IDENTIFIER, code="P002", msg="Expected struct field name")
+                        self.expect(TokenType.COLON, code="P002", msg="Expected ':' after struct field name")
+                        f_val = self.parse_expr()
+                        fields.append(FieldInit(name=f_tok.value, value=f_val, line=f_tok.line, col=f_tok.col))
+                        self.match(TokenType.COMMA)
+                    self.expect(TokenType.RBRACE, code="P007", msg="Unterminated struct initializer, expected '}'")
+                    return StructInitExpr(struct_name=ident_name, fields=fields, line=token.line, col=token.col)
+
+            return IdentExpr(name=ident_name, line=token.line, col=token.col)
+
+        # Unary operations: '-' and 'not'
+        if self.match(TokenType.MINUS, TokenType.NOT):
+            operand = self.parse_expr(min_prec=8, allow_struct_init=allow_struct_init)
+            return UnaryExpr(op=token.value, operand=operand, line=token.line, col=token.col)
+
+        # Parenthesized expressions & Tuples
+        if self.match(TokenType.LPAREN):
+            if self.match(TokenType.RPAREN):
+                return TupleExpr(elements=[], line=token.line, col=token.col)
+
+            first_expr = self.parse_expr()
+            if self.match(TokenType.COMMA):
+                elements: List[Expr] = [first_expr]
+                if not self.check(TokenType.RPAREN):
+                    elements.append(self.parse_expr())
+                    while self.match(TokenType.COMMA):
+                        if self.check(TokenType.RPAREN):
+                            break
+                        elements.append(self.parse_expr())
+                self.expect(TokenType.RPAREN, code="P002", msg="Expected ')' after tuple elements")
+                return TupleExpr(elements=elements, line=token.line, col=token.col)
+
+            self.expect(TokenType.RPAREN, code="P002", msg="Expected ')' after expression")
+            return first_expr
+
+        # List Literals
+        if self.match(TokenType.LBRACKET):
+            elements: List[Expr] = []
+            if not self.check(TokenType.RBRACKET):
                 elements.append(self.parse_expr())
-        
-        self.expect(TokenType.RIGHT_BR, "Expected ']' after list elements")
-        return ListLiteral(elements)
-    
-    def parse_dict_literal(self) -> DictLiteral:
-        self.expect(TokenType.LEFT_CBR, "Expected '{'")
-        
-        pairs = []
-        if self.at().type != TokenType.RIGHT_CBR:
-            # Parse first key-value pair
-            key = self.parse_expr()
-            self.expect(TokenType.COLON, "Expected ':' after dictionary key")
-            value = self.parse_expr()
-            pairs.append((key, value))
-            
-            while self.at().type == TokenType.COMMA:
-                self.eat()  # consume comma
-                if self.at().type == TokenType.RIGHT_CBR:
-                    break  # trailing comma
-                key = self.parse_expr()
-                self.expect(TokenType.COLON, "Expected ':' after dictionary key")
-                value = self.parse_expr()
-                pairs.append((key, value))
-        
-        self.expect(TokenType.RIGHT_CBR, "Expected '}' after dictionary elements")
-        return DictLiteral(pairs)
+                while self.match(TokenType.COMMA):
+                    if self.check(TokenType.RBRACKET):
+                        break
+                    elements.append(self.parse_expr())
+            self.expect(TokenType.RBRACKET, code="P002", msg="Expected ']' after list elements")
+            return ListExpr(elements=elements, line=token.line, col=token.col)
 
-    def parse_return_statement(self) -> ReturnStatement:
-        self.expect(TokenType.RETURN, "Expected 'return'")
-        
-        if (self.at().type in [TokenType.NEW_LINE, TokenType.RIGHT_CBR] or 
-            self.at().type == TokenType.EOF):
-            return ReturnStatement()
-        
-        value = self.parse_expr()
-        
-        if self.at().type == TokenType.NEW_LINE:
-            self.eat()
-            
-        return ReturnStatement(value)
+        # Dict Literals: { key: value, ... }
+        if self.match(TokenType.LBRACE):
+            entries: List[DictEntry] = []
+            if not self.check(TokenType.RBRACE):
+                k = self.parse_expr()
+                self.expect(TokenType.COLON, code="P002", msg="Expected ':' after dict key")
+                v = self.parse_expr()
+                entries.append(DictEntry(key=k, value=v, line=k.line, col=k.col))
+                while self.match(TokenType.COMMA):
+                    if self.check(TokenType.RBRACE):
+                        break
+                    k = self.parse_expr()
+                    self.expect(TokenType.COLON, code="P002", msg="Expected ':' after dict key")
+                    v = self.parse_expr()
+                    entries.append(DictEntry(key=k, value=v, line=k.line, col=k.col))
+            self.expect(TokenType.RBRACE, code="P007", msg="Unterminated dict literal, expected '}'")
+            return DictExpr(entries=entries, line=token.line, col=token.col)
 
-    def parse_index_expr(self, object: Expr) -> IndexExpr:
-        self.expect(TokenType.LEFT_BR, "Expected '['")
-        index = self.parse_expr()
-        self.expect(TokenType.RIGHT_BR, "Expected ']' after index")
-        return IndexExpr(object, index)
 
-    def parse_method_call(self, object: Expr) -> MethodCallExpr:
-        self.expect(TokenType.DOT, "Expected '.'")
-        
-        # List of all supported method tokens
-        supported_methods = [
-            # List methods
-            TokenType.APPEND, TokenType.INSERT, TokenType.REMOVE, 
-            TokenType.POP, TokenType.CLEAR, TokenType.INDEX, 
-            TokenType.COUNT, TokenType.SORT, TokenType.REVERSE, TokenType.EXTEND,
-            # Dict methods  
-            TokenType.GET, TokenType.KEYS, TokenType.VALUES, 
-            TokenType.ITEMS, TokenType.UPDATE
-        ]
-        
-        if self.at().type not in supported_methods:
-            print(f"Unknown method: {self.at().value}")
-            exit(1)
-            
-        method_name = self.eat().value
-        
-        arguments = []
-        if self.at().type == TokenType.LEFT_PR:
-            self.eat()
-            
-            if self.at().type != TokenType.RIGHT_PR:
-                arguments.append(self.parse_expr())
-                
-                while self.at().type == TokenType.COMMA:
-                    self.eat()  # consume ','
-                    arguments.append(self.parse_expr())
-            
-            self.expect(TokenType.RIGHT_PR, "Expected ')' after method arguments")
-        
-        return MethodCallExpr(object, method_name, arguments)
+        # Control flow expressions: 'if' and 'match'
+        if self.check(TokenType.IF):
+            return self.parse_if_expr()
+
+        if self.check(TokenType.MATCH):
+            return self.parse_match_expr()
+
+        raise ParserError(
+            message=f"Unexpected token '{token.type.name}' in expression",
+            line=token.line,
+            col=token.col,
+            file=self.file,
+            code="P001"
+        )
+
+    def parse_if_expr(self) -> IfExpr:
+        start_tok = self.expect(TokenType.IF, code="P004", msg="Expected 'if'")
+        condition = self.parse_expr(allow_struct_init=False)
+        then_branch = self.parse_block()
+
+        elif_branches: List[ElifBranch] = []
+        while self.match(TokenType.ELIF):
+            e_tok = self.tokens[self.pos - 1]
+            elif_cond = self.parse_expr(allow_struct_init=False)
+            elif_body = self.parse_block()
+            elif_branches.append(ElifBranch(condition=elif_cond, body=elif_body, line=e_tok.line, col=e_tok.col))
+
+        else_branch: Optional[Block] = None
+        if self.match(TokenType.ELSE):
+            else_branch = self.parse_block()
+
+        return IfExpr(
+            condition=condition,
+            then_branch=then_branch,
+            elif_branches=elif_branches,
+            else_branch=else_branch,
+            line=start_tok.line,
+            col=start_tok.col
+        )
+
+    def parse_match_expr(self) -> MatchExpr:
+        start_tok = self.expect(TokenType.MATCH, code="P004", msg="Expected 'match'")
+        subject = self.parse_expr(allow_struct_init=False)
+        self.expect(TokenType.LBRACE, code="P002", msg="Expected '{' after match subject")
+
+        arms: List[MatchArm] = []
+        while not self.check(TokenType.RBRACE) and not self.is_at_end():
+            arm_tok = self.at()
+            pattern: Pattern
+            if self.match(TokenType.ELSE):
+                pattern = WildcardPattern(line=arm_tok.line, col=arm_tok.col)
+            else:
+                pattern = self.parse_pattern()
+
+            self.expect(TokenType.FAT_ARROW, code="P002", msg="Expected '=>' after match pattern")
+
+            body: Block
+            if self.check(TokenType.LBRACE):
+                body = self.parse_block()
+            else:
+                # Single expression arm
+                expr = self.parse_expr()
+                body = Block(statements=[], tail_expr=expr, line=expr.line, col=expr.col)
+
+            self.match(TokenType.COMMA)
+            arms.append(MatchArm(pattern=pattern, body=body, line=arm_tok.line, col=arm_tok.col))
+
+        self.expect(TokenType.RBRACE, code="P007", msg="Unterminated match body, expected '}'")
+        return MatchExpr(subject=subject, arms=arms, line=start_tok.line, col=start_tok.col)

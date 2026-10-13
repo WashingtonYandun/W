@@ -1,76 +1,207 @@
-# W
+# W Programming Language (`v0.1`)
 
-W is an interpreted programming language that is designed to be simple and easy to use. It's a high-level language that is designed to be easy to read and write.
+> **W = Compact + Deterministic + Statically Typed + Self-Hostable.**  
+> *A small, statically typed programming language optimized for semantic density, deterministic tooling, and reliable code generation by humans and AI systems.*
 
-## Considerations
+---
 
-> [!IMPORTANT]
-> Still working on it and it's not ready for use.
-> Currently, am working on the lexer and parser. Then I will move to the interpreter with the AST.
+## Overview
 
-## Syntax
+**W (`v0.1`)** is a statically typed, value-semantics programming language with both a reference interpreter (`W0`) and a self-hosting native C99 compiler (`W1` in [`selfhost/w1.w`](selfhost/w1.w)).
 
-The syntax is designed to be simple and easy to read and write. This is how it will look like in the future:
+### Core Properties
+1. **Exactly 22 Keywords:** `fn`, `let`, `mut`, `struct`, `enum`, `import`, `if`, `elif`, `else`, `for`, `while`, `in`, `match`, `return`, `break`, `continue`, `true`, `false`, `none`, `and`, `or`, `not`.
+2. **Explicit Nullability & Fallibility:**
+   - Types are non-nullable by default (`str` vs `str?`).
+   - Functions declare explicit error channels (`T ! E`) without stack-unwinding exceptions.
+   - Unified postfix `?` propagation for both `T?` and `T ! E`, plus inline `else err { ... }` recovery and `??` null-coalescing.
+3. **Pure Value Semantics (ARC + Copy-on-Write):**
+   - Collections (`list[T]`, `dict[K, V]`) and structs (`struct`) behave as independent values.
+   - Assignments share memory via reference counting (`rc`) and automatically clone on mutation (`w_cow_detach`) when `rc > 1`.
+4. **UTF-8 Code-Point Strings:**
+   - Strings are stored as UTF-8, while `len(s)`, `s[i]`, `slice(s, a, b)`, `ord(s)`, and `chr(c)` operate on Unicode scalar values (`len("José") == 4`, `"José"[3] == "é"`, `len(bytes("José")) == 5`).
+5. **Verified 3-Stage Self-Hosting Fixed Point:**
+   - `W0` compiles `selfhost/w1.w` $\rightarrow$ `compiler0.c` $\rightarrow$ `w1_stage1`
+   - `w1_stage1` compiles `selfhost/w1.w` $\rightarrow$ `compiler1.c` $\rightarrow$ `w1_stage2`
+   - `w1_stage2` compiles `selfhost/w1.w` $\rightarrow$ `compiler2.c`
+   - $\text{SHA256}(\texttt{compiler0.c}) == \text{SHA256}(\texttt{compiler1.c}) == \text{SHA256}(\texttt{compiler2.c})$
 
-```python
-# Normal function
-const target: int = 9
-arr: list[int] = [1, 2, 3, 4, 5]
+---
 
-func two_sum(target: int, arr: list[int]) -> list[int] {
-    for i in range(len(arr)){
-        for j in range(i + 1, len(arr)){
-            if arr[i] + arr[j] == target {
-                return [i, j]
-            }
+## Quick Start & Installation
+
+**Requirements:** `python3` ($\ge 3.10$) and a C99 compiler (`clang` or `gcc`). Zero external Python dependencies are needed.
+
+```bash
+git clone https://github.com/WashingtonYandun/W.git
+cd W
+
+# 1. Pre-build the Stage-2 native W1 compiler and install 'w' globally (~/.local/bin/w)
+./install.sh
+# (Or via Makefile / pip):
+# make install
+# pip install -e .
+
+# 2. Verify installation & run the 164-test conformance suite
+w version
+w test
+```
+
+---
+
+## Language Tour
+
+```w
+enum Status {
+    Pending
+    Active
+    Done
+}
+
+struct Task {
+    id: int
+    title: str
+    status: Status
+}
+
+fn describe(task: Task) -> str {
+    match task.status {
+        Status.Pending => {
+            return "pending: " + task.title
+        }
+        Status.Active => {
+            return "active: " + task.title
+        }
+        Status.Done => {
+            return "done: " + task.title
         }
     }
-    return []
 }
 
-print(two_sum(target, arr))
-
-# classes and interfaces
-# If there is not access modifier, it's public
-interface Flyer {
-    func fly(self) -> None:
-        pass
+fn find_title(tasks: list[Task], target_id: int) -> str? {
+    for idx, t in enumerate(tasks) {
+        if t.id == target_id {
+            return t.title
+        }
+    }
+    return none
 }
 
-interface Swimmer {
-    func swim(self) -> None:
-        pass
-}
+fn main() -> unit {
+    let a = [1, 2, 3]
+    let mut b = a
+    b.append(4) # Copy-on-Write: `a` remains [1, 2, 3]
+    print(a, b)
 
-class Duck(Animal, Flyer, Swimmer) {
-    func __init__(self, name: str) -> None {
-        self.name: str = name
-    }
-
-    func fly(self) -> None {
-        print("The duck flies")
-    }
-
-    func swim(self) -> None {
-        print("The duck swims")
-    }
-
-    private func be_a_duck(self) -> None {
-        print("I am a duck")
-    }
+    let tasks = [
+        Task { id: 1, title: "Design SPEC v0.1", status: Status.Done },
+        Task { id: 2, title: "Self-host W1", status: Status.Active },
+    ]
+    print(describe(tasks[1]))
+    print(find_title(tasks, 2) ?? "not found")
 }
 ```
 
-## Goals
+---
 
--   [x] Lexer
--   [x] Parser
--   [x] Interpreter
--   [ ] Compiler
+## CLI Usage (`w` / `./w`)
 
-## Features Goals (Maybe, maybe not, still thinking about it)
+The canonical `w` CLI supports interpretation, static type checking, formatting, AST inspection, C99 emission, and native binary compilation (via either `W0` or the self-hosted `W1` native compiler with `--selfhost`):
 
--   [ ] OOP and access modifiers, interfaces
--   [ ] Async and Await
--   [ ] Exception Handling
--   [ ] Modules
+```bash
+# Run a .w file via the W0 interpreter
+./w run examples/01_hello_world.w
+
+# Static type checking (human-readable or structured JSON diagnostics)
+./w check selfhost/w1.w
+./w check examples/03_enums_and_match.w --json
+
+# Canonical idempotent code formatter
+./w fmt examples/01_hello_world.w
+./w fmt examples/01_hello_world.w --write
+
+# Inspect AST or lexical token stream
+./w ast examples/01_hello_world.w --json
+./w tokens examples/01_hello_world.w
+
+# Transpile W to portable C99 (using W0 or self-hosted W1)
+./w emit-c examples/05_utf8_and_algorithms.w -o out.c
+./w emit-c --selfhost examples/05_utf8_and_algorithms.w -o out_w1.c
+
+# Compile W directly to a native executable (using W0 or self-hosted W1)
+./w build examples/05_utf8_and_algorithms.w -o app
+./w build --selfhost examples/05_utf8_and_algorithms.w -o app_w1
+
+# Run the full 9-stage conformance & self-hosting test suite
+./w test
+```
+
+---
+
+## Runnable Examples (`examples/`)
+
+| Example | Features Demonstrated |
+| :--- | :--- |
+| [`examples/01_hello_world.w`](examples/01_hello_world.w) | Functions, explicit types, inclusive ranges (`1..=limit`), loops |
+| [`examples/02_value_semantics_cow.w`](examples/02_value_semantics_cow.w) | ARC + Copy-on-Write value semantics across `list`, `dict`, and `struct` |
+| [`examples/03_enums_and_match.w`](examples/03_enums_and_match.w) | `enum`, named `struct` initialization, exhaustive `match` expressions, `enumerate()` |
+| [`examples/04_optionals_and_errors.w`](examples/04_optionals_and_errors.w) | `T?`, `??` coalescing, `T ! E` fallible functions, postfix `?`, `else err` recovery |
+| [`examples/05_utf8_and_algorithms.w`](examples/05_utf8_and_algorithms.w) | UTF-8 code-point indexing (`"José"[3] == "é"`), `bytes()`, binary search |
+| [`examples/06_game_of_life.w`](examples/06_game_of_life.w) | Conway's Game of Life (Glider simulation using `struct`, 2D grid indexing, and CoW state transitions) |
+
+---
+
+## Editor Support (VS Code / Cursor / Antigravity)
+
+Syntax highlighting and bracket/comment configuration for `.w` files are included in [`editors/vscode-w/`](editors/vscode-w/README.md):
+
+```bash
+# VS Code
+ln -sfn "$(pwd)/editors/vscode-w" ~/.vscode/extensions/w-lang-0.1.0
+
+# Cursor
+ln -sfn "$(pwd)/editors/vscode-w" ~/.cursor/extensions/w-lang-0.1.0
+
+# Antigravity
+ln -sfn "$(pwd)/editors/vscode-w" ~/.antigravity/extensions/w-lang-0.1.0
+```
+
+---
+
+## Repository Architecture
+
+| Path | Description |
+| :--- | :--- |
+| [`SPEC.md`](SPEC.md) | Frozen W v0.1 Language Specification |
+| [`w`](w) / [`main.py`](main.py) | Unified CLI entrypoint (`run`, `check`, `fmt`, `ast`, `tokens`, `emit-c`, `build`, `test`, `version`) |
+| [`install.sh`](install.sh) / [`Makefile`](Makefile) | One-command toolchain installer and build automation |
+| [`pyproject.toml`](pyproject.toml) | PEP 621 package configuration for `pip` / `pipx` |
+| [`lexer/Lexer.py`](lexer/Lexer.py) | W v0.1 Lexer (22 keywords, strict numbers, UTF-8 escapes, spans) |
+| [`parser/Parser.py`](parser/Parser.py) | Recursive descent parser with 12-level operator precedence |
+| [`node/NodeType.py`](node/NodeType.py) | Canonical AST nodes with JSON serialization (`w_ast_version: "0.1"`) |
+| [`checker/TypeChecker.py`](checker/TypeChecker.py) | Two-pass static type checker, nullability/error enforcement, exhaustive `match` |
+| [`formatter/Formatter.py`](formatter/Formatter.py) | Deterministic, idempotent source code formatter (`w fmt`) |
+| [`runtime/Interpreter.py`](runtime/Interpreter.py) | Reference W0 runtime with ARC + Copy-on-Write value semantics |
+| [`codegen/CCodeGen.py`](codegen/CCodeGen.py) | W0 C99 code generator |
+| [`runtime/w_runtime.h`](runtime/w_runtime.h) | Single-header C99 runtime (ARC + CoW, UTF-8 code points, collections, I/O) |
+| [`selfhost/w1.w`](selfhost/w1.w) | **Self-hosted W1 compiler** written in 100% pure W |
+| [`run_conformance.py`](run_conformance.py) | Automated 10-stage conformance test runner (170/170 tests) |
+| [`.github/workflows/ci.yml`](.github/workflows/ci.yml) | Cross-platform CI pipeline (Linux & macOS) |
+
+---
+
+## Running the Conformance & Self-Hosting Suite
+
+```bash
+./w test
+```
+
+Verifies all 10 stages (**170 / 170 tests**):
+1. **Lexer Valid (12/12)** & **Lexer Invalid (7/7)**
+2. **Parser Valid (18/18)** & **Parser Invalid (8/8)**
+3. **Checker Valid (13/13)**, **Checker Invalid (20/20)** & **Error Handling (2/2)**
+4. **Formatter Idempotence (`w fmt`) (22/22)**
+5. **Runtime W0 Interpreter (21/21)**
+6. **C99 Native Backend W0 (20/20)**
+7. **W1 Stage-2 Native Compiler Runtime Parity (20/20)**
+8. **Showcase Examples E2E Suite (6/6)** & **3-Stage Fixed-Point Bootstrap (`1/1`)**

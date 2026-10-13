@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "w-lang"
+version = "0.1.0"
+description = "W Programming Language v0.1 — Compact, deterministic, statically typed, self-hosting language with ARC + Copy-on-Write value semantics"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { file = "LICENSE" }
+authors = [
+    { name = "Washington Yandún" }
+]
+keywords = ["compiler", "programming-language", "self-hosting", "c99", "static-typing", "copy-on-write"]
+dependencies = []
+
+[project.scripts]
+w = "main:main"
+
+[tool.setuptools]
+py-modules = ["main", "run_conformance"]
+packages = ["lexer", "parser", "checker", "formatter", "runtime", "codegen", "common", "error", "node", "token"]
+
+[tool.setuptools.package-data]
+runtime = ["w_runtime.h"]

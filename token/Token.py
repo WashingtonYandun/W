@@ -1,19 +1,40 @@
 from token.TokenType import TokenType
-
+from typing import Any, Optional
 
 class Token:
-    def __init__(self, value: object = None, type_: TokenType = None):
+    """
+    Represents a lexical token in W Language.
+    
+    Attributes:
+        value (Any): The literal value or symbol of the token.
+        type (TokenType): The token classification.
+        line (int): 1-based line number of the initial character.
+        col (int): 1-based column number of the initial character.
+    """
+    def __init__(
+        self,
+        value: Any = None,
+        type: Optional[TokenType] = None,
+        line: int = 1,
+        col: int = 1,
+        type_: Optional[TokenType] = None
+    ) -> None:
         self.value = value
-        self.type = type_
+        self.type = type if type is not None else type_
+        self.line = line
+        self.col = col
 
     def __str__(self) -> str:
-        return f"Token({self.value}, {self.type})"
+        type_name = self.type.name if self.type is not None else "UNKNOWN"
+        return f"Token({self.value!r}, {type_name}, line={self.line}, col={self.col})"
 
     def __repr__(self) -> str:
         return self.__str__()
 
-    def __eq__(self, other) -> bool:
+    def __eq__(self, other: Any) -> bool:
+        if not isinstance(other, Token):
+            return False
         return self.value == other.value and self.type == other.type
 
-    def __ne__(self, other) -> bool:
+    def __ne__(self, other: Any) -> bool:
         return not self.__eq__(other)
