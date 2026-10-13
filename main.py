@@ -83,6 +83,7 @@ def run_pipeline(
     emit_c_path: Optional[str] = None,
     build_bin_path: Optional[str] = None,
     use_selfhost: bool = False,
+    sanitize: bool = False,
 ) -> int:
     try:
         # 1. Lexing
@@ -160,7 +161,8 @@ def run_pipeline(
                     tmp_c.write(c_code)
                     tmp_c_path = tmp_c.name
                 try:
-                    cmd = ["cc", "-std=c99", "-O2", f"-I{repo_root}", tmp_c_path, "-o", build_bin_path]
+                    san_flags = ["-fsanitize=address,undefined", "-fno-omit-frame-pointer"] if sanitize else []
+                    cmd = ["cc", "-std=c99", "-O2", f"-I{repo_root}"] + san_flags + [tmp_c_path, "-o", build_bin_path]
                     proc = subprocess.run(cmd, capture_output=True, text=True)
                     if proc.returncode != 0:
                         print(f"[C Compiler Error]\n{proc.stderr}", file=sys.stderr)
@@ -273,6 +275,7 @@ def main() -> None:
     build_bin_path: Optional[str] = None
     subcmd: Optional[str] = None
     file_to_run: Optional[str] = None
+    sanitize = False
 
     if args and args[0] in ("run", "check", "fmt", "ast", "tokens", "emit-c", "build", "test", "bench", "version"):
         subcmd = args[0]
@@ -321,6 +324,8 @@ def main() -> None:
                 ok = run_fuzz_suite(fuzz_count=fuzz_count, base_seed=base_seed, repo_root=repo_root)
                 sys.exit(0 if ok else 1)
             else:
+                if args and ("--sanitize" in args or "-s" in args):
+                    os.environ["W_SANITIZE"] = "1"
                 from run_conformance import run_suite
                 run_suite()
                 return
@@ -373,6 +378,8 @@ def main() -> None:
                     build_bin_path = args[i]
                 else:
                     build_bin_path = args[i]
+        elif arg in ("--sanitize", "-s"):
+            sanitize = True
         elif arg in ("--help", "-h"):
             print_help()
             sys.exit(0)
@@ -405,6 +412,7 @@ def main() -> None:
             emit_c_path=emit_c_path,
             build_bin_path=build_bin_path,
             use_selfhost=use_selfhost,
+            sanitize=sanitize,
         )
         sys.exit(code)
     else:

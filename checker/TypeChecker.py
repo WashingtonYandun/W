@@ -23,6 +23,7 @@ from checker.WType import (
     ResultType, FunctionType, ModuleType, AnyType, is_assignable
 )
 from checker.SymbolTable import Scope, Symbol, create_global_scope
+from checker.TypeInterner import TypeInterner
 from error.Error import TypeError
 
 class TypeChecker:
@@ -45,6 +46,7 @@ class TypeChecker:
         self.loop_depth: int = 0
         self.checked_modules: Dict[str, ModuleType] = checked_modules if checked_modules is not None else {}
         self.active_imports: Set[str] = active_imports if active_imports is not None else set()
+        self.interner: TypeInterner = TypeInterner()
 
     def check(self, program: Program) -> None:
         # Pass 1: Collect declarations
@@ -52,6 +54,8 @@ class TypeChecker:
 
         # Pass 2: Typecheck bodies & statements
         self._pass2_check_program(program)
+
+        program.interner = self.interner
 
     # ==========================================
     # Pass 1: Collect Top-Level Declarations
@@ -690,6 +694,15 @@ class TypeChecker:
     # ==========================================
 
     def _check_expr(self, expr: Expr, is_statement_context: bool = False) -> WType:
+        wtype = self._check_expr_impl(expr, is_statement_context)
+        try:
+            expr.inferred_type = wtype
+            expr.inferred_type_id = self.interner.from_wtype(wtype)
+        except Exception:
+            pass
+        return wtype
+
+    def _check_expr_impl(self, expr: Expr, is_statement_context: bool = False) -> WType:
         if isinstance(expr, IntLiteral):
             return IntType
         if isinstance(expr, FloatLiteral):

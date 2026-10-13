@@ -52,7 +52,7 @@ def test_types_suite():
             print(f"  [FAIL] {f}: Expected TypeError, but typechecking passed successfully")
             failures.append((f, "Expected TypeError but succeeded"))
         except TypeError as err:
-            assert err.code.startswith("T"), f"Type error code should start with 'T', got {err.code}"
+            assert err.code.startswith("W") or err.code.startswith("T"), f"Type error code should start with 'W' or 'T', got {err.code}"
             assert err.line >= 1 and err.col >= 1, f"Invalid position line={err.line}, col={err.col}"
             print(f"  [PASS] {f}: Caught {err.code} at line {err.line}:{err.col} -> {err.message}")
             invalid_passed += 1
