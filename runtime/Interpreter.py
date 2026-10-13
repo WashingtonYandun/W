@@ -390,7 +390,7 @@ class Interpreter:
                 return val
 
             if isinstance(target, IndexExpr):
-                obj = self.eval_expr(target.object, env)
+                obj = self.eval_mutable_lvalue(target.object, env)
                 idx = self.eval_expr(target.index, env)
                 if isinstance(obj, WList) and isinstance(idx, WInt):
                     if idx.value < 0 or idx.value >= len(obj):
@@ -404,7 +404,7 @@ class Interpreter:
                 raise WRuntimeError(f"Cannot assign to index of '{type(obj).__name__}'", line=target.line, col=target.col, file=self.file)
 
             if isinstance(target, MemberExpr):
-                obj = self.eval_expr(target.object, env)
+                obj = self.eval_mutable_lvalue(target.object, env)
                 if isinstance(obj, WObjectInstance):
                     obj.set_field(target.property, val)
                     return val
@@ -416,7 +416,10 @@ class Interpreter:
             raise WRuntimeError("Invalid assignment target", line=expr.line, col=expr.col, file=self.file)
 
         if isinstance(expr, MemberExpr):
-            obj = self.eval_expr(expr.object, env)
+            if expr.property in ("append", "pop", "clear"):
+                obj = self.eval_mutable_lvalue(expr.object, env)
+            else:
+                obj = self.eval_expr(expr.object, env)
             if isinstance(obj, WEnumNamespace):
                 return obj.get_variant(expr.property)
             if isinstance(obj, WSuperProxy):
@@ -526,6 +529,45 @@ class Interpreter:
     # ==========================================
     # Helper Call & OOP Methods
     # ==========================================
+
+    def eval_mutable_lvalue(self, expr: Expr, env: Environment) -> WValue:
+        if isinstance(expr, IdentExpr):
+            val = env.lookup(expr.name)
+            if isinstance(val, (WList, WDict, WStructInstance)):
+                val.ensure_unique()
+            return val
+
+        if isinstance(expr, ThisExpr):
+            return env.lookup("this")
+
+        if isinstance(expr, IndexExpr):
+            parent = self.eval_mutable_lvalue(expr.object, env)
+            idx = self.eval_expr(expr.index, env)
+            if isinstance(parent, WList):
+                if not isinstance(idx, WInt):
+                    raise WRuntimeError("List index must be int", line=expr.line, col=expr.col, file=self.file)
+                if idx.value < 0 or idx.value >= len(parent):
+                    raise WRuntimeError(f"List index out of bounds: index {idx.value}, length {len(parent)}", line=expr.line, col=expr.col, file=self.file)
+                elem = parent.get(idx.value)
+                if isinstance(elem, (WList, WDict, WStructInstance)):
+                    elem.ensure_unique()
+                return elem
+            if isinstance(parent, WDict):
+                key_raw = idx.value if hasattr(idx, 'value') else idx
+                elem = parent.get(key_raw)
+                if elem is not None and isinstance(elem, (WList, WDict, WStructInstance)):
+                    elem.ensure_unique()
+                return elem if elem is not None else WNone()
+
+        if isinstance(expr, MemberExpr):
+            parent = self.eval_mutable_lvalue(expr.object, env)
+            if isinstance(parent, (WStructInstance, WObjectInstance)):
+                elem = parent.get_field(expr.property)
+                if isinstance(elem, (WList, WDict, WStructInstance)):
+                    elem.ensure_unique()
+                return elem
+
+        return self.eval_expr(expr, env)
 
     def _default_value_for_type(self, type_ann: Any) -> WValue:
         if isinstance(type_ann, NamedType):

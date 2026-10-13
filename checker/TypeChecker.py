@@ -499,6 +499,18 @@ class TypeChecker:
                 return True
         return self._block_has_return(block)
 
+    def _find_value_root_symbol(self, expr: Expr) -> Optional[Symbol]:
+        if isinstance(expr, IdentExpr):
+            return self.current_scope.lookup_symbol(expr.name)
+        if isinstance(expr, IndexExpr):
+            return self._find_value_root_symbol(expr.object)
+        if isinstance(expr, MemberExpr):
+            obj_t = self._check_expr(expr.object)
+            if isinstance(obj_t, ClassType):
+                return None
+            return self._find_value_root_symbol(expr.object)
+        return None
+
 
     def _check_block(self, block: Block, is_statement_context: bool = False) -> Optional[WType]:
         block_scope = Scope(parent=self.current_scope)
@@ -980,17 +992,16 @@ class TypeChecker:
                 return sym.type
 
             if isinstance(expr.target, IndexExpr):
-                # Target must be mutable binding
-                if isinstance(expr.target.object, IdentExpr):
-                    sym = self.current_scope.lookup_symbol(expr.target.object.name)
-                    if sym and not sym.is_mut:
-                        raise TypeError(
-                            message=f"Cannot mutate elements of immutable binding '{sym.name}'",
-                            line=expr.line,
-                            col=expr.col,
-                            file=self.file,
-                            code="T004"
-                        )
+                # Target value root must be a mutable binding (unless rooted in a reference-type class)
+                sym = self._find_value_root_symbol(expr.target.object)
+                if sym and not sym.is_mut:
+                    raise TypeError(
+                        message=f"Cannot mutate elements of immutable binding '{sym.name}'",
+                        line=expr.line,
+                        col=expr.col,
+                        file=self.file,
+                        code="T004"
+                    )
                 obj_t = self._check_expr(expr.target.object)
                 idx_t = self._check_expr(expr.target.index)
                 if isinstance(obj_t, ListType):
@@ -1070,16 +1081,15 @@ class TypeChecker:
                         )
                     return f_info.type
 
-                if isinstance(expr.target.object, IdentExpr):
-                    sym = self.current_scope.lookup_symbol(expr.target.object.name)
-                    if sym and not sym.is_mut:
-                        raise TypeError(
-                            message=f"Cannot mutate field of immutable binding '{sym.name}'",
-                            line=expr.line,
-                            col=expr.col,
-                            file=self.file,
-                            code="T004"
-                        )
+                sym = self._find_value_root_symbol(expr.target.object)
+                if sym and not sym.is_mut:
+                    raise TypeError(
+                        message=f"Cannot mutate field of immutable binding '{sym.name}'",
+                        line=expr.line,
+                        col=expr.col,
+                        file=self.file,
+                        code="T004"
+                    )
                 if not isinstance(obj_t, StructType):
                     raise TypeError(
                         message=f"Cannot assign to field of non-struct '{obj_t}'",
@@ -1280,21 +1290,21 @@ class TypeChecker:
             )
 
         if isinstance(expr, CallExpr):
-            # Mutating method check on receiver
+            # Mutating method check on receiver (transitive across value-type paths)
             if isinstance(expr.callee, MemberExpr):
-                if isinstance(expr.callee.object, IdentExpr):
-                    sym = self.current_scope.lookup_symbol(expr.callee.object.name)
-                    callee_t = self._check_expr(expr.callee)
-                    if isinstance(callee_t, FunctionType) and callee_t.is_mutating:
-                        if sym and not sym.is_mut:
-                            raise TypeError(
-                                message=f"Cannot call mutating method '{expr.callee.property}' on immutable binding '{sym.name}'",
-                                line=expr.line,
-                                col=expr.col,
-                                file=self.file,
-                                code="T004"
-                            )
-            callee_t = self._check_expr(expr.callee)
+                callee_t = self._check_expr(expr.callee)
+                if isinstance(callee_t, FunctionType) and callee_t.is_mutating:
+                    sym = self._find_value_root_symbol(expr.callee.object)
+                    if sym and not sym.is_mut:
+                        raise TypeError(
+                            message=f"Cannot call mutating method '{expr.callee.property}' on immutable binding '{sym.name}'",
+                            line=expr.line,
+                            col=expr.col,
+                            file=self.file,
+                            code="T004"
+                        )
+            else:
+                callee_t = self._check_expr(expr.callee)
             if isinstance(callee_t, AnyType):
                 for a in expr.args:
                     self._check_expr(a)

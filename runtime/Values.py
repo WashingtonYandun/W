@@ -74,6 +74,9 @@ class WStr(WValue):
     def __str__(self) -> str:
         return self.value
 
+    def __repr__(self) -> str:
+        return f'"{self.value}"'
+
 
 class WUnit(WValue):
     def __eq__(self, other: Any) -> bool:
@@ -187,7 +190,8 @@ class WList(WValue):
         if storage is not None:
             self.storage = storage
         else:
-            self.storage = SharedBuffer(list(elements) if elements is not None else [])
+            cloned_elems = [e.clone_value() for e in elements] if elements is not None else []
+            self.storage = SharedBuffer(cloned_elems)
 
     def clone_value(self) -> 'WList':
         self.storage.refcount += 1
@@ -237,7 +241,8 @@ class WDict(WValue):
         if storage is not None:
             self.storage = storage
         else:
-            self.storage = SharedBuffer(dict(pairs) if pairs is not None else {})
+            cloned_pairs = {k: v.clone_value() for k, v in pairs.items()} if pairs is not None else {}
+            self.storage = SharedBuffer(cloned_pairs)
 
     def clone_value(self) -> 'WDict':
         self.storage.refcount += 1
@@ -282,7 +287,8 @@ class WStructInstance(WValue):
         if storage is not None:
             self.storage = storage
         else:
-            self.storage = SharedBuffer(dict(fields) if fields is not None else {})
+            cloned_fields = {k: v.clone_value() for k, v in fields.items()} if fields is not None else {}
+            self.storage = SharedBuffer(cloned_fields)
 
     def clone_value(self) -> 'WStructInstance':
         self.storage.refcount += 1
@@ -356,7 +362,7 @@ class WObjectInstance(WValue):
     """Heap-allocated class instance with reference semantics (mutations happen in-place)."""
     def __init__(self, class_name: str, fields: Optional[Dict[str, WValue]] = None):
         self.class_name = class_name
-        self.fields: Dict[str, WValue] = dict(fields) if fields is not None else {}
+        self.fields: Dict[str, WValue] = {k: v.clone_value() for k, v in fields.items()} if fields is not None else {}
 
     def clone_value(self) -> 'WObjectInstance':
         # Reference semantics: copying a reference points to the same object instance
