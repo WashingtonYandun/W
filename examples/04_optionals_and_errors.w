@@ -1,0 +1,36 @@
+## 04_optionals_and_errors.w
+## Explicit nullability (T?), coalescing (??), fallible channels (T ! E),
+## postfix propagation (?), and inline recovery (else err).
+
+fn lookup_env(env: dict[str, str], key: str) -> str? {
+    return env.get(key)
+}
+
+fn resolve_host_and_port(env: dict[str, str]) -> str? {
+    let host = lookup_env(env, "HOST")?
+    let port = lookup_env(env, "PORT") ?? "8080"
+    return host + ":" + port
+}
+
+fn load_or_default(path: str) -> str {
+    let content = read_file(path) else err {
+        if len(err.message) > 0 {
+            return "default_config=true (recovered from IoError)"
+        }
+        return "default_config=true"
+    }
+    return content
+}
+
+fn main() -> unit {
+    let env1 = {"HOST": "127.0.0.1", "PORT": "9000"}
+    let env2 = {"HOST": "localhost"}
+    let env3 = {"USER": "washo"}
+
+    print("env1:", resolve_host_and_port(env1) ?? "missing HOST")
+    print("env2:", resolve_host_and_port(env2) ?? "missing HOST")
+    print("env3:", resolve_host_and_port(env3) ?? "missing HOST")
+
+    let cfg = load_or_default("non_existent_config_file.w")
+    print("config:", cfg)
+}
