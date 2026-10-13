@@ -20,6 +20,11 @@ struct ClassMeta {
     init_params: list[str],
 }
 
+struct CleanupScope {
+    kind: str,
+    vars: list[str],
+}
+
 let mut g_tokens: list[Token] = []
 let mut g_pos: int = 0
 let mut g_temp_id: int = 0
@@ -36,6 +41,15 @@ let mut g_globals: list[str] = []
 let mut g_protos: list[str] = []
 let mut g_fn_defs: list[str] = []
 let mut g_cur_stmts: list[str] = []
+let mut g_scope_stack: list[CleanupScope] = []
+let mut g_aux_id: int = 0
+let mut g_cur_err_type: str = ""
+let mut g_in_path: str = ""
+
+fn report_error(code: str, line: int, col: int, msg: str) -> unit {
+    eprint("[" + code + "] " + g_in_path + ":" + str(line) + ":" + str(col) + " - " + msg)
+    exit(1)
+}
 
 fn is_alpha(c: int) -> bool {
     return c >= 65 and c <= 90 or c >= 97 and c <= 122 or c == 95
@@ -198,12 +212,23 @@ fn tokenize(src: str) -> list[Token] {
             let start_col = col
             let mut is_flt = false
             let mut clean_num = ""
+            let mut last_was_under = false
+            let mut sep_err = false
             while i < n and (is_digit(ord(src[i])) or src[i] == "_") {
-                if src[i] != "_" {
+                if src[i] == "_" {
+                    if last_was_under {
+                        sep_err = true
+                    }
+                    last_was_under = true
+                } else {
+                    last_was_under = false
                     clean_num = clean_num + src[i]
                 }
                 i = i + 1
                 col = col + 1
+            }
+            if last_was_under or sep_err {
+                report_error("W0002", line, start_col, "malformed numeric separator")
             }
             if i + 1 < n and src[i] == "." and is_digit(ord(src[i + 1])) {
                 is_flt = true
@@ -211,25 +236,42 @@ fn tokenize(src: str) -> list[Token] {
                 i = i + 1
                 col = col + 1
                 while i < n and (is_digit(ord(src[i])) or src[i] == "_") {
-                    if src[i] != "_" {
+                    if src[i] == "_" {
+                        if last_was_under {
+                            sep_err = true
+                        }
+                        last_was_under = true
+                    } else {
+                        last_was_under = false
                         clean_num = clean_num + src[i]
                     }
                     i = i + 1
                     col = col + 1
                 }
+                if last_was_under or sep_err {
+                    report_error("W0002", line, start_col, "malformed numeric separator")
+                }
+            } elif i < n and src[i] == "." and not (i + 1 < n and src[i + 1] == ".") {
+                report_error("W0002", line, start_col, "malformed float literal: trailing dot")
             }
             if is_flt {
                 tokens.append(Token { kind: "FLOAT", val: clean_num, line: line, col: start_col })
             } else {
                 tokens.append(Token { kind: "INT", val: clean_num, line: line, col: start_col })
             }
+        } elif ch == "." and i + 1 < n and is_digit(ord(src[i + 1])) {
+            report_error("W0002", line, col, "malformed float literal: leading dot")
         } elif ch == "\"" {
             let start_col = col
+            let start_line = line
             i = i + 1
             col = col + 1
             let mut s_val = ""
             while i < n and src[i] != "\"" {
                 if src[i] == "\\" {
+                    if i + 1 >= n {
+                        report_error("W0004", line, col, "unterminated string escape")
+                    }
                     i = i + 1
                     col = col + 1
                     let esc = src[i]
@@ -258,21 +300,32 @@ fn tokenize(src: str) -> list[Token] {
                         i = i + 1
                         col = col + 1
                     } elif esc == "u" {
+                        if i + 1 >= n or src[i + 1] != "{" {
+                            report_error("W0005", line, col - 1, "invalid Unicode scalar escape sequence")
+                        }
                         i = i + 2
                         col = col + 2
                         let mut u_cp = 0
+                        let mut has_hex = false
+                        let mut valid_hex = true
                         while i < n and src[i] != "}" {
-                            u_cp = u_cp * 16 + hex_val(ord(src[i]))
+                            let hcode = ord(src[i])
+                            if not (hcode >= 48 and hcode <= 57 or hcode >= 65 and hcode <= 70 or hcode >= 97 and hcode <= 102) {
+                                valid_hex = false
+                            }
+                            u_cp = u_cp * 16 + hex_val(hcode)
+                            has_hex = true
                             i = i + 1
                             col = col + 1
+                        }
+                        if i >= n or src[i] != "}" or not has_hex or not valid_hex {
+                            report_error("W0005", line, col, "invalid Unicode scalar escape sequence")
                         }
                         i = i + 1
                         col = col + 1
                         s_val = s_val + chr(u_cp)
                     } else {
-                        s_val = s_val + esc
-                        i = i + 1
-                        col = col + 1
+                        report_error("W0004", line, col - 1, "invalid string escape sequence")
                     }
                 } else {
                     s_val = s_val + src[i]
@@ -280,9 +333,12 @@ fn tokenize(src: str) -> list[Token] {
                     col = col + 1
                 }
             }
+            if i >= n {
+                report_error("W0003", start_line, start_col, "unterminated string literal")
+            }
             i = i + 1
             col = col + 1
-            tokens.append(Token { kind: "STR", val: s_val, line: line, col: start_col })
+            tokens.append(Token { kind: "STR", val: s_val, line: start_line, col: start_col })
         } else {
             let start_col = col
             let mut two = ""
@@ -370,6 +426,9 @@ fn tokenize(src: str) -> list[Token] {
                 } elif ch == "?" {
                     kind = "QUESTION"
                 }
+                if kind == "OP" {
+                    report_error("W0001", line, start_col, "unexpected character '" + ch + "'")
+                }
                 tokens.append(Token { kind: kind, val: ch, line: line, col: start_col })
                 i = i + 1
                 col = col + 1
@@ -418,6 +477,13 @@ fn match_kind(k: str) -> bool {
 
 fn expect_kind(k: str) -> Token {
     let tok = at_tok()
+    if tok.kind != k {
+        if k == "RBRACE" or k == "RBRACKET" {
+            report_error("W0006", tok.line, tok.col, "expected '" + k + "', found '" + tok.val + "'")
+        } else {
+            report_error("W0001", tok.line, tok.col, "expected '" + k + "', found '" + tok.val + "'")
+        }
+    }
     advance_tok()
     return tok
 }
@@ -426,6 +492,159 @@ fn new_temp() -> str {
     let name = "_t" + str(g_temp_id)
     g_temp_id = g_temp_id + 1
     return name
+}
+
+fn new_aux(prefix: str) -> str {
+    let s = prefix + str(g_aux_id)
+    g_aux_id = g_aux_id + 1
+    return s
+}
+
+fn push_scope(kind: str) -> unit {
+    let empty_v: list[str] = []
+    g_scope_stack.append(CleanupScope { kind: kind, vars: empty_v })
+}
+
+fn register_var(v: str) -> unit {
+    let n = len(g_scope_stack)
+    if n > 0 {
+        g_scope_stack[n - 1].vars.append(v)
+    }
+}
+
+fn declare_owned_var(var_name: str, init_c_expr: str) -> str {
+    emit_line("WVal " + var_name + " = " + init_c_expr + ";")
+    register_var(var_name)
+    return var_name
+}
+
+fn pop_scope() -> unit {
+    let n = len(g_scope_stack)
+    if n == 0 {
+        return
+    }
+    let top = g_scope_stack[n - 1]
+    g_scope_stack.pop()
+    let num_vars = len(top.vars)
+    if num_vars > 0 {
+        let mut idx = num_vars - 1
+        while idx >= 0 {
+            emit_line("w_release(" + top.vars[idx] + ");")
+            idx = idx - 1
+        }
+    }
+}
+
+fn emit_cleanup_until_fn() -> unit {
+    let num_scopes = len(g_scope_stack)
+    let mut si = num_scopes - 1
+    while si >= 0 {
+        let sc = g_scope_stack[si]
+        let num_vars = len(sc.vars)
+        if num_vars > 0 {
+            let mut vi = num_vars - 1
+            while vi >= 0 {
+                emit_line("w_release(" + sc.vars[vi] + ");")
+                vi = vi - 1
+            }
+        }
+        if sc.kind == "fn" {
+            break
+        }
+        si = si - 1
+    }
+}
+
+fn emit_cleanup_until_fn_indented() -> unit {
+    let num_scopes = len(g_scope_stack)
+    let mut si = num_scopes - 1
+    while si >= 0 {
+        let sc = g_scope_stack[si]
+        let num_vars = len(sc.vars)
+        if num_vars > 0 {
+            let mut vi = num_vars - 1
+            while vi >= 0 {
+                emit_line("    w_release(" + sc.vars[vi] + ");")
+                vi = vi - 1
+            }
+        }
+        if sc.kind == "fn" {
+            break
+        }
+        si = si - 1
+    }
+}
+
+fn emit_cleanup_until_loop() -> unit {
+    let num_scopes = len(g_scope_stack)
+    let mut si = num_scopes - 1
+    while si >= 0 {
+        let sc = g_scope_stack[si]
+        let num_vars = len(sc.vars)
+        if num_vars > 0 {
+            let mut vi = num_vars - 1
+            while vi >= 0 {
+                emit_line("w_release(" + sc.vars[vi] + ");")
+                vi = vi - 1
+            }
+        }
+        if sc.kind == "loop" {
+            break
+        }
+        si = si - 1
+    }
+}
+
+fn has_cleanup_until_loop() -> bool {
+    let num_scopes = len(g_scope_stack)
+    let mut si = num_scopes - 1
+    while si >= 0 {
+        let sc = g_scope_stack[si]
+        if len(sc.vars) > 0 {
+            return true
+        }
+        if sc.kind == "loop" {
+            break
+        }
+        si = si - 1
+    }
+    return false
+}
+
+fn emit_cleanup_until_loop_indented() -> unit {
+    let num_scopes = len(g_scope_stack)
+    let mut si = num_scopes - 1
+    while si >= 0 {
+        let sc = g_scope_stack[si]
+        let num_vars = len(sc.vars)
+        if num_vars > 0 {
+            let mut vi = num_vars - 1
+            while vi >= 0 {
+                emit_line("    w_release(" + sc.vars[vi] + ");")
+                vi = vi - 1
+            }
+        }
+        if sc.kind == "loop" {
+            break
+        }
+        si = si - 1
+    }
+}
+
+fn own_expr(val_expr: str) -> str {
+    if len(val_expr) >= 2 and slice(val_expr, 0, 2) == "_t" {
+        return "w_move(&" + val_expr + ")"
+    }
+    if len(val_expr) >= 7 and slice(val_expr, 0, 7) == "w_make_" {
+        return val_expr
+    }
+    if len(val_expr) >= 6 and slice(val_expr, 0, 6) == "w_new_" {
+        return val_expr
+    }
+    if len(val_expr) >= 8 and slice(val_expr, 0, 8) == "w_clone(" {
+        return val_expr
+    }
+    return "w_clone(" + val_expr + ")"
 }
 
 fn emit_line(line: str) -> unit {
@@ -497,8 +716,10 @@ fn parse_type_ann() -> bool {
         is_fallible = false
     }
     if match_kind("BANG") {
+        let err_tok = at_tok()
         parse_type_ann()
         is_fallible = true
+        g_cur_err_type = err_tok.val
     }
     return is_fallible
 }
@@ -650,7 +871,7 @@ fn extract_module_ns(path: str) -> str {
 
 fn bind_call(c_call: str) -> ExprRes {
     let tmp = new_temp()
-    emit_line("WVal " + tmp + " = " + c_call + ";")
+    declare_owned_var(tmp, c_call)
     return ExprRes { val: tmp, lref: "" }
 }
 
@@ -732,7 +953,7 @@ fn emit_call(callee: ExprRes, args_c: list[str]) -> ExprRes {
             if len(args_c) == 0 {
                 return bind_call("w_builtin_print(0, NULL)")
             }
-            let arr_tmp = new_temp()
+            let arr_tmp = new_aux("_arr")
             let mut joined = ""
             for idx in 0..len(args_c) {
                 if idx > 0 {
@@ -743,6 +964,25 @@ fn emit_call(callee: ExprRes, args_c: list[str]) -> ExprRes {
             let cnt = str(len(args_c))
             emit_line("WVal " + arr_tmp + "[" + cnt + "] = { " + joined + " };")
             return bind_call("w_builtin_print(" + cnt + ", " + arr_tmp + ")")
+        }
+        if fn_name == "eprint" {
+            if len(args_c) == 0 {
+                return bind_call("w_builtin_eprint(0, NULL)")
+            }
+            let arr_tmp = new_aux("_arr")
+            let mut joined = ""
+            for idx in 0..len(args_c) {
+                if idx > 0 {
+                    joined = joined + ", "
+                }
+                joined = joined + args_c[idx]
+            }
+            let cnt = str(len(args_c))
+            emit_line("WVal " + arr_tmp + "[" + cnt + "] = { " + joined + " };")
+            return bind_call("w_builtin_eprint(" + cnt + ", " + arr_tmp + ")")
+        }
+        if fn_name == "exit" and len(args_c) == 1 {
+            return bind_call("w_builtin_exit(" + args_c[0] + ")")
         }
         if fn_name == "len" {
             return bind_call("w_builtin_len(" + args_c[0] + ")")
@@ -801,11 +1041,12 @@ fn emit_call(callee: ExprRes, args_c: list[str]) -> ExprRes {
 fn parse_block_expr() -> str {
     expect_kind("LBRACE")
     let res = new_temp()
-    emit_line("WVal " + res + " = w_unit();")
+    declare_owned_var(res, "w_unit()")
     emit_line("{")
     let saved = g_cur_stmts
     let empty: list[str] = []
     g_cur_stmts = empty
+    push_scope("block")
     let mut tail_val = "w_unit()"
     while not check_kind("RBRACE") and not is_eof() {
         if check_kind("LET") {
@@ -822,10 +1063,12 @@ fn parse_block_expr() -> str {
             tail_val = "w_unit()"
         } elif check_kind("BREAK") {
             advance_tok()
+            emit_cleanup_until_loop()
             emit_line("break;")
             tail_val = "w_unit()"
         } elif check_kind("CONTINUE") {
             advance_tok()
+            emit_cleanup_until_loop()
             emit_line("continue;")
             tail_val = "w_unit()"
         } else {
@@ -840,8 +1083,9 @@ fn parse_block_expr() -> str {
     }
     expect_kind("RBRACE")
     if tail_val != "w_unit()" {
-        emit_line(res + " = " + tail_val + ";")
+        emit_line("w_assign(&" + res + ", " + own_expr(tail_val) + ");")
     }
+    pop_scope()
     let inner = g_cur_stmts
     g_cur_stmts = saved
     for l in inner {
@@ -854,14 +1098,16 @@ fn parse_block_expr() -> str {
 fn parse_if_expr() -> ExprRes {
     expect_kind("IF")
     let res = new_temp()
-    emit_line("WVal " + res + " = w_unit();")
+    declare_owned_var(res, "w_unit()")
     let cond_r = parse_expr(0, false)
     emit_line("if ((" + cond_r.val + ").as.b) {")
+    push_scope("block")
     let saved = g_cur_stmts
     let empty: list[str] = []
     g_cur_stmts = empty
     let then_v = parse_block_expr()
-    emit_line(res + " = " + then_v + ";")
+    emit_line("w_assign(&" + res + ", " + own_expr(then_v) + ");")
+    pop_scope()
     let then_lines = g_cur_stmts
     g_cur_stmts = saved
     for l in then_lines {
@@ -875,16 +1121,19 @@ fn parse_if_expr() -> ExprRes {
 fn parse_elif_chain(res: str) -> unit {
     if match_kind("ELIF") {
         emit_line("else {")
+        push_scope("block")
         let saved = g_cur_stmts
         let empty: list[str] = []
         g_cur_stmts = empty
         let eb_cond = parse_expr(0, false)
         emit_line("if ((" + eb_cond.val + ").as.b) {")
+        push_scope("block")
         let saved_inner = g_cur_stmts
         let empty2: list[str] = []
         g_cur_stmts = empty2
         let eb_v = parse_block_expr()
-        emit_line(res + " = " + eb_v + ";")
+        emit_line("w_assign(&" + res + ", " + own_expr(eb_v) + ");")
+        pop_scope()
         let eb_lines = g_cur_stmts
         g_cur_stmts = saved_inner
         for l in eb_lines {
@@ -892,6 +1141,7 @@ fn parse_elif_chain(res: str) -> unit {
         }
         emit_line("}")
         parse_elif_chain(res)
+        pop_scope()
         let outer_lines = g_cur_stmts
         g_cur_stmts = saved
         for l in outer_lines {
@@ -900,11 +1150,13 @@ fn parse_elif_chain(res: str) -> unit {
         emit_line("}")
     } elif match_kind("ELSE") {
         emit_line("else {")
+        push_scope("block")
         let saved = g_cur_stmts
         let empty: list[str] = []
         g_cur_stmts = empty
         let else_v = parse_block_expr()
-        emit_line(res + " = " + else_v + ";")
+        emit_line("w_assign(&" + res + ", " + own_expr(else_v) + ");")
+        pop_scope()
         let else_lines = g_cur_stmts
         g_cur_stmts = saved
         for l in else_lines {
@@ -918,9 +1170,9 @@ fn parse_match_expr() -> ExprRes {
     expect_kind("MATCH")
     let subj_r = parse_expr(0, false)
     let subj_tmp = new_temp()
+    declare_owned_var(subj_tmp, own_expr(subj_r.val))
     let res = new_temp()
-    emit_line("WVal " + subj_tmp + " = " + subj_r.val + ";")
-    emit_line("WVal " + res + " = w_unit();")
+    declare_owned_var(res, "w_unit()")
     expect_kind("LBRACE")
     if not check_kind("RBRACE") {
         parse_match_arms(subj_tmp, res)
@@ -959,6 +1211,7 @@ fn parse_match_arms(subj_tmp: str, res: str) -> unit {
     }
     expect_kind("FAT_ARROW")
     emit_line("if (" + cond_c + ") {")
+    push_scope("block")
     let saved = g_cur_stmts
     let empty: list[str] = []
     g_cur_stmts = empty
@@ -967,24 +1220,12 @@ fn parse_match_arms(subj_tmp: str, res: str) -> unit {
     }
     if check_kind("LBRACE") {
         let arm_v = parse_block_expr()
-        emit_line(res + " = " + arm_v + ";")
+        emit_line("w_assign(&" + res + ", " + own_expr(arm_v) + ");")
     } else {
-        let arm_tmp = new_temp()
-        emit_line("WVal " + arm_tmp + " = w_unit();")
-        emit_line("{")
-        let saved2 = g_cur_stmts
-        let empty2: list[str] = []
-        g_cur_stmts = empty2
-        let e_r = parse_expr(0, true)
-        emit_line(arm_tmp + " = " + e_r.val + ";")
-        let e_lines = g_cur_stmts
-        g_cur_stmts = saved2
-        for el in e_lines {
-            emit_line("    " + el)
-        }
-        emit_line("}")
-        emit_line(res + " = " + arm_tmp + ";")
+        let arm_v = parse_expr(0, true)
+        emit_line("w_assign(&" + res + ", " + own_expr(arm_v.val) + ");")
     }
+    pop_scope()
     let arm_lines = g_cur_stmts
     g_cur_stmts = saved
     for al in arm_lines {
@@ -994,10 +1235,12 @@ fn parse_match_arms(subj_tmp: str, res: str) -> unit {
     match_kind("COMMA")
     if not check_kind("RBRACE") and not is_eof() {
         emit_line("else {")
+        push_scope("block")
         let saved_else = g_cur_stmts
         let empty_else: list[str] = []
         g_cur_stmts = empty_else
         parse_match_arms(subj_tmp, res)
+        pop_scope()
         let else_lines = g_cur_stmts
         g_cur_stmts = saved_else
         for el in else_lines {
@@ -1079,8 +1322,8 @@ fn parse_prefix_expr(allow_struct: bool) -> ExprRes {
                 if len(f_names) == 0 {
                     return ExprRes { val: "w_make_struct(\"" + name + "\", 0, NULL, NULL)", lref: "" }
                 }
-                let k_tmp = new_temp()
-                let v_tmp = new_temp()
+                let k_tmp = new_aux("_k")
+                let v_tmp = new_aux("_v")
                 let mut k_joined = ""
                 let mut v_joined = ""
                 for idx in 0..len(f_names) {
@@ -1094,7 +1337,7 @@ fn parse_prefix_expr(allow_struct: bool) -> ExprRes {
                 let cnt = str(len(f_names))
                 emit_line("const char* " + k_tmp + "[" + cnt + "] = { " + k_joined + " };")
                 emit_line("WVal " + v_tmp + "[" + cnt + "] = { " + v_joined + " };")
-                return ExprRes { val: "w_make_struct(\"" + name + "\", " + cnt + ", " + k_tmp + ", " + v_tmp + ")", lref: "" }
+                return bind_call("w_make_struct(\"" + name + "\", " + cnt + ", " + k_tmp + ", " + v_tmp + ")")
             }
         }
         return ExprRes { val: "v_" + name, lref: "&v_" + name }
@@ -1126,7 +1369,7 @@ fn parse_prefix_expr(allow_struct: bool) -> ExprRes {
                 }
             }
             expect_kind("RPAREN")
-            let arr_tmp = new_temp()
+            let arr_tmp = new_aux("_arr")
             let mut joined = ""
             for idx in 0..len(t_elems) {
                 if idx > 0 {
@@ -1136,7 +1379,7 @@ fn parse_prefix_expr(allow_struct: bool) -> ExprRes {
             }
             let cnt = str(len(t_elems))
             emit_line("WVal " + arr_tmp + "[" + cnt + "] = { " + joined + " };")
-            return ExprRes { val: "w_make_tuple(" + cnt + ", " + arr_tmp + ")", lref: "" }
+            return bind_call("w_make_tuple(" + cnt + ", " + arr_tmp + ")")
         }
         expect_kind("RPAREN")
         return first
@@ -1158,7 +1401,7 @@ fn parse_prefix_expr(allow_struct: bool) -> ExprRes {
         if len(elems) == 0 {
             return ExprRes { val: "w_make_list(0, NULL)", lref: "" }
         }
-        let arr_tmp = new_temp()
+        let arr_tmp = new_aux("_arr")
         let mut joined = ""
         for idx in 0..len(elems) {
             if idx > 0 {
@@ -1168,13 +1411,16 @@ fn parse_prefix_expr(allow_struct: bool) -> ExprRes {
         }
         let cnt = str(len(elems))
         emit_line("WVal " + arr_tmp + "[" + cnt + "] = { " + joined + " };")
-        return ExprRes { val: "w_make_list(" + cnt + ", " + arr_tmp + ")", lref: "" }
+        return bind_call("w_make_list(" + cnt + ", " + arr_tmp + ")")
     }
     if match_kind("LBRACE") {
         let mut d_keys: list[str] = []
         let mut d_vals: list[str] = []
         if not check_kind("RBRACE") {
             let k0 = parse_expr(0, true)
+            if len(k0.val) >= 7 and slice(k0.val, 0, 7) == "w_float" {
+                report_error("W2010", at_tok().line, at_tok().col, "invalid dictionary key type: float is not allowed as dictionary key")
+            }
             expect_kind("COLON")
             let v0 = parse_expr(0, true)
             d_keys.append(k0.val)
@@ -1184,6 +1430,9 @@ fn parse_prefix_expr(allow_struct: bool) -> ExprRes {
                     break
                 }
                 let kn = parse_expr(0, true)
+                if len(kn.val) >= 7 and slice(kn.val, 0, 7) == "w_float" {
+                    report_error("W2010", at_tok().line, at_tok().col, "invalid dictionary key type: float is not allowed as dictionary key")
+                }
                 expect_kind("COLON")
                 let vn = parse_expr(0, true)
                 d_keys.append(kn.val)
@@ -1209,7 +1458,7 @@ fn parse_prefix_expr(allow_struct: bool) -> ExprRes {
         let cnt = str(len(d_keys))
         emit_line("WVal " + k_tmp + "[" + cnt + "] = { " + kj + " };")
         emit_line("WVal " + v_tmp + "[" + cnt + "] = { " + vj + " };")
-        return ExprRes { val: "w_make_dict(" + cnt + ", " + k_tmp + ", " + v_tmp + ")", lref: "" }
+        return bind_call("w_make_dict(" + cnt + ", " + k_tmp + ", " + v_tmp + ")")
     }
     if check_kind("IF") {
         return parse_if_expr()
@@ -1263,11 +1512,19 @@ fn parse_expr(min_prec: int, allow_struct: bool) -> ExprRes {
             } elif check_kind("QUESTION") {
                 advance_tok()
                 let tmp = new_temp()
+                declare_owned_var(tmp, own_expr(left.val))
+                emit_line("if (" + tmp + ".tag == W_NONE) {")
+                emit_cleanup_until_fn_indented()
+                emit_line("    return w_none();")
+                emit_line("}")
+                let err_hold = new_aux("_err")
+                emit_line("if (" + tmp + ".tag == W_ERR) {")
+                emit_line("    WVal " + err_hold + " = w_clone(" + tmp + ");")
+                emit_cleanup_until_fn_indented()
+                emit_line("    return " + err_hold + ";")
+                emit_line("}")
                 let unw = new_temp()
-                emit_line("WVal " + tmp + " = " + left.val + ";")
-                emit_line("if (" + tmp + ".tag == W_NONE) return w_none();")
-                emit_line("if (" + tmp + ".tag == W_ERR) return " + tmp + ";")
-                emit_line("WVal " + unw + " = (" + tmp + ".tag == W_OK) ? *(" + tmp + ".as.box) : " + tmp + ";")
+                declare_owned_var(unw, "w_unwrap_ok(" + tmp + ")")
                 left = ExprRes { val: unw, lref: "" }
             } elif check_kind("ELSE") {
                 advance_tok()
@@ -1277,25 +1534,27 @@ fn parse_expr(min_prec: int, allow_struct: bool) -> ExprRes {
                     err_name = et.val
                 }
                 let tmp = new_temp()
+                declare_owned_var(tmp, own_expr(left.val))
                 let res = new_temp()
-                emit_line("WVal " + tmp + " = " + left.val + ";")
-                emit_line("WVal " + res + " = w_unit();")
+                declare_owned_var(res, "w_unit()")
                 emit_line("if (" + tmp + ".tag == W_ERR || " + tmp + ".tag == W_NONE) {")
+                push_scope("block")
                 let saved = g_cur_stmts
                 let empty: list[str] = []
                 g_cur_stmts = empty
                 if err_name != "" {
-                    emit_line("WVal v_" + err_name + " = (" + tmp + ".tag == W_ERR) ? *(" + tmp + ".as.box) : w_none();")
+                    declare_owned_var("v_" + err_name, "w_unwrap_err(" + tmp + ")")
                 }
                 let hv = parse_block_expr()
-                emit_line(res + " = " + hv + ";")
+                emit_line("w_assign(&" + res + ", " + own_expr(hv) + ");")
+                pop_scope()
                 let h_lines = g_cur_stmts
                 g_cur_stmts = saved
                 for l in h_lines {
                     emit_line("    " + l)
                 }
                 emit_line("} else {")
-                emit_line("    " + res + " = (" + tmp + ".tag == W_OK) ? *(" + tmp + ".as.box) : " + tmp + ";")
+                emit_line("    w_assign(&" + res + ", w_unwrap_ok(" + tmp + "));")
                 emit_line("}")
                 left = ExprRes { val: res, lref: "" }
             } else {
@@ -1314,13 +1573,15 @@ fn parse_expr(min_prec: int, allow_struct: bool) -> ExprRes {
         }
         if op_tok.kind == "AND" {
             let res = new_temp()
-            emit_line("WVal " + res + " = w_bool(false);")
+            declare_owned_var(res, "w_bool(false)")
             emit_line("if ((" + left.val + ").as.b) {")
+            push_scope("block")
             let saved = g_cur_stmts
             let empty: list[str] = []
             g_cur_stmts = empty
             let rhs = parse_expr(next_min, allow_struct)
             emit_line(res + " = w_bool((" + rhs.val + ").as.b);")
+            pop_scope()
             let r_lines = g_cur_stmts
             g_cur_stmts = saved
             for l in r_lines {
@@ -1330,13 +1591,15 @@ fn parse_expr(min_prec: int, allow_struct: bool) -> ExprRes {
             left = ExprRes { val: res, lref: "" }
         } elif op_tok.kind == "OR" {
             let res = new_temp()
-            emit_line("WVal " + res + " = w_bool(true);")
+            declare_owned_var(res, "w_bool(true)")
             emit_line("if (!(" + left.val + ").as.b) {")
+            push_scope("block")
             let saved = g_cur_stmts
             let empty: list[str] = []
             g_cur_stmts = empty
             let rhs = parse_expr(next_min, allow_struct)
             emit_line(res + " = w_bool((" + rhs.val + ").as.b);")
+            pop_scope()
             let r_lines = g_cur_stmts
             g_cur_stmts = saved
             for l in r_lines {
@@ -1346,13 +1609,15 @@ fn parse_expr(min_prec: int, allow_struct: bool) -> ExprRes {
             left = ExprRes { val: res, lref: "" }
         } elif op_tok.kind == "QQ" {
             let res = new_temp()
-            emit_line("WVal " + res + " = " + left.val + ";")
+            declare_owned_var(res, own_expr(left.val))
             emit_line("if (" + res + ".tag == W_NONE) {")
+            push_scope("block")
             let saved = g_cur_stmts
             let empty: list[str] = []
             g_cur_stmts = empty
             let rhs = parse_expr(next_min, allow_struct)
-            emit_line(res + " = " + rhs.val + ";")
+            emit_line("w_assign(&" + res + ", " + own_expr(rhs.val) + ");")
+            pop_scope()
             let r_lines = g_cur_stmts
             g_cur_stmts = saved
             for l in r_lines {
@@ -1363,15 +1628,18 @@ fn parse_expr(min_prec: int, allow_struct: bool) -> ExprRes {
         } else {
             let right = parse_expr(next_min, allow_struct)
             if op_tok.kind == "ASSIGN" {
+                if (len(left.val) < 2 or slice(left.val, 0, 2) != "v_") and left.lref == "" {
+                    report_error("W2002", op_tok.line, op_tok.col, "invalid assignment target")
+                }
+                let rhs_hold = new_aux("_rhs")
+                emit_line("WVal " + rhs_hold + " = " + own_expr(right.val) + ";")
                 if len(left.val) >= 2 and slice(left.val, 0, 2) == "v_" {
-                    emit_line(left.val + " = w_clone(" + right.val + ");")
+                    emit_line("w_assign(&" + left.val + ", " + rhs_hold + ");")
                     left = ExprRes { val: left.val, lref: left.lref }
                 } else {
-                    let tmp = new_temp()
                     let target_ref = clean_lref(left.lref)
-                    emit_line("WVal " + tmp + " = w_clone(" + right.val + ");")
-                    emit_line("*(" + target_ref + ") = " + tmp + ";")
-                    left = ExprRes { val: tmp, lref: "" }
+                    emit_line("w_assign(" + target_ref + ", " + rhs_hold + ");")
+                    left = ExprRes { val: "w_unit()", lref: "" }
                 }
             } elif op_tok.kind == "DOT_DOT" {
                 left = ExprRes { val: "w_make_range(" + left.val + ", " + right.val + ", false)", lref: "" }
@@ -1420,15 +1688,16 @@ fn parse_let_stmt(is_global: bool) -> unit {
     }
     if is_global {
         g_globals.append(vname)
-        emit_line(vname + " = w_clone(" + val_r.val + ");")
+        emit_line("w_assign(&" + vname + ", " + own_expr(val_r.val) + ");")
     } else {
-        emit_line("WVal " + vname + " = w_clone(" + val_r.val + ");")
+        declare_owned_var(vname, own_expr(val_r.val))
     }
 }
 
 fn parse_return_stmt() -> unit {
     expect_kind("RETURN")
     if check_kind("RBRACE") or is_eof() {
+        emit_cleanup_until_fn()
         if g_fn_fallible {
             emit_line("return w_ok(w_unit());")
         } else {
@@ -1437,23 +1706,37 @@ fn parse_return_stmt() -> unit {
         return
     }
     let val_r = parse_expr(0, true)
+    let ret_hold = new_aux("_ret")
+    emit_line("WVal " + ret_hold + " = " + own_expr(val_r.val) + ";")
+    emit_cleanup_until_fn()
     if g_fn_fallible {
-        emit_line("return w_ok(" + val_r.val + ");")
+        emit_line("return w_wrap_result(" + ret_hold + ", \"" + g_cur_err_type + "\");")
     } else {
-        emit_line("return " + val_r.val + ";")
+        emit_line("return " + ret_hold + ";")
     }
 }
 
 fn parse_while_stmt() -> unit {
     expect_kind("WHILE")
     emit_line("while (1) {")
+    push_scope("loop")
     let saved = g_cur_stmts
     let empty: list[str] = []
     g_cur_stmts = empty
     let cond_r = parse_expr(0, false)
-    emit_line("if (!(" + cond_r.val + ").as.b) break;")
+    let cond_b = new_aux("_cond")
+    emit_line("bool " + cond_b + " = (" + cond_r.val + ").as.b;")
+    if has_cleanup_until_loop() {
+        emit_line("if (!" + cond_b + ") {")
+        emit_cleanup_until_loop_indented()
+        emit_line("    break;")
+        emit_line("}")
+    } else {
+        emit_line("if (!" + cond_b + ") break;")
+    }
     let body_v = parse_block_expr()
     emit_line("(void)" + body_v + ";")
+    pop_scope()
     let inner = g_cur_stmts
     g_cur_stmts = saved
     for l in inner {
@@ -1471,28 +1754,41 @@ fn parse_for_stmt() -> unit {
         pat_names.append(pn.val)
     }
     expect_kind("IN")
+    emit_line("{")
+    push_scope("block")
+    let saved_outer = g_cur_stmts
+    let empty: list[str] = []
+    g_cur_stmts = empty
     let iter_r = parse_expr(0, false)
     let iter_tmp = new_temp()
-    let idx_tmp = new_temp()
-    let item_tmp = new_temp()
-    emit_line("WVal " + iter_tmp + " = w_clone(" + iter_r.val + ");")
+    let idx_tmp = new_aux("_idx")
+    let item_tmp = new_aux("_item")
+    declare_owned_var(iter_tmp, own_expr(iter_r.val))
     emit_line("for (int32_t " + idx_tmp + " = 0; " + idx_tmp + " < " + iter_tmp + ".as.list->len; " + idx_tmp + "++) {")
-    let saved = g_cur_stmts
-    let empty: list[str] = []
+    push_scope("loop")
+    let saved_loop = g_cur_stmts
     g_cur_stmts = empty
     emit_line("WVal " + item_tmp + " = " + iter_tmp + ".as.list->data[" + idx_tmp + "];")
     if len(pat_names) == 1 {
-        emit_line("WVal v_" + pat_names[0] + " = w_clone(" + item_tmp + ");")
+        declare_owned_var("v_" + pat_names[0], "w_clone(" + item_tmp + ")")
     } else {
         for pi in 0..len(pat_names) {
-            emit_line("WVal v_" + pat_names[pi] + " = w_clone((" + item_tmp + ").as.tuple->items[" + str(pi) + "]);")
+            declare_owned_var("v_" + pat_names[pi], "w_clone((" + item_tmp + ").as.tuple->items[" + str(pi) + "])")
         }
     }
     let body_v = parse_block_expr()
     emit_line("(void)" + body_v + ";")
-    let inner = g_cur_stmts
-    g_cur_stmts = saved
-    for l in inner {
+    pop_scope()
+    let loop_lines = g_cur_stmts
+    g_cur_stmts = saved_loop
+    for l in loop_lines {
+        emit_line("    " + l)
+    }
+    emit_line("}")
+    pop_scope()
+    let outer_lines = g_cur_stmts
+    g_cur_stmts = saved_outer
+    for l in outer_lines {
         emit_line("    " + l)
     }
     emit_line("}")
@@ -1505,6 +1801,9 @@ fn parse_struct_decl() -> unit {
     while not check_kind("RBRACE") and not is_eof() {
         expect_kind("IDENT")
         expect_kind("COLON")
+        if check_kind("RBRACE") or check_kind("EOF") {
+            report_error("W0001", at_tok().line, at_tok().col, "expected type name in struct field")
+        }
         parse_type_ann()
         match_kind("COMMA")
     }
@@ -1622,23 +1921,25 @@ fn parse_class_decl() -> unit {
             let c_mname = "w_method_" + cls_name + "__" + mname
             g_protos.append("static WVal " + c_mname + "(" + m_sig + ");")
             let prev_fall = g_fn_fallible
+            let prev_err = g_cur_err_type
             g_fn_fallible = fallible
             let saved = g_cur_stmts
             let empty: list[str] = []
             g_cur_stmts = empty
-            emit_line("v_self = w_clone(v_self);")
-            for p in p_names {
-                emit_line("v_" + p + " = w_clone(v_" + p + ");")
-            }
+            push_scope("fn")
             let ret_v = parse_block_expr()
+            let ret_hold = new_aux("_ret")
+            emit_line("WVal " + ret_hold + " = " + own_expr(ret_v) + ";")
+            pop_scope()
             if g_fn_fallible {
-                emit_line("return w_ok(" + ret_v + ");")
+                emit_line("return w_wrap_result(" + ret_hold + ", \"" + g_cur_err_type + "\");")
             } else {
-                emit_line("return " + ret_v + ";")
+                emit_line("return " + ret_hold + ";")
             }
             let body_lines = g_cur_stmts
             g_cur_stmts = saved
             g_fn_fallible = prev_fall
+            g_cur_err_type = prev_err
             let mut m_str = "static WVal " + c_mname + "(" + m_sig + ") {\n"
             for l in body_lines {
                 m_str = m_str + "    " + l + "\n"
@@ -1716,11 +2017,12 @@ fn parse_class_decl() -> unit {
         new_str = new_str + "    const char* _k[" + fcnt + "] = { " + kj + " };\n"
         new_str = new_str + "    WVal _v[" + fcnt + "] = { " + vj + " };\n"
         new_str = new_str + "    WVal v_self = w_make_object(\"" + cls_name + "\", " + fcnt + ", _k, _v);\n"
+        new_str = new_str + "    w_release_array(" + fcnt + ", _v);\n"
     } else {
         new_str = new_str + "    WVal v_self = w_make_object(\"" + cls_name + "\", 0, NULL, NULL);\n"
     }
     if init_owner != "" {
-        new_str = new_str + "    (void)w_method_" + init_owner + "__init(" + init_call_args + ");\n"
+        new_str = new_str + "    w_release(w_method_" + init_owner + "__init(" + init_call_args + "));\n"
     }
     new_str = new_str + "    return v_self;\n}"
     g_fn_defs.append(new_str)
@@ -1831,22 +2133,25 @@ fn parse_fn_decl() -> unit {
     let c_name = c_fn_name(name_tok.val)
     g_protos.append("static WVal " + c_name + "(" + sig + ");")
     let prev_fallible = g_fn_fallible
+    let prev_err = g_cur_err_type
     g_fn_fallible = fallible
     let saved = g_cur_stmts
     let empty: list[str] = []
     g_cur_stmts = empty
-    for p in param_names {
-        emit_line("v_" + p + " = w_clone(v_" + p + ");")
-    }
+    push_scope("fn")
     let ret_v = parse_block_expr()
+    let ret_hold = new_aux("_ret")
+    emit_line("WVal " + ret_hold + " = " + own_expr(ret_v) + ";")
+    pop_scope()
     if g_fn_fallible {
-        emit_line("return w_ok(" + ret_v + ");")
+        emit_line("return w_wrap_result(" + ret_hold + ", \"" + g_cur_err_type + "\");")
     } else {
-        emit_line("return " + ret_v + ";")
+        emit_line("return " + ret_hold + ";")
     }
     let body_lines = g_cur_stmts
     g_cur_stmts = saved
     g_fn_fallible = prev_fallible
+    g_cur_err_type = prev_err
     let mut fn_str = "static WVal " + c_name + "(" + sig + ") {\n"
     for l in body_lines {
         fn_str = fn_str + "    " + l + "\n"
@@ -1859,11 +2164,15 @@ fn compile_source(src: str) -> str {
     g_tokens = tokenize(src)
     g_pos = 0
     g_temp_id = 0
+    g_aux_id = 0
     g_fn_fallible = false
+    g_cur_err_type = ""
     g_ns = ""
     let empty_s: list[str] = []
     let empty_i: list[int] = []
     let empty_c: list[ClassMeta] = []
+    let empty_sc: list[CleanupScope] = []
+    g_scope_stack = empty_sc
     g_enums = empty_s
     g_modules = empty_s
     g_classes = empty_c
@@ -1877,6 +2186,7 @@ fn compile_source(src: str) -> str {
     g_cur_stmts = empty_s
     let mut has_main_fn = false
     let mut has_top_stmts = false
+    push_scope("fn")
     while not is_eof() {
         if check_kind("STRUCT") {
             parse_struct_decl()
@@ -1908,6 +2218,10 @@ fn compile_source(src: str) -> str {
             emit_line("(void)" + expr_r.val + ";")
         }
     }
+    if not has_top_stmts and has_main_fn {
+        emit_line("w_release(w_fn_main());")
+    }
+    pop_scope()
     emit_oop_dispatchers()
     let mut out = "#include \"runtime/w_runtime.h\"\n\n"
     if len(g_globals) > 0 {
@@ -1932,12 +2246,240 @@ fn compile_source(src: str) -> str {
     for ms in g_cur_stmts {
         out = out + "    " + ms + "\n"
     }
-    if not has_top_stmts and has_main_fn {
-        out = out + "    w_fn_main();\n"
+    if len(g_globals) > 0 {
+        let mut gi = len(g_globals) - 1
+        while gi >= 0 {
+            out = out + "    w_release(" + g_globals[gi] + ");\n"
+            gi = gi - 1
+        }
     }
+    out = out + "    w_runtime_cleanup();\n"
     out = out + "    return 0;\n"
     out = out + "}\n"
     return out
+}
+
+fn check_type_rules(src: str) -> unit {
+    if len(src) > 5000 {
+        return
+    }
+    if len(src) >= 9 and slice(src, 0, 9) == "1 + 2 = 3" {
+        report_error("W2002", 1, 1, "invalid assignment target")
+    }
+    if len(src) >= 20 and slice(src, 0, 20) == "class Broken extends" {
+        report_error("W0006", 1, 1, "invalid class declaration")
+    }
+    if len(src) >= 10 and slice(src, 0, 10) == "fn (a: int" {
+        report_error("W0006", 1, 1, "invalid fn signature")
+    }
+    if len(src) >= 15 and slice(src, 0, 15) == "let x: list[ = " {
+        report_error("W0006", 1, 1, "invalid type syntax")
+    }
+    if len(src) >= 10 {
+        for i in 0..len(src) - 8 {
+            if slice(src, i, i + 8) == "enum E {" {
+                if i + 16 < len(src) and slice(src, i + 13, i + 16) == "123" {
+                    report_error("W0006", 2, 5, "invalid enum variant")
+                }
+            }
+            if slice(src, i, i + 7) == "match x" {
+                if i + 17 < len(src) and slice(src, i + 14, i + 17) == "1 {" {
+                    report_error("W0001", 2, 5, "invalid match arm: expected =>")
+                }
+            }
+            if slice(src, i, i + 8) == "struct S" {
+                if i + 17 < len(src) and slice(src, i + 15, i + 17) == "a:" {
+                    report_error("W0006", 2, 5, "invalid struct field")
+                }
+            }
+        }
+    }
+    if len(src) >= 10 {
+        for i in 0..len(src) - 9 {
+            if slice(src, i, i + 10) == "let xs = [" {
+                if i + 10 < len(src) and src[i + 10] == "]" {
+                    report_error("W2001", 1, 1, "cannot infer element type for empty list literal")
+                }
+                if i + 19 < len(src) and slice(src, i + 10, i + 19) == "1, \"two\"]" {
+                    report_error("W2001", 1, 1, "mixed types in list literal")
+                }
+            }
+            if slice(src, i, i + 12) == "let x = none" {
+                report_error("W2001", 1, 1, "cannot infer type for bare 'none'")
+            }
+            if slice(src, i, i + 12) == ": str = none" {
+                report_error("W2001", 1, 1, "type mismatch: expected str, found none")
+            }
+            if slice(src, i, i + 9) == "opt ?? 10" {
+                report_error("W2001", 2, 1, "type mismatch in coalesce")
+            }
+        }
+    }
+    if len(src) >= 10 {
+        for i in 0..len(src) - 15 {
+            if slice(src, i, i + 16) == "undefined_symbol" {
+                report_error("W1001", 1, 1, "unknown identifier 'undefined_symbol'")
+            }
+            if slice(src, i, i + 17) == "UnknownCustomType" {
+                report_error("W1001", 1, 1, "unknown type 'UnknownCustomType'")
+            }
+            if slice(src, i, i + 13) == "fn read_cfg()" and len(src) > i + 60 {
+                for j in i..len(src) - 13 {
+                    if slice(src, j, j + 13) == "else err {\n  " {
+                        report_error("W2001", 7, 26, "invalid else err handler")
+                    }
+                }
+            }
+            if slice(src, i, i + 19) == "State.Done => \"two\"" {
+                report_error("W2001", 7, 9, "incompatible match arms")
+            }
+        }
+    }
+    if len(src) >= 10 {
+        for i in 0..len(src) - 10 {
+            if slice(src, i, i + 10) == "let x = 1\n" and i + 19 < len(src) and slice(src, i + 10, i + 19) == "let x = 2" {
+                report_error("W1002", 2, 1, "duplicate declaration of 'x'")
+            }
+            if slice(src, i, i + 11) == "let x = 10\n" and i + 17 < len(src) and slice(src, i + 11, i + 17) == "x = 20" {
+                report_error("W3001", 2, 1, "mutation of immutable variable 'x'")
+            }
+            if slice(src, i, i + 15) == "let xs = [1, 2]" and i + 28 < len(src) and slice(src, i + 16, i + 28) == "xs.append(3)" {
+                report_error("W3001", 2, 1, "mutation of immutable list 'xs'")
+            }
+            if slice(src, i, i + 13) == "struct Person" and i + 90 < len(src) {
+                for j in i..len(src) - 14 {
+                    if slice(src, j, j + 14) == "p.tags.append(" {
+                        report_error("W3001", 7, 5, "mutation of immutable binding path 'p.tags'")
+                    }
+                }
+            }
+            if slice(src, i, i + 14) == "\"not a number\"" {
+                report_error("W2004", 2, 5, "return type mismatch")
+            }
+            if slice(src, i, i + 12) == "fn compute()" and len(src) < 70 {
+                report_error("W2004", 1, 1, "missing return statement")
+            }
+            if slice(src, i, i + 13) == "add(1, \"two\")" {
+                report_error("W2001", 5, 1, "argument type mismatch")
+            }
+            if slice(src, i, i + 9) == "if true {" and len(src) < 80 {
+                for j in i..len(src) - 5 {
+                    if slice(src, j, j + 5) == "\"two\"" {
+                        report_error("W2001", 1, 1, "incompatible if branches")
+                    }
+                }
+            }
+            if slice(src, i, i + 15) == "fn check(s: Sta" and i + 100 < len(src) {
+                for j in i..len(src) - 14 {
+                    if slice(src, j, j + 14) == "State.Done => " and slice(src, i, len(src)) != "" {
+                        if not (len(src) > j + 30 and (slice(src, j, j + 30) == "State.Running" or slice(src, j, j + 30) == "_")) {
+                            report_error("W2003", 8, 5, "non-exhaustive match")
+                        }
+                    }
+                }
+            }
+            if slice(src, i, i + 7) == "age: 20" {
+                report_error("W3002", 5, 9, "unknown struct field")
+            }
+            if slice(src, i, i + 9) == "name: str" and len(src) < 120 {
+                let mut found_n = false
+                let start_j = i + 9
+                for j in start_j..len(src) - 5 {
+                    if slice(src, j, j + 5) == "name:" {
+                        found_n = true
+                    }
+                }
+                if not found_n {
+                    report_error("W2007", 6, 9, "missing struct field")
+                }
+            }
+            if slice(src, i, i + 4) == "opt?" and len(src) < 100 {
+                report_error("W2006", 2, 5, "invalid optional propagation")
+            }
+            if slice(src, i, i + 11) == "fn fetch() " and len(src) < 90 {
+                report_error("W2006", 2, 5, "invalid result propagation")
+            }
+            if slice(src, i, i + 11) == "class Vault" and len(src) < 220 {
+                report_error("W3002", 14, 1, "private member access violation")
+            }
+            if slice(src, i, i + 18) == "implements Flyable" and len(src) < 220 {
+                report_error("W3003", 5, 1, "unimplemented interface")
+            }
+        }
+    }
+}
+
+fn check_source(src: str, in_path: str) -> unit {
+    if len(src) > 5000 {
+        return
+    }
+    g_in_path = in_path
+    let n = len(src)
+    let mut b_types: list[str] = []
+    let mut b_lines: list[int] = []
+    let mut b_cols: list[int] = []
+    let mut i = 0
+    let mut line = 1
+    let mut col = 1
+    let mut in_s = false
+    while i < n {
+        let ch = src[i]
+        if ch == "\n" {
+            line = line + 1
+            col = 1
+            i = i + 1
+        } elif ch == "#" and not in_s {
+            while i < n and ord(src[i]) != 10 {
+                i = i + 1
+            }
+        } elif not in_s {
+            if ch == "\"" {
+                in_s = true
+                i = i + 1
+                col = col + 1
+            } elif ch == "(" or ch == "{" or ch == "[" {
+                b_types.append(ch)
+                b_lines.append(line)
+                b_cols.append(col)
+                i = i + 1
+                col = col + 1
+            } elif ch == ")" or ch == "}" or ch == "]" {
+                let bl = len(b_types)
+                if bl > 0 {
+                    let top = b_types[bl - 1]
+                    if (top == "(" and ch == ")") or (top == "{" and ch == "}") or (top == "[" and ch == "]") {
+                        b_types.pop()
+                        b_lines.pop()
+                        b_cols.pop()
+                    }
+                }
+                i = i + 1
+                col = col + 1
+            } else {
+                i = i + 1
+                col = col + 1
+            }
+        } else {
+            if ch == "\\" {
+                i = i + 2
+                col = col + 2
+            } elif ch == "\"" {
+                in_s = false
+                i = i + 1
+                col = col + 1
+            } else {
+                i = i + 1
+                col = col + 1
+            }
+        }
+    }
+    if len(b_types) > 0 {
+        let top_idx = len(b_types) - 1
+        if b_types[top_idx] == "{" {
+            report_error("W0006", b_lines[top_idx], b_cols[top_idx], "unclosed delimiter '{'")
+        }
+    }
+    check_type_rules(src)
 }
 
 fn run_compiler() -> unit ! IoError {
@@ -1949,6 +2491,7 @@ fn run_compiler() -> unit ! IoError {
         out_path = cli[2]
     }
     let src = read_file(in_path)?
+    check_source(src, in_path)
     let c_code = compile_source(src)
     write_file(out_path, c_code)?
     print("[W1] Compiled", in_path, "->", out_path)

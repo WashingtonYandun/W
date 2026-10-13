@@ -27,6 +27,7 @@ DIAGNOSTIC_CODES: Dict[str, str] = {
     "W2005": "Invalid call arity or non-callable target",
     "W2006": "Invalid optional ('?') or fallible ('T ! E' / 'else err') propagation",
     "W2007": "Missing or invalid struct initialization field",
+    "W2010": "Invalid dictionary key type",
     # W3xxx — Mutability & OOP Contracts
     "W3001": "Mutation of immutable value binding",
     "W3002": "Invalid member access/mutation or private visibility violation",

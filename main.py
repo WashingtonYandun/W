@@ -13,7 +13,7 @@ from formatter.Formatter import Formatter
 from codegen.CCodeGen import CCodeGen
 from error.Error import WError
 
-W_VERSION = "0.1.2"
+W_VERSION = "0.1.3"
 
 
 def get_repo_root() -> str:

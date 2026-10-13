@@ -82,6 +82,8 @@ def create_global_scope() -> Scope:
     # 2. Built-in Functions
     # print(any...) -> unit
     scope.define_symbol(Symbol("print", FunctionType([AnyType()], UnitType), kind="builtin"))
+    scope.define_symbol(Symbol("eprint", FunctionType([AnyType()], UnitType), kind="builtin"))
+    scope.define_symbol(Symbol("exit", FunctionType([IntType], UnitType), kind="builtin"))
     
     # conversions & string primitives
     scope.define_symbol(Symbol("float", FunctionType([AnyType()], FloatType), kind="builtin"))

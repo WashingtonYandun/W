@@ -7,7 +7,7 @@
 
 ## Overview
 
-**W (`v0.1.1`)** is a statically typed, value-semantics programming language. W includes a self-hosting compiler written entirely in W ([`selfhost/w1.w`](selfhost/w1.w)), bootstrapped from the Python `W0` reference implementation and emitting portable C99.
+**W (`v0.1.3`)** is a statically typed, value-semantics programming language. W includes a self-hosting compiler written entirely in W ([`selfhost/w1.w`](selfhost/w1.w)), bootstrapped from the Python `W0` reference implementation and emitting portable C99.
 
 ### Core Properties
 1. **31 Keywords:**
@@ -229,7 +229,8 @@ Verifies all **13 phases (190 / 190 tests)**:
 | :--- | :--- | :--- |
 | **`v0.1.0`** | **Core + Self-Host + OOP** ✅ | 31 keywords, pure value CoW, Java-style OOP, C99 backend, 3-stage `W1` self-hosting fixed point, CLI & CI |
 | **`v0.1.1`** | **Harden & Oracle** ✅ | Formalized semantic guarantees, recursive nested CoW, constructor calls without `new`, $L \rightarrow R$ C99 sequence points, 3-engine differential oracle & fuzzer |
-| **`v0.1.2`** | **Diagnostics & Stress** | Stable diagnostic codes (`W0xxx`–`W4xxx`), unified JSON diagnostics, full-behavior differential oracle, reproducible stress fuzzing, benchmark harness (`w bench`), HIR & `TypeId` architecture specs |
+| **`v0.1.2`** | **Diagnostics & Stress** ✅ | Stable diagnostic codes (`W0xxx`–`W4xxx`), unified JSON diagnostics, full-behavior differential oracle, reproducible stress fuzzing, benchmark harness (`w bench`), HIR & `TypeId` architecture specs |
+| **`v0.1.3`** | **Ownership & Self-Host Parity** | Deterministic RC lifetime management (`CleanupScope`, `w_release` across `return`/`?`/`break`/`continue`), leak/double-free instrumentation (`W_MEM_CHECK=1`), and `W1` standalone semantic & diagnostic parity (`Wxxxx`) |
 | **`v0.2`** | **Generics + Monomorphization** | Parametric polymorphism (`fn`, `struct`, `enum`, `class`) compiled via monomorphization with container invariance |
 | **`v0.3`** | **Function Types + Typed HIR** | First-class `fn(A) -> B` types and shared `AST -> Typed HIR -> C99` lowering pipeline |
 | **`v0.4`** | **Closures + HOFs** | Anonymous functions, value-captured closures, and typed `map` / `filter` / `fold` |

@@ -1539,7 +1539,7 @@ class TypeChecker:
                     line=expr.entries[0].key.line,
                     col=expr.entries[0].key.col,
                     file=self.file,
-                    code="W2001"
+                    code="W2010"
                 )
             first_val_t = self._check_expr(expr.entries[0].value)
             for entry in expr.entries[1:]:
@@ -1551,7 +1551,7 @@ class TypeChecker:
                         line=entry.key.line,
                         col=entry.key.col,
                         file=self.file,
-                        code="W2001"
+                        code="W2010"
                     )
                 if not is_assignable(kt, first_key_t):
                     raise TypeError(
@@ -1731,7 +1731,7 @@ class TypeChecker:
                     line=node.key_type.line,
                     col=node.key_type.col,
                     file=self.file,
-                    code="W2001"
+                    code="W2010"
                 )
             val_t = self._resolve_type_node(node.value_type)
             return DictType(key_t, val_t)
