@@ -1,6 +1,6 @@
 import copy
 import os
-from typing import Dict, List, Optional, Set, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple
 from node.NodeType import (
     Node, Program, Stmt, Expr, TypeNode, Pattern, Block,
     NamedType, OptionalType as AstOptionalType, ListType as AstListType,
