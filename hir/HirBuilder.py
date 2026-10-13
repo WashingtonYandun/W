@@ -1,3 +1,5 @@
+import os
+from parser.Parser import Parser
 from typing import Any, Dict, List, Optional, Tuple, Set
 from node.NodeType import (
     Program, Stmt, Expr, TypeNode, ResultType as AstResultType,
@@ -20,15 +22,16 @@ from hir.HirNodes import (
     HirFnDecl, HirStructDecl, HirEnumDecl, HirInterfaceDecl, HirClassDecl, HirModule,
     HirLet, HirBindTemp, HirAssign, HirWhile, HirForList, HirReturn, HirBreak, HirContinue, HirExprStmt,
     HirConstInt, HirConstFloat, HirConstBool, HirConstStr, HirConstNone, HirConstUnit,
-    HirLocalRef, HirThisRef, HirUnaryOp, HirBinaryOp,
+    HirLocalRef, HirThisRef, HirSuperRef, HirUnaryOp, HirBinaryOp,
     HirConstructStruct, HirConstructEnum, HirConstructObject, HirConstructList, HirConstructDict, HirConstructTuple,
     HirDirectCall, HirBuiltinCall, HirMethodCall, HirFieldRead, HirIndexRead,
-    HirTryPropagate, HirCoalesce, HirElseHandle, HirIf, HirMatch, HirMatchArm
+    HirTryPropagate, HirCoalesce, HirElseHandle, HirIf, HirMatch, HirMatchArm, HirRange
 )
 
 
 BUILTIN_NAMES = {
-    "print", "len", "range", "ord", "chr", "slice", "str", "int", "float", "bool",
+    "print", "eprint", "len", "range", "ord", "chr", "slice", "str", "int", "float", "bool",
+    "bytes", "args", "exit", "enumerate", "dict_items", "read_file", "write_file",
     "w_read_file", "w_write_file"
 }
 
@@ -48,6 +51,8 @@ class HirBuilder:
         self.classes: Set[str] = set()
         self.structs: Set[str] = set()
         self.enums: Set[str] = set()
+        self.modules: Set[str] = set()
+        self.imported_files: Set[str] = set()
 
     def lower(self, program: Program) -> HirModule:
         # Pre-scan top-level nominal types to distinguish constructors from calls
@@ -78,7 +83,7 @@ class HirBuilder:
             elif isinstance(stmt, FnDecl):
                 fn_decls.append(self._lower_fn_decl(stmt))
             elif isinstance(stmt, ImportDecl):
-                continue
+                self._handle_import(stmt, fn_decls)
             else:
                 top_stmts.append(self._lower_stmt(stmt))
 
@@ -91,6 +96,27 @@ class HirBuilder:
             functions=fn_decls,
             top_level_stmts=top_stmts
         )
+
+    def _handle_import(self, stmt: ImportDecl, fn_decls: List[HirFnDecl]) -> None:
+        current_dir = os.path.dirname(os.path.abspath(self.file_path)) if self.file_path != "<stdin>" else os.getcwd()
+        resolved_path = os.path.join(current_dir, stmt.path)
+        if not os.path.exists(resolved_path):
+            resolved_path = stmt.path
+        abs_path = os.path.abspath(resolved_path)
+        if abs_path in self.imported_files or not os.path.exists(abs_path):
+            return
+        self.imported_files.add(abs_path)
+        self.modules.add(stmt.namespace)
+
+        with open(abs_path, "r", encoding="utf-8") as f:
+            code = f.read()
+
+        sub_ast = Parser(file=abs_path).parse(code)
+        for s in sub_ast.body:
+            if isinstance(s, FnDecl):
+                fn_hir = self._lower_fn_decl(s)
+                fn_hir.name = f"{stmt.namespace}__{s.name}"
+                fn_decls.append(fn_hir)
 
     # -------------------------------------------------------------
     # Nominal Declarations
@@ -199,7 +225,16 @@ class HirBuilder:
 
     def _lower_block(self, block: Block) -> HirBlock:
         stmts = [self._lower_stmt(s) for s in block.statements]
-        return HirBlock(stmts, Span(block.line, block.col))
+        tail_hir = None
+        if block.tail_expr is not None:
+            if isinstance(block.tail_expr, AssignmentExpr):
+                tgt_hir = self._lower_expr(block.tail_expr.target)
+                val_hir = self._lower_expr(block.tail_expr.value)
+                stmts.append(HirAssign(tgt_hir, val_hir, Span(block.tail_expr.line, block.tail_expr.col)))
+                tail_hir = HirConstUnit(TYPE_UNIT, Span(block.tail_expr.line, block.tail_expr.col))
+            else:
+                tail_hir = self._lower_expr(block.tail_expr)
+        return HirBlock(stmts, Span(block.line, block.col), tail_expr=tail_hir)
 
     def _lower_stmt(self, stmt: Stmt) -> HirStmt:
         span = Span(stmt.line, stmt.col)
@@ -219,9 +254,8 @@ class HirBuilder:
             entry = self.interner.get_entry(list_tid)
             if entry.tag == "list":
                 elem_tid = entry.data
-            var_name = stmt.pattern.name if hasattr(stmt.pattern, "name") else str(stmt.pattern)
             body_hir = self._lower_block(stmt.body)
-            return HirForList(var_name, elem_tid, list_hir, body_hir, span)
+            return HirForList(stmt.pattern, elem_tid, list_hir, body_hir, span)
         elif isinstance(stmt, ReturnStmt):
             if stmt.value is not None:
                 val_hir = self._lower_expr(stmt.value)
@@ -264,6 +298,8 @@ class HirBuilder:
             return HirLocalRef(expr.name, tid, span)
         elif isinstance(expr, ThisExpr):
             return HirThisRef(tid, span)
+        elif isinstance(expr, SuperExpr):
+            return HirSuperRef(tid, span)
         elif isinstance(expr, UnaryExpr):
             operand_hir = self._lower_expr(expr.operand)
             return HirUnaryOp(getattr(expr, "op", getattr(expr, "operator", "-")), operand_hir, tid, span)
@@ -313,8 +349,11 @@ class HirBuilder:
             elif isinstance(expr.callee, IdentExpr) and expr.callee.name in BUILTIN_NAMES:
                 args_hir = [self._lower_expr(a) for a in raw_args]
                 return HirBuiltinCall(expr.callee.name, args_hir, tid, span)
-            # Check if method call
+            # Check if method call or module function call
             elif isinstance(expr.callee, MemberExpr):
+                if isinstance(expr.callee.object, IdentExpr) and expr.callee.object.name in self.modules:
+                    args_hir = [self._lower_expr(a) for a in raw_args]
+                    return HirDirectCall(f"{expr.callee.object.name}__{expr.callee.property}", args_hir, tid, span)
                 rec_hir = self._lower_expr(expr.callee.object)
                 args_hir = [self._lower_expr(a) for a in raw_args]
                 return HirMethodCall(rec_hir, expr.callee.property, args_hir, tid, span)
@@ -363,6 +402,10 @@ class HirBuilder:
             sub_hir = self._lower_expr(expr.subject)
             arms_hir = [HirMatchArm(arm.pattern, self._lower_block(arm.body), Span(arm.line, arm.col)) for arm in expr.arms]
             return HirMatch(sub_hir, arms_hir, tid, span)
+        elif isinstance(expr, RangeExpr):
+            s_hir = self._lower_expr(expr.start)
+            e_hir = self._lower_expr(expr.end)
+            return HirRange(s_hir, e_hir, expr.inclusive, tid, span)
 
         # Fallback
         return HirConstUnit(tid or TYPE_UNIT, span)
