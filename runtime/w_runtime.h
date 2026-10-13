@@ -404,7 +404,7 @@ static inline WVal w_index_get(WVal obj, WVal idx) {
     if (obj.tag == W_LIST) {
         int64_t i = idx.as.i;
         if (i < 0 || i >= obj.as.list->len) {
-            fprintf(stderr, "RuntimeError: List index out of bounds\n");
+            fprintf(stderr, "[W4002] RuntimeError: List index out of bounds\n");
             exit(1);
         }
         return obj.as.list->data[i];
@@ -412,7 +412,7 @@ static inline WVal w_index_get(WVal obj, WVal idx) {
     if (obj.tag == W_STR) {
         size_t off = 0, blen = 0;
         if (!w_utf8_cp_offset(obj.as.s, idx.as.i, &off, &blen) || blen == 0) {
-            fprintf(stderr, "RuntimeError: String index out of bounds\n");
+            fprintf(stderr, "[W4002] RuntimeError: String index out of bounds\n");
             exit(1);
         }
         char* buf = (char*)malloc(blen + 1);
@@ -436,7 +436,7 @@ static inline WVal* w_index_ref(WVal* obj, WVal idx) {
         w_list_detach(obj);
         int64_t i = idx.as.i;
         if (i < 0 || i >= obj->as.list->len) {
-            fprintf(stderr, "RuntimeError: List index out of bounds\n");
+            fprintf(stderr, "[W4002] RuntimeError: List index out of bounds\n");
             exit(1);
         }
         return &obj->as.list->data[i];
@@ -459,7 +459,7 @@ static inline WVal* w_index_ref(WVal* obj, WVal idx) {
         d->len++;
         return &d->vals[d->len - 1];
     }
-    fprintf(stderr, "RuntimeError: Cannot index-assign non-collection\n");
+    fprintf(stderr, "[W4003] RuntimeError: Cannot index-assign non-collection\n");
     exit(1);
 }
 
@@ -489,7 +489,7 @@ static inline WVal* w_member_ref(WVal* obj, const char* prop) {
             }
         }
     }
-    fprintf(stderr, "RuntimeError: Invalid field '%s'\n", prop);
+    fprintf(stderr, "[W4003] RuntimeError: Invalid field '%s'\n", prop);
     exit(1);
 }
 
@@ -509,7 +509,7 @@ static inline WVal w_list_pop(WVal* list_val) {
     w_list_detach(list_val);
     WListBuf* b = list_val->as.list;
     if (b->len == 0) {
-        fprintf(stderr, "RuntimeError: pop from empty list\n");
+        fprintf(stderr, "[W4002] RuntimeError: pop from empty list\n");
         exit(1);
     }
     return b->data[--b->len];
@@ -537,7 +537,7 @@ static inline WVal w_dict_values(WVal dict_val) {
 
 /* Binary Operations */
 static inline WVal w_add(WVal a, WVal b) {
-    if (a.tag == W_INT && b.tag == W_INT) return w_int(a.as.i + b.as.i);
+    if (a.tag == W_INT && b.tag == W_INT) return w_int((int64_t)((uint64_t)a.as.i + (uint64_t)b.as.i));
     if (a.tag == W_FLOAT && b.tag == W_FLOAT) return w_float(a.as.f + b.as.f);
     if (a.tag == W_STR && b.tag == W_STR) {
         size_t la = strlen(a.as.s);
@@ -552,31 +552,33 @@ static inline WVal w_add(WVal a, WVal b) {
 }
 
 static inline WVal w_sub(WVal a, WVal b) {
-    if (a.tag == W_INT) return w_int(a.as.i - b.as.i);
+    if (a.tag == W_INT) return w_int((int64_t)((uint64_t)a.as.i - (uint64_t)b.as.i));
     return w_float(a.as.f - b.as.f);
 }
 
 static inline WVal w_mul(WVal a, WVal b) {
-    if (a.tag == W_INT) return w_int(a.as.i * b.as.i);
+    if (a.tag == W_INT) return w_int((int64_t)((uint64_t)a.as.i * (uint64_t)b.as.i));
     return w_float(a.as.f * b.as.f);
 }
 
 static inline WVal w_div(WVal a, WVal b) {
     if (a.tag == W_INT) {
-        if (b.as.i == 0) { fprintf(stderr, "RuntimeError: Division by zero\n"); exit(1); }
+        if (b.as.i == 0) { fprintf(stderr, "[W4001] RuntimeError: Division by zero\n"); exit(1); }
+        if (a.as.i == INT64_MIN && b.as.i == -1) return w_int(INT64_MIN);
         return w_int(a.as.i / b.as.i);
     }
-    if (b.as.f == 0.0) { fprintf(stderr, "RuntimeError: Division by zero\n"); exit(1); }
+    if (b.as.f == 0.0) { fprintf(stderr, "[W4001] RuntimeError: Division by zero\n"); exit(1); }
     return w_float(a.as.f / b.as.f);
 }
 
 static inline WVal w_mod(WVal a, WVal b) {
-    if (b.as.i == 0) { fprintf(stderr, "RuntimeError: Modulo by zero\n"); exit(1); }
+    if (b.as.i == 0) { fprintf(stderr, "[W4001] RuntimeError: Modulo by zero\n"); exit(1); }
+    if (a.as.i == INT64_MIN && b.as.i == -1) return w_int(0);
     return w_int(a.as.i % b.as.i);
 }
 
 static inline WVal w_neg(WVal a) {
-    if (a.tag == W_INT) return w_int(-a.as.i);
+    if (a.tag == W_INT) return w_int((int64_t)(0ULL - (uint64_t)a.as.i));
     return w_float(-a.as.f);
 }
 
@@ -807,7 +809,7 @@ static inline WVal w_builtin_float(WVal v) {
 
 static inline WVal w_builtin_ord(WVal v) {
     if (v.tag != W_STR || v.as.s[0] == '\0') {
-        fprintf(stderr, "RuntimeError: ord() expects non-empty str\n");
+        fprintf(stderr, "[W4003] RuntimeError: ord() expects non-empty str\n");
         exit(1);
     }
     const unsigned char* u = (const unsigned char*)v.as.s;

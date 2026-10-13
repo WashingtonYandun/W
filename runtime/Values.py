@@ -21,7 +21,10 @@ class WValue:
 
 class WInt(WValue):
     def __init__(self, value: int):
-        self.value = int(value)
+        v = int(value) & 0xFFFFFFFFFFFFFFFF
+        if v >= 0x8000000000000000:
+            v -= 0x10000000000000000
+        self.value = v
 
     def __eq__(self, other: Any) -> bool:
         return isinstance(other, WInt) and self.value == other.value
