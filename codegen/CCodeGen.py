@@ -16,37 +16,100 @@ from node.NodeType import (
 from parser.Parser import Parser
 
 
+class CleanupScope:
+    def __init__(self, kind: str) -> None:
+        self.kind = kind  # "fn" | "loop" | "block"
+        self.vars: List[str] = []
+
+
 class CCodeGen:
     """
     Canonical W v0.1 to C99 Transpiler Backend.
     Preserves exact value semantics (Deterministic RC + Copy-on-Write via runtime/w_runtime.h),
-    reference semantics for OOP classes, dynamic dispatch, and fallible error handling.
+    reference semantics for OOP classes, dynamic dispatch, fallible error handling,
+    and deterministic LIFO lifetime cleanup across all control-flow paths (v0.1.3).
     """
     def __init__(self, file: str = "<stdin>"):
         self.file = file
         self.temp_counter = 0
+        self.aux_counter = 0
         self.enum_names: Set[str] = set()
         self.classes: Dict[str, ClassDecl] = {}
         self.class_order: List[str] = []
         self.dispatch_methods: List[Tuple[str, int]] = []
         self.current_class: Optional[ClassDecl] = None
         self.fallible_fns: Dict[str, bool] = {}
+        self.fn_err_types: Dict[str, str] = {}
         self.current_fn_fallible: bool = False
+        self.current_fn_err_type: str = ""
         self.current_ns: str = ""
         self.imported_modules: Set[str] = set()
         self.global_vars: List[str] = []
         self.fn_Prototypes: List[str] = []
         self.fn_Definitions: List[str] = []
+        self.scope_stack: List[CleanupScope] = []
 
     def new_temp(self) -> str:
         name = f"_t{self.temp_counter}"
         self.temp_counter += 1
         return name
 
+    def new_aux(self, prefix: str = "_aux") -> str:
+        name = f"{prefix}{self.aux_counter}"
+        self.aux_counter += 1
+        return name
+
+    def _push_scope(self, kind: str) -> None:
+        self.scope_stack.append(CleanupScope(kind))
+
+    def _register_var(self, var_name: str) -> None:
+        if self.scope_stack:
+            self.scope_stack[-1].vars.append(var_name)
+
+    def _declare_owned_var(self, var_name: str, init_c_expr: str, out: List[str]) -> str:
+        out.append(f"WVal {var_name} = {init_c_expr};")
+        self._register_var(var_name)
+        return var_name
+
+    def _pop_scope(self, out: List[str]) -> None:
+        if not self.scope_stack:
+            return
+        scope = self.scope_stack.pop()
+        for v in reversed(scope.vars):
+            out.append(f"w_release({v});")
+
+    def _emit_cleanup_until_fn(self, out: List[str]) -> None:
+        for scope in reversed(self.scope_stack):
+            for v in reversed(scope.vars):
+                out.append(f"w_release({v});")
+            if scope.kind == "fn":
+                break
+
+    def _emit_cleanup_until_loop(self, out: List[str]) -> None:
+        for scope in reversed(self.scope_stack):
+            for v in reversed(scope.vars):
+                out.append(f"w_release({v});")
+            if scope.kind == "loop":
+                break
+
+    def _own_expr(self, val_expr: str) -> str:
+        if val_expr.startswith("_t"):
+            return f"w_move(&{val_expr})"
+        return f"w_clone({val_expr})"
+
+    def _is_local_var(self, c_name: str) -> bool:
+        for scope in reversed(self.scope_stack):
+            if c_name in scope.vars:
+                return True
+        return False
+
     def c_var(self, name: str) -> str:
+        local_name = f"v_{name}"
+        if self._is_local_var(local_name):
+            return local_name
         if self.current_ns and f"v_{self.current_ns}_{name}" in self.global_vars:
             return f"v_{self.current_ns}_{name}"
-        return f"v_{name}"
+        return local_name
 
     def c_fn(self, name: str, ns: str = "") -> str:
         prefix = ns if ns else self.current_ns
@@ -81,7 +144,15 @@ class CCodeGen:
 
         # Emit all top-level functions, class methods, and imported module functions
         main_stmts: List[str] = []
+        self._push_scope("fn")
         self._emit_module_body(program, ns="", out_main_stmts=main_stmts)
+
+        # If there are no top-level executable statements and main() exists in W, call it
+        non_decls = [s for s in program.body if not isinstance(s, (FnDecl, StructDecl, EnumDecl, InterfaceDecl, ClassDecl, ImportDecl))]
+        if not non_decls and "w_fn_main" in self.fallible_fns:
+            main_stmts.append("w_release(w_fn_main());")
+
+        self._pop_scope(main_stmts)
         self._emit_oop_dispatchers()
 
         lines: List[str] = [
@@ -107,12 +178,9 @@ class CCodeGen:
         lines.append("    w_init_args(argc, argv);")
         for s in main_stmts:
             lines.append(f"    {s}")
-
-        # If there are no top-level executable statements and main() exists in W, call it
-        non_decls = [s for s in program.body if not isinstance(s, (FnDecl, StructDecl, EnumDecl, InterfaceDecl, ClassDecl, ImportDecl))]
-        if not non_decls and "w_fn_main" in self.fallible_fns:
-            lines.append("    w_fn_main();")
-
+        for gv in reversed(self.global_vars):
+            lines.append(f"    w_release({gv});")
+        lines.append("    w_runtime_cleanup();")
         lines.append("    return 0;")
         lines.append("}")
         return "\n".join(lines) + "\n"
@@ -134,6 +202,10 @@ class CCodeGen:
                 c_name = self.c_fn(stmt.name, ns=ns)
                 is_fallible = isinstance(stmt.return_type, ResultType)
                 self.fallible_fns[c_name] = is_fallible
+                if is_fallible and isinstance(stmt.return_type, ResultType) and isinstance(stmt.return_type.err_type, NamedType):
+                    self.fn_err_types[c_name] = stmt.return_type.err_type.name
+                else:
+                    self.fn_err_types[c_name] = ""
                 params_sig = ", ".join([f"WVal v_{p.name}" for p in stmt.params]) if stmt.params else "void"
                 self.fn_Prototypes.append(f"static WVal {c_name}({params_sig});")
             elif isinstance(stmt, LetDecl):
@@ -211,17 +283,23 @@ class CCodeGen:
                 c_name = f"w_method_{stmt.name}__{m.name}"
                 params = ["WVal v_self"] + [f"WVal v_{p.name}" for p in m.params]
                 prev_fallible = self.current_fn_fallible
+                prev_err_type = self.current_fn_err_type
                 self.current_fn_fallible = isinstance(m.return_type, ResultType)
-
-                body_stmts: List[str] = ["v_self = w_clone(v_self);"]
-                for p in m.params:
-                    body_stmts.append(f"v_{p.name} = w_clone(v_{p.name});")
-
-                ret_expr = self.emit_block_value(m.body, body_stmts)
-                if self.current_fn_fallible:
-                    body_stmts.append(f"return w_ok({ret_expr});")
+                if self.current_fn_fallible and isinstance(m.return_type, ResultType) and isinstance(m.return_type.err_type, NamedType):
+                    self.current_fn_err_type = m.return_type.err_type.name
                 else:
-                    body_stmts.append(f"return {ret_expr};")
+                    self.current_fn_err_type = ""
+
+                body_stmts: List[str] = []
+                self._push_scope("fn")
+                ret_expr = self.emit_block_value(m.body, body_stmts)
+                ret_hold = self.new_aux("_ret")
+                body_stmts.append(f"WVal {ret_hold} = {self._own_expr(ret_expr)};")
+                self._pop_scope(body_stmts)
+                if self.current_fn_fallible:
+                    body_stmts.append(f'return w_wrap_result({ret_hold}, "{self.current_fn_err_type}");')
+                else:
+                    body_stmts.append(f"return {ret_hold};")
 
                 fn_lines = [f"static WVal {c_name}({', '.join(params)}) {{"]
                 for s in body_stmts:
@@ -229,6 +307,7 @@ class CCodeGen:
                 fn_lines.append("}")
                 self.fn_Definitions.append("\n".join(fn_lines))
                 self.current_fn_fallible = prev_fallible
+                self.current_fn_err_type = prev_err_type
 
             # Emit constructor helper w_new_<ClassName>
             all_fields = self._collect_class_fields(stmt.name)
@@ -250,10 +329,11 @@ class CCodeGen:
                 new_lines.append(f"    const char* _k[{len(all_fields)}] = {{ {f_names} }};")
                 new_lines.append(f"    WVal _v[{len(all_fields)}] = {{ {f_defaults} }};")
                 new_lines.append(f'    WVal v_self = w_make_object("{stmt.name}", {len(all_fields)}, _k, _v);')
+                new_lines.append(f"    w_release_array({len(all_fields)}, _v);")
             else:
                 new_lines.append(f'    WVal v_self = w_make_object("{stmt.name}", 0, NULL, NULL);')
             if init_m is not None:
-                new_lines.append(f"    (void)w_method_{init_cls}__init({', '.join(init_args)});")
+                new_lines.append(f"    w_release(w_method_{init_cls}__init({', '.join(init_args)}));")
             new_lines.append("    return v_self;")
             new_lines.append("}")
             self.fn_Definitions.append("\n".join(new_lines))
@@ -295,7 +375,7 @@ class CCodeGen:
                 if isinstance(stmt, LetDecl):
                     gv_name = f"v_{ns}_{stmt.name}" if ns else f"v_{stmt.name}"
                     val_expr = self.emit_expr(stmt.initializer, out_main_stmts)
-                    out_main_stmts.append(f"{gv_name} = w_clone({val_expr});")
+                    out_main_stmts.append(f"w_assign(&{gv_name}, {self._own_expr(val_expr)});")
                 else:
                     self.emit_stmt(stmt, out_main_stmts)
 
@@ -325,18 +405,20 @@ class CCodeGen:
         c_name = self.c_fn(stmt.name, ns=ns)
         params_sig = ", ".join([f"WVal v_{p.name}" for p in stmt.params]) if stmt.params else "void"
         prev_fallible = self.current_fn_fallible
+        prev_err_type = self.current_fn_err_type
         self.current_fn_fallible = isinstance(stmt.return_type, ResultType)
+        self.current_fn_err_type = self.fn_err_types.get(c_name, "")
 
         body_stmts: List[str] = []
-        # Clone parameters to preserve local CoW ownership
-        for p in stmt.params:
-            body_stmts.append(f"v_{p.name} = w_clone(v_{p.name});")
-
+        self._push_scope("fn")
         ret_expr = self.emit_block_value(stmt.body, body_stmts)
+        ret_hold = self.new_aux("_ret")
+        body_stmts.append(f"WVal {ret_hold} = {self._own_expr(ret_expr)};")
+        self._pop_scope(body_stmts)
         if self.current_fn_fallible:
-            body_stmts.append(f"return w_ok({ret_expr});")
+            body_stmts.append(f'return w_wrap_result({ret_hold}, "{self.current_fn_err_type}");')
         else:
-            body_stmts.append(f"return {ret_expr};")
+            body_stmts.append(f"return {ret_hold};")
 
         fn_lines = [f"static WVal {c_name}({params_sig}) {{"]
         for s in body_stmts:
@@ -344,6 +426,7 @@ class CCodeGen:
         fn_lines.append("}")
         self.fn_Definitions.append("\n".join(fn_lines))
         self.current_fn_fallible = prev_fallible
+        self.current_fn_err_type = prev_err_type
 
     # ==========================================
     # Statement Emission
@@ -351,13 +434,15 @@ class CCodeGen:
 
     def emit_block_value(self, block: Block, out: List[str]) -> str:
         res_var = self.new_temp()
-        out.append(f"WVal {res_var} = w_unit();")
+        self._declare_owned_var(res_var, "w_unit()", out)
         inner: List[str] = []
+        self._push_scope("block")
         for s in block.statements:
             self.emit_stmt(s, inner)
         if block.tail_expr is not None:
             tail_val = self.emit_expr(block.tail_expr, inner)
-            inner.append(f"{res_var} = {tail_val};")
+            inner.append(f"w_assign(&{res_var}, {self._own_expr(tail_val)});")
+        self._pop_scope(inner)
         out.append("{")
         for line in inner:
             out.append(f"    {line}")
@@ -372,17 +457,22 @@ class CCodeGen:
 
         if isinstance(stmt, LetDecl):
             val = self.emit_expr(stmt.initializer, out)
-            out.append(f"WVal v_{stmt.name} = w_clone({val});")
+            c_name = f"v_{stmt.name}"
+            self._declare_owned_var(c_name, self._own_expr(val), out)
             return
 
         if isinstance(stmt, ReturnStmt):
             if stmt.value is not None:
                 val = self.emit_expr(stmt.value, out)
+                ret_hold = self.new_aux("_ret")
+                out.append(f"WVal {ret_hold} = {self._own_expr(val)};")
+                self._emit_cleanup_until_fn(out)
                 if self.current_fn_fallible:
-                    out.append(f"return w_ok({val});")
+                    out.append(f'return w_wrap_result({ret_hold}, "{self.current_fn_err_type}");')
                 else:
-                    out.append(f"return {val};")
+                    out.append(f"return {ret_hold};")
             else:
+                self._emit_cleanup_until_fn(out)
                 if self.current_fn_fallible:
                     out.append("return w_ok(w_unit());")
                 else:
@@ -390,44 +480,68 @@ class CCodeGen:
             return
 
         if isinstance(stmt, BreakStmt):
+            self._emit_cleanup_until_loop(out)
             out.append("break;")
             return
 
         if isinstance(stmt, ContinueStmt):
+            self._emit_cleanup_until_loop(out)
             out.append("continue;")
             return
 
         if isinstance(stmt, WhileStmt):
             out.append("while (1) {")
+            self._push_scope("loop")
             loop_inner: List[str] = []
             cond_val = self.emit_expr(stmt.condition, loop_inner)
-            loop_inner.append(f"if (!({cond_val}).as.b) break;")
+            cond_b = self.new_aux("_cond")
+            loop_inner.append(f"bool {cond_b} = ({cond_val}).as.b;")
+            cond_cleanup: List[str] = []
+            self._emit_cleanup_until_loop(cond_cleanup)
+            if cond_cleanup:
+                loop_inner.append(f"if (!{cond_b}) {{")
+                for cl in cond_cleanup:
+                    loop_inner.append(f"    {cl}")
+                loop_inner.append("    break;")
+                loop_inner.append("}")
+            else:
+                loop_inner.append(f"if (!{cond_b}) break;")
             body_v = self.emit_block_value(stmt.body, loop_inner)
             loop_inner.append(f"(void){body_v};")
+            self._pop_scope(loop_inner)
             for line in loop_inner:
                 out.append(f"    {line}")
             out.append("}")
             return
 
         if isinstance(stmt, ForStmt):
-            iter_val = self.emit_expr(stmt.iterable, out)
+            out.append("{")
+            self._push_scope("block")
+            for_outer: List[str] = []
+            iter_val = self.emit_expr(stmt.iterable, for_outer)
             iter_tmp = self.new_temp()
-            idx_tmp = self.new_temp()
-            item_tmp = self.new_temp()
-            out.append(f"WVal {iter_tmp} = w_clone({iter_val});")
-            out.append(f"for (int32_t {idx_tmp} = 0; {idx_tmp} < {iter_tmp}.as.list->len; {idx_tmp}++) {{")
+            idx_tmp = self.new_aux("_idx")
+            item_tmp = self.new_aux("_item")
+            self._declare_owned_var(iter_tmp, self._own_expr(iter_val), for_outer)
+            for_outer.append(f"for (int32_t {idx_tmp} = 0; {idx_tmp} < {iter_tmp}.as.list->len; {idx_tmp}++) {{")
+            self._push_scope("loop")
             loop_inner = [f"WVal {item_tmp} = {iter_tmp}.as.list->data[{idx_tmp}];"]
             self._emit_pattern_bindings(stmt.pattern, item_tmp, loop_inner)
             body_v = self.emit_block_value(stmt.body, loop_inner)
             loop_inner.append(f"(void){body_v};")
+            self._pop_scope(loop_inner)
             for line in loop_inner:
+                for_outer.append(f"    {line}")
+            for_outer.append("}")
+            self._pop_scope(for_outer)
+            for line in for_outer:
                 out.append(f"    {line}")
             out.append("}")
             return
 
     def _emit_pattern_bindings(self, pattern: Pattern, val_expr: str, out: List[str]) -> None:
         if isinstance(pattern, IdentifierPattern):
-            out.append(f"WVal v_{pattern.name} = w_clone({val_expr});")
+            self._declare_owned_var(f"v_{pattern.name}", f"w_clone({val_expr})", out)
         elif isinstance(pattern, TuplePattern):
             for idx, elem_pat in enumerate(pattern.elements):
                 sub_expr = f"({val_expr}).as.tuple->items[{idx}]"
@@ -469,13 +583,15 @@ class CCodeGen:
             return f'w_member_ref({obj_ref}, "{target.property}")'
         # Fallback for temporary receiver
         val = self.emit_expr(target, out)
+        if val.startswith("_t"):
+            return f"&{val}"
         tmp = self.new_temp()
-        out.append(f"WVal {tmp} = {val};")
+        self._declare_owned_var(tmp, self._own_expr(val), out)
         return f"&{tmp}"
 
     def _bind_call(self, c_call: str, out: List[str]) -> str:
         tmp = self.new_temp()
-        out.append(f"WVal {tmp} = {c_call};")
+        self._declare_owned_var(tmp, c_call, out)
         return tmp
 
     def emit_expr(self, expr: Expr, out: List[str]) -> str:
@@ -516,26 +632,30 @@ class CCodeGen:
             if expr.op == "and":
                 lhs = self.emit_expr(expr.left, out)
                 res = self.new_temp()
-                out.append(f"WVal {res} = w_bool(false);")
+                self._declare_owned_var(res, "w_bool(false)", out)
                 out.append(f"if (({lhs}).as.b) {{")
+                self._push_scope("block")
                 rhs_stmts: List[str] = []
                 rhs = self.emit_expr(expr.right, rhs_stmts)
+                rhs_stmts.append(f"{res} = w_bool(({rhs}).as.b);")
+                self._pop_scope(rhs_stmts)
                 for s in rhs_stmts:
                     out.append(f"    {s}")
-                out.append(f"    {res} = w_bool(({rhs}).as.b);")
                 out.append("}")
                 return res
 
             if expr.op == "or":
                 lhs = self.emit_expr(expr.left, out)
                 res = self.new_temp()
-                out.append(f"WVal {res} = w_bool(true);")
+                self._declare_owned_var(res, "w_bool(true)", out)
                 out.append(f"if (!({lhs}).as.b) {{")
+                self._push_scope("block")
                 rhs_stmts = []
                 rhs = self.emit_expr(expr.right, rhs_stmts)
+                rhs_stmts.append(f"{res} = w_bool(({rhs}).as.b);")
+                self._pop_scope(rhs_stmts)
                 for s in rhs_stmts:
                     out.append(f"    {s}")
-                out.append(f"    {res} = w_bool(({rhs}).as.b);")
                 out.append("}")
                 return res
 
@@ -562,13 +682,15 @@ class CCodeGen:
         if isinstance(expr, CoalesceExpr):
             lhs = self.emit_expr(expr.left, out)
             res = self.new_temp()
-            out.append(f"WVal {res} = {lhs};")
+            self._declare_owned_var(res, self._own_expr(lhs), out)
             out.append(f"if ({res}.tag == W_NONE) {{")
+            self._push_scope("block")
             rhs_stmts = []
             rhs = self.emit_expr(expr.right, rhs_stmts)
+            rhs_stmts.append(f"w_assign(&{res}, {self._own_expr(rhs)});")
+            self._pop_scope(rhs_stmts)
             for s in rhs_stmts:
                 out.append(f"    {s}")
-            out.append(f"    {res} = {rhs};")
             out.append("}")
             return res
 
@@ -576,48 +698,67 @@ class CCodeGen:
             s_val = self.emit_expr(expr.start, out)
             e_val = self.emit_expr(expr.end, out)
             inc = "true" if expr.inclusive else "false"
-            return f"w_make_range({s_val}, {e_val}, {inc})"
+            return self._bind_call(f"w_make_range({s_val}, {e_val}, {inc})", out)
 
         if isinstance(expr, PostfixTryExpr):
             op_val = self.emit_expr(expr.operand, out)
             tmp = self.new_temp()
+            self._declare_owned_var(tmp, self._own_expr(op_val), out)
+
+            none_cleanup: List[str] = []
+            self._emit_cleanup_until_fn(none_cleanup)
+            out.append(f"if ({tmp}.tag == W_NONE) {{")
+            for cl in none_cleanup:
+                out.append(f"    {cl}")
+            out.append("    return w_none();")
+            out.append("}")
+
+            err_hold = self.new_aux("_err")
+            err_cleanup: List[str] = []
+            self._emit_cleanup_until_fn(err_cleanup)
+            out.append(f"if ({tmp}.tag == W_ERR) {{")
+            out.append(f"    WVal {err_hold} = w_clone({tmp});")
+            for cl in err_cleanup:
+                out.append(f"    {cl}")
+            out.append(f"    return {err_hold};")
+            out.append("}")
+
             unwrapped = self.new_temp()
-            out.append(f"WVal {tmp} = {op_val};")
-            out.append(f"if ({tmp}.tag == W_NONE) return w_none();")
-            out.append(f"if ({tmp}.tag == W_ERR) return {tmp};")
-            out.append(f"WVal {unwrapped} = ({tmp}.tag == W_OK) ? *({tmp}.as.box) : {tmp};")
+            self._declare_owned_var(unwrapped, f"w_unwrap_ok({tmp})", out)
             return unwrapped
 
         if isinstance(expr, ElseErrExpr):
             op_val = self.emit_expr(expr.operand, out)
             tmp = self.new_temp()
+            self._declare_owned_var(tmp, self._own_expr(op_val), out)
             res = self.new_temp()
-            out.append(f"WVal {tmp} = {op_val};")
-            out.append(f"WVal {res} = w_unit();")
+            self._declare_owned_var(res, "w_unit()", out)
             out.append(f"if ({tmp}.tag == W_ERR || {tmp}.tag == W_NONE) {{")
+            self._push_scope("block")
             handler_stmts: List[str] = []
             if expr.err_name is not None:
-                handler_stmts.append(f"WVal v_{expr.err_name} = ({tmp}.tag == W_ERR) ? *({tmp}.as.box) : w_none();")
+                self._declare_owned_var(f"v_{expr.err_name}", f"w_unwrap_err({tmp})", handler_stmts)
             h_val = self.emit_block_value(expr.handler, handler_stmts)
-            handler_stmts.append(f"{res} = {h_val};")
+            handler_stmts.append(f"w_assign(&{res}, {self._own_expr(h_val)});")
+            self._pop_scope(handler_stmts)
             for s in handler_stmts:
                 out.append(f"    {s}")
             out.append("} else {")
-            out.append(f"    {res} = ({tmp}.tag == W_OK) ? *({tmp}.as.box) : {tmp};")
+            out.append(f"    w_assign(&{res}, w_unwrap_ok({tmp}));")
             out.append("}")
             return res
 
         if isinstance(expr, AssignmentExpr):
             val = self.emit_expr(expr.value, out)
+            rhs_hold = self.new_aux("_rhs")
+            out.append(f"WVal {rhs_hold} = {self._own_expr(val)};")
             if isinstance(expr.target, IdentExpr):
                 c_target = self.c_var(expr.target.name)
-                out.append(f"{c_target} = w_clone({val});")
+                out.append(f"w_assign(&{c_target}, {rhs_hold});")
                 return c_target
             lref = self.emit_lvalue_ref(expr.target, out)
-            tmp = self.new_temp()
-            out.append(f"WVal {tmp} = w_clone({val});")
-            out.append(f"*({lref}) = {tmp};")
-            return tmp
+            out.append(f"w_assign({lref}, {rhs_hold});")
+            return "w_unit()"
 
         if isinstance(expr, MemberExpr):
             if isinstance(expr.object, IdentExpr):
@@ -642,7 +783,7 @@ class CCodeGen:
                 if fn_name == "print":
                     if not arg_vals:
                         return self._bind_call("w_builtin_print(0, NULL)", out)
-                    arr_tmp = self.new_temp()
+                    arr_tmp = self.new_aux("_arr")
                     elems_c = ", ".join(arg_vals)
                     out.append(f"WVal {arr_tmp}[{len(arg_vals)}] = {{ {elems_c} }};")
                     return self._bind_call(f"w_builtin_print({len(arg_vals)}, {arr_tmp})", out)
@@ -730,48 +871,50 @@ class CCodeGen:
 
         if isinstance(expr, ListExpr):
             if not expr.elements:
-                return "w_make_list(0, NULL)"
+                return self._bind_call("w_make_list(0, NULL)", out)
             elem_vals = [self.emit_expr(e, out) for e in expr.elements]
-            arr_tmp = self.new_temp()
+            arr_tmp = self.new_aux("_arr")
             out.append(f"WVal {arr_tmp}[{len(elem_vals)}] = {{ {', '.join(elem_vals)} }};")
-            return f"w_make_list({len(elem_vals)}, {arr_tmp})"
+            return self._bind_call(f"w_make_list({len(elem_vals)}, {arr_tmp})", out)
 
         if isinstance(expr, TupleExpr):
             elem_vals = [self.emit_expr(e, out) for e in expr.elements]
-            arr_tmp = self.new_temp()
+            arr_tmp = self.new_aux("_arr")
             out.append(f"WVal {arr_tmp}[{len(elem_vals)}] = {{ {', '.join(elem_vals)} }};")
-            return f"w_make_tuple({len(elem_vals)}, {arr_tmp})"
+            return self._bind_call(f"w_make_tuple({len(elem_vals)}, {arr_tmp})", out)
 
         if isinstance(expr, DictExpr):
             if not expr.entries:
-                return "w_make_dict(0, NULL, NULL)"
+                return self._bind_call("w_make_dict(0, NULL, NULL)", out)
             k_vals = [self.emit_expr(e.key, out) for e in expr.entries]
             v_vals = [self.emit_expr(e.value, out) for e in expr.entries]
-            k_tmp = self.new_temp()
-            v_tmp = self.new_temp()
+            k_tmp = self.new_aux("_k")
+            v_tmp = self.new_aux("_v")
             out.append(f"WVal {k_tmp}[{len(k_vals)}] = {{ {', '.join(k_vals)} }};")
             out.append(f"WVal {v_tmp}[{len(v_vals)}] = {{ {', '.join(v_vals)} }};")
-            return f"w_make_dict({len(k_vals)}, {k_tmp}, {v_tmp})"
+            return self._bind_call(f"w_make_dict({len(k_vals)}, {k_tmp}, {v_tmp})", out)
 
         if isinstance(expr, StructInitExpr):
             if not expr.fields:
-                return f'w_make_struct("{expr.struct_name}", 0, NULL, NULL)'
+                return self._bind_call(f'w_make_struct("{expr.struct_name}", 0, NULL, NULL)', out)
             f_names = [f'"{f.name}"' for f in expr.fields]
             f_vals = [self.emit_expr(f.value, out) for f in expr.fields]
-            k_tmp = self.new_temp()
-            v_tmp = self.new_temp()
+            k_tmp = self.new_aux("_k")
+            v_tmp = self.new_aux("_v")
             out.append(f"const char* {k_tmp}[{len(f_names)}] = {{ {', '.join(f_names)} }};")
             out.append(f"WVal {v_tmp}[{len(f_vals)}] = {{ {', '.join(f_vals)} }};")
-            return f'w_make_struct("{expr.struct_name}", {len(f_names)}, {k_tmp}, {v_tmp})'
+            return self._bind_call(f'w_make_struct("{expr.struct_name}", {len(f_names)}, {k_tmp}, {v_tmp})', out)
 
         if isinstance(expr, IfExpr):
             res = self.new_temp()
-            out.append(f"WVal {res} = w_unit();")
+            self._declare_owned_var(res, "w_unit()", out)
             cond_v = self.emit_expr(expr.condition, out)
             out.append(f"if (({cond_v}).as.b) {{")
+            self._push_scope("block")
             then_stmts: List[str] = []
             then_v = self.emit_block_value(expr.then_branch, then_stmts)
-            then_stmts.append(f"{res} = {then_v};")
+            then_stmts.append(f"w_assign(&{res}, {self._own_expr(then_v)});")
+            self._pop_scope(then_stmts)
             for s in then_stmts:
                 out.append(f"    {s}")
             out.append("}")
@@ -783,9 +926,9 @@ class CCodeGen:
         if isinstance(expr, MatchExpr):
             subj_v = self.emit_expr(expr.subject, out)
             subj_tmp = self.new_temp()
+            self._declare_owned_var(subj_tmp, self._own_expr(subj_v), out)
             res = self.new_temp()
-            out.append(f"WVal {subj_tmp} = {subj_v};")
-            out.append(f"WVal {res} = w_unit();")
+            self._declare_owned_var(res, "w_unit()", out)
             self._emit_match_arms(expr.arms, 0, subj_tmp, res, out)
             return res
 
@@ -795,24 +938,30 @@ class CCodeGen:
         if idx < len(elifs):
             eb = elifs[idx]
             out.append("else {")
+            self._push_scope("block")
             inner: List[str] = []
             eb_cond = self.emit_expr(eb.condition, inner)
             inner.append(f"if (({eb_cond}).as.b) {{")
+            self._push_scope("block")
             eb_stmts: List[str] = []
             eb_v = self.emit_block_value(eb.body, eb_stmts)
-            eb_stmts.append(f"{res_var} = {eb_v};")
+            eb_stmts.append(f"w_assign(&{res_var}, {self._own_expr(eb_v)});")
+            self._pop_scope(eb_stmts)
             for s in eb_stmts:
                 inner.append(f"    {s}")
             inner.append("}")
             self._emit_elif_chain(elifs, idx + 1, else_branch, res_var, inner)
+            self._pop_scope(inner)
             for s in inner:
                 out.append(f"    {s}")
             out.append("}")
         elif else_branch is not None:
             out.append("else {")
+            self._push_scope("block")
             else_stmts: List[str] = []
             else_v = self.emit_block_value(else_branch, else_stmts)
-            else_stmts.append(f"{res_var} = {else_v};")
+            else_stmts.append(f"w_assign(&{res_var}, {self._own_expr(else_v)});")
+            self._pop_scope(else_stmts)
             for s in else_stmts:
                 out.append(f"    {s}")
             out.append("}")
@@ -823,17 +972,21 @@ class CCodeGen:
         arm = arms[idx]
         cond_str = self._emit_pattern_cond(arm.pattern, subj_tmp, out)
         out.append(f"if ({cond_str}) {{")
+        self._push_scope("block")
         arm_stmts: List[str] = []
         self._emit_pattern_bindings(arm.pattern, subj_tmp, arm_stmts)
         arm_v = self.emit_block_value(arm.body, arm_stmts)
-        arm_stmts.append(f"{res_var} = {arm_v};")
+        arm_stmts.append(f"w_assign(&{res_var}, {self._own_expr(arm_v)});")
+        self._pop_scope(arm_stmts)
         for s in arm_stmts:
             out.append(f"    {s}")
         out.append("}")
         if idx + 1 < len(arms):
             out.append("else {")
+            self._push_scope("block")
             else_inner: List[str] = []
             self._emit_match_arms(arms, idx + 1, subj_tmp, res_var, else_inner)
+            self._pop_scope(else_inner)
             for s in else_inner:
                 out.append(f"    {s}")
             out.append("}")

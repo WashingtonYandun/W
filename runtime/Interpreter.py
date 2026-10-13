@@ -667,12 +667,28 @@ class Interpreter:
         except PropagationSignal as prop:
             ret_val = prop.value
 
-        from node.NodeType import ResultType as AstResultType
-        if isinstance(method_decl.return_type, AstResultType):
-            if not isinstance(ret_val, WResult):
-                ret_val = WOk(ret_val)
+        return self._wrap_result_value(ret_val, method_decl.return_type)
 
-        return ret_val
+    def _wrap_result_value(self, ret_val: WValue, ret_type: Any) -> WValue:
+        from node.NodeType import ResultType as AstResultType
+        if not isinstance(ret_type, AstResultType) or isinstance(ret_val, WResult):
+            return ret_val
+        err_ann = ret_type.err_type
+        if isinstance(err_ann, NamedType):
+            ename = err_ann.name
+            if isinstance(ret_val, WStructInstance) and ret_val.type_name == ename:
+                return WErr(ret_val)
+            if isinstance(ret_val, WObjectInstance) and ret_val.class_name == ename:
+                return WErr(ret_val)
+            if isinstance(ret_val, WEnumValue) and ret_val.enum_name == ename:
+                return WErr(ret_val)
+            if ename == "str" and isinstance(ret_val, WStr):
+                return WErr(ret_val)
+            if ename == "int" and isinstance(ret_val, WInt):
+                return WErr(ret_val)
+            if ename == "bool" and isinstance(ret_val, WBool):
+                return WErr(ret_val)
+        return WOk(ret_val)
 
     def call_function(self, func: WFunction, args: List[WValue]) -> WValue:
         if len(args) != len(func.decl.params):
@@ -695,12 +711,7 @@ class Interpreter:
         except PropagationSignal as prop:
             ret_val = prop.value
 
-        from node.NodeType import ResultType as AstResultType
-        if isinstance(func.decl.return_type, AstResultType):
-            if not isinstance(ret_val, WResult):
-                ret_val = WOk(ret_val)
-
-        return ret_val
+        return self._wrap_result_value(ret_val, func.decl.return_type)
 
 
     def call_bound_method(self, bound: WBoundMethod, args: List[WValue]) -> WValue:
