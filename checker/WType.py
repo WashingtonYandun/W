@@ -5,6 +5,9 @@ class WType:
     def __eq__(self, other: Any) -> bool:
         raise NotImplementedError
 
+    def __hash__(self) -> int:
+        return hash(str(self))
+
     def __str__(self) -> str:
         raise NotImplementedError
 
@@ -213,6 +216,49 @@ class AnyType(WType):
 
     def __str__(self) -> str:
         return "any"
+
+
+class TypeParamType(WType):
+    """Represents a type parameter in generic declarations: T, U, A, B."""
+    def __init__(self, name: str, constraint: Optional[WType] = None):
+        self.name = name
+        self.constraint = constraint
+
+    def __eq__(self, other: Any) -> bool:
+        return isinstance(other, TypeParamType) and self.name == other.name
+
+    def __str__(self) -> str:
+        return self.name
+
+
+class GenericStructTemplate(WType):
+    """Represents an uninstantiated generic struct template: struct Box[T] { val: T }"""
+    def __init__(self, name: str, type_params: List[Any], ast_decl: Any):
+        self.name = name
+        self.type_params = type_params
+        self.ast_decl = ast_decl
+
+    def __eq__(self, other: Any) -> bool:
+        return isinstance(other, GenericStructTemplate) and self.name == other.name
+
+    def __str__(self) -> str:
+        params_str = ", ".join(p.name if hasattr(p, "name") else str(p) for p in self.type_params)
+        return f"{self.name}[{params_str}]"
+
+
+class GenericFnTemplate(WType):
+    """Represents an uninstantiated generic function template: fn id[T](x: T) -> T"""
+    def __init__(self, name: str, type_params: List[Any], ast_decl: Any):
+        self.name = name
+        self.type_params = type_params
+        self.ast_decl = ast_decl
+
+    def __eq__(self, other: Any) -> bool:
+        return isinstance(other, GenericFnTemplate) and self.name == other.name
+
+    def __str__(self) -> str:
+        params_str = ", ".join(p.name if hasattr(p, "name") else str(p) for p in self.type_params)
+        return f"{self.name}[{params_str}]"
 
 
 def is_assignable(source: WType, target: WType) -> bool:

@@ -6,7 +6,7 @@ from lexer.Lexer import Lexer
 from error.Error import ParserError
 from node.NodeType import (
     Node, Program, Stmt, Expr, TypeNode, Pattern, Block,
-    NamedType, OptionalType, ListType, DictType, TupleType, ResultType,
+    NamedType, GenericType, TypeParam, OptionalType, ListType, DictType, TupleType, ResultType,
     IdentifierPattern, TuplePattern, EnumPattern, LiteralPattern, WildcardPattern,
     FnDecl, Param, StructDecl, StructField, EnumDecl,
     InterfaceDecl, InterfaceMethod, ClassDecl, ClassField, MethodDecl,
@@ -167,10 +167,14 @@ class Parser:
                 self.expect(TokenType.RBRACKET, code="P006", msg="Expected ']' after tuple types")
                 inner_type = TupleType(element_types=elem_types, line=line, col=col)
             else:
-                # Generic custom type
-                generic_arg = self.parse_type()
+                # Generic custom type: Box[T], Pair[A, B], etc.
+                type_args: List[TypeNode] = [self.parse_type()]
+                while self.match(TokenType.COMMA):
+                    if self.check(TokenType.RBRACKET):
+                        break
+                    type_args.append(self.parse_type())
                 self.expect(TokenType.RBRACKET, code="P006", msg="Expected ']' after generic type")
-                inner_type = NamedType(name=f"{name}[{generic_arg}]", line=line, col=col)
+                inner_type = GenericType(name=name, type_args=type_args, line=line, col=col)
         else:
             inner_type = NamedType(name=name, line=line, col=col)
 
@@ -304,6 +308,17 @@ class Parser:
     def parse_fn_decl(self) -> FnDecl:
         start_tok = self.expect(TokenType.FN, code="P004", msg="Expected 'fn'")
         name_tok = self.expect(TokenType.IDENTIFIER, code="P004", msg="Expected function name after 'fn'")
+        type_params: List[TypeParam] = []
+        if self.match(TokenType.LBRACKET):
+            while not self.check(TokenType.RBRACKET) and not self.is_at_end():
+                p_tok = self.expect(TokenType.IDENTIFIER, code="P004", msg="Expected type parameter identifier")
+                constraint: Optional[TypeNode] = None
+                if self.match(TokenType.COLON):
+                    constraint = self.parse_type()
+                type_params.append(TypeParam(p_tok.value, constraint, line=p_tok.line, col=p_tok.col))
+                if not self.match(TokenType.COMMA):
+                    break
+            self.expect(TokenType.RBRACKET, code="P006", msg="Expected ']' after type parameters")
         self.expect(TokenType.LPAREN, code="P002", msg="Expected '(' after function name")
         params = self._parse_param_list(allow_receiver=False)
         self.expect(TokenType.RPAREN, code="P002", msg="Expected ')' after parameters")
@@ -314,7 +329,7 @@ class Parser:
             return_type = self.parse_type()
 
         body = self.parse_block()
-        return FnDecl(name=name_tok.value, params=params, return_type=return_type, body=body, line=start_tok.line, col=start_tok.col)
+        return FnDecl(name=name_tok.value, params=params, return_type=return_type, body=body, type_params=type_params, line=start_tok.line, col=start_tok.col)
 
     def parse_interface_decl(self) -> InterfaceDecl:
         start_tok = self.expect(TokenType.INTERFACE, code="P004", msg="Expected 'interface'")
@@ -422,6 +437,17 @@ class Parser:
     def parse_struct_decl(self) -> StructDecl:
         start_tok = self.expect(TokenType.STRUCT, code="P004", msg="Expected 'struct'")
         name_tok = self.expect(TokenType.IDENTIFIER, code="P004", msg="Expected struct name")
+        type_params: List[TypeParam] = []
+        if self.match(TokenType.LBRACKET):
+            while not self.check(TokenType.RBRACKET) and not self.is_at_end():
+                p_tok = self.expect(TokenType.IDENTIFIER, code="P004", msg="Expected type parameter identifier")
+                constraint: Optional[TypeNode] = None
+                if self.match(TokenType.COLON):
+                    constraint = self.parse_type()
+                type_params.append(TypeParam(p_tok.value, constraint, line=p_tok.line, col=p_tok.col))
+                if not self.match(TokenType.COMMA):
+                    break
+            self.expect(TokenType.RBRACKET, code="P006", msg="Expected ']' after type parameters")
         self.expect(TokenType.LBRACE, code="P002", msg="Expected '{' to start struct body")
 
         fields: List[StructField] = []
@@ -433,7 +459,7 @@ class Parser:
             self.match(TokenType.COMMA)
 
         self.expect(TokenType.RBRACE, code="P007", msg="Unterminated struct body, expected '}'")
-        return StructDecl(name=name_tok.value, fields=fields, line=start_tok.line, col=start_tok.col)
+        return StructDecl(name=name_tok.value, fields=fields, type_params=type_params, line=start_tok.line, col=start_tok.col)
 
     def parse_enum_decl(self) -> EnumDecl:
         start_tok = self.expect(TokenType.ENUM, code="P004", msg="Expected 'enum'")
@@ -600,6 +626,32 @@ class Parser:
 
         return left
 
+    def _try_parse_generic_type_args(self) -> Optional[List[TypeNode]]:
+        if not self.check(TokenType.LBRACKET):
+            return None
+        saved_pos = self.pos
+        try:
+            self.advance()  # consume '['
+            if self.check(TokenType.RBRACKET):
+                self.pos = saved_pos
+                return None
+            args: List[TypeNode] = [self.parse_type()]
+            while self.match(TokenType.COMMA):
+                if self.check(TokenType.RBRACKET):
+                    break
+                args.append(self.parse_type())
+            if not self.match(TokenType.RBRACKET):
+                self.pos = saved_pos
+                return None
+            # Only treat as generic args if followed by '{' or '('
+            if not (self.check(TokenType.LBRACE) or self.check(TokenType.LPAREN)):
+                self.pos = saved_pos
+                return None
+            return args
+        except ParserError:
+            self.pos = saved_pos
+            return None
+
     def parse_prefix_expr(self, allow_struct_init: bool = True) -> Expr:
         token = self.at()
 
@@ -645,7 +697,29 @@ class Parser:
         if self.match(TokenType.IDENTIFIER):
             ident_name = token.value
 
-            # Check if this is a Struct Initialization: Identifier { field: val, ... }
+            type_args: Optional[List[TypeNode]] = None
+            if self.check(TokenType.LBRACKET):
+                type_args = self._try_parse_generic_type_args()
+
+            # Check if this is a generic call: ident[T](args) or Box[T](args)
+            if type_args and self.match(TokenType.LPAREN):
+                call_args: List[Expr] = []
+                if not self.check(TokenType.RPAREN):
+                    call_args.append(self.parse_expr())
+                    while self.match(TokenType.COMMA):
+                        if self.check(TokenType.RPAREN):
+                            break
+                        call_args.append(self.parse_expr())
+                self.expect(TokenType.RPAREN, code="P002", msg="Expected ')' after call arguments")
+                return CallExpr(
+                    callee=IdentExpr(name=ident_name, line=token.line, col=token.col),
+                    args=call_args,
+                    type_args=type_args,
+                    line=token.line,
+                    col=token.col
+                )
+
+            # Check if this is a Struct Initialization: Identifier { field: val, ... } or Identifier[T] { field: val, ... }
             if allow_struct_init and self.check(TokenType.LBRACE):
                 # Disambiguate struct init from block: next must be IDENTIFIER followed by COLON, or empty RBRACE
                 if self.peek(1).type == TokenType.RBRACE or (self.peek(1).type == TokenType.IDENTIFIER and self.peek(2).type == TokenType.COLON):
@@ -658,7 +732,7 @@ class Parser:
                         fields.append(FieldInit(name=f_tok.value, value=f_val, line=f_tok.line, col=f_tok.col))
                         self.match(TokenType.COMMA)
                     self.expect(TokenType.RBRACE, code="P007", msg="Unterminated struct initializer, expected '}'")
-                    return StructInitExpr(struct_name=ident_name, fields=fields, line=token.line, col=token.col)
+                    return StructInitExpr(struct_name=ident_name, fields=fields, type_args=type_args, line=token.line, col=token.col)
 
             return IdentExpr(name=ident_name, line=token.line, col=token.col)
 

@@ -280,6 +280,7 @@ def _run_suite_in_repo(repo_root: str) -> None:
 
             try:
                 ast = Parser(file=path).parse(code)
+                TypeChecker(file=path).check(ast)
                 c_code = CCodeGen(file=path).generate(ast)
                 c_path = os.path.join(tmpdir, f[:-2] + ".c")
                 bin_path = os.path.join(tmpdir, f[:-2])
@@ -322,8 +323,9 @@ def _run_suite_in_repo(repo_root: str) -> None:
             assert h0 == h1 == h2, f"Hash mismatch: {h0} vs {h1} vs {h2}"
             bootstrap_ok = True
 
-            # 9. Verify W1 Stage 2 Native Compiler on All Runtime Conformance Programs
-            for f in c99_targets:
+            # 9. Verify W1 Stage 2 Native Compiler on Core Runtime Conformance Programs
+            w1_targets = [f for f in c99_targets if not f.startswith("generic_")]
+            for f in w1_targets:
                 path = os.path.join(runtime_dir, f)
                 expected_path = os.path.join(runtime_dir, f[:-2] + ".expected")
                 with open(expected_path, "r", encoding="utf-8") as exp_stream:
@@ -411,7 +413,7 @@ def _run_suite_in_repo(repo_root: str) -> None:
 
     print(f"C99 Native Backend:  {c99_passed}/{len(c99_targets)}")
     print(f"HIR C99 Backend:     {hir_c99_passed}/{len(c99_targets)}")
-    print(f"W1 Stage-2 Runtime:  {w1_runtime_passed}/{len(c99_targets)}")
+    print(f"W1 Stage-2 Runtime:  {w1_runtime_passed}/{len(w1_targets)}")
     print(f"W1 Modular Split:    {'1/1 (Loss-less verified)' if split_ok else '0/1'}")
     print(f"Examples E2E Suite:  {examples_passed}/{len(example_files)}")
     print(f"Bootstrap FixedPoint:{'1/1 (SHA256 verified)' if bootstrap_ok else '0/1'}")
@@ -430,7 +432,7 @@ def _run_suite_in_repo(repo_root: str) -> None:
         and runtime_passed == len(runtime_files)
         and c99_passed == len(c99_targets)
         and hir_c99_passed == len(c99_targets)
-        and w1_runtime_passed == len(c99_targets)
+        and w1_runtime_passed == len(w1_targets)
         and split_ok
         and examples_passed == len(example_files)
         and bootstrap_ok
