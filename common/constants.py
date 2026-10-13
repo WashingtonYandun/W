@@ -1,57 +1,42 @@
-from enum import Enum
 from token.TokenType import TokenType
 
-OPERATORS = ["+", "-", "*", "/", "%", "==", "!=", "<", ">", "<=", ">=", "and", "or", "not", "is"]
-
 KEYWORDS = {
-    "func": TokenType.FUNC,
-    "return": TokenType.RETURN,
-    "None": TokenType.NONE,
-    "True": TokenType.BOOLEANS,
-    "False": TokenType.BOOLEANS,
+    # Declarations (6)
+    "fn": TokenType.FN,
+    "let": TokenType.LET,
+    "mut": TokenType.MUT,
+    "struct": TokenType.STRUCT,
+    "enum": TokenType.ENUM,
+    "import": TokenType.IMPORT,
 
+    # Control Flow (10)
     "if": TokenType.IF,
-    "else": TokenType.ELSE,
     "elif": TokenType.ELIF,
+    "else": TokenType.ELSE,
     "for": TokenType.FOR,
-    "in": TokenType.IN,
     "while": TokenType.WHILE,
+    "in": TokenType.IN,
+    "match": TokenType.MATCH,
+    "return": TokenType.RETURN,
+    "break": TokenType.BREAK,
+    "continue": TokenType.CONTINUE,
 
-    "int": TokenType.DATATYPE_INT,
-    "float": TokenType.DATATYPE_FLOAT,
-    "str": TokenType.DATATYPE_STR,
-    "bool": TokenType.DATATYPE_BOOL,
-    "list": TokenType.DATATYPE_LIST,
-    "dict": TokenType.DATATYPE_DICT,
-    "const": TokenType.CONST,
-    
-    # Logical operators
+    # Primitive Literals (3)
+    "true": TokenType.TRUE,
+    "false": TokenType.FALSE,
+    "none": TokenType.NONE,
+
+    # Logical Operators (3)
     "and": TokenType.AND,
     "or": TokenType.OR,
     "not": TokenType.NOT,
-    "is": TokenType.IS,
-
-    "=": TokenType.ASSIGNMENT_OPERATOR,
-    
-    ":": TokenType.COLON,
-    "\n": TokenType.NEW_LINE,
-    
-    # List methods
-    "append": TokenType.APPEND,
-    "insert": TokenType.INSERT,
-    "remove": TokenType.REMOVE,
-    "pop": TokenType.POP,
-    "clear": TokenType.CLEAR,
-    "index": TokenType.INDEX,
-    "count": TokenType.COUNT,
-    "sort": TokenType.SORT,
-    "reverse": TokenType.REVERSE,
-    "extend": TokenType.EXTEND,
-    
-    # Dict methods
-    "get": TokenType.GET,
-    "keys": TokenType.KEYS,
-    "values": TokenType.VALUES,
-    "items": TokenType.ITEMS,
-    "update": TokenType.UPDATE,
 }
+
+OPERATORS = [
+    "+", "-", "*", "/", "%",
+    "==", "!=", "<", "<=", ">", ">=",
+    "=", "->", "=>",
+    "..", "..=",
+    "?", "??", "!",
+    "and", "or", "not"
+]
