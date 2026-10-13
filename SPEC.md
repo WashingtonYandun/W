@@ -382,17 +382,51 @@ fn compile(source: str) {
 1. **Canonical Formatter (`w fmt`):**
    - Every valid W program has exactly one canonical formatted representation.
    - The formatter is idempotent: `fmt(fmt(source)) == fmt(source)`.
-2. **Structured JSON Diagnostics (`w check --json`):**
-   - Compiler errors and warnings output machine-readable JSON:
+2. **Stable Diagnostic Codes & Structured JSON Diagnostics (`w check --json`):**
+   - Every compiler and runtime error carries a stable `Wxxxx` diagnostic code categorized by phase:
+     - **`W0xxx` — Lexical & Syntactic Diagnostics:**
+       - `W0001`: Unexpected token or invalid character
+       - `W0002`: Malformed numeric literal
+       - `W0003`: Unterminated string literal
+       - `W0004`: Invalid or unterminated string escape sequence
+       - `W0005`: Invalid Unicode scalar escape sequence
+       - `W0006`: Invalid syntax or missing delimiter
+     - **`W1xxx` — Name Resolution, Scope & Module Diagnostics:**
+       - `W1001`: Unknown identifier, symbol, or type
+       - `W1002`: Duplicate declaration
+       - `W1003`: Module resolution or circular import error
+       - `W1004`: Invalid control-flow or lexical context (`break`/`continue`/`return`/`this`/`super`)
+     - **`W2xxx` — Type System, Exhaustiveness & Error Channel Diagnostics:**
+       - `W2001`: Type mismatch (including invalid dictionary key types)
+       - `W2002`: Invalid assignment target
+       - `W2003`: Non-exhaustive `match` expression
+       - `W2004`: Invalid return type or missing `return` statement
+       - `W2005`: Invalid call arity or non-callable target
+       - `W2006`: Invalid optional (`?`) or fallible (`T ! E` / `else err`) propagation
+       - `W2007`: Missing or invalid `struct` initialization field
+     - **`W3xxx` — Mutability, Ownership & OOP Encapsulation Diagnostics:**
+       - `W3001`: Mutation of immutable value binding (`let` vs `let mut`)
+       - `W3002`: Invalid member access/mutation or `private` visibility violation
+       - `W3003`: Invalid class inheritance or unimplemented `interface` contract
+     - **`W4xxx` — Runtime Execution Diagnostics:**
+       - `W4001`: Division or modulo by zero
+       - `W4002`: Index or key out of bounds
+       - `W4003`: Runtime execution error
+   - `w check --json <file.w>` outputs deterministic machine-readable JSON:
    ```json
    {
-     "code": "E023",
-     "file": "src/parser.w",
-     "line": 42,
-     "column": 17,
-     "message": "Non-exhaustive match on enum TokenKind. Missing: Eof",
-     "expected": ["TokenKind.Eof"],
-     "found": null
+     "code": "W2001",
+     "severity": "error",
+     "stage": "type",
+     "message": "Type mismatch: cannot assign value of type 'none' to variable 'name' of type 'str'",
+     "file": "example.w",
+     "line": 12,
+     "column": 9,
+     "span": {
+       "file": "example.w",
+       "line": 12,
+       "column": 9
+     }
    }
    ```
 3. **Stable AST Representation (`w ast file.w --json`):**

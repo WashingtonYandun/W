@@ -13,7 +13,7 @@ from formatter.Formatter import Formatter
 from codegen.CCodeGen import CCodeGen
 from error.Error import WError
 
-W_VERSION = "0.1.1"
+W_VERSION = "0.1.2"
 
 
 def get_repo_root() -> str:
@@ -188,11 +188,18 @@ def run_pipeline(
     except Exception as exc:
         if json_diagnostics:
             err_dict = {
-                "code": "E999",
+                "code": "W9999",
+                "severity": "error",
+                "stage": "internal",
+                "message": str(exc),
                 "file": file_name,
                 "line": 1,
                 "column": 1,
-                "message": str(exc)
+                "span": {
+                    "file": file_name,
+                    "line": 1,
+                    "column": 1,
+                },
             }
             print(json.dumps(err_dict, indent=2))
         else:

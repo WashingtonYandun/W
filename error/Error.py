@@ -123,10 +123,17 @@ class WError(Exception):
     def to_dict(self) -> dict:
         return {
             "code": self.code,
+            "severity": self.severity,
+            "stage": self.stage,
+            "message": self.message,
             "file": self.file,
             "line": self.line,
             "column": self.col,
-            "message": self.message,
+            "span": {
+                "file": self.file,
+                "line": self.line,
+                "column": self.col,
+            },
         }
 
 
