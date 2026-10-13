@@ -42,6 +42,7 @@ class TypeChecker:
         self.current_scope = self.global_scope
         self.current_fn_ret_type: Optional[WType] = None
         self.current_class: Optional[ClassType] = None
+        self.loop_depth: int = 0
         self.checked_modules: Dict[str, ModuleType] = checked_modules if checked_modules is not None else {}
         self.active_imports: Set[str] = active_imports if active_imports is not None else set()
 
@@ -68,7 +69,7 @@ class TypeChecker:
                 line=stmt.line,
                 col=stmt.col,
                 file=self.file,
-                code="T001"
+                code="W1003"
             )
 
         if candidate in self.active_imports:
@@ -77,7 +78,7 @@ class TypeChecker:
                 line=stmt.line,
                 col=stmt.col,
                 file=self.file,
-                code="T008"
+                code="W1003"
             )
 
         if candidate in self.checked_modules:
@@ -191,7 +192,7 @@ class TypeChecker:
                             line=stmt.line,
                             col=stmt.col,
                             file=self.file,
-                            code="T008"
+                            code="W3003"
                         )
                     cls_type.superclass = sup_t
 
@@ -283,7 +284,7 @@ class TypeChecker:
                             line=stmt.line,
                             col=stmt.col,
                             file=self.file,
-                            code="T003"
+                            code="W3003"
                         )
                 merged_methods[mname] = minfo
 
@@ -299,7 +300,7 @@ class TypeChecker:
                             line=stmt.line,
                             col=stmt.col,
                             file=self.file,
-                            code="T013"
+                            code="W3003"
                         )
                     impl_info = cls_type.methods[req_name]
                     if not impl_info.is_public:
@@ -308,7 +309,7 @@ class TypeChecker:
                             line=stmt.line,
                             col=stmt.col,
                             file=self.file,
-                            code="T013"
+                            code="W3003"
                         )
                     if impl_info.fn_type.params != req_sig.params or not is_assignable(impl_info.fn_type.ret, req_sig.ret):
                         raise TypeError(
@@ -316,7 +317,7 @@ class TypeChecker:
                             line=stmt.line,
                             col=stmt.col,
                             file=self.file,
-                            code="T003"
+                            code="W3003"
                         )
 
 
@@ -351,7 +352,11 @@ class TypeChecker:
                     file=self.file,
                     code="T003"
                 )
-            self._check_block(stmt.body, is_statement_context=True)
+            self.loop_depth += 1
+            try:
+                self._check_block(stmt.body, is_statement_context=True)
+            finally:
+                self.loop_depth -= 1
 
         elif isinstance(stmt, ForStmt):
             self._check_for_stmt(stmt)
@@ -364,7 +369,7 @@ class TypeChecker:
                     line=stmt.line,
                     col=stmt.col,
                     file=self.file,
-                    code="T006"
+                    code="W1004"
                 )
             if not is_assignable(val_t, self.current_fn_ret_type):
                 raise TypeError(
@@ -375,8 +380,25 @@ class TypeChecker:
                     code="T006"
                 )
 
-        elif isinstance(stmt, (BreakStmt, ContinueStmt)):
-            pass
+        elif isinstance(stmt, BreakStmt):
+            if self.loop_depth == 0:
+                raise TypeError(
+                    message="'break' statement outside of loop",
+                    line=stmt.line,
+                    col=stmt.col,
+                    file=self.file,
+                    code="W1004"
+                )
+
+        elif isinstance(stmt, ContinueStmt):
+            if self.loop_depth == 0:
+                raise TypeError(
+                    message="'continue' statement outside of loop",
+                    line=stmt.line,
+                    col=stmt.col,
+                    file=self.file,
+                    code="W1004"
+                )
 
         elif isinstance(stmt, ExprStmt):
             self._check_expr(stmt.expr, is_statement_context=True)
@@ -393,8 +415,10 @@ class TypeChecker:
                 fn_scope = Scope(parent=self.current_scope, is_function_scope=True)
                 old_scope = self.current_scope
                 old_ret_type = self.current_fn_ret_type
+                old_loop_depth = self.loop_depth
                 self.current_scope = fn_scope
                 self.current_fn_ret_type = fn_type.ret
+                self.loop_depth = 0
                 try:
                     # Also bind 'self' as an alias to 'this' inside methods
                     fn_scope.define_symbol(
@@ -422,6 +446,7 @@ class TypeChecker:
                 finally:
                     self.current_scope = old_scope
                     self.current_fn_ret_type = old_ret_type
+                    self.loop_depth = old_loop_depth
         finally:
             self.current_class = old_class
 
@@ -433,9 +458,11 @@ class TypeChecker:
         fn_scope = Scope(parent=self.current_scope, is_function_scope=True)
         old_scope = self.current_scope
         old_ret_type = self.current_fn_ret_type
+        old_loop_depth = self.loop_depth
 
         self.current_scope = fn_scope
         self.current_fn_ret_type = fn_type.ret
+        self.loop_depth = 0
 
         try:
             # Bind parameters in function scope as immutable
@@ -463,6 +490,7 @@ class TypeChecker:
         finally:
             self.current_scope = old_scope
             self.current_fn_ret_type = old_ret_type
+            self.loop_depth = old_loop_depth
 
     def _expr_has_return(self, expr: Expr) -> bool:
         if isinstance(expr, IfExpr):
@@ -625,6 +653,7 @@ class TypeChecker:
         loop_scope = Scope(parent=self.current_scope)
         old_scope = self.current_scope
         self.current_scope = loop_scope
+        self.loop_depth += 1
 
         try:
             if isinstance(stmt.pattern, IdentifierPattern):
@@ -653,6 +682,7 @@ class TypeChecker:
             if stmt.body.tail_expr is not None:
                 self._check_expr(stmt.body.tail_expr, is_statement_context=True)
         finally:
+            self.loop_depth -= 1
             self.current_scope = old_scope
 
     # ==========================================
@@ -926,7 +956,7 @@ class TypeChecker:
                     line=expr.line,
                     col=expr.col,
                     file=self.file,
-                    code="T001"
+                    code="W1004"
                 )
             return self.current_class
 
@@ -937,7 +967,7 @@ class TypeChecker:
                     line=expr.line,
                     col=expr.col,
                     file=self.file,
-                    code="T001"
+                    code="W1004"
                 )
             if self.current_class.superclass is None:
                 raise TypeError(
@@ -945,7 +975,7 @@ class TypeChecker:
                     line=expr.line,
                     col=expr.col,
                     file=self.file,
-                    code="T001"
+                    code="W1004"
                 )
             return self.current_class.superclass
 
@@ -1125,7 +1155,7 @@ class TypeChecker:
                 line=expr.line,
                 col=expr.col,
                 file=self.file,
-                code="T004"
+                code="W2002"
             )
 
         if isinstance(expr, MemberExpr):
@@ -1503,10 +1533,26 @@ class TypeChecker:
             if len(expr.entries) == 0:
                 return DictType(AnyType(), AnyType())
             first_key_t = self._check_expr(expr.entries[0].key)
+            if not self._is_valid_dict_key_type(first_key_t):
+                raise TypeError(
+                    message=f"Invalid dictionary key type '{first_key_t}'; allowed key types are int, str, bool, or enum",
+                    line=expr.entries[0].key.line,
+                    col=expr.entries[0].key.col,
+                    file=self.file,
+                    code="W2001"
+                )
             first_val_t = self._check_expr(expr.entries[0].value)
             for entry in expr.entries[1:]:
                 kt = self._check_expr(entry.key)
                 vt = self._check_expr(entry.value)
+                if not self._is_valid_dict_key_type(kt):
+                    raise TypeError(
+                        message=f"Invalid dictionary key type '{kt}'; allowed key types are int, str, bool, or enum",
+                        line=entry.key.line,
+                        col=entry.key.col,
+                        file=self.file,
+                        code="W2001"
+                    )
                 if not is_assignable(kt, first_key_t):
                     raise TypeError(
                         message=f"Dict keys must be homogeneous: found '{kt}' and '{first_key_t}'",
@@ -1647,6 +1693,15 @@ class TypeChecker:
     # Type Node Resolution
     # ==========================================
 
+    def _is_valid_dict_key_type(self, t: WType) -> bool:
+        if isinstance(t, AnyType):
+            return True
+        if t in (IntType, StrType, BoolType):
+            return True
+        if isinstance(t, EnumType):
+            return True
+        return False
+
     def _resolve_type_node(self, node: TypeNode) -> WType:
         if isinstance(node, NamedType):
             resolved = self.current_scope.lookup_type(node.name)
@@ -1670,6 +1725,14 @@ class TypeChecker:
 
         if isinstance(node, AstDictType):
             key_t = self._resolve_type_node(node.key_type)
+            if not self._is_valid_dict_key_type(key_t):
+                raise TypeError(
+                    message=f"Invalid dictionary key type '{key_t}'; allowed key types are int, str, bool, or enum",
+                    line=node.key_type.line,
+                    col=node.key_type.col,
+                    file=self.file,
+                    code="W2001"
+                )
             val_t = self._resolve_type_node(node.value_type)
             return DictType(key_t, val_t)
 

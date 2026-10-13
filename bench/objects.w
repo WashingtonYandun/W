@@ -1,0 +1,28 @@
+# Benchmark 9: Class reference identity, shared mutation, and method calls
+
+class Account {
+    public balance: int
+    public ops: int
+
+    fn init(initial: int) {
+        this.balance = initial
+        this.ops = 0
+    }
+
+    public fn apply(delta: int) -> int {
+        this.balance = this.balance + delta
+        this.ops = this.ops + 1
+        return this.balance
+    }
+}
+
+fn main() -> unit {
+    let acc = Account(100)
+    let shared = acc
+    let mut i = 0
+    while i < 5000 {
+        shared.apply(i % 7 - 3)
+        i = i + 1
+    }
+    print(acc.balance, acc.ops, acc == shared)
+}

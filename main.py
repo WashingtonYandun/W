@@ -13,7 +13,7 @@ from formatter.Formatter import Formatter
 from codegen.CCodeGen import CCodeGen
 from error.Error import WError
 
-W_VERSION = "0.1.1"
+W_VERSION = "0.1.2"
 
 
 def get_repo_root() -> str:
@@ -188,11 +188,18 @@ def run_pipeline(
     except Exception as exc:
         if json_diagnostics:
             err_dict = {
-                "code": "E999",
+                "code": "W9999",
+                "severity": "error",
+                "stage": "internal",
+                "message": str(exc),
                 "file": file_name,
                 "line": 1,
                 "column": 1,
-                "message": str(exc)
+                "span": {
+                    "file": file_name,
+                    "line": 1,
+                    "column": 1,
+                },
             }
             print(json.dumps(err_dict, indent=2))
         else:
@@ -249,6 +256,7 @@ def print_help() -> None:
     print("  w emit-c [--selfhost] <file.w> [-o <out.c>] # Transpile W source to C99")
     print("  w build [--selfhost] <file.w> [-o <bin>]    # Compile W source to native binary")
     print("  w test [--differential [N]] [--fuzz [N]]    # Run conformance, differential, or fuzz suite")
+    print("  w bench [--update-baseline]                 # Run W0/W1 performance benchmark harness")
     print("  w version                                   # Show compiler version")
 
 
@@ -266,21 +274,51 @@ def main() -> None:
     subcmd: Optional[str] = None
     file_to_run: Optional[str] = None
 
-    if args and args[0] in ("run", "check", "fmt", "ast", "tokens", "emit-c", "build", "test", "version"):
+    if args and args[0] in ("run", "check", "fmt", "ast", "tokens", "emit-c", "build", "test", "bench", "version"):
         subcmd = args[0]
         args = args[1:]
-        if subcmd == "test":
+        if subcmd == "bench":
+            update_baseline = "--update-baseline" in args
+            repo_root = get_repo_root()
+            w1_bin = ensure_selfhost_w1_binary(repo_root)
+            from bench.run_bench import run_benchmark_suite
+            ok = run_benchmark_suite(repo_root, w1_bin, update_baseline=update_baseline)
+            sys.exit(0 if ok else 1)
+        elif subcmd == "test":
             if args and args[0] == "--differential":
-                gen_count = int(args[1]) if len(args) > 1 and args[1].isdigit() else 25
+                gen_count = 25
+                base_seed = 1000
+                idx = 1
+                while idx < len(args):
+                    if args[idx] == "--seed" and idx + 1 < len(args) and args[idx + 1].isdigit():
+                        base_seed = int(args[idx + 1])
+                        idx += 2
+                    elif args[idx].isdigit():
+                        gen_count = int(args[idx])
+                        idx += 1
+                    else:
+                        idx += 1
                 repo_root = get_repo_root()
                 w1_bin = ensure_selfhost_w1_binary(repo_root)
                 from tests.differential.differential_test import run_differential_suite
-                ok = run_differential_suite(repo_root, w1_bin, generated_count=gen_count)
+                ok = run_differential_suite(repo_root, w1_bin, generated_count=gen_count, base_seed=base_seed)
                 sys.exit(0 if ok else 1)
             elif args and args[0] == "--fuzz":
-                fuzz_count = int(args[1]) if len(args) > 1 and args[1].isdigit() else 200
+                fuzz_count = 200
+                base_seed = 9000
+                idx = 1
+                while idx < len(args):
+                    if args[idx] == "--seed" and idx + 1 < len(args) and args[idx + 1].isdigit():
+                        base_seed = int(args[idx + 1])
+                        idx += 2
+                    elif args[idx].isdigit():
+                        fuzz_count = int(args[idx])
+                        idx += 1
+                    else:
+                        idx += 1
+                repo_root = get_repo_root()
                 from tests.differential.differential_test import run_fuzz_suite
-                ok = run_fuzz_suite(fuzz_count=fuzz_count)
+                ok = run_fuzz_suite(fuzz_count=fuzz_count, base_seed=base_seed, repo_root=repo_root)
                 sys.exit(0 if ok else 1)
             else:
                 from run_conformance import run_suite

@@ -11,9 +11,18 @@ from checker.TypeChecker import TypeChecker
 from runtime.Interpreter import Interpreter
 from formatter.Formatter import Formatter
 from codegen.CCodeGen import CCodeGen
-from error.Error import LexerError, ParserError, TypeError
+from error.Error import DIAGNOSTIC_CODES, LexerError, ParserError, TypeError, WError
 from token.TokenType import TokenType
 from node.NodeType import Program
+
+
+def _check_expected_diag_code(code_text: str, err: WError) -> None:
+    assert err.code in DIAGNOSTIC_CODES, f"Invalid diagnostic code {err.code!r}"
+    for line in code_text.splitlines():
+        s = line.strip()
+        if s.startswith("# ERROR:"):
+            expected_code = s.split(":", 1)[1].strip()
+            assert err.code == expected_code, f"Expected diagnostic code {expected_code}, got {err.code}"
 
 
 def sha256_file(path: str) -> str:
@@ -65,7 +74,8 @@ def _run_suite_in_repo(repo_root: str) -> None:
         try:
             Lexer(code, file=f).tokenize()
             print(f"  [LEXER FAIL] {f}: Expected LexerError but succeeded")
-        except LexerError:
+        except LexerError as err:
+            _check_expected_diag_code(code, err)
             i_lex_passed += 1
         except Exception as e:
             print(f"  [LEXER FAIL] {f}: Unexpected exception {e}")
@@ -100,7 +110,8 @@ def _run_suite_in_repo(repo_root: str) -> None:
         try:
             Parser(file=f).parse(code)
             print(f"  [PARSER FAIL] {f}: Expected ParserError but succeeded")
-        except ParserError:
+        except ParserError as err:
+            _check_expected_diag_code(code, err)
             i_parse_passed += 1
         except Exception as e:
             print(f"  [PARSER FAIL] {f}: Unexpected exception {e}")
@@ -138,7 +149,8 @@ def _run_suite_in_repo(repo_root: str) -> None:
             checker = TypeChecker(file=path)
             checker.check(ast)
             print(f"  [TYPE FAIL] {f}: Expected TypeError but succeeded")
-        except TypeError:
+        except TypeError as err:
+            _check_expected_diag_code(code, err)
             i_type_passed += 1
         except Exception as e:
             print(f"  [TYPE FAIL] {f}: Unexpected exception {e}")
@@ -161,8 +173,9 @@ def _run_suite_in_repo(repo_root: str) -> None:
                 err_passed += 1
             else:
                 print(f"  [ERROR SUITE FAIL] {f}: Expected TypeError")
-        except TypeError:
+        except TypeError as err:
             if f.startswith("invalid_"):
+                _check_expected_diag_code(code, err)
                 err_passed += 1
             else:
                 print(f"  [ERROR SUITE FAIL] {f}: Unexpected TypeError")

@@ -1,0 +1,15 @@
+# Benchmark 7: UTF-8 Unicode scalar indexing, slicing, and code-point operations
+
+fn main() -> unit {
+    let text = "WySofia—José—🚀—Language—v0.1.2"
+    let n = len(text)
+    let mut acc = 0
+    let mut i = 0
+    while i < 1500 {
+        let ch = text[i % n]
+        let sub = slice(text, 0, 12)
+        acc = acc + ord(ch) + len(sub)
+        i = i + 1
+    }
+    print(acc)
+}
