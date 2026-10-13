@@ -41,9 +41,10 @@ class HirParam:
 
 
 class HirBlock(HirNode):
-    def __init__(self, statements: List[HirStmt], span: Span):
+    def __init__(self, statements: List[HirStmt], span: Span, tail_expr: Optional[HirExpr] = None):
         super().__init__(span)
         self.statements = statements
+        self.tail_expr = tail_expr
 
 
 class HirFnDecl(HirNode):
@@ -180,9 +181,10 @@ class HirWhile(HirStmt):
 
 
 class HirForList(HirStmt):
-    def __init__(self, elem_name: str, elem_type_id: int, list_expr: HirExpr, body: HirBlock, span: Span):
+    def __init__(self, pattern: Any, elem_type_id: int, list_expr: HirExpr, body: HirBlock, span: Span):
         super().__init__(span)
-        self.elem_name = elem_name
+        self.pattern = pattern
+        self.elem_name = getattr(pattern, "name", str(pattern))
         self.elem_type_id = elem_type_id
         self.list_expr = list_expr
         self.body = body
@@ -255,6 +257,11 @@ class HirLocalRef(HirExpr):
 
 
 class HirThisRef(HirExpr):
+    def __init__(self, type_id: int, span: Span):
+        super().__init__(type_id, span)
+
+
+class HirSuperRef(HirExpr):
     def __init__(self, type_id: int, span: Span):
         super().__init__(type_id, span)
 
@@ -374,6 +381,14 @@ class HirElseHandle(HirExpr):
         self.operand = operand
         self.err_var = err_var
         self.handler = handler
+
+
+class HirRange(HirExpr):
+    def __init__(self, start: HirExpr, end: HirExpr, inclusive: bool, type_id: int, span: Span):
+        super().__init__(type_id, span)
+        self.start = start
+        self.end = end
+        self.inclusive = inclusive
 
 
 class HirIf(HirExpr):

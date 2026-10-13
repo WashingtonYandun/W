@@ -13,6 +13,8 @@ from formatter.Formatter import Formatter
 from codegen.CCodeGen import CCodeGen
 from hir.HirBuilder import HirBuilder
 from hir.HirNodes import HirModule
+from hir.HirCCodeGen import HirCCodeGen
+from test_w1_split_conformance import test_split_conformance
 from error.Error import DIAGNOSTIC_CODES, LexerError, ParserError, TypeError, WError
 from token.TokenType import TokenType
 from node.NodeType import Program
@@ -364,6 +366,41 @@ def _run_suite_in_repo(repo_root: str) -> None:
             example_files = []
             examples_passed = 0
 
+    # 11. Typed HIR -> C99 Native Backend (HirCCodeGen)
+    hir_c99_passed = 0
+    with tempfile.TemporaryDirectory() as tmpdir:
+        for f in c99_targets:
+            path = os.path.join(runtime_dir, f)
+            expected_path = os.path.join(runtime_dir, f[:-2] + ".expected")
+            with open(path, "r", encoding="utf-8") as stream:
+                code = stream.read()
+            with open(expected_path, "r", encoding="utf-8") as exp_stream:
+                expected = exp_stream.read()
+
+            try:
+                ast = Parser(file=path).parse(code)
+                checker = TypeChecker(file=path)
+                checker.check(ast)
+                builder = HirBuilder(checker.interner, file_path=path)
+                hir_mod = builder.lower(ast)
+                gen = HirCCodeGen(checker.interner, file_path=path)
+                c_code = gen.generate(hir_mod)
+
+                c_path = os.path.join(tmpdir, "hir_" + f[:-2] + ".c")
+                bin_path = os.path.join(tmpdir, "hir_" + f[:-2])
+                with open(c_path, "w", encoding="utf-8") as cf:
+                    cf.write(c_code)
+                comp = subprocess.run(["cc", "-std=c99", f"-I{repo_root}"] + extra_cc_flags + [c_path, "-o", bin_path], capture_output=True, text=True)
+                assert comp.returncode == 0, comp.stderr
+                run_res = subprocess.run([bin_path], capture_output=True, text=True, cwd=repo_root)
+                assert run_res.stdout == expected, f"HIR C99 mismatch on {f}: expected {expected!r}, got {run_res.stdout!r}"
+                hir_c99_passed += 1
+            except Exception as e:
+                print(f"  [HIR C99 FAIL] {f}: {e}")
+
+    # 12. Modular W1 Split Conformance
+    split_ok = test_split_conformance()
+
     # Clean temporary files if any
     temp_file = os.path.join(runtime_dir, "temp_file.txt")
     if os.path.exists(temp_file):
@@ -373,7 +410,9 @@ def _run_suite_in_repo(repo_root: str) -> None:
             pass
 
     print(f"C99 Native Backend:  {c99_passed}/{len(c99_targets)}")
+    print(f"HIR C99 Backend:     {hir_c99_passed}/{len(c99_targets)}")
     print(f"W1 Stage-2 Runtime:  {w1_runtime_passed}/{len(c99_targets)}")
+    print(f"W1 Modular Split:    {'1/1 (Loss-less verified)' if split_ok else '0/1'}")
     print(f"Examples E2E Suite:  {examples_passed}/{len(example_files)}")
     print(f"Bootstrap FixedPoint:{'1/1 (SHA256 verified)' if bootstrap_ok else '0/1'}")
 
@@ -390,7 +429,9 @@ def _run_suite_in_repo(repo_root: str) -> None:
         and hir_passed == len(hir_files)
         and runtime_passed == len(runtime_files)
         and c99_passed == len(c99_targets)
+        and hir_c99_passed == len(c99_targets)
         and w1_runtime_passed == len(c99_targets)
+        and split_ok
         and examples_passed == len(example_files)
         and bootstrap_ok
     )
@@ -399,7 +440,8 @@ def _run_suite_in_repo(repo_root: str) -> None:
         total = (
             v_lex_passed + i_lex_passed + v_parse_passed + i_parse_passed +
             v_type_passed + i_type_passed + err_passed + fmt_passed + hir_passed +
-            runtime_passed + c99_passed + w1_runtime_passed + examples_passed + 1
+            runtime_passed + c99_passed + hir_c99_passed + w1_runtime_passed +
+            examples_passed + 1 + 1
         )
         print(f"ALL {total}/{total} CONFORMANCE, EXAMPLES & SELF-HOSTING TESTS PASSED (100%).")
         sys.exit(0)
