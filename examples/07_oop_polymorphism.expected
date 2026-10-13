@@ -1,0 +1,7 @@
+struct CoW: 10 99
+class ref: #1 Rect@(12,23) [8x10] area=80
+same instance: true
+#1 Rect@(12,23) [8x10] area=80 perim=36
+#2 Square@(0,0) [6x6] area=36 perim=24
+#3 OriginMarker@(5,5) perim=0
+total area: 116
