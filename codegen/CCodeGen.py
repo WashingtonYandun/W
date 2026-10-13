@@ -95,6 +95,8 @@ class CCodeGen:
     def _own_expr(self, val_expr: str) -> str:
         if val_expr.startswith("_t"):
             return f"w_move(&{val_expr})"
+        if val_expr.startswith("w_make_") or val_expr.startswith("w_new_") or val_expr.startswith("w_clone("):
+            return val_expr
         return f"w_clone({val_expr})"
 
     def _is_local_var(self, c_name: str) -> bool:
@@ -698,7 +700,7 @@ class CCodeGen:
             s_val = self.emit_expr(expr.start, out)
             e_val = self.emit_expr(expr.end, out)
             inc = "true" if expr.inclusive else "false"
-            return self._bind_call(f"w_make_range({s_val}, {e_val}, {inc})", out)
+            return f"w_make_range({s_val}, {e_val}, {inc})"
 
         if isinstance(expr, PostfixTryExpr):
             op_val = self.emit_expr(expr.operand, out)
@@ -788,6 +790,14 @@ class CCodeGen:
                     out.append(f"WVal {arr_tmp}[{len(arg_vals)}] = {{ {elems_c} }};")
                     return self._bind_call(f"w_builtin_print({len(arg_vals)}, {arr_tmp})", out)
 
+                if fn_name == "eprint":
+                    if not arg_vals:
+                        return self._bind_call("w_builtin_eprint(0, NULL)", out)
+                    arr_tmp = self.new_aux("_arr")
+                    elems_c = ", ".join(arg_vals)
+                    out.append(f"WVal {arr_tmp}[{len(arg_vals)}] = {{ {elems_c} }};")
+                    return self._bind_call(f"w_builtin_eprint({len(arg_vals)}, {arr_tmp})", out)
+
                 builtin_1 = {
                     "len": "w_builtin_len",
                     "str": "w_builtin_str",
@@ -805,6 +815,9 @@ class CCodeGen:
 
                 if fn_name == "args" and len(arg_vals) == 0:
                     return self._bind_call("w_builtin_args()", out)
+
+                if fn_name == "exit" and len(arg_vals) == 1:
+                    return self._bind_call(f"w_builtin_exit({arg_vals[0]})", out)
 
                 if fn_name == "write_file" and len(arg_vals) == 2:
                     return self._bind_call(f"w_builtin_write_file({arg_vals[0]}, {arg_vals[1]})", out)
@@ -871,13 +884,15 @@ class CCodeGen:
 
         if isinstance(expr, ListExpr):
             if not expr.elements:
-                return self._bind_call("w_make_list(0, NULL)", out)
+                return "w_make_list(0, NULL)"
             elem_vals = [self.emit_expr(e, out) for e in expr.elements]
             arr_tmp = self.new_aux("_arr")
             out.append(f"WVal {arr_tmp}[{len(elem_vals)}] = {{ {', '.join(elem_vals)} }};")
             return self._bind_call(f"w_make_list({len(elem_vals)}, {arr_tmp})", out)
 
         if isinstance(expr, TupleExpr):
+            if not expr.elements:
+                return "w_make_tuple(0, NULL)"
             elem_vals = [self.emit_expr(e, out) for e in expr.elements]
             arr_tmp = self.new_aux("_arr")
             out.append(f"WVal {arr_tmp}[{len(elem_vals)}] = {{ {', '.join(elem_vals)} }};")
@@ -885,7 +900,7 @@ class CCodeGen:
 
         if isinstance(expr, DictExpr):
             if not expr.entries:
-                return self._bind_call("w_make_dict(0, NULL, NULL)", out)
+                return "w_make_dict(0, NULL, NULL)"
             k_vals = [self.emit_expr(e.key, out) for e in expr.entries]
             v_vals = [self.emit_expr(e.value, out) for e in expr.entries]
             k_tmp = self.new_aux("_k")
@@ -896,7 +911,7 @@ class CCodeGen:
 
         if isinstance(expr, StructInitExpr):
             if not expr.fields:
-                return self._bind_call(f'w_make_struct("{expr.struct_name}", 0, NULL, NULL)', out)
+                return f'w_make_struct("{expr.struct_name}", 0, NULL, NULL)'
             f_names = [f'"{f.name}"' for f in expr.fields]
             f_vals = [self.emit_expr(f.value, out) for f in expr.fields]
             k_tmp = self.new_aux("_k")

@@ -994,6 +994,25 @@ static inline WVal w_builtin_print(int32_t argc, const WVal* argv) {
     return w_unit();
 }
 
+static inline WVal w_builtin_eprint(int32_t argc, const WVal* argv) {
+    for (int32_t i = 0; i < argc; i++) {
+        if (i > 0) fputc(' ', stderr);
+        char* s = w_to_cstr(argv[i], false);
+        fputs(s, stderr);
+        free(s);
+    }
+    fputc('\n', stderr);
+    fflush(stderr);
+    return w_unit();
+}
+
+static inline WVal w_builtin_exit(WVal code) {
+    int c = (code.tag == W_INT) ? (int)code.as.i : 0;
+    w_runtime_cleanup();
+    exit(c);
+    return w_unit();
+}
+
 static inline WVal w_builtin_len(WVal v) {
     if (v.tag == W_LIST) return w_int(v.as.list->len);
     if (v.tag == W_DICT) return w_int(v.as.dict->len);
