@@ -1,0 +1,118 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "W",
+  "scopeName": "source.w",
+  "patterns": [
+    { "include": "#comments" },
+    { "include": "#strings" },
+    { "include": "#declarations" },
+    { "include": "#keywords" },
+    { "include": "#types" },
+    { "include": "#builtins" },
+    { "include": "#numbers" },
+    { "include": "#operators" }
+  ],
+  "repository": {
+    "comments": {
+      "patterns": [
+        {
+          "name": "comment.line.documentation.w",
+          "match": "##.*$"
+        },
+        {
+          "name": "comment.line.number-sign.w",
+          "match": "#.*$"
+        }
+      ]
+    },
+    "strings": {
+      "name": "string.quoted.double.w",
+      "begin": "\"",
+      "end": "\"",
+      "patterns": [
+        {
+          "name": "constant.character.escape.unicode.w",
+          "match": "\\\\u\\{[0-9a-fA-F]{1,6}\\}"
+        },
+        {
+          "name": "constant.character.escape.w",
+          "match": "\\\\[nrt\\\\\"0]"
+        }
+      ]
+    },
+    "declarations": {
+      "patterns": [
+        {
+          "match": "\\b(fn)\\s+([A-Za-z_][A-Za-z0-9_]*)\\b",
+          "captures": {
+            "1": { "name": "keyword.declaration.function.w" },
+            "2": { "name": "entity.name.function.w" }
+          }
+        },
+        {
+          "match": "\\b(struct|enum)\\s+([A-Za-z_][A-Za-z0-9_]*)\\b",
+          "captures": {
+            "1": { "name": "keyword.declaration.type.w" },
+            "2": { "name": "entity.name.type.w" }
+          }
+        }
+      ]
+    },
+    "keywords": {
+      "patterns": [
+        {
+          "name": "keyword.control.w",
+          "match": "\\b(if|elif|else|for|while|in|match|return|break|continue)\\b"
+        },
+        {
+          "name": "keyword.declaration.w",
+          "match": "\\b(fn|let|mut|struct|enum|import)\\b"
+        },
+        {
+          "name": "keyword.operator.logical.w",
+          "match": "\\b(and|or|not)\\b"
+        },
+        {
+          "name": "constant.language.w",
+          "match": "\\b(true|false|none)\\b"
+        }
+      ]
+    },
+    "types": {
+      "patterns": [
+        {
+          "name": "storage.type.primitive.w",
+          "match": "\\b(int|float|bool|str|unit|list|dict|tuple|IoError)\\b"
+        }
+      ]
+    },
+    "builtins": {
+      "patterns": [
+        {
+          "name": "support.function.builtin.w",
+          "match": "\\b(print|len|enumerate|dict_items|ord|chr|slice|bytes|args|read_file|write_file)\\b(?=\\s*\\()"
+        }
+      ]
+    },
+    "numbers": {
+      "patterns": [
+        {
+          "name": "constant.numeric.float.w",
+          "match": "\\b[0-9][0-9_]*\\.[0-9][0-9_]*\\b"
+        },
+        {
+          "name": "constant.numeric.integer.w",
+          "match": "\\b[0-9][0-9_]*\\b"
+        }
+      ]
+    },
+    "operators": {
+      "patterns": [
+        {
+          "name": "keyword.operator.w",
+          "match": "(->|=>|\\?\\?|\\.\\.=|\\.\\.|==|!=|<=|>=|[+\\-*/%=<>?!])"
+        }
+      ]
+    }
+  }
+}
