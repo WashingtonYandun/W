@@ -15,13 +15,16 @@
 
 ---
 
-## 2. Lexical Inventory (Exactly 22 Keywords)
+## 2. Lexical Inventory (Keywords)
 
-The language defines an immutable set of **22 keywords**:
+The language defines the following reserved keywords:
 
 ```text
 DECLARATIONS (6):
 fn        let       mut       struct    enum      import
+
+OBJECT-ORIENTED (9):
+class     interface extends   implements new       this      super     public    private
 
 CONTROL FLOW (10):
 if        elif      else      for       while     in        match     return    break     continue
@@ -40,7 +43,7 @@ and       or        not
 ## 3. Lexical Structure
 
 ### 3.1 Identifiers
-Identifiers must start with an ASCII letter (`a-z`, `A-Z`) or underscore `_`, followed by letters, digits, or underscores. Identifiers cannot match any of the 22 reserved keywords.
+Identifiers must start with an ASCII letter (`a-z`, `A-Z`) or underscore `_`, followed by letters, digits, or underscores. Identifiers cannot match any of the reserved keywords.
 
 ### 3.2 Literals
 * **Integers (`int`):** 64-bit signed integers. Supports optional `_` digit separators:
@@ -63,7 +66,7 @@ Identifiers must start with an ASCII letter (`a-z`, `A-Z`) or underscore `_`, fo
 
 ### 3.4 Comments and Delimiters
 * **Comments:** Only line comments starting with `#`. Doc-comments start with `##`.
-* **Delimiters:** Braces `{}` are mandatory for blocks (`if`, `for`, `while`, `fn`, `match`, `struct`). Semicolons are not used.
+* **Delimiters:** Braces `{}` are mandatory for blocks (`if`, `for`, `while`, `fn`, `match`, `struct`, `class`, `interface`). Semicolons are not used.
 
 ---
 
@@ -113,7 +116,8 @@ enum TokenKind {
 }
 ```
 
-### 4.5 Product Types (`struct`) with Mandatory Named Initialization
+### 4.5 Value-Type Records (`struct`) with Mandatory Named Initialization
+`struct` defines pure Copy-on-Write value records:
 ```w
 struct Token {
     kind: TokenKind
@@ -130,6 +134,55 @@ let tok = Token {
     col: 10,
 }
 ```
+
+### 4.6 Object-Oriented Programming (`class` & `interface`)
+Alongside value-type `struct` and `enum`, W supports Java-style reference-type classes, single inheritance (`extends`), multiple interface contracts (`implements`), visibility modifiers (`public` / `private`), constructors (`fn init`), and runtime polymorphism:
+
+```w
+interface Describable {
+    fn describe() -> str
+}
+
+class Animal {
+    public name: str
+    private energy: int
+
+    fn init(name: str, energy: int) {
+        this.name = name
+        this.energy = energy
+    }
+
+    public fn speak() -> str {
+        return this.name + " makes a sound"
+    }
+
+    public fn get_energy() -> int {
+        return this.energy
+    }
+}
+
+class Dog extends Animal implements Describable {
+    public breed: str
+
+    fn init(name: str, breed: str) {
+        super.init(name, 100)
+        this.breed = breed
+    }
+
+    public fn speak() -> str {
+        return this.name + " (" + this.breed + ") barks: Woof!"
+    }
+
+    public fn describe() -> str {
+        return this.speak()
+    }
+}
+
+let d: Describable = new Dog("Rex", "Husky")
+print(d.describe())
+```
+* **Reference Semantics vs Value Semantics:** `struct` values use Copy-on-Write (`W_STRUCT`), whereas `class` instances allocated via `new ClassName(...)` have reference identity (`W_OBJECT`) managed via ARC.
+* **Functional Programming Synergy:** Interfaces with a single method (`interface`) and `fn(...) -> R` signatures are designed to interoperate seamlessly with functional programming constructs.
 
 ---
 
