@@ -437,6 +437,22 @@ Step 2: Stage-1 Self-Compilation (`w1_stage1`)
 Step 3: Stage-2 Fixed-Point Verification (`w1_stage2`)
         └── `w1_stage2` compiles `selfhost/w1.w` -> `compiler2.c`.
         └── Fixed-point identity verified: SHA256(compiler0.c) == SHA256(compiler1.c) == SHA256(compiler2.c).
-        └── `w1_stage2` natively compiles and passes all 21/21 runtime conformance tests with zero Python.
+        └── `w1_stage2` natively compiles and passes all runtime conformance tests with zero Python.
 ```
+
+---
+
+## 13. Language Evolution Roadmap
+
+W evolves in disciplined, semantically verified increments while keeping the canonical `W` language name, `.w` file extension, and `w` CLI:
+
+* **`v0.1.0` — Core + Self-Host + OOP** ✅
+* **`v0.1.1` — Harden & Oracle** ✅
+* **`v0.1.2` — Diagnostics & Stress** (stable diagnostic codes, full-behavior differential oracle, stress fuzzing, benchmark harness, HIR & `TypeId` design specs)
+* **`v0.2` — Generics + Monomorphization** (`v0.2-alpha1` generic functions $\rightarrow$ `v0.2-alpha2` generic structs $\rightarrow$ `v0.2-alpha3` generic enums $\rightarrow$ `v0.2-alpha4` generic classes)
+* **`v0.3` — Function Types + Typed HIR**
+* **`v0.4` — Closures + HOFs**
+* **`v0.5` — Modules + Self-Host Split** (modular `.w` compiler passes)
+* **`v0.6` — Stdlib + LSP**
+
 
