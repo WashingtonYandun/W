@@ -24,6 +24,16 @@ def sha256_file(path: str) -> str:
 
 
 def run_suite() -> None:
+    repo_root = os.path.dirname(os.path.realpath(__file__))
+    prev_cwd = os.getcwd()
+    os.chdir(repo_root)
+    try:
+        _run_suite_in_repo(repo_root)
+    finally:
+        os.chdir(prev_cwd)
+
+
+def _run_suite_in_repo(repo_root: str) -> None:
     print("==================================================")
     print("W Language Conformance Runner (SPEC v0.1)")
     print("==================================================")

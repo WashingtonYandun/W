@@ -13,6 +13,63 @@ from formatter.Formatter import Formatter
 from codegen.CCodeGen import CCodeGen
 from error.Error import WError
 
+W_VERSION = "0.1.0"
+
+
+def get_repo_root() -> str:
+    return os.path.dirname(os.path.realpath(__file__))
+
+
+def ensure_selfhost_w1_binary(repo_root: str) -> str:
+    cache_dir = os.path.join(repo_root, ".w_cache")
+    os.makedirs(cache_dir, exist_ok=True)
+    w1_bin = os.path.join(cache_dir, "w1_stage2")
+    w1_src_path = os.path.join(repo_root, "selfhost", "w1.w")
+    rt_hdr_path = os.path.join(repo_root, "runtime", "w_runtime.h")
+
+    needs_rebuild = not os.path.exists(w1_bin)
+    if not needs_rebuild:
+        bin_mtime = os.path.getmtime(w1_bin)
+        src_mtime = max(os.path.getmtime(w1_src_path), os.path.getmtime(rt_hdr_path))
+        if src_mtime > bin_mtime:
+            needs_rebuild = True
+
+    if needs_rebuild:
+        with open(w1_src_path, "r", encoding="utf-8") as wf:
+            w1_src = wf.read()
+        w1_ast = Parser(file=w1_src_path).parse(w1_src)
+        TypeChecker(file=w1_src_path).check(w1_ast)
+        c0_code = CCodeGen(file=w1_src_path).generate(w1_ast)
+
+        c0_path = os.path.join(cache_dir, "compiler0.c")
+        c1_path = os.path.join(cache_dir, "compiler1.c")
+        s1_bin = os.path.join(cache_dir, "w1_stage1")
+
+        with open(c0_path, "w", encoding="utf-8") as cf:
+            cf.write(c0_code)
+
+        subprocess.run(
+            ["cc", "-std=c99", "-O2", f"-I{repo_root}", c0_path, "-o", s1_bin],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        subprocess.run(
+            [s1_bin, w1_src_path, c1_path],
+            check=True,
+            capture_output=True,
+            text=True,
+            cwd=repo_root,
+        )
+        subprocess.run(
+            ["cc", "-std=c99", "-O2", f"-I{repo_root}", c1_path, "-o", w1_bin],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+
+    return w1_bin
+
 
 def run_pipeline(
     source_code: str,
@@ -25,6 +82,7 @@ def run_pipeline(
     fmt_write: bool = False,
     emit_c_path: Optional[str] = None,
     build_bin_path: Optional[str] = None,
+    use_selfhost: bool = False,
 ) -> int:
     try:
         # 1. Lexing
@@ -66,7 +124,31 @@ def run_pipeline(
 
         # 4. C99 Code Generation / Native Build
         if emit_c_path is not None or build_bin_path is not None:
-            c_code = CCodeGen(file=file_name).generate(ast)
+            repo_root = get_repo_root()
+            if use_selfhost and file_name != "<stdin>":
+                w1_bin = ensure_selfhost_w1_binary(repo_root)
+                abs_input = os.path.abspath(file_name)
+                input_dir = os.path.dirname(abs_input) or os.getcwd()
+                with tempfile.NamedTemporaryFile(mode="w", suffix=".c", delete=False, encoding="utf-8") as tmp_w1_c:
+                    tmp_w1_c_path = tmp_w1_c.name
+                try:
+                    w1_proc = subprocess.run(
+                        [w1_bin, abs_input, tmp_w1_c_path],
+                        capture_output=True,
+                        text=True,
+                        cwd=input_dir,
+                    )
+                    if w1_proc.returncode != 0:
+                        print(f"[W1 Self-Hosted Compiler Error]\n{w1_proc.stderr}", file=sys.stderr)
+                        return 1
+                    with open(tmp_w1_c_path, "r", encoding="utf-8") as cf:
+                        c_code = cf.read()
+                finally:
+                    if os.path.exists(tmp_w1_c_path):
+                        os.remove(tmp_w1_c_path)
+            else:
+                c_code = CCodeGen(file=file_name).generate(ast)
+
             if emit_c_path is not None:
                 with open(emit_c_path, "w", encoding="utf-8") as f:
                     f.write(c_code)
@@ -74,7 +156,6 @@ def run_pipeline(
                     return 0
 
             if build_bin_path is not None:
-                repo_root = os.path.dirname(os.path.abspath(__file__))
                 with tempfile.NamedTemporaryFile(mode="w", suffix=".c", delete=False, encoding="utf-8") as tmp_c:
                     tmp_c.write(c_code)
                     tmp_c_path = tmp_c.name
@@ -121,7 +202,7 @@ def run_pipeline(
 
 def repl(show_tokens: bool = False, show_ast: bool = False) -> None:
     print("==================================================")
-    print("W Language REPL v0.1 (Type 'exit' to quit)")
+    print(f"W Language REPL v{W_VERSION} (Type 'exit' to quit)")
     print("==================================================")
 
     parser = Parser(file="<repl>")
@@ -157,17 +238,18 @@ def repl(show_tokens: bool = False, show_ast: bool = False) -> None:
 
 
 def print_help() -> None:
-    print("W Language Compiler & Toolchain v0.1")
+    print(f"W Language Compiler & Toolchain v{W_VERSION}")
     print("Usage:")
-    print("  ./w                              # Start interactive REPL")
-    print("  ./w [run] <file.w>               # Execute W source file")
-    print("  ./w check [--json] <file.w>      # Static typecheck without execution")
-    print("  ./w fmt [--write] <file.w>       # Canonical deterministic formatter")
-    print("  ./w ast [--json] <file.w>        # Emit canonical JSON AST (v0.1)")
-    print("  ./w tokens <file.w>              # Emit lexical token stream")
-    print("  ./w emit-c <file.w> -o <out.c>   # Transpile W source to C99")
-    print("  ./w build <file.w> -o <bin>      # Compile W source to native binary")
-    print("  ./w test                         # Run full conformance & bootstrap suite")
+    print("  w                                           # Start interactive REPL")
+    print("  w [run] <file.w>                            # Execute W source file (W0 interpreter)")
+    print("  w check [--json] <file.w>                   # Static typecheck without execution")
+    print("  w fmt [--write] <file.w>                    # Canonical deterministic formatter")
+    print("  w ast [--json] <file.w>                     # Emit canonical JSON AST (v0.1)")
+    print("  w tokens <file.w>                           # Emit lexical token stream")
+    print("  w emit-c [--selfhost] <file.w> [-o <out.c>] # Transpile W source to C99")
+    print("  w build [--selfhost] <file.w> [-o <bin>]    # Compile W source to native binary")
+    print("  w test                                      # Run full conformance & bootstrap suite")
+    print("  w version                                   # Show compiler version")
 
 
 def main() -> None:
@@ -178,17 +260,21 @@ def main() -> None:
     json_diagnostics = False
     fmt_only = False
     fmt_write = False
+    use_selfhost = False
     emit_c_path: Optional[str] = None
     build_bin_path: Optional[str] = None
     subcmd: Optional[str] = None
     file_to_run: Optional[str] = None
 
-    if args and args[0] in ("run", "check", "fmt", "ast", "tokens", "emit-c", "build", "test"):
+    if args and args[0] in ("run", "check", "fmt", "ast", "tokens", "emit-c", "build", "test", "version"):
         subcmd = args[0]
         args = args[1:]
         if subcmd == "test":
             from run_conformance import run_suite
             run_suite()
+            return
+        elif subcmd == "version":
+            print(f"W Language Compiler v{W_VERSION} (W0 + W1 Self-Hosted C99)")
             return
         elif subcmd == "check":
             check_only = True
@@ -214,6 +300,11 @@ def main() -> None:
             fmt_only = True
         elif arg in ("--write", "-w"):
             fmt_write = True
+        elif arg == "--selfhost":
+            use_selfhost = True
+        elif arg in ("--version", "-v"):
+            print(f"W Language Compiler v{W_VERSION} (W0 + W1 Self-Hosted C99)")
+            sys.exit(0)
         elif arg == "--emit-c":
             i += 1
             if i < len(args):
@@ -262,6 +353,7 @@ def main() -> None:
             fmt_write=fmt_write,
             emit_c_path=emit_c_path,
             build_bin_path=build_bin_path,
+            use_selfhost=use_selfhost,
         )
         sys.exit(code)
     else:
