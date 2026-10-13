@@ -1,22 +1,18 @@
-
+# Python cache & artifacts
 *.pyc
-*.txt
-/.idea
-.vscode
-*.log
 *.pyo
 *.pyd
-__pycache__
+__pycache__/
+*/__pycache__/
 
+# IDEs & OS
+.idea/
+.vscode/
+*.log
+.DS_Store
 
-# tests
-tests/__pycache__
-tests/*.pyc
-tests/*
-
-runtime/__pycache__
-runtime/*.pyc
-runtime/*.pyo
-runtime/*.pyd
-
-run_tests.py
+# Build & test outputs
+dist/
+build/
+*.o
+*.out
