@@ -1,0 +1,15 @@
+interface Flyable {
+    fn fly() -> int
+}
+
+class Penguin implements Flyable {
+    public name: str
+
+    fn init(name: str) {
+        this.name = name
+    }
+}
+
+fn main() {
+    let p = new Penguin("Pingu")
+}

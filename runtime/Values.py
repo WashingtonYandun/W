@@ -331,12 +331,59 @@ class WNativeFunction(WValue):
 
 
 class WBoundMethod(WValue):
-    def __init__(self, receiver: WValue, method_name: str):
+    def __init__(self, receiver: WValue, method_name: str, target_class_name: Optional[str] = None):
         self.receiver = receiver
         self.method_name = method_name
+        self.target_class_name = target_class_name
 
     def __str__(self) -> str:
         return f"<bound method {self.method_name}>"
+
+
+class WClassDef(WValue):
+    def __init__(self, name: str, superclass_name: Optional[str], fields: List[Any], methods: Dict[str, Any], closure_env: Any):
+        self.name = name
+        self.superclass_name = superclass_name
+        self.fields = fields
+        self.methods = methods
+        self.closure_env = closure_env
+
+    def __str__(self) -> str:
+        return f"<class {self.name}>"
+
+
+class WObjectInstance(WValue):
+    """Heap-allocated class instance with reference semantics (mutations happen in-place)."""
+    def __init__(self, class_name: str, fields: Optional[Dict[str, WValue]] = None):
+        self.class_name = class_name
+        self.fields: Dict[str, WValue] = dict(fields) if fields is not None else {}
+
+    def clone_value(self) -> 'WObjectInstance':
+        # Reference semantics: copying a reference points to the same object instance
+        return self
+
+    def get_field(self, name: str) -> WValue:
+        return self.fields[name]
+
+    def set_field(self, name: str, val: WValue) -> None:
+        self.fields[name] = val.clone_value()
+
+    def __eq__(self, other: Any) -> bool:
+        return self is other
+
+    def __str__(self) -> str:
+        fields_str = ", ".join(f"{k}: {repr(v) if isinstance(v, WStr) else str(v)}" for k, v in self.fields.items())
+        return f"{self.class_name} {{ {fields_str} }}"
+
+
+class WSuperProxy(WValue):
+    """Proxy binding 'super' inside a method to dispatch starting at the defining class's superclass."""
+    def __init__(self, receiver: WObjectInstance, superclass_name: str):
+        self.receiver = receiver
+        self.superclass_name = superclass_name
+
+    def __str__(self) -> str:
+        return f"<super {self.superclass_name}>"
 
 
 class WEnumNamespace(WValue):
@@ -363,4 +410,5 @@ class WModule(WValue):
 
     def __str__(self) -> str:
         return f"<module {self.name}>"
+
 

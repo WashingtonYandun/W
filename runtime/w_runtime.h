@@ -19,6 +19,7 @@ typedef enum {
     W_DICT,
     W_TUPLE,
     W_STRUCT,
+    W_OBJECT,
     W_ENUM,
     W_OK,
     W_ERR
@@ -132,7 +133,7 @@ static inline WVal w_clone(WVal v) {
         v.as.list->refcount++;
     } else if (v.tag == W_DICT && v.as.dict) {
         v.as.dict->refcount++;
-    } else if (v.tag == W_STRUCT && v.as.st) {
+    } else if ((v.tag == W_STRUCT || v.tag == W_OBJECT) && v.as.st) {
         v.as.st->refcount++;
     } else if (v.tag == W_TUPLE && v.as.tuple) {
         WTupleBuf* old_t = v.as.tuple;
@@ -250,6 +251,8 @@ static inline bool w_eq(WVal a, WVal b) {
                 if (!w_eq(a.as.st->vals[i], b.as.st->vals[i])) return false;
             }
             return true;
+        case W_OBJECT:
+            return a.as.st == b.as.st;
         case W_OK:
         case W_ERR:
             return w_eq(*a.as.box, *b.as.box);
@@ -333,6 +336,20 @@ static inline WVal w_make_struct(const char* name, int32_t count, const char** k
         st->vals[i] = w_clone(vals[i]);
     }
     WVal v; v.tag = W_STRUCT; v.as.st = st; return v;
+}
+
+static inline WVal w_make_object(const char* name, int32_t count, const char** keys, const WVal* vals) {
+    WStructBuf* st = (WStructBuf*)malloc(sizeof(WStructBuf));
+    st->refcount = 1;
+    st->name = name;
+    st->len = count;
+    st->keys = (const char**)malloc(sizeof(const char*) * (count > 0 ? count : 1));
+    st->vals = (WVal*)malloc(sizeof(WVal) * (count > 0 ? count : 1));
+    for (int32_t i = 0; i < count; i++) {
+        st->keys[i] = keys[i];
+        st->vals[i] = w_clone(vals[i]);
+    }
+    WVal v; v.tag = W_OBJECT; v.as.st = st; return v;
 }
 
 /* UTF-8 Code-Point Helpers (SPEC Section 3.3) */
@@ -447,7 +464,7 @@ static inline WVal* w_index_ref(WVal* obj, WVal idx) {
 }
 
 static inline WVal w_member_get(WVal obj, const char* prop) {
-    if (obj.tag == W_STRUCT) {
+    if (obj.tag == W_STRUCT || obj.tag == W_OBJECT) {
         for (int32_t i = 0; i < obj.as.st->len; i++) {
             if (strcmp(obj.as.st->keys[i], prop) == 0) {
                 return obj.as.st->vals[i];
@@ -465,8 +482,14 @@ static inline WVal* w_member_ref(WVal* obj, const char* prop) {
                 return &obj->as.st->vals[i];
             }
         }
+    } else if (obj->tag == W_OBJECT) {
+        for (int32_t i = 0; i < obj->as.st->len; i++) {
+            if (strcmp(obj->as.st->keys[i], prop) == 0) {
+                return &obj->as.st->vals[i];
+            }
+        }
     }
-    fprintf(stderr, "RuntimeError: Invalid struct field '%s'\n", prop);
+    fprintf(stderr, "RuntimeError: Invalid field '%s'\n", prop);
     exit(1);
 }
 
@@ -695,7 +718,8 @@ static inline char* w_to_cstr(WVal v, bool quote_str) {
             buf[pos] = '\0';
             return buf;
         }
-        case W_STRUCT: {
+        case W_STRUCT:
+        case W_OBJECT: {
             size_t cap = 128;
             size_t pos = 0;
             buf = (char*)malloc(cap);

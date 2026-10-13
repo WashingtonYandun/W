@@ -1,13 +1,23 @@
 from enum import Enum, auto
 
 class TokenType(Enum):
-    # 22 Reserved Keywords (SPEC v0.1)
+    # Reserved Keywords
     FN = auto()
     LET = auto()
     MUT = auto()
     STRUCT = auto()
     ENUM = auto()
     IMPORT = auto()
+
+    CLASS = auto()
+    INTERFACE = auto()
+    EXTENDS = auto()
+    IMPLEMENTS = auto()
+    NEW = auto()
+    THIS = auto()
+    SUPER = auto()
+    PUBLIC = auto()
+    PRIVATE = auto()
 
     IF = auto()
     ELIF = auto()

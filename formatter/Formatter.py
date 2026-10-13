@@ -2,9 +2,11 @@ from typing import List, Optional
 from node.NodeType import (
     Program, Stmt, Expr, TypeNode, NamedType, OptionalType, ListType, DictType, TupleType, ResultType,
     Pattern, IdentifierPattern, TuplePattern, EnumPattern, LiteralPattern, WildcardPattern,
-    Block, ExprStmt, Param, FnDecl, StructField, StructDecl, EnumDecl, ImportDecl,
-    LetDecl, WhileStmt, ForStmt, ReturnStmt, BreakStmt, ContinueStmt,
-    IntLiteral, FloatLiteral, StringLiteral, BoolLiteral, NoneLiteral, IdentExpr,
+    Block, ExprStmt, Param, FnDecl, StructField, StructDecl, EnumDecl,
+    InterfaceMethod, InterfaceDecl, ClassField, MethodDecl, ClassDecl,
+    ImportDecl, LetDecl, WhileStmt, ForStmt, ReturnStmt, BreakStmt, ContinueStmt,
+    IntLiteral, FloatLiteral, StringLiteral, BoolLiteral, NoneLiteral,
+    IdentExpr, ThisExpr, SuperExpr, NewExpr,
     UnaryExpr, BinaryExpr, CoalesceExpr, RangeExpr, PostfixTryExpr, ElseErrExpr,
     CallExpr, MemberExpr, IndexExpr, AssignmentExpr, FieldInit, StructInitExpr,
     ListExpr, DictEntry, DictExpr, TupleExpr, ElifBranch, IfExpr, MatchArm, MatchExpr
@@ -48,7 +50,7 @@ class Formatter:
         lines: List[str] = []
         prev_was_decl = False
         for idx, stmt in enumerate(program.body):
-            is_decl = isinstance(stmt, (FnDecl, StructDecl, EnumDecl))
+            is_decl = isinstance(stmt, (FnDecl, StructDecl, EnumDecl, InterfaceDecl, ClassDecl))
             if idx > 0 and (is_decl or prev_was_decl):
                 lines.append("")
             lines.append(self.format_stmt(stmt, 0))
@@ -114,6 +116,38 @@ class Formatter:
                 field_lines.append(f"{self._indent(level + 1)}{f.name}: {self.format_type(f.type_ann)},")
             body = "\n".join(field_lines)
             return f"{ind}struct {stmt.name} {{\n{body}\n{ind}}}"
+
+        if isinstance(stmt, InterfaceDecl):
+            if not stmt.methods:
+                return f"{ind}interface {stmt.name} {{}}"
+            method_lines: List[str] = []
+            for m in stmt.methods:
+                params_str = ", ".join([f"{p.name}: {self.format_type(p.type_ann)}" for p in m.params])
+                ret_str = self.format_type(m.return_type)
+                method_lines.append(f"{self._indent(level + 1)}fn {m.name}({params_str}) -> {ret_str}")
+            body = "\n".join(method_lines)
+            return f"{ind}interface {stmt.name} {{\n{body}\n{ind}}}"
+
+        if isinstance(stmt, ClassDecl):
+            header = f"{ind}class {stmt.name}"
+            if stmt.superclass:
+                header += f" extends {stmt.superclass}"
+            if stmt.interfaces:
+                header += f" implements {', '.join(stmt.interfaces)}"
+            if not stmt.fields and not stmt.methods:
+                return f"{header} {{}}"
+            member_lines: List[str] = []
+            for f in stmt.fields:
+                vis = "public " if f.is_public else "private "
+                member_lines.append(f"{self._indent(level + 1)}{vis}{f.name}: {self.format_type(f.type_ann)}")
+            for m in stmt.methods:
+                vis = "public " if m.is_public else "private "
+                params_str = ", ".join([f"{p.name}: {self.format_type(p.type_ann)}" for p in m.params])
+                ret_str = self.format_type(m.return_type)
+                blk_str = self.format_block(m.body, level + 1)
+                member_lines.append(f"{self._indent(level + 1)}{vis}fn {m.name}({params_str}) -> {ret_str} {blk_str}")
+            body = "\n".join(member_lines)
+            return f"{header} {{\n{body}\n{ind}}}"
 
         if isinstance(stmt, FnDecl):
             params_str = ", ".join([f"{p.name}: {self.format_type(p.type_ann)}" for p in stmt.params])
@@ -223,6 +257,16 @@ class Formatter:
 
         if isinstance(expr, IdentExpr):
             return expr.name
+
+        if isinstance(expr, ThisExpr):
+            return "this"
+
+        if isinstance(expr, SuperExpr):
+            return "super"
+
+        if isinstance(expr, NewExpr):
+            args_str = ", ".join([self.format_expr(a, level) for a in expr.args])
+            return f"new {expr.class_name}({args_str})"
 
         if isinstance(expr, UnaryExpr):
             inner = self.format_expr(expr.operand, level, parent_prec=10)
