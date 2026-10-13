@@ -1,236 +1,701 @@
-from typing import Union
+from typing import Any, List, Optional, Union
 
-NodeType = Union[
-    "Program", 
-    "Statement",
-    "Expr", 
-    "Identifier", 
-    "VarDeclaration",
-    "NumericLiteral", 
-    "IntLiteral",
-    "FloatLiteral",
-    "NoneLiteral",
-    "StringLiteral", 
-    "BooleanLiteral",
-    "ListLiteral",
-    "DictLiteral",
-    "IndexExpr",
-    "BinaryExpr",
-    "IfStatement",
-    "WhileStatement",
-    "ForStatement",
-    "FunctionDeclaration",
-    "CallExpr",
-    "AssignmentExpr",
-    "IndexAssignmentExpr",
-    "ReturnStatement",
-    "MethodCallExpr"
-    ]
+class Node:
+    """Base class for all W AST nodes with line/col tracking."""
+    def __init__(self, line: int = 1, col: int = 1):
+        self.line = line
+        self.col = col
+
+    def to_dict(self) -> dict:
+        raise NotImplementedError(f"{self.__class__.__name__}.to_dict() not implemented")
+
+    def __repr__(self) -> str:
+        return f"{self.__class__.__name__}({self.to_dict()})"
 
 
-class Statement:
-    def __init__(self, kind: NodeType):
-        self.kind = kind
+# ==========================================
+# Type Annotation AST Nodes
+# ==========================================
 
-    def __repr__(self):
-        return f"{self.__dict__}"
-
-
-class Program(Statement):
-    def __init__(self, body: list[Statement] = None):
-        super().__init__("Program")
-
-        self.kind = "Program"
-        self.body = body if body is not None else []
-
-
-class Expr(Statement):
+class TypeNode(Node):
     pass
 
+class NamedType(TypeNode):
+    def __init__(self, name: str, line: int = 1, col: int = 1):
+        super().__init__(line, col)
+        self.name = name
 
-class BinaryExpr(Expr):
-    def __init__(self, left: Expr, right: Expr, operator: str):
-        super().__init__("BinaryExpr")
+    def to_dict(self) -> dict:
+        return {"kind": "NamedType", "name": self.name, "line": self.line, "col": self.col}
 
-        self.kind = "BinaryExpr"
-        self.left = left
-        self.right = right
-        self.operator = operator
+class OptionalType(TypeNode):
+    def __init__(self, inner: TypeNode, line: int = 1, col: int = 1):
+        super().__init__(line, col)
+        self.inner = inner
 
+    def to_dict(self) -> dict:
+        return {"kind": "OptionalType", "inner": self.inner.to_dict(), "line": self.line, "col": self.col}
 
-class Identifier(Expr):
-    def __init__(self, symbol: str):
-        super().__init__("Identifier")
+class ListType(TypeNode):
+    def __init__(self, element_type: TypeNode, line: int = 1, col: int = 1):
+        super().__init__(line, col)
+        self.element_type = element_type
 
-        self.kind = "Identifier"
-        self.symbol = symbol
+    def to_dict(self) -> dict:
+        return {"kind": "ListType", "element_type": self.element_type.to_dict(), "line": self.line, "col": self.col}
 
+class DictType(TypeNode):
+    def __init__(self, key_type: TypeNode, value_type: TypeNode, line: int = 1, col: int = 1):
+        super().__init__(line, col)
+        self.key_type = key_type
+        self.value_type = value_type
 
-class VarDeclaration(Statement):
-    def __init__(self, identifier: Identifier, value: Expr, const: bool, datatype: str):
-        super().__init__("VarDeclaration")
+    def to_dict(self) -> dict:
+        return {
+            "kind": "DictType",
+            "key_type": self.key_type.to_dict(),
+            "value_type": self.value_type.to_dict(),
+            "line": self.line,
+            "col": self.col
+        }
 
-        self.kind = "VarDeclaration"
-        self.constant = const
-        self.identifier = identifier
-        self.datatype = datatype
-        self.initializer = value
+class TupleType(TypeNode):
+    def __init__(self, element_types: List[TypeNode], line: int = 1, col: int = 1):
+        super().__init__(line, col)
+        self.element_types = element_types
 
+    def to_dict(self) -> dict:
+        return {
+            "kind": "TupleType",
+            "element_types": [t.to_dict() for t in self.element_types],
+            "line": self.line,
+            "col": self.col
+        }
 
-class NumericLiteral(Expr):
-    def __init__(self, value: float):
-        super().__init__("NumericLiteral")
+class ResultType(TypeNode):
+    """Represents fallible return types: T ! E"""
+    def __init__(self, ok_type: TypeNode, err_type: TypeNode, line: int = 1, col: int = 1):
+        super().__init__(line, col)
+        self.ok_type = ok_type
+        self.err_type = err_type
 
-        self.kind = "NumericLiteral"
-        self.value = value
-
-
-class IntLiteral(Expr):
-    def __init__(self, value: int):
-        super().__init__("IntLiteral")
-
-        self.kind = "IntLiteral"
-        self.value = int(value)
-
-
-class FloatLiteral(Expr):
-    def __init__(self, value: float):
-        super().__init__("FloatLiteral")
-
-        self.kind = "FloatLiteral"
-        self.value = float(value)
-
-
-class NoneLiteral(Expr):
-    def __init__(self):
-        super().__init__("NoneLiteral")
-
-        self.kind = "NoneLiteral"
-        self.value = "None"
-    
-
-class StringLiteral(Expr):
-    def __init__(self, value: str):
-        super().__init__("StringLiteral")
-
-        self.kind = "StringLiteral"
-        self.value = value
-
-
-class BooleanLiteral(Expr):
-    def __init__(self, value: bool):
-        super().__init__("BooleanLiteral")
-
-        self.kind = "BooleanLiteral"
-        self.value = value
+    def to_dict(self) -> dict:
+        return {
+            "kind": "ResultType",
+            "ok_type": self.ok_type.to_dict(),
+            "err_type": self.err_type.to_dict(),
+            "line": self.line,
+            "col": self.col
+        }
 
 
-class IfStatement(Statement):
-    def __init__(self, condition: Expr, then_body: list[Statement], else_body: list[Statement] = None):
-        super().__init__("IfStatement")
-        
-        self.kind = "IfStatement"
-        self.condition = condition
-        self.then_body = then_body
-        self.else_body = else_body if else_body is not None else []
+# ==========================================
+# Pattern Matching AST Nodes
+# ==========================================
+
+class Pattern(Node):
+    pass
+
+class IdentifierPattern(Pattern):
+    def __init__(self, name: str, line: int = 1, col: int = 1):
+        super().__init__(line, col)
+        self.name = name
+
+    def to_dict(self) -> dict:
+        return {"kind": "IdentifierPattern", "name": self.name, "line": self.line, "col": self.col}
+
+class TuplePattern(Pattern):
+    def __init__(self, elements: List[Pattern], line: int = 1, col: int = 1):
+        super().__init__(line, col)
+        self.elements = elements
+
+    def to_dict(self) -> dict:
+        return {
+            "kind": "TuplePattern",
+            "elements": [p.to_dict() for p in self.elements],
+            "line": self.line,
+            "col": self.col
+        }
+
+class EnumPattern(Pattern):
+    def __init__(self, enum_name: str, variant: str, line: int = 1, col: int = 1):
+        super().__init__(line, col)
+        self.enum_name = enum_name
+        self.variant = variant
+
+    def to_dict(self) -> dict:
+        return {
+            "kind": "EnumPattern",
+            "enum_name": self.enum_name,
+            "variant": self.variant,
+            "line": self.line,
+            "col": self.col
+        }
+
+class LiteralPattern(Pattern):
+    def __init__(self, literal: 'Expr', line: int = 1, col: int = 1):
+        super().__init__(line, col)
+        self.literal = literal
+
+    def to_dict(self) -> dict:
+        return {"kind": "LiteralPattern", "literal": self.literal.to_dict(), "line": self.line, "col": self.col}
+
+class WildcardPattern(Pattern):
+    def to_dict(self) -> dict:
+        return {"kind": "WildcardPattern", "line": self.line, "col": self.col}
 
 
-class WhileStatement(Statement):
-    def __init__(self, condition: Expr, body: list[Statement]):
-        super().__init__("WhileStatement")
-        
-        self.kind = "WhileStatement"
+# ==========================================
+# Block Node (with optional tail expression)
+# ==========================================
+
+class Block(Node):
+    def __init__(self, statements: List['Stmt'], tail_expr: Optional['Expr'] = None, line: int = 1, col: int = 1):
+        super().__init__(line, col)
+        self.statements = statements
+        self.tail_expr = tail_expr
+
+    def to_dict(self) -> dict:
+        return {
+            "kind": "Block",
+            "statements": [s.to_dict() for s in self.statements],
+            "tail_expr": self.tail_expr.to_dict() if self.tail_expr else None,
+            "line": self.line,
+            "col": self.col
+        }
+
+
+# ==========================================
+# Statement & Declaration Nodes
+# ==========================================
+
+class Stmt(Node):
+    pass
+
+class ExprStmt(Stmt):
+    def __init__(self, expr: 'Expr', line: int = 1, col: int = 1):
+        super().__init__(line, col)
+        self.expr = expr
+
+    def to_dict(self) -> dict:
+        return {"kind": "ExprStmt", "expr": self.expr.to_dict(), "line": self.line, "col": self.col}
+
+class Param(Node):
+    def __init__(self, name: str, type_ann: TypeNode, line: int = 1, col: int = 1):
+        super().__init__(line, col)
+        self.name = name
+        self.type_ann = type_ann
+
+    def to_dict(self) -> dict:
+        return {"kind": "Param", "name": self.name, "type_ann": self.type_ann.to_dict(), "line": self.line, "col": self.col}
+
+class FnDecl(Stmt):
+    def __init__(self, name: str, params: List[Param], return_type: TypeNode, body: Block, line: int = 1, col: int = 1):
+        super().__init__(line, col)
+        self.name = name
+        self.params = params
+        self.return_type = return_type
+        self.body = body
+
+    def to_dict(self) -> dict:
+        return {
+            "kind": "FnDecl",
+            "name": self.name,
+            "params": [p.to_dict() for p in self.params],
+            "return_type": self.return_type.to_dict(),
+            "body": self.body.to_dict(),
+            "line": self.line,
+            "col": self.col
+        }
+
+class StructField(Node):
+    def __init__(self, name: str, type_ann: TypeNode, line: int = 1, col: int = 1):
+        super().__init__(line, col)
+        self.name = name
+        self.type_ann = type_ann
+
+    def to_dict(self) -> dict:
+        return {"kind": "StructField", "name": self.name, "type_ann": self.type_ann.to_dict(), "line": self.line, "col": self.col}
+
+class StructDecl(Stmt):
+    def __init__(self, name: str, fields: List[StructField], line: int = 1, col: int = 1):
+        super().__init__(line, col)
+        self.name = name
+        self.fields = fields
+
+    def to_dict(self) -> dict:
+        return {
+            "kind": "StructDecl",
+            "name": self.name,
+            "fields": [f.to_dict() for f in self.fields],
+            "line": self.line,
+            "col": self.col
+        }
+
+class EnumDecl(Stmt):
+    def __init__(self, name: str, variants: List[str], line: int = 1, col: int = 1):
+        super().__init__(line, col)
+        self.name = name
+        self.variants = variants
+
+    def to_dict(self) -> dict:
+        return {
+            "kind": "EnumDecl",
+            "name": self.name,
+            "variants": self.variants,
+            "line": self.line,
+            "col": self.col
+        }
+
+class ImportDecl(Stmt):
+    def __init__(self, path: str, namespace: str, line: int = 1, col: int = 1):
+        super().__init__(line, col)
+        self.path = path
+        self.namespace = namespace
+
+    def to_dict(self) -> dict:
+        return {
+            "kind": "ImportDecl",
+            "path": self.path,
+            "namespace": self.namespace,
+            "line": self.line,
+            "col": self.col
+        }
+
+class LetDecl(Stmt):
+    def __init__(self, name: str, is_mut: bool, type_ann: Optional[TypeNode], initializer: 'Expr', line: int = 1, col: int = 1):
+        super().__init__(line, col)
+        self.name = name
+        self.is_mut = is_mut
+        self.type_ann = type_ann
+        self.initializer = initializer
+
+    def to_dict(self) -> dict:
+        return {
+            "kind": "LetDecl",
+            "name": self.name,
+            "is_mut": self.is_mut,
+            "type_ann": self.type_ann.to_dict() if self.type_ann else None,
+            "initializer": self.initializer.to_dict(),
+            "line": self.line,
+            "col": self.col
+        }
+
+class WhileStmt(Stmt):
+    def __init__(self, condition: 'Expr', body: Block, line: int = 1, col: int = 1):
+        super().__init__(line, col)
         self.condition = condition
         self.body = body
 
+    def to_dict(self) -> dict:
+        return {
+            "kind": "WhileStmt",
+            "condition": self.condition.to_dict(),
+            "body": self.body.to_dict(),
+            "line": self.line,
+            "col": self.col
+        }
 
-class ForStatement(Statement):
-    def __init__(self, variable: str, iterable: Expr, body: list[Statement]):
-        super().__init__("ForStatement")
-        
-        self.kind = "ForStatement"
-        self.variable = variable
+class ForStmt(Stmt):
+    def __init__(self, pattern: Pattern, iterable: 'Expr', body: Block, line: int = 1, col: int = 1):
+        super().__init__(line, col)
+        self.pattern = pattern
         self.iterable = iterable
         self.body = body
 
+    def to_dict(self) -> dict:
+        return {
+            "kind": "ForStmt",
+            "pattern": self.pattern.to_dict(),
+            "iterable": self.iterable.to_dict(),
+            "body": self.body.to_dict(),
+            "line": self.line,
+            "col": self.col
+        }
 
-class FunctionDeclaration(Statement):
-    def __init__(self, name: str, parameters: list[tuple[str, str]], body: list[Statement], return_type: str = "None"):
-        super().__init__("FunctionDeclaration")
-        
-        self.kind = "FunctionDeclaration"
+class ReturnStmt(Stmt):
+    def __init__(self, value: Optional['Expr'] = None, line: int = 1, col: int = 1):
+        super().__init__(line, col)
+        self.value = value
+
+    def to_dict(self) -> dict:
+        return {
+            "kind": "ReturnStmt",
+            "value": self.value.to_dict() if self.value else None,
+            "line": self.line,
+            "col": self.col
+        }
+
+class BreakStmt(Stmt):
+    def to_dict(self) -> dict:
+        return {"kind": "BreakStmt", "line": self.line, "col": self.col}
+
+class ContinueStmt(Stmt):
+    def to_dict(self) -> dict:
+        return {"kind": "ContinueStmt", "line": self.line, "col": self.col}
+
+
+# ==========================================
+# Expression Nodes
+# ==========================================
+
+class Expr(Node):
+    pass
+
+class IntLiteral(Expr):
+    def __init__(self, value: int, line: int = 1, col: int = 1):
+        super().__init__(line, col)
+        self.value = value
+
+    def to_dict(self) -> dict:
+        return {"kind": "IntLiteral", "value": self.value, "line": self.line, "col": self.col}
+
+class FloatLiteral(Expr):
+    def __init__(self, value: float, line: int = 1, col: int = 1):
+        super().__init__(line, col)
+        self.value = value
+
+    def to_dict(self) -> dict:
+        return {"kind": "FloatLiteral", "value": self.value, "line": self.line, "col": self.col}
+
+class StringLiteral(Expr):
+    def __init__(self, value: str, line: int = 1, col: int = 1):
+        super().__init__(line, col)
+        self.value = value
+
+    def to_dict(self) -> dict:
+        return {"kind": "StringLiteral", "value": self.value, "line": self.line, "col": self.col}
+
+class BoolLiteral(Expr):
+    def __init__(self, value: bool, line: int = 1, col: int = 1):
+        super().__init__(line, col)
+        self.value = value
+
+    def to_dict(self) -> dict:
+        return {"kind": "BoolLiteral", "value": self.value, "line": self.line, "col": self.col}
+
+class NoneLiteral(Expr):
+    def to_dict(self) -> dict:
+        return {"kind": "NoneLiteral", "line": self.line, "col": self.col}
+
+class IdentExpr(Expr):
+    def __init__(self, name: str, line: int = 1, col: int = 1):
+        super().__init__(line, col)
         self.name = name
-        self.parameters = parameters  # List of (param_name, param_type) tuples
-        self.body = body
-        self.return_type = return_type
+
+    def to_dict(self) -> dict:
+        return {"kind": "IdentExpr", "name": self.name, "line": self.line, "col": self.col}
+
+class UnaryExpr(Expr):
+    def __init__(self, op: str, operand: Expr, line: int = 1, col: int = 1):
+        super().__init__(line, col)
+        self.op = op
+        self.operand = operand
+
+    def to_dict(self) -> dict:
+        return {
+            "kind": "UnaryExpr",
+            "op": self.op,
+            "operand": self.operand.to_dict(),
+            "line": self.line,
+            "col": self.col
+        }
+
+class BinaryExpr(Expr):
+    def __init__(self, left: Expr, op: str, right: Expr, line: int = 1, col: int = 1):
+        super().__init__(line, col)
+        self.left = left
+        self.op = op
+        self.right = right
+
+    def to_dict(self) -> dict:
+        return {
+            "kind": "BinaryExpr",
+            "left": self.left.to_dict(),
+            "op": self.op,
+            "right": self.right.to_dict(),
+            "line": self.line,
+            "col": self.col
+        }
+
+class CoalesceExpr(Expr):
+    """Represents null-coalescing: a ?? fallback"""
+    def __init__(self, left: Expr, right: Expr, line: int = 1, col: int = 1):
+        super().__init__(line, col)
+        self.left = left
+        self.right = right
+
+    def to_dict(self) -> dict:
+        return {
+            "kind": "CoalesceExpr",
+            "left": self.left.to_dict(),
+            "right": self.right.to_dict(),
+            "line": self.line,
+            "col": self.col
+        }
+
+class RangeExpr(Expr):
+    """Represents numeric range: a..b or a..=b"""
+    def __init__(self, start: Expr, end: Expr, inclusive: bool, line: int = 1, col: int = 1):
+        super().__init__(line, col)
+        self.start = start
+        self.end = end
+        self.inclusive = inclusive
+
+    def to_dict(self) -> dict:
+        return {
+            "kind": "RangeExpr",
+            "start": self.start.to_dict(),
+            "end": self.end.to_dict(),
+            "inclusive": self.inclusive,
+            "line": self.line,
+            "col": self.col
+        }
+
+class PostfixTryExpr(Expr):
+    """Represents postfix early propagation: expr?"""
+    def __init__(self, operand: Expr, line: int = 1, col: int = 1):
+        super().__init__(line, col)
+        self.operand = operand
+
+    def to_dict(self) -> dict:
+        return {"kind": "PostfixTryExpr", "operand": self.operand.to_dict(), "line": self.line, "col": self.col}
+
+class ElseErrExpr(Expr):
+    """Represents in-place fallible/optional handling: expr else err { ... }"""
+    def __init__(self, operand: Expr, err_name: Optional[str], handler: Block, line: int = 1, col: int = 1):
+        super().__init__(line, col)
+        self.operand = operand
+        self.err_name = err_name
+        self.handler = handler
+
+    def to_dict(self) -> dict:
+        return {
+            "kind": "ElseErrExpr",
+            "operand": self.operand.to_dict(),
+            "err_name": self.err_name,
+            "handler": self.handler.to_dict(),
+            "line": self.line,
+            "col": self.col
+        }
 
 
 class CallExpr(Expr):
-    def __init__(self, callee: Expr, arguments: list[Expr]):
-        super().__init__("CallExpr")
-        
-        self.kind = "CallExpr"
+    def __init__(self, callee: Expr, args: List[Expr], line: int = 1, col: int = 1):
+        super().__init__(line, col)
         self.callee = callee
-        self.arguments = arguments
+        self.args = args
 
+    def to_dict(self) -> dict:
+        return {
+            "kind": "CallExpr",
+            "callee": self.callee.to_dict(),
+            "args": [a.to_dict() for a in self.args],
+            "line": self.line,
+            "col": self.col
+        }
 
-class AssignmentExpr(Expr):
-    def __init__(self, assignee: Identifier, value: Expr):
-        super().__init__("AssignmentExpr")
-        
-        self.kind = "AssignmentExpr"
-        self.assignee = assignee
-        self.value = value
-
-
-class IndexAssignmentExpr(Expr):
-    def __init__(self, object: Expr, index: Expr, value: Expr):
-        super().__init__("IndexAssignmentExpr")
-        
-        self.kind = "IndexAssignmentExpr"
+class MemberExpr(Expr):
+    def __init__(self, object: Expr, property: str, line: int = 1, col: int = 1):
+        super().__init__(line, col)
         self.object = object
-        self.index = index
-        self.value = value
+        self.property = property
 
-
-class ListLiteral(Expr):
-    def __init__(self, elements: list[Expr]):
-        super().__init__("ListLiteral")
-        
-        self.kind = "ListLiteral"
-        self.elements = elements
-
-
-class DictLiteral(Expr):
-    def __init__(self, pairs: list[tuple[Expr, Expr]]):
-        super().__init__("DictLiteral")
-        
-        self.kind = "DictLiteral"
-        self.pairs = pairs  # List of (key, value) tuples
-
-
-class ReturnStatement(Statement):
-    def __init__(self, value: Expr = None):
-        super().__init__("ReturnStatement")
-        
-        self.kind = "ReturnStatement"
-        self.value = value
-
+    def to_dict(self) -> dict:
+        return {
+            "kind": "MemberExpr",
+            "object": self.object.to_dict(),
+            "property": self.property,
+            "line": self.line,
+            "col": self.col
+        }
 
 class IndexExpr(Expr):
-    def __init__(self, object: Expr, index: Expr):
-        super().__init__("IndexExpr")
-        
-        self.kind = "IndexExpr"
+    def __init__(self, object: Expr, index: Expr, line: int = 1, col: int = 1):
+        super().__init__(line, col)
         self.object = object
         self.index = index
 
+    def to_dict(self) -> dict:
+        return {
+            "kind": "IndexExpr",
+            "object": self.object.to_dict(),
+            "index": self.index.to_dict(),
+            "line": self.line,
+            "col": self.col
+        }
 
-class MethodCallExpr(Expr):
-    def __init__(self, object: Expr, method: str, arguments: list[Expr] = None):
-        super().__init__("MethodCallExpr")
-        
-        self.kind = "MethodCallExpr"
-        self.object = object
-        self.method = method
-        self.arguments = arguments if arguments is not None else []
+class AssignmentExpr(Expr):
+    def __init__(self, target: Expr, value: Expr, line: int = 1, col: int = 1):
+        super().__init__(line, col)
+        self.target = target
+        self.value = value
+
+    def to_dict(self) -> dict:
+        return {
+            "kind": "AssignmentExpr",
+            "target": self.target.to_dict(),
+            "value": self.value.to_dict(),
+            "line": self.line,
+            "col": self.col
+        }
+
+class FieldInit(Node):
+    def __init__(self, name: str, value: Expr, line: int = 1, col: int = 1):
+        super().__init__(line, col)
+        self.name = name
+        self.value = value
+
+    def to_dict(self) -> dict:
+        return {"kind": "FieldInit", "name": self.name, "value": self.value.to_dict(), "line": self.line, "col": self.col}
+
+class StructInitExpr(Expr):
+    def __init__(self, struct_name: str, fields: List[FieldInit], line: int = 1, col: int = 1):
+        super().__init__(line, col)
+        self.struct_name = struct_name
+        self.fields = fields
+
+    def to_dict(self) -> dict:
+        return {
+            "kind": "StructInitExpr",
+            "struct_name": self.struct_name,
+            "fields": [f.to_dict() for f in self.fields],
+            "line": self.line,
+            "col": self.col
+        }
+
+class ListExpr(Expr):
+    def __init__(self, elements: List[Expr], line: int = 1, col: int = 1):
+        super().__init__(line, col)
+        self.elements = elements
+
+    def to_dict(self) -> dict:
+        return {
+            "kind": "ListExpr",
+            "elements": [e.to_dict() for e in self.elements],
+            "line": self.line,
+            "col": self.col
+        }
+
+class DictEntry(Node):
+    def __init__(self, key: Expr, value: Expr, line: int = 1, col: int = 1):
+        super().__init__(line, col)
+        self.key = key
+        self.value = value
+
+    def to_dict(self) -> dict:
+        return {"kind": "DictEntry", "key": self.key.to_dict(), "value": self.value.to_dict(), "line": self.line, "col": self.col}
+
+class DictExpr(Expr):
+    def __init__(self, entries: List[DictEntry], line: int = 1, col: int = 1):
+        super().__init__(line, col)
+        self.entries = entries
+
+    def to_dict(self) -> dict:
+        return {
+            "kind": "DictExpr",
+            "entries": [e.to_dict() for e in self.entries],
+            "line": self.line,
+            "col": self.col
+        }
+
+class TupleExpr(Expr):
+    def __init__(self, elements: List[Expr], line: int = 1, col: int = 1):
+        super().__init__(line, col)
+        self.elements = elements
+
+    def to_dict(self) -> dict:
+        return {
+            "kind": "TupleExpr",
+            "elements": [e.to_dict() for e in self.elements],
+            "line": self.line,
+            "col": self.col
+        }
+
+class ElifBranch(Node):
+    def __init__(self, condition: Expr, body: Block, line: int = 1, col: int = 1):
+        super().__init__(line, col)
+        self.condition = condition
+        self.body = body
+
+    def to_dict(self) -> dict:
+        return {
+            "kind": "ElifBranch",
+            "condition": self.condition.to_dict(),
+            "body": self.body.to_dict(),
+            "line": self.line,
+            "col": self.col
+        }
+
+class IfExpr(Expr):
+    def __init__(self, condition: Expr, then_branch: Block, elif_branches: List[ElifBranch], else_branch: Optional[Block], line: int = 1, col: int = 1):
+        super().__init__(line, col)
+        self.condition = condition
+        self.then_branch = then_branch
+        self.elif_branches = elif_branches
+        self.else_branch = else_branch
+
+    def to_dict(self) -> dict:
+        return {
+            "kind": "IfExpr",
+            "condition": self.condition.to_dict(),
+            "then_branch": self.then_branch.to_dict(),
+            "elif_branches": [b.to_dict() for b in self.elif_branches],
+            "else_branch": self.else_branch.to_dict() if self.else_branch else None,
+            "line": self.line,
+            "col": self.col
+        }
+
+class MatchArm(Node):
+    def __init__(self, pattern: Pattern, body: Block, line: int = 1, col: int = 1):
+        super().__init__(line, col)
+        self.pattern = pattern
+        self.body = body
+
+    def to_dict(self) -> dict:
+        return {
+            "kind": "MatchArm",
+            "pattern": self.pattern.to_dict(),
+            "body": self.body.to_dict(),
+            "line": self.line,
+            "col": self.col
+        }
+
+class MatchExpr(Expr):
+    def __init__(self, subject: Expr, arms: List[MatchArm], line: int = 1, col: int = 1):
+        super().__init__(line, col)
+        self.subject = subject
+        self.arms = arms
+
+    def to_dict(self) -> dict:
+        return {
+            "kind": "MatchExpr",
+            "subject": self.subject.to_dict(),
+            "arms": [a.to_dict() for a in self.arms],
+            "line": self.line,
+            "col": self.col
+        }
+
+
+# ==========================================
+# Root Program Node
+# ==========================================
+
+class Program(Node):
+    def __init__(self, body: List[Stmt] = None, line: int = 1, col: int = 1):
+        super().__init__(line, col)
+        self.body = body if body is not None else []
+
+    def to_dict(self) -> dict:
+        return {
+            "w_ast_version": "0.1",
+            "kind": "Program",
+            "body": [s.to_dict() for s in self.body],
+            "line": self.line,
+            "col": self.col
+        }
+
+    # Backward compatibility helpers
+    @property
+    def kind(self) -> str:
+        return "Program"
