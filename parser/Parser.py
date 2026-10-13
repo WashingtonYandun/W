@@ -58,7 +58,16 @@ class Parser:
         self.pos = 0
         if show_tokens:
             print("Tokens:", self.tokens)
-        return self.produce_ast()
+        try:
+            return self.produce_ast()
+        except RecursionError:
+            raise ParserError(
+                message="Maximum syntax nesting depth exceeded",
+                line=self.at().line,
+                col=self.at().col,
+                file=self.file,
+                code="W0006",
+            )
 
     def produce_ast(self) -> Program:
         start_line = self.at().line
@@ -66,7 +75,7 @@ class Parser:
         body: List[Stmt] = []
 
         while not self.is_at_end():
-            stmt = self.parse_stmt()
+            stmt = self.parse_stmt(allow_top_level=True)
             if stmt is not None:
                 body.append(stmt)
 
@@ -224,7 +233,17 @@ class Parser:
     # Statement & Declaration Parsing
     # ==========================================
 
-    def parse_stmt(self) -> Stmt:
+    def parse_stmt(self, allow_top_level: bool = False) -> Stmt:
+        if self.check(TokenType.FN) or self.check(TokenType.STRUCT) or self.check(TokenType.ENUM) or self.check(TokenType.INTERFACE) or self.check(TokenType.CLASS) or self.check(TokenType.IMPORT):
+            if not allow_top_level:
+                tok = self.at()
+                raise ParserError(
+                    message=f"Top-level declaration '{tok.value}' is not allowed inside a block",
+                    line=tok.line,
+                    col=tok.col,
+                    file=self.file,
+                    code="W0006",
+                )
         if self.check(TokenType.FN):
             return self.parse_fn_decl()
         if self.check(TokenType.LET):
@@ -450,6 +469,14 @@ class Parser:
     def parse_for_stmt(self) -> ForStmt:
         start_tok = self.expect(TokenType.FOR, code="P004", msg="Expected 'for'")
         pattern = self.parse_pattern()
+        if not isinstance(pattern, (IdentifierPattern, TuplePattern)):
+            raise ParserError(
+                message="For loop binding must be an identifier or tuple pattern",
+                line=pattern.line,
+                col=pattern.col,
+                file=self.file,
+                code="W0006",
+            )
         self.expect(TokenType.IN, code="P004", msg="Expected 'in' after for loop pattern")
         iterable = self.parse_expr(allow_struct_init=False)
         body = self.parse_block()

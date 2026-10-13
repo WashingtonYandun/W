@@ -278,16 +278,39 @@ def main() -> None:
         args = args[1:]
         if subcmd == "test":
             if args and args[0] == "--differential":
-                gen_count = int(args[1]) if len(args) > 1 and args[1].isdigit() else 25
+                gen_count = 25
+                base_seed = 1000
+                idx = 1
+                while idx < len(args):
+                    if args[idx] == "--seed" and idx + 1 < len(args) and args[idx + 1].isdigit():
+                        base_seed = int(args[idx + 1])
+                        idx += 2
+                    elif args[idx].isdigit():
+                        gen_count = int(args[idx])
+                        idx += 1
+                    else:
+                        idx += 1
                 repo_root = get_repo_root()
                 w1_bin = ensure_selfhost_w1_binary(repo_root)
                 from tests.differential.differential_test import run_differential_suite
-                ok = run_differential_suite(repo_root, w1_bin, generated_count=gen_count)
+                ok = run_differential_suite(repo_root, w1_bin, generated_count=gen_count, base_seed=base_seed)
                 sys.exit(0 if ok else 1)
             elif args and args[0] == "--fuzz":
-                fuzz_count = int(args[1]) if len(args) > 1 and args[1].isdigit() else 200
+                fuzz_count = 200
+                base_seed = 9000
+                idx = 1
+                while idx < len(args):
+                    if args[idx] == "--seed" and idx + 1 < len(args) and args[idx + 1].isdigit():
+                        base_seed = int(args[idx + 1])
+                        idx += 2
+                    elif args[idx].isdigit():
+                        fuzz_count = int(args[idx])
+                        idx += 1
+                    else:
+                        idx += 1
+                repo_root = get_repo_root()
                 from tests.differential.differential_test import run_fuzz_suite
-                ok = run_fuzz_suite(fuzz_count=fuzz_count)
+                ok = run_fuzz_suite(fuzz_count=fuzz_count, base_seed=base_seed, repo_root=repo_root)
                 sys.exit(0 if ok else 1)
             else:
                 from run_conformance import run_suite
