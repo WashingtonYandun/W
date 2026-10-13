@@ -19,7 +19,7 @@ from parser.Parser import Parser
 class CCodeGen:
     """
     Canonical W v0.1 to C99 Transpiler Backend.
-    Preserves exact value semantics (ARC + Copy-on-Write via runtime/w_runtime.h),
+    Preserves exact value semantics (Deterministic RC + Copy-on-Write via runtime/w_runtime.h),
     reference semantics for OOP classes, dynamic dispatch, and fallible error handling.
     """
     def __init__(self, file: str = "<stdin>"):
@@ -665,6 +665,9 @@ class CCodeGen:
 
                 if fn_name == "slice" and len(arg_vals) == 3:
                     return f"w_builtin_slice({arg_vals[0]}, {arg_vals[1]}, {arg_vals[2]})"
+
+                if fn_name in self.classes:
+                    return f"w_new_{fn_name}({', '.join(arg_vals)})"
 
                 c_callee = self.c_fn(fn_name)
                 return f"{c_callee}({', '.join(arg_vals)})"

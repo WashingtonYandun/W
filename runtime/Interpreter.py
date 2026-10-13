@@ -465,6 +465,8 @@ class Interpreter:
             callee = self.eval_expr(expr.callee, env)
             args = [self.eval_expr(a, env) for a in expr.args]
 
+            if isinstance(callee, WClassDef):
+                return self.instantiate_class(callee.name, args, env, expr.line, expr.col)
             if isinstance(callee, WNativeFunction):
                 return callee.call_fn(args)
             if isinstance(callee, WFunction):

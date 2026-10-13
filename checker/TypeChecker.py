@@ -511,6 +511,45 @@ class TypeChecker:
             return self._find_value_root_symbol(expr.object)
         return None
 
+    def _check_class_instantiation(self, class_t: ClassType, args: List[Expr], line: int, col: int) -> ClassType:
+        init_fn: Optional[FunctionType] = None
+        curr_c: Optional[ClassType] = class_t
+        while curr_c is not None:
+            if curr_c.init_type is not None:
+                init_fn = curr_c.init_type
+                break
+            curr_c = curr_c.superclass
+        if init_fn is not None:
+            expected_params = init_fn.params
+            if len(args) != len(expected_params):
+                raise TypeError(
+                    message=f"Constructor of '{class_t.name}' expects {len(expected_params)} arguments, found {len(args)}",
+                    line=line,
+                    col=col,
+                    file=self.file,
+                    code="T015"
+                )
+            for i, (a_expr, p_type) in enumerate(zip(args, expected_params)):
+                a_type = self._check_expr(a_expr)
+                if not is_assignable(a_type, p_type):
+                    raise TypeError(
+                        message=f"Constructor argument {i + 1} type mismatch: expected '{p_type}', found '{a_type}'",
+                        line=a_expr.line,
+                        col=a_expr.col,
+                        file=self.file,
+                        code="T003"
+                    )
+        else:
+            if len(args) != 0:
+                raise TypeError(
+                    message=f"Default constructor of '{class_t.name}' takes 0 arguments, found {len(args)}",
+                    line=line,
+                    col=col,
+                    file=self.file,
+                    code="T015"
+                )
+        return class_t
+
 
     def _check_block(self, block: Block, is_statement_context: bool = False) -> Optional[WType]:
         block_scope = Scope(parent=self.current_scope)
@@ -920,43 +959,7 @@ class TypeChecker:
                     file=self.file,
                     code="T002"
                 )
-            init_fn: Optional[FunctionType] = None
-            curr_c: Optional[ClassType] = class_t
-            while curr_c is not None:
-                if curr_c.init_type is not None:
-                    init_fn = curr_c.init_type
-                    break
-                curr_c = curr_c.superclass
-            if init_fn is not None:
-                expected_params = init_fn.params
-                if len(expr.args) != len(expected_params):
-                    raise TypeError(
-                        message=f"Constructor of '{expr.class_name}' expects {len(expected_params)} arguments, found {len(expr.args)}",
-                        line=expr.line,
-                        col=expr.col,
-                        file=self.file,
-                        code="T015"
-                    )
-                for i, (a_expr, p_type) in enumerate(zip(expr.args, expected_params)):
-                    a_type = self._check_expr(a_expr)
-                    if not is_assignable(a_type, p_type):
-                        raise TypeError(
-                            message=f"Constructor argument {i + 1} type mismatch: expected '{p_type}', found '{a_type}'",
-                            line=a_expr.line,
-                            col=a_expr.col,
-                            file=self.file,
-                            code="T003"
-                        )
-            else:
-                if len(expr.args) != 0:
-                    raise TypeError(
-                        message=f"Default constructor of '{expr.class_name}' takes 0 arguments, found {len(expr.args)}",
-                        line=expr.line,
-                        col=expr.col,
-                        file=self.file,
-                        code="T015"
-                    )
-            return class_t
+            return self._check_class_instantiation(class_t, expr.args, expr.line, expr.col)
 
         if isinstance(expr, AssignmentExpr):
 
@@ -1290,6 +1293,13 @@ class TypeChecker:
             )
 
         if isinstance(expr, CallExpr):
+            # Support direct constructor call syntax: ClassName(...)
+            if isinstance(expr.callee, IdentExpr):
+                if self.current_scope.lookup_symbol(expr.callee.name) is None:
+                    maybe_cls = self.current_scope.lookup_type(expr.callee.name)
+                    if isinstance(maybe_cls, ClassType):
+                        return self._check_class_instantiation(maybe_cls, expr.args, expr.line, expr.col)
+
             # Mutating method check on receiver (transitive across value-type paths)
             if isinstance(expr.callee, MemberExpr):
                 callee_t = self._check_expr(expr.callee)

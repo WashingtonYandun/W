@@ -136,6 +136,12 @@ The canonical `w` CLI supports interpretation, static type checking, formatting,
 
 # Run the full 13-phase conformance & self-hosting test suite
 ./w test
+
+# Run the three-engine differential oracle (W0 Interpreter == W0 C99 == W1 Native)
+./w test --differential 25
+
+# Run the compiler fuzz suite (0 internal tracebacks invariant)
+./w test --fuzz 200
 ```
 
 ---
@@ -188,7 +194,8 @@ ln -sfn "$(pwd)/editors/vscode-w" ~/.antigravity/extensions/w-lang-0.1.0
 | [`codegen/CCodeGen.py`](codegen/CCodeGen.py) | W0 C99 code generator |
 | [`runtime/w_runtime.h`](runtime/w_runtime.h) | Single-header C99 runtime (deterministic RC + CoW, `W_OBJECT` reference types, UTF-8 code points, collections, I/O) |
 | [`selfhost/w1.w`](selfhost/w1.w) | **Self-hosted W1 compiler** written entirely in W |
-| [`run_conformance.py`](run_conformance.py) | Automated 13-phase conformance test runner (181/181 tests) |
+| [`run_conformance.py`](run_conformance.py) | Automated 13-phase conformance test runner (190/190 tests) |
+| [`tests/differential/differential_test.py`](tests/differential/differential_test.py) | Three-engine differential oracle & compiler fuzz suite |
 | [`.github/workflows/ci.yml`](.github/workflows/ci.yml) | Cross-platform CI pipeline (Linux & macOS) |
 
 ---
@@ -199,18 +206,18 @@ ln -sfn "$(pwd)/editors/vscode-w" ~/.antigravity/extensions/w-lang-0.1.0
 ./w test
 ```
 
-Verifies all **13 phases (181 / 181 tests)**:
+Verifies all **13 phases (190 / 190 tests)**:
 1. **Lexer Valid (13/13)**
 2. **Lexer Invalid (7/7)**
 3. **Parser Valid (19/19)**
 4. **Parser Invalid (9/9)**
 5. **Checker Valid (14/14)**
-6. **Checker Invalid (22/22)**
+6. **Checker Invalid (23/23)**
 7. **Error Handling (2/2)**
-8. **Formatter Idempotence (`w fmt`) (23/23)**
-9. **Runtime W0 Interpreter (22/22)**
-10. **C99 Native Backend W0 (21/21)**
-11. **W1 Stage-2 Native Compiler Runtime Parity (21/21)**
+8. **Formatter Idempotence (`w fmt`) (25/25)**
+9. **Runtime W0 Interpreter (24/24)**
+10. **C99 Native Backend W0 (23/23)**
+11. **W1 Stage-2 Native Compiler Runtime Parity (23/23)**
 12. **Showcase Examples E2E Suite (7/7)**
 13. **3-Stage Fixed-Point Bootstrap (`1/1`)**
 

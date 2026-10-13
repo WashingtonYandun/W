@@ -70,3 +70,5 @@ jobs:
       - name: Run Full 13-Phase Conformance & 3-Stage Bootstrap Suite
         run: |
           ./w test
+          ./w test --differential 20
+          ./w test --fuzz 100
