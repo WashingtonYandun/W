@@ -8,10 +8,13 @@ from node.NodeType import (
     Node, Program, Stmt, Expr, TypeNode, Pattern, Block,
     NamedType, OptionalType, ListType, DictType, TupleType, ResultType,
     IdentifierPattern, TuplePattern, EnumPattern, LiteralPattern, WildcardPattern,
-    FnDecl, Param, StructDecl, StructField, EnumDecl, ImportDecl, LetDecl,
+    FnDecl, Param, StructDecl, StructField, EnumDecl,
+    InterfaceDecl, InterfaceMethod, ClassDecl, ClassField, MethodDecl,
+    ImportDecl, LetDecl,
     WhileStmt, ForStmt, ReturnStmt, BreakStmt, ContinueStmt, ExprStmt,
     IntLiteral, FloatLiteral, StringLiteral, BoolLiteral, NoneLiteral,
-    IdentExpr, UnaryExpr, BinaryExpr, CoalesceExpr, RangeExpr, PostfixTryExpr, ElseErrExpr,
+    IdentExpr, ThisExpr, SuperExpr, NewExpr,
+    UnaryExpr, BinaryExpr, CoalesceExpr, RangeExpr, PostfixTryExpr, ElseErrExpr,
     CallExpr, MemberExpr, IndexExpr, AssignmentExpr,
     StructInitExpr, FieldInit, ListExpr, DictExpr, DictEntry, TupleExpr,
     IfExpr, ElifBranch, MatchExpr, MatchArm
@@ -230,6 +233,10 @@ class Parser:
             return self.parse_struct_decl()
         if self.check(TokenType.ENUM):
             return self.parse_enum_decl()
+        if self.check(TokenType.INTERFACE):
+            return self.parse_interface_decl()
+        if self.check(TokenType.CLASS):
+            return self.parse_class_decl()
         if self.check(TokenType.IMPORT):
             return self.parse_import_decl()
         if self.check(TokenType.WHILE):
@@ -249,26 +256,37 @@ class Parser:
         expr = self.parse_expr()
         return ExprStmt(expr=expr, line=expr.line, col=expr.col)
 
-    def parse_fn_decl(self) -> FnDecl:
-        start_tok = self.expect(TokenType.FN, code="P004", msg="Expected 'fn'")
-        name_tok = self.expect(TokenType.IDENTIFIER, code="P004", msg="Expected function name after 'fn'")
-        self.expect(TokenType.LPAREN, code="P002", msg="Expected '(' after function name")
-
+    def _parse_param_list(self, allow_receiver: bool = False) -> List[Param]:
         params: List[Param] = []
         if not self.check(TokenType.RPAREN):
-            p_name = self.expect(TokenType.IDENTIFIER, code="P002", msg="Expected parameter name")
-            self.expect(TokenType.COLON, code="P002", msg="Expected ':' after parameter name")
-            p_type = self.parse_type()
-            params.append(Param(p_name.value, p_type, line=p_name.line, col=p_name.col))
-
-            while self.match(TokenType.COMMA):
-                if self.check(TokenType.RPAREN):
-                    break
+            first = True
+            while True:
+                if first and allow_receiver and (
+                    self.check(TokenType.THIS)
+                    or (self.check(TokenType.IDENTIFIER) and self.at().value == "self" and self.peek(1).type != TokenType.COLON)
+                ):
+                    self.advance()
+                    first = False
+                    if self.match(TokenType.COMMA):
+                        if self.check(TokenType.RPAREN):
+                            break
+                        continue
+                    else:
+                        break
+                first = False
                 p_name = self.expect(TokenType.IDENTIFIER, code="P002", msg="Expected parameter name")
                 self.expect(TokenType.COLON, code="P002", msg="Expected ':' after parameter name")
                 p_type = self.parse_type()
                 params.append(Param(p_name.value, p_type, line=p_name.line, col=p_name.col))
+                if not self.match(TokenType.COMMA) or self.check(TokenType.RPAREN):
+                    break
+        return params
 
+    def parse_fn_decl(self) -> FnDecl:
+        start_tok = self.expect(TokenType.FN, code="P004", msg="Expected 'fn'")
+        name_tok = self.expect(TokenType.IDENTIFIER, code="P004", msg="Expected function name after 'fn'")
+        self.expect(TokenType.LPAREN, code="P002", msg="Expected '(' after function name")
+        params = self._parse_param_list(allow_receiver=False)
         self.expect(TokenType.RPAREN, code="P002", msg="Expected ')' after parameters")
 
         # Return type: defaults to unit if omitted
@@ -278,6 +296,95 @@ class Parser:
 
         body = self.parse_block()
         return FnDecl(name=name_tok.value, params=params, return_type=return_type, body=body, line=start_tok.line, col=start_tok.col)
+
+    def parse_interface_decl(self) -> InterfaceDecl:
+        start_tok = self.expect(TokenType.INTERFACE, code="P004", msg="Expected 'interface'")
+        name_tok = self.expect(TokenType.IDENTIFIER, code="P004", msg="Expected interface name")
+        self.expect(TokenType.LBRACE, code="P002", msg="Expected '{' to start interface body")
+
+        methods: List[InterfaceMethod] = []
+        while not self.check(TokenType.RBRACE) and not self.is_at_end():
+            self.match(TokenType.PUBLIC)
+            fn_tok = self.expect(TokenType.FN, code="P004", msg="Expected 'fn' in interface method declaration")
+            m_name = self.expect(TokenType.IDENTIFIER, code="P004", msg="Expected method name after 'fn'")
+            self.expect(TokenType.LPAREN, code="P002", msg="Expected '(' after interface method name")
+            params = self._parse_param_list(allow_receiver=True)
+            self.expect(TokenType.RPAREN, code="P002", msg="Expected ')' after interface method parameters")
+            ret_type = NamedType("unit", line=m_name.line, col=m_name.col)
+            if self.match(TokenType.ARROW):
+                ret_type = self.parse_type()
+            methods.append(InterfaceMethod(name=m_name.value, params=params, return_type=ret_type, line=fn_tok.line, col=fn_tok.col))
+
+        self.expect(TokenType.RBRACE, code="P007", msg="Unterminated interface body, expected '}'")
+        return InterfaceDecl(name=name_tok.value, methods=methods, line=start_tok.line, col=start_tok.col)
+
+    def parse_class_decl(self) -> ClassDecl:
+        start_tok = self.expect(TokenType.CLASS, code="P004", msg="Expected 'class'")
+        name_tok = self.expect(TokenType.IDENTIFIER, code="P004", msg="Expected class name")
+
+        superclass: Optional[str] = None
+        if self.match(TokenType.EXTENDS):
+            sup_tok = self.expect(TokenType.IDENTIFIER, code="P004", msg="Expected superclass name after 'extends'")
+            superclass = sup_tok.value
+
+        interfaces: List[str] = []
+        if self.match(TokenType.IMPLEMENTS):
+            first_intf = self.expect(TokenType.IDENTIFIER, code="P004", msg="Expected interface name after 'implements'")
+            interfaces.append(first_intf.value)
+            while self.match(TokenType.COMMA):
+                next_intf = self.expect(TokenType.IDENTIFIER, code="P004", msg="Expected interface name after ','")
+                interfaces.append(next_intf.value)
+
+        self.expect(TokenType.LBRACE, code="P002", msg="Expected '{' to start class body")
+
+        fields: List[ClassField] = []
+        methods: List[MethodDecl] = []
+
+        while not self.check(TokenType.RBRACE) and not self.is_at_end():
+            is_public = True
+            if self.match(TokenType.PUBLIC):
+                is_public = True
+            elif self.match(TokenType.PRIVATE):
+                is_public = False
+
+            if self.check(TokenType.FN):
+                fn_tok = self.advance()
+                m_name = self.expect(TokenType.IDENTIFIER, code="P004", msg="Expected method name after 'fn'")
+                self.expect(TokenType.LPAREN, code="P002", msg="Expected '(' after method name")
+                params = self._parse_param_list(allow_receiver=True)
+                self.expect(TokenType.RPAREN, code="P002", msg="Expected ')' after method parameters")
+                ret_type = NamedType("unit", line=m_name.line, col=m_name.col)
+                if self.match(TokenType.ARROW):
+                    ret_type = self.parse_type()
+                body = self.parse_block()
+                methods.append(
+                    MethodDecl(
+                        name=m_name.value,
+                        params=params,
+                        return_type=ret_type,
+                        body=body,
+                        is_public=is_public,
+                        line=fn_tok.line,
+                        col=fn_tok.col,
+                    )
+                )
+            else:
+                f_name = self.expect(TokenType.IDENTIFIER, code="P004", msg="Expected class field or method declaration")
+                self.expect(TokenType.COLON, code="P004", msg="Expected ':' after class field name")
+                f_type = self.parse_type()
+                fields.append(ClassField(name=f_name.value, type_ann=f_type, is_public=is_public, line=f_name.line, col=f_name.col))
+                self.match(TokenType.COMMA)
+
+        self.expect(TokenType.RBRACE, code="P007", msg="Unterminated class body, expected '}'")
+        return ClassDecl(
+            name=name_tok.value,
+            superclass=superclass,
+            interfaces=interfaces,
+            fields=fields,
+            methods=methods,
+            line=start_tok.line,
+            col=start_tok.col,
+        )
 
     def parse_let_decl(self) -> LetDecl:
         start_tok = self.expect(TokenType.LET, code="P004", msg="Expected 'let'")
@@ -487,6 +594,25 @@ class Parser:
 
         if self.match(TokenType.NONE):
             return NoneLiteral(line=token.line, col=token.col)
+
+        if self.match(TokenType.THIS):
+            return ThisExpr(line=token.line, col=token.col)
+
+        if self.match(TokenType.SUPER):
+            return SuperExpr(line=token.line, col=token.col)
+
+        if self.match(TokenType.NEW):
+            cls_tok = self.expect(TokenType.IDENTIFIER, code="P004", msg="Expected class name after 'new'")
+            self.expect(TokenType.LPAREN, code="P002", msg="Expected '(' after class name in 'new' expression")
+            args: List[Expr] = []
+            if not self.check(TokenType.RPAREN):
+                args.append(self.parse_expr())
+                while self.match(TokenType.COMMA):
+                    if self.check(TokenType.RPAREN):
+                        break
+                    args.append(self.parse_expr())
+            self.expect(TokenType.RPAREN, code="P002", msg="Expected ')' after 'new' arguments")
+            return NewExpr(class_name=cls_tok.value, args=args, line=token.line, col=token.col)
 
         # Identifiers & Named Struct Initializations
         if self.match(TokenType.IDENTIFIER):
