@@ -1,0 +1,419 @@
+from typing import Any, Dict, List, Optional, Tuple, Set
+from node.NodeType import (
+    Program, Stmt, Expr, TypeNode, ResultType as AstResultType,
+    NamedType, OptionalType as AstOptionalType, ListType as AstListType, DictType as AstDictType,
+    Pattern, IdentifierPattern, TuplePattern, EnumPattern, LiteralPattern, WildcardPattern,
+    Block, ExprStmt, Param, FnDecl, StructDecl, EnumDecl, ImportDecl,
+    InterfaceDecl, ClassDecl, ClassField, MethodDecl,
+    LetDecl, WhileStmt, ForStmt, ReturnStmt, BreakStmt, ContinueStmt,
+    IntLiteral, FloatLiteral, StringLiteral, BoolLiteral, NoneLiteral, IdentExpr,
+    ThisExpr, SuperExpr, NewExpr,
+    UnaryExpr, BinaryExpr, CoalesceExpr, RangeExpr, PostfixTryExpr, ElseErrExpr,
+    CallExpr, MemberExpr, IndexExpr, AssignmentExpr, StructInitExpr,
+    ListExpr, DictExpr, TupleExpr, IfExpr, MatchExpr
+)
+from checker.TypeInterner import (
+    TypeInterner, TYPE_ERROR, TYPE_UNIT, TYPE_BOOL, TYPE_INT, TYPE_FLOAT, TYPE_STR, TYPE_NONE
+)
+from hir.HirNodes import (
+    Span, HirNode, HirExpr, HirStmt, HirParam, HirBlock, HirFieldDef,
+    HirFnDecl, HirStructDecl, HirEnumDecl, HirInterfaceDecl, HirClassDecl, HirModule,
+    HirLet, HirBindTemp, HirAssign, HirWhile, HirForList, HirReturn, HirBreak, HirContinue, HirExprStmt,
+    HirConstInt, HirConstFloat, HirConstBool, HirConstStr, HirConstNone, HirConstUnit,
+    HirLocalRef, HirThisRef, HirUnaryOp, HirBinaryOp,
+    HirConstructStruct, HirConstructEnum, HirConstructObject, HirConstructList, HirConstructDict, HirConstructTuple,
+    HirDirectCall, HirBuiltinCall, HirMethodCall, HirFieldRead, HirIndexRead,
+    HirTryPropagate, HirCoalesce, HirElseHandle, HirIf, HirMatch, HirMatchArm
+)
+
+
+BUILTIN_NAMES = {
+    "print", "len", "range", "ord", "chr", "slice", "str", "int", "float", "bool",
+    "w_read_file", "w_write_file"
+}
+
+
+class HirBuilder:
+    """
+    Lowers a fully type-checked surface AST into a canonical Typed HIR.
+    Invariants guaranteed:
+    1. Every HirExpr carries an interned TypeId.
+    2. Constructors ClassName(...) and new ClassName(...) are normalized to HirConstructObject.
+    3. Missing function return expressions are normalized to HirConstUnit.
+    4. Method calls and member accesses are categorized.
+    """
+    def __init__(self, interner: TypeInterner, file_path: str = "<stdin>"):
+        self.interner = interner
+        self.file_path = file_path
+        self.classes: Set[str] = set()
+        self.structs: Set[str] = set()
+        self.enums: Set[str] = set()
+
+    def lower(self, program: Program) -> HirModule:
+        # Pre-scan top-level nominal types to distinguish constructors from calls
+        for stmt in program.body:
+            if isinstance(stmt, ClassDecl):
+                self.classes.add(stmt.name)
+            elif isinstance(stmt, StructDecl):
+                self.structs.add(stmt.name)
+            elif isinstance(stmt, EnumDecl):
+                self.enums.add(stmt.name)
+
+        struct_decls: List[HirStructDecl] = []
+        enum_decls: List[HirEnumDecl] = []
+        intf_decls: List[HirInterfaceDecl] = []
+        class_decls: List[HirClassDecl] = []
+        fn_decls: List[HirFnDecl] = []
+        top_stmts: List[HirStmt] = []
+
+        for stmt in program.body:
+            if isinstance(stmt, StructDecl):
+                struct_decls.append(self._lower_struct_decl(stmt))
+            elif isinstance(stmt, EnumDecl):
+                enum_decls.append(self._lower_enum_decl(stmt))
+            elif isinstance(stmt, InterfaceDecl):
+                intf_decls.append(self._lower_interface_decl(stmt))
+            elif isinstance(stmt, ClassDecl):
+                class_decls.append(self._lower_class_decl(stmt))
+            elif isinstance(stmt, FnDecl):
+                fn_decls.append(self._lower_fn_decl(stmt))
+            elif isinstance(stmt, ImportDecl):
+                continue
+            else:
+                top_stmts.append(self._lower_stmt(stmt))
+
+        return HirModule(
+            file_path=self.file_path,
+            structs=struct_decls,
+            enums=enum_decls,
+            interfaces=intf_decls,
+            classes=class_decls,
+            functions=fn_decls,
+            top_level_stmts=top_stmts
+        )
+
+    # -------------------------------------------------------------
+    # Nominal Declarations
+    # -------------------------------------------------------------
+
+    def _lower_struct_decl(self, decl: StructDecl) -> HirStructDecl:
+        tid = self.interner.mk_struct(decl.name)
+        fields = [
+            HirFieldDef(f.name, self._get_type_id_from_node(getattr(f, "type_ann", getattr(f, "type_annotation", None))), is_public=True, span=Span(f.line, f.col))
+            for f in decl.fields
+        ]
+        return HirStructDecl(decl.name, tid, fields, Span(decl.line, decl.col))
+
+    def _lower_enum_decl(self, decl: EnumDecl) -> HirEnumDecl:
+        tid = self.interner.mk_enum(decl.name, decl.variants)
+        return HirEnumDecl(decl.name, tid, decl.variants, Span(decl.line, decl.col))
+
+    def _lower_interface_decl(self, decl: InterfaceDecl) -> HirInterfaceDecl:
+        methods: List[Tuple[str, int]] = []
+        for m in decl.methods:
+            params = tuple(self._get_type_id_from_node(getattr(p, "type_ann", getattr(p, "type_annotation", None))) for p in m.params)
+            ret = self._get_type_id_from_node(m.return_type) if m.return_type else TYPE_UNIT
+            fn_tid = self.interner.mk_function(params, ret)
+            methods.append((m.name, fn_tid))
+        tid = self.interner.mk_interface(decl.name, dict(methods))
+        return HirInterfaceDecl(decl.name, tid, methods, Span(decl.line, decl.col))
+
+    def _lower_class_decl(self, decl: ClassDecl) -> HirClassDecl:
+        tid = self.interner.mk_class(decl.name)
+        fields = [
+            HirFieldDef(f.name, self._get_type_id_from_node(getattr(f, "type_ann", getattr(f, "type_annotation", None))), is_public=f.is_public, span=Span(f.line, f.col))
+            for f in decl.fields
+        ]
+        methods: List[HirFnDecl] = []
+        init_method: Optional[HirFnDecl] = None
+        for m in decl.methods:
+            m_hir = self._lower_method_decl(m)
+            if m.name == "init":
+                init_method = m_hir
+            methods.append(m_hir)
+
+        return HirClassDecl(
+            name=decl.name,
+            type_id=tid,
+            superclass=decl.superclass,
+            interfaces=decl.interfaces,
+            fields=fields,
+            methods=methods,
+            init_method=init_method,
+            span=Span(decl.line, decl.col)
+        )
+
+    def _lower_fn_decl(self, decl: FnDecl) -> HirFnDecl:
+        params = [
+            HirParam(p.name, self._get_type_id_from_node(getattr(p, "type_ann", getattr(p, "type_annotation", None))), Span(p.line, p.col))
+            for p in decl.params
+        ]
+        ret_tid = self._get_type_id_from_node(decl.return_type) if decl.return_type else TYPE_UNIT
+        body_hir = self._lower_block(decl.body)
+        is_fallible = False
+        err_type_name = ""
+        if decl.return_type and isinstance(decl.return_type, AstResultType):
+            is_fallible = True
+            err_type_name = decl.return_type.err_type.name if hasattr(decl.return_type.err_type, "name") else "Error"
+
+        return HirFnDecl(
+            name=decl.name,
+            params=params,
+            return_type_id=ret_tid,
+            body=body_hir,
+            is_fallible=is_fallible,
+            err_type_name=err_type_name,
+            is_method=False,
+            is_public=True,
+            span=Span(decl.line, decl.col)
+        )
+
+    def _lower_method_decl(self, decl: MethodDecl) -> HirFnDecl:
+        params = [
+            HirParam(p.name, self._get_type_id_from_node(getattr(p, "type_ann", getattr(p, "type_annotation", None))), Span(p.line, p.col))
+            for p in decl.params
+        ]
+        ret_tid = self._get_type_id_from_node(decl.return_type) if decl.return_type else TYPE_UNIT
+        body_hir = self._lower_block(decl.body)
+        is_fallible = False
+        err_type_name = ""
+        if decl.return_type and isinstance(decl.return_type, AstResultType):
+            is_fallible = True
+            err_type_name = decl.return_type.err_type.name if hasattr(decl.return_type.err_type, "name") else "Error"
+
+        return HirFnDecl(
+            name=decl.name,
+            params=params,
+            return_type_id=ret_tid,
+            body=body_hir,
+            is_fallible=is_fallible,
+            err_type_name=err_type_name,
+            is_method=True,
+            is_public=decl.is_public,
+            span=Span(decl.line, decl.col)
+        )
+
+    # -------------------------------------------------------------
+    # Blocks and Statements
+    # -------------------------------------------------------------
+
+    def _lower_block(self, block: Block) -> HirBlock:
+        stmts = [self._lower_stmt(s) for s in block.statements]
+        return HirBlock(stmts, Span(block.line, block.col))
+
+    def _lower_stmt(self, stmt: Stmt) -> HirStmt:
+        span = Span(stmt.line, stmt.col)
+        if isinstance(stmt, LetDecl):
+            ann_node = getattr(stmt, "type_ann", getattr(stmt, "type_annotation", None))
+            tid = self._get_type_id_from_node(ann_node) if ann_node else self._get_expr_type_id(stmt.initializer)
+            init_hir = self._lower_expr(stmt.initializer)
+            return HirLet(stmt.name, tid, stmt.is_mut, init_hir, span)
+        elif isinstance(stmt, WhileStmt):
+            cond_hir = self._lower_expr(stmt.condition)
+            body_hir = self._lower_block(stmt.body)
+            return HirWhile(cond_hir, body_hir, span)
+        elif isinstance(stmt, ForStmt):
+            list_hir = self._lower_expr(stmt.iterable)
+            list_tid = list_hir.type_id
+            elem_tid = TYPE_INT
+            entry = self.interner.get_entry(list_tid)
+            if entry.tag == "list":
+                elem_tid = entry.data
+            var_name = stmt.pattern.name if hasattr(stmt.pattern, "name") else str(stmt.pattern)
+            body_hir = self._lower_block(stmt.body)
+            return HirForList(var_name, elem_tid, list_hir, body_hir, span)
+        elif isinstance(stmt, ReturnStmt):
+            if stmt.value is not None:
+                val_hir = self._lower_expr(stmt.value)
+            else:
+                val_hir = HirConstUnit(TYPE_UNIT, span)
+            return HirReturn(val_hir, span)
+        elif isinstance(stmt, BreakStmt):
+            return HirBreak(span)
+        elif isinstance(stmt, ContinueStmt):
+            return HirContinue(span)
+        elif isinstance(stmt, ExprStmt):
+            if isinstance(stmt.expr, AssignmentExpr):
+                tgt_hir = self._lower_expr(stmt.expr.target)
+                val_hir = self._lower_expr(stmt.expr.value)
+                return HirAssign(tgt_hir, val_hir, span)
+            return HirExprStmt(self._lower_expr(stmt.expr), span)
+
+        # Fallback to expression statement
+        return HirExprStmt(HirConstUnit(TYPE_UNIT, span), span)
+
+    # -------------------------------------------------------------
+    # Expressions
+    # -------------------------------------------------------------
+
+    def _lower_expr(self, expr: Expr) -> HirExpr:
+        span = Span(expr.line, expr.col)
+        tid = self._get_expr_type_id(expr)
+
+        if isinstance(expr, IntLiteral):
+            return HirConstInt(expr.value, tid or TYPE_INT, span)
+        elif isinstance(expr, FloatLiteral):
+            return HirConstFloat(expr.value, tid or TYPE_FLOAT, span)
+        elif isinstance(expr, BoolLiteral):
+            return HirConstBool(expr.value, tid or TYPE_BOOL, span)
+        elif isinstance(expr, StringLiteral):
+            return HirConstStr(expr.value, tid or TYPE_STR, span)
+        elif isinstance(expr, NoneLiteral):
+            return HirConstNone(tid or TYPE_NONE, span)
+        elif isinstance(expr, IdentExpr):
+            return HirLocalRef(expr.name, tid, span)
+        elif isinstance(expr, ThisExpr):
+            return HirThisRef(tid, span)
+        elif isinstance(expr, UnaryExpr):
+            operand_hir = self._lower_expr(expr.operand)
+            return HirUnaryOp(getattr(expr, "op", getattr(expr, "operator", "-")), operand_hir, tid, span)
+        elif isinstance(expr, BinaryExpr):
+            left_hir = self._lower_expr(expr.left)
+            right_hir = self._lower_expr(expr.right)
+            return HirBinaryOp(getattr(expr, "op", getattr(expr, "operator", "+")), left_hir, right_hir, tid, span)
+        elif isinstance(expr, NewExpr):
+            raw_args = getattr(expr, "arguments", getattr(expr, "args", []))
+            args_hir = [self._lower_expr(a) for a in raw_args]
+            return HirConstructObject(expr.class_name, args_hir, tid, span)
+        elif isinstance(expr, StructInitExpr):
+            s_name = getattr(expr, "struct_name", getattr(expr, "name", "Struct"))
+            fields_hir = [(f.name, self._lower_expr(f.value)) for f in expr.fields]
+            return HirConstructStruct(s_name, fields_hir, tid, span)
+        elif isinstance(expr, ListExpr):
+            elems_hir = [self._lower_expr(e) for e in expr.elements]
+            elem_tid = elems_hir[0].type_id if elems_hir else TYPE_INT
+            return HirConstructList(elem_tid, elems_hir, tid or self.interner.mk_list(elem_tid), span)
+        elif isinstance(expr, DictExpr):
+            entries_hir = [
+                (self._lower_expr(e.key), self._lower_expr(e.value)) if hasattr(e, "key")
+                else (self._lower_expr(e[0]), self._lower_expr(e[1]))
+                for e in expr.entries
+            ]
+            k_tid = entries_hir[0][0].type_id if entries_hir else TYPE_STR
+            v_tid = entries_hir[0][1].type_id if entries_hir else TYPE_INT
+            return HirConstructDict(k_tid, v_tid, entries_hir, tid or self.interner.mk_dict(k_tid, v_tid), span)
+        elif isinstance(expr, TupleExpr):
+            elems_hir = [self._lower_expr(e) for e in expr.elements]
+            elem_tids = [e.type_id for e in elems_hir]
+            return HirConstructTuple(elem_tids, elems_hir, tid or self.interner.mk_tuple(tuple(elem_tids)), span)
+        elif isinstance(expr, CallExpr):
+            raw_args = getattr(expr, "args", getattr(expr, "arguments", []))
+            # Check if this call is an object construction: ClassName(...)
+            if isinstance(expr.callee, IdentExpr) and expr.callee.name in self.classes:
+                args_hir = [self._lower_expr(a) for a in raw_args]
+                return HirConstructObject(expr.callee.name, args_hir, tid or self.interner.mk_class(expr.callee.name), span)
+            # Check if this call is a struct construction: StructName(...)
+            elif isinstance(expr.callee, IdentExpr) and expr.callee.name in self.structs:
+                args_hir = [self._lower_expr(a) for a in raw_args]
+                sdef = self.interner.struct_defs.get(expr.callee.name)
+                field_names = list(sdef.fields.keys()) if sdef else []
+                fields = [(field_names[i] if i < len(field_names) else f"f{i}", args_hir[i]) for i in range(len(args_hir))]
+                return HirConstructStruct(expr.callee.name, fields, tid or self.interner.mk_struct(expr.callee.name), span)
+            # Check if builtin call
+            elif isinstance(expr.callee, IdentExpr) and expr.callee.name in BUILTIN_NAMES:
+                args_hir = [self._lower_expr(a) for a in raw_args]
+                return HirBuiltinCall(expr.callee.name, args_hir, tid, span)
+            # Check if method call
+            elif isinstance(expr.callee, MemberExpr):
+                rec_hir = self._lower_expr(expr.callee.object)
+                args_hir = [self._lower_expr(a) for a in raw_args]
+                return HirMethodCall(rec_hir, expr.callee.property, args_hir, tid, span)
+            # Direct top-level function call
+            elif isinstance(expr.callee, IdentExpr):
+                args_hir = [self._lower_expr(a) for a in raw_args]
+                return HirDirectCall(expr.callee.name, args_hir, tid, span)
+            else:
+                args_hir = [self._lower_expr(a) for a in raw_args]
+                callee_name = getattr(expr.callee, "name", "anon_fn")
+                return HirDirectCall(callee_name, args_hir, tid, span)
+        elif isinstance(expr, MemberExpr):
+            # Check if this is an Enum variant: EnumName.Variant
+            if isinstance(expr.object, IdentExpr) and expr.object.name in self.enums:
+                enum_name = expr.object.name
+                variant_name = expr.property
+                edef = self.interner.enum_defs.get(enum_name)
+                v_idx = edef.variants.index(variant_name) if edef and variant_name in edef.variants else 0
+                return HirConstructEnum(enum_name, variant_name, v_idx, tid or self.interner.mk_enum(enum_name), span)
+            obj_hir = self._lower_expr(expr.object)
+            return HirFieldRead(obj_hir, expr.property, tid, span)
+        elif isinstance(expr, IndexExpr):
+            obj_hir = self._lower_expr(expr.object)
+            idx_hir = self._lower_expr(expr.index)
+            return HirIndexRead(obj_hir, idx_hir, tid, span)
+        elif isinstance(expr, PostfixTryExpr):
+            op_hir = self._lower_expr(expr.operand)
+            return HirTryPropagate(op_hir, "result" if "!" in self.interner.to_string(op_hir.type_id) else "optional", tid, span)
+        elif isinstance(expr, CoalesceExpr):
+            opt_hir = self._lower_expr(expr.left)
+            fb_hir = self._lower_expr(expr.right)
+            return HirCoalesce(opt_hir, fb_hir, tid, span)
+        elif isinstance(expr, ElseErrExpr):
+            op_hir = self._lower_expr(expr.operand)
+            h_block = getattr(expr, "handler", getattr(expr, "body", None))
+            handler_hir = self._lower_block(h_block)
+            err_var = getattr(expr, "err_name", getattr(expr, "err_variable", None))
+            return HirElseHandle(op_hir, err_var, handler_hir, tid, span)
+        elif isinstance(expr, IfExpr):
+            cond_hir = self._lower_expr(expr.condition)
+            then_hir = self._lower_block(expr.then_branch)
+            elifs_hir = [(self._lower_expr(b.condition), self._lower_block(b.body)) for b in expr.elif_branches]
+            else_hir = self._lower_block(expr.else_branch) if expr.else_branch else None
+            return HirIf(cond_hir, then_hir, elifs_hir, else_hir, tid, span)
+        elif isinstance(expr, MatchExpr):
+            sub_hir = self._lower_expr(expr.subject)
+            arms_hir = [HirMatchArm(arm.pattern, self._lower_block(arm.body), Span(arm.line, arm.col)) for arm in expr.arms]
+            return HirMatch(sub_hir, arms_hir, tid, span)
+
+        # Fallback
+        return HirConstUnit(tid or TYPE_UNIT, span)
+
+    # -------------------------------------------------------------
+    # Type Resolution Helpers
+    # -------------------------------------------------------------
+
+    def _get_expr_type_id(self, expr: Expr) -> int:
+        if hasattr(expr, "inferred_type_id") and expr.inferred_type_id is not None:
+            return expr.inferred_type_id
+        if hasattr(expr, "inferred_type") and expr.inferred_type is not None:
+            return self.interner.from_wtype(expr.inferred_type)
+        return TYPE_ERROR
+
+    def _get_type_id_from_node(self, node: Optional[TypeNode]) -> int:
+        if node is None:
+            return TYPE_UNIT
+        if isinstance(node, NamedType):
+            name = node.name
+            if name == "int":
+                return TYPE_INT
+            elif name == "float":
+                return TYPE_FLOAT
+            elif name == "bool":
+                return TYPE_BOOL
+            elif name == "str":
+                return TYPE_STR
+            elif name == "unit":
+                return TYPE_UNIT
+            elif name == "none":
+                return TYPE_NONE
+            elif name in self.structs:
+                return self.interner.mk_struct(name)
+            elif name in self.enums:
+                return self.interner.mk_enum(name)
+            elif name in self.classes:
+                return self.interner.mk_class(name)
+            return TYPE_ERROR
+        elif isinstance(node, AstOptionalType):
+            return self.interner.mk_optional(self._get_type_id_from_node(node.inner))
+        elif isinstance(node, AstListType):
+            return self.interner.mk_list(self._get_type_id_from_node(node.element_type))
+        elif isinstance(node, AstDictType):
+            return self.interner.mk_dict(
+                self._get_type_id_from_node(node.key_type),
+                self._get_type_id_from_node(node.value_type)
+            )
+        elif isinstance(node, AstResultType):
+            return self.interner.mk_result(
+                self._get_type_id_from_node(node.ok_type),
+                self._get_type_id_from_node(node.err_type)
+            )
+        return TYPE_ERROR
