@@ -1,0 +1,50 @@
+name: W Language CI & Self-Hosting Verification
+
+on:
+  push:
+    branches: [ main, develop, "feat/**" ]
+  pull_request:
+    branches: [ main, develop ]
+
+jobs:
+  conformance-and-bootstrap:
+    name: Conformance & 3-Stage Bootstrap (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ ubuntu-latest, macos-latest ]
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Verify CLI & Self-Hosted Compiler Typecheck
+        run: |
+          chmod +x w install.sh
+          ./w version
+          ./w check selfhost/w1.w
+
+      - name: Run 9-Stage Conformance & Fixed-Point Bootstrap Suite
+        run: |
+          ./w test
+
+      - name: Verify Examples (Interpreter vs Self-Hosted W1 Native Binary)
+        run: |
+          for f in examples/*.w; do
+            echo "Verifying $f..."
+            ./w check "$f"
+            out_interp=$(./w run "$f")
+            ./w build --selfhost "$f" -o /tmp/w_ci_bin
+            out_native=$(/tmp/w_ci_bin)
+            rm -f /tmp/w_ci_bin
+            if [ "$out_interp" != "$out_native" ]; then
+              echo "Mismatch between W0 interpreter and W1 native binary on $f"
+              exit 1
+            fi
+          done
