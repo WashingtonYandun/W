@@ -648,6 +648,12 @@ fn extract_module_ns(path: str) -> str {
     return slice(path, slash + 1, dot)
 }
 
+fn bind_call(c_call: str) -> ExprRes {
+    let tmp = new_temp()
+    emit_line("WVal " + tmp + " = " + c_call + ";")
+    return ExprRes { val: tmp, lref: "" }
+}
+
 fn emit_call(callee: ExprRes, args_c: list[str]) -> ExprRes {
     let raw = callee.lref
     let n = len(raw)
@@ -679,7 +685,7 @@ fn emit_call(callee: ExprRes, args_c: list[str]) -> ExprRes {
                 for idx in 0..len(args_c) {
                     joined = joined + ", " + args_c[idx]
                 }
-                return ExprRes { val: "w_method_" + def_cls + "__" + method + "(" + joined + ")", lref: "" }
+                return bind_call("w_method_" + def_cls + "__" + method + "(" + joined + ")")
             }
             return ExprRes { val: "w_unit()", lref: "" }
         }
@@ -693,38 +699,38 @@ fn emit_call(callee: ExprRes, args_c: list[str]) -> ExprRes {
                     }
                     joined = joined + args_c[idx]
                 }
-                return ExprRes { val: "w_fn_" + obj_name + "__" + method + "(" + joined + ")", lref: "" }
+                return bind_call("w_fn_" + obj_name + "__" + method + "(" + joined + ")")
             }
         }
         if method == "append" {
-            return ExprRes { val: "w_list_append(" + recv_lref + ", " + args_c[0] + ")", lref: "" }
+            return bind_call("w_list_append(" + recv_lref + ", " + args_c[0] + ")")
         }
         if method == "pop" {
-            return ExprRes { val: "w_list_pop(" + recv_lref + ")", lref: "" }
+            return bind_call("w_list_pop(" + recv_lref + ")")
         }
         if method == "clear" {
-            return ExprRes { val: "w_list_clear(" + recv_lref + ")", lref: "" }
+            return bind_call("w_list_clear(" + recv_lref + ")")
         }
         if method == "get" {
-            return ExprRes { val: "w_dict_get(" + recv_val + ", " + args_c[0] + ")", lref: "" }
+            return bind_call("w_dict_get(" + recv_val + ", " + args_c[0] + ")")
         }
         if method == "keys" {
-            return ExprRes { val: "w_dict_keys(" + recv_val + ")", lref: "" }
+            return bind_call("w_dict_keys(" + recv_val + ")")
         }
         if method == "values" {
-            return ExprRes { val: "w_dict_values(" + recv_val + ")", lref: "" }
+            return bind_call("w_dict_values(" + recv_val + ")")
         }
         let mut d_args = recv_val
         for idx in 0..len(args_c) {
             d_args = d_args + ", " + args_c[idx]
         }
-        return ExprRes { val: "w_dispatch__" + method + "__" + str(len(args_c)) + "(" + d_args + ")", lref: "" }
+        return bind_call("w_dispatch__" + method + "__" + str(len(args_c)) + "(" + d_args + ")")
     }
     if len(callee.val) >= 2 and slice(callee.val, 0, 2) == "v_" {
         let fn_name = slice(callee.val, 2, len(callee.val))
         if fn_name == "print" {
             if len(args_c) == 0 {
-                return ExprRes { val: "w_builtin_print(0, NULL)", lref: "" }
+                return bind_call("w_builtin_print(0, NULL)")
             }
             let arr_tmp = new_temp()
             let mut joined = ""
@@ -736,46 +742,46 @@ fn emit_call(callee: ExprRes, args_c: list[str]) -> ExprRes {
             }
             let cnt = str(len(args_c))
             emit_line("WVal " + arr_tmp + "[" + cnt + "] = { " + joined + " };")
-            return ExprRes { val: "w_builtin_print(" + cnt + ", " + arr_tmp + ")", lref: "" }
+            return bind_call("w_builtin_print(" + cnt + ", " + arr_tmp + ")")
         }
         if fn_name == "len" {
-            return ExprRes { val: "w_builtin_len(" + args_c[0] + ")", lref: "" }
+            return bind_call("w_builtin_len(" + args_c[0] + ")")
         }
         if fn_name == "str" {
-            return ExprRes { val: "w_builtin_str(" + args_c[0] + ")", lref: "" }
+            return bind_call("w_builtin_str(" + args_c[0] + ")")
         }
         if fn_name == "int" {
-            return ExprRes { val: "w_builtin_int(" + args_c[0] + ")", lref: "" }
+            return bind_call("w_builtin_int(" + args_c[0] + ")")
         }
         if fn_name == "float" {
-            return ExprRes { val: "w_builtin_float(" + args_c[0] + ")", lref: "" }
+            return bind_call("w_builtin_float(" + args_c[0] + ")")
         }
         if fn_name == "ord" {
-            return ExprRes { val: "w_builtin_ord(" + args_c[0] + ")", lref: "" }
+            return bind_call("w_builtin_ord(" + args_c[0] + ")")
         }
         if fn_name == "chr" {
-            return ExprRes { val: "w_builtin_chr(" + args_c[0] + ")", lref: "" }
+            return bind_call("w_builtin_chr(" + args_c[0] + ")")
         }
         if fn_name == "bytes" {
-            return ExprRes { val: "w_builtin_bytes(" + args_c[0] + ")", lref: "" }
+            return bind_call("w_builtin_bytes(" + args_c[0] + ")")
         }
         if fn_name == "enumerate" {
-            return ExprRes { val: "w_builtin_enumerate(" + args_c[0] + ")", lref: "" }
+            return bind_call("w_builtin_enumerate(" + args_c[0] + ")")
         }
         if fn_name == "dict_items" {
-            return ExprRes { val: "w_builtin_dict_items(" + args_c[0] + ")", lref: "" }
+            return bind_call("w_builtin_dict_items(" + args_c[0] + ")")
         }
         if fn_name == "read_file" {
-            return ExprRes { val: "w_builtin_read_file(" + args_c[0] + ")", lref: "" }
+            return bind_call("w_builtin_read_file(" + args_c[0] + ")")
         }
         if fn_name == "write_file" {
-            return ExprRes { val: "w_builtin_write_file(" + args_c[0] + ", " + args_c[1] + ")", lref: "" }
+            return bind_call("w_builtin_write_file(" + args_c[0] + ", " + args_c[1] + ")")
         }
         if fn_name == "slice" {
-            return ExprRes { val: "w_builtin_slice(" + args_c[0] + ", " + args_c[1] + ", " + args_c[2] + ")", lref: "" }
+            return bind_call("w_builtin_slice(" + args_c[0] + ", " + args_c[1] + ", " + args_c[2] + ")")
         }
         if fn_name == "args" {
-            return ExprRes { val: "w_builtin_args()", lref: "" }
+            return bind_call("w_builtin_args()")
         }
         let mut joined = ""
         for idx in 0..len(args_c) {
@@ -785,9 +791,9 @@ fn emit_call(callee: ExprRes, args_c: list[str]) -> ExprRes {
             joined = joined + args_c[idx]
         }
         if find_class_meta_idx(fn_name) != -1 {
-            return ExprRes { val: "w_new_" + fn_name + "(" + joined + ")", lref: "" }
+            return bind_call("w_new_" + fn_name + "(" + joined + ")")
         }
-        return ExprRes { val: c_fn_name(fn_name) + "(" + joined + ")", lref: "" }
+        return bind_call(c_fn_name(fn_name) + "(" + joined + ")")
     }
     return ExprRes { val: "w_unit()", lref: "" }
 }
@@ -1050,7 +1056,7 @@ fn parse_prefix_expr(allow_struct: bool) -> ExprRes {
             }
             joined = joined + args_c[idx]
         }
-        return ExprRes { val: "w_new_" + cname_tok.val + "(" + joined + ")", lref: "" }
+        return bind_call("w_new_" + cname_tok.val + "(" + joined + ")")
     }
     if match_kind("IDENT") {
         let name = tok.val
