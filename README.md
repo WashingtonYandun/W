@@ -147,6 +147,7 @@ The canonical `w` CLI supports interpretation, static type checking, formatting,
 | [`examples/03_enums_and_match.w`](examples/03_enums_and_match.w) | `enum`, named `struct` initialization, exhaustive `match` expressions, `enumerate()` |
 | [`examples/04_optionals_and_errors.w`](examples/04_optionals_and_errors.w) | `T?`, `??` coalescing, `T ! E` fallible functions, postfix `?`, `else err` recovery |
 | [`examples/05_utf8_and_algorithms.w`](examples/05_utf8_and_algorithms.w) | UTF-8 code-point indexing (`"José"[3] == "é"`), `bytes()`, binary search |
+| [`examples/06_game_of_life.w`](examples/06_game_of_life.w) | Conway's Game of Life (Glider simulation using `struct`, 2D grid indexing, and CoW state transitions) |
 
 ---
 
@@ -184,7 +185,7 @@ ln -sfn "$(pwd)/editors/vscode-w" ~/.antigravity/extensions/w-lang-0.1.0
 | [`codegen/CCodeGen.py`](codegen/CCodeGen.py) | W0 C99 code generator |
 | [`runtime/w_runtime.h`](runtime/w_runtime.h) | Single-header C99 runtime (ARC + CoW, UTF-8 code points, collections, I/O) |
 | [`selfhost/w1.w`](selfhost/w1.w) | **Self-hosted W1 compiler** written in 100% pure W |
-| [`run_conformance.py`](run_conformance.py) | Automated 9-stage conformance test runner (164/164 tests) |
+| [`run_conformance.py`](run_conformance.py) | Automated 10-stage conformance test runner (170/170 tests) |
 | [`.github/workflows/ci.yml`](.github/workflows/ci.yml) | Cross-platform CI pipeline (Linux & macOS) |
 
 ---
@@ -195,11 +196,12 @@ ln -sfn "$(pwd)/editors/vscode-w" ~/.antigravity/extensions/w-lang-0.1.0
 ./w test
 ```
 
-Verifies all 9 stages (**164 / 164 tests**):
+Verifies all 10 stages (**170 / 170 tests**):
 1. **Lexer Valid (12/12)** & **Lexer Invalid (7/7)**
 2. **Parser Valid (18/18)** & **Parser Invalid (8/8)**
 3. **Checker Valid (13/13)**, **Checker Invalid (20/20)** & **Error Handling (2/2)**
 4. **Formatter Idempotence (`w fmt`) (22/22)**
 5. **Runtime W0 Interpreter (21/21)**
 6. **C99 Native Backend W0 (20/20)**
-7. **W1 Stage-2 Native Compiler Runtime Parity (20/20)** & **3-Stage Fixed-Point Bootstrap (`1/1`)**
+7. **W1 Stage-2 Native Compiler Runtime Parity (20/20)**
+8. **Showcase Examples E2E Suite (6/6)** & **3-Stage Fixed-Point Bootstrap (`1/1`)**

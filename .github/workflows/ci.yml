@@ -31,7 +31,7 @@ jobs:
           export PATH="$HOME/.local/bin:$PATH"
           w version
 
-      - name: Run & Verify All 5 Showcase Examples (W0 Interpreter + W0 C99 + W1 Native)
+      - name: Run & Verify All 6 Showcase Examples (W0 Interpreter + W0 C99 + W1 Native)
         run: |
           export PATH="$HOME/.local/bin:$PATH"
           for f in examples/*.w; do
@@ -67,6 +67,6 @@ jobs:
             echo "[PASS] $f verified across W0 Interpreter, W0 C99, and W1 Self-Hosted Native"
           done
 
-      - name: Run Full 169-Test Conformance & 3-Stage Bootstrap Suite
+      - name: Run Full 170-Test Conformance & 3-Stage Bootstrap Suite
         run: |
           ./w test
