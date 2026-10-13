@@ -1,0 +1,34 @@
+fn load_data(ok: bool) -> str ! IoError {
+    if not ok {
+        let missing = read_file("__non_existent_w_file__.txt")?
+        return missing
+    }
+    return "loaded_ok"
+}
+
+fn find_tag(id: int) -> str? {
+    if id == 1 {
+        return "v0.1"
+    }
+    return none
+}
+
+fn main() -> unit {
+    let a = load_data(true) else err {
+        "fallback:" + err.message
+    }
+    print(a)
+
+    let b = load_data(false) else err {
+        "recovered"
+    }
+    print(b)
+
+    let t1 = find_tag(1) else {
+        "none_tag"
+    }
+    let t2 = find_tag(99) else {
+        "default_tag"
+    }
+    print(t1, t2)
+}
