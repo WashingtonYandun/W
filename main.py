@@ -256,6 +256,7 @@ def print_help() -> None:
     print("  w emit-c [--selfhost] <file.w> [-o <out.c>] # Transpile W source to C99")
     print("  w build [--selfhost] <file.w> [-o <bin>]    # Compile W source to native binary")
     print("  w test [--differential [N]] [--fuzz [N]]    # Run conformance, differential, or fuzz suite")
+    print("  w bench [--update-baseline]                 # Run W0/W1 performance benchmark harness")
     print("  w version                                   # Show compiler version")
 
 
@@ -273,10 +274,17 @@ def main() -> None:
     subcmd: Optional[str] = None
     file_to_run: Optional[str] = None
 
-    if args and args[0] in ("run", "check", "fmt", "ast", "tokens", "emit-c", "build", "test", "version"):
+    if args and args[0] in ("run", "check", "fmt", "ast", "tokens", "emit-c", "build", "test", "bench", "version"):
         subcmd = args[0]
         args = args[1:]
-        if subcmd == "test":
+        if subcmd == "bench":
+            update_baseline = "--update-baseline" in args
+            repo_root = get_repo_root()
+            w1_bin = ensure_selfhost_w1_binary(repo_root)
+            from bench.run_bench import run_benchmark_suite
+            ok = run_benchmark_suite(repo_root, w1_bin, update_baseline=update_baseline)
+            sys.exit(0 if ok else 1)
+        elif subcmd == "test":
             if args and args[0] == "--differential":
                 gen_count = 25
                 base_seed = 1000

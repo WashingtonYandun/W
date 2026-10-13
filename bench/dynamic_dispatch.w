@@ -1,0 +1,42 @@
+# Benchmark 10: Polymorphic interface & subclass dynamic method dispatch
+
+interface Op {
+    fn eval(x: int) -> int
+}
+
+class AddOp implements Op {
+    public offset: int
+    fn init(o: int) {
+        this.offset = o
+    }
+    public fn eval(x: int) -> int {
+        return x + this.offset
+    }
+}
+
+class LinearOp extends AddOp implements Op {
+    public factor: int
+    fn init(f: int, o: int) {
+        super.init(o)
+        this.factor = f
+    }
+    public fn eval(x: int) -> int {
+        return x * this.factor + this.offset
+    }
+}
+
+fn run_op(op: Op, x: int) -> int {
+    return op.eval(x)
+}
+
+fn main() -> unit {
+    let op1: Op = AddOp(5)
+    let op2: Op = LinearOp(3, 2)
+    let mut total = 0
+    let mut i = 0
+    while i < 4000 {
+        total = (total + run_op(op1, i) + run_op(op2, i)) % 1000000
+        i = i + 1
+    }
+    print(total)
+}
