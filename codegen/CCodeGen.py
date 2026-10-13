@@ -2,10 +2,13 @@ import os
 from typing import Dict, List, Optional, Set, Tuple
 from node.NodeType import (
     Program, Stmt, Expr, TypeNode, ResultType,
+    NamedType, OptionalType as AstOptionalType, ListType as AstListType, DictType as AstDictType,
     Pattern, IdentifierPattern, TuplePattern, EnumPattern, LiteralPattern, WildcardPattern,
     Block, ExprStmt, Param, FnDecl, StructDecl, EnumDecl, ImportDecl,
+    InterfaceDecl, ClassDecl, ClassField, MethodDecl,
     LetDecl, WhileStmt, ForStmt, ReturnStmt, BreakStmt, ContinueStmt,
     IntLiteral, FloatLiteral, StringLiteral, BoolLiteral, NoneLiteral, IdentExpr,
+    ThisExpr, SuperExpr, NewExpr,
     UnaryExpr, BinaryExpr, CoalesceExpr, RangeExpr, PostfixTryExpr, ElseErrExpr,
     CallExpr, MemberExpr, IndexExpr, AssignmentExpr, StructInitExpr,
     ListExpr, DictExpr, TupleExpr, IfExpr, MatchExpr
@@ -17,12 +20,16 @@ class CCodeGen:
     """
     Canonical W v0.1 to C99 Transpiler Backend.
     Preserves exact value semantics (ARC + Copy-on-Write via runtime/w_runtime.h),
-    deterministic control flow, pattern matching, and fallible error handling.
+    reference semantics for OOP classes, dynamic dispatch, and fallible error handling.
     """
     def __init__(self, file: str = "<stdin>"):
         self.file = file
         self.temp_counter = 0
         self.enum_names: Set[str] = set()
+        self.classes: Dict[str, ClassDecl] = {}
+        self.class_order: List[str] = []
+        self.dispatch_methods: List[Tuple[str, int]] = []
+        self.current_class: Optional[ClassDecl] = None
         self.fallible_fns: Dict[str, bool] = {}
         self.current_fn_fallible: bool = False
         self.current_ns: str = ""
@@ -70,10 +77,12 @@ class CCodeGen:
 
     def generate(self, program: Program) -> str:
         self._collect_declarations(program, ns="")
+        self._prepare_oop_prototypes()
 
-        # Emit all top-level functions (and imported module functions)
+        # Emit all top-level functions, class methods, and imported module functions
         main_stmts: List[str] = []
         self._emit_module_body(program, ns="", out_main_stmts=main_stmts)
+        self._emit_oop_dispatchers()
 
         lines: List[str] = [
             '#include "runtime/w_runtime.h"',
@@ -100,7 +109,7 @@ class CCodeGen:
             lines.append(f"    {s}")
 
         # If there are no top-level executable statements and main() exists in W, call it
-        non_decls = [s for s in program.body if not isinstance(s, (FnDecl, StructDecl, EnumDecl, ImportDecl))]
+        non_decls = [s for s in program.body if not isinstance(s, (FnDecl, StructDecl, EnumDecl, InterfaceDecl, ClassDecl, ImportDecl))]
         if not non_decls and "w_fn_main" in self.fallible_fns:
             lines.append("    w_fn_main();")
 
@@ -112,6 +121,15 @@ class CCodeGen:
         for stmt in program.body:
             if isinstance(stmt, EnumDecl):
                 self.enum_names.add(stmt.name)
+            elif isinstance(stmt, ClassDecl):
+                if stmt.name not in self.classes:
+                    self.classes[stmt.name] = stmt
+                    self.class_order.append(stmt.name)
+                for m in stmt.methods:
+                    if m.name != "init":
+                        key = (m.name, len(m.params))
+                        if key not in self.dispatch_methods:
+                            self.dispatch_methods.append(key)
             elif isinstance(stmt, FnDecl):
                 c_name = self.c_fn(stmt.name, ns=ns)
                 is_fallible = isinstance(stmt.return_type, ResultType)
@@ -123,6 +141,143 @@ class CCodeGen:
                 if gv_name not in self.global_vars:
                     self.global_vars.append(gv_name)
 
+    def _find_class_method(self, class_name: str, method_name: str) -> Optional[Tuple[str, MethodDecl]]:
+        curr: Optional[str] = class_name
+        while curr is not None and curr in self.classes:
+            cdecl = self.classes[curr]
+            for m in cdecl.methods:
+                if m.name == method_name:
+                    return (curr, m)
+            curr = cdecl.superclass
+        return None
+
+    def _collect_class_fields(self, class_name: str) -> List[ClassField]:
+        lineage: List[ClassDecl] = []
+        curr: Optional[str] = class_name
+        while curr is not None and curr in self.classes:
+            lineage.append(self.classes[curr])
+            curr = self.classes[curr].superclass
+        lineage.reverse()
+        fields: List[ClassField] = []
+        seen: Set[str] = set()
+        for cdecl in lineage:
+            for f in cdecl.fields:
+                if f.name not in seen:
+                    seen.add(f.name)
+                    fields.append(f)
+        return fields
+
+    def _default_c_expr_for_type(self, type_ann: TypeNode) -> str:
+        if isinstance(type_ann, NamedType):
+            if type_ann.name == "int":
+                return "w_int(0LL)"
+            if type_ann.name == "float":
+                return "w_float(0.0)"
+            if type_ann.name == "bool":
+                return "w_bool(false)"
+            if type_ann.name == "str":
+                return 'w_str("")'
+        elif isinstance(type_ann, AstOptionalType):
+            return "w_none()"
+        elif isinstance(type_ann, AstListType):
+            return "w_make_list(0, NULL)"
+        elif isinstance(type_ann, AstDictType):
+            return "w_make_dict(0, NULL, NULL)"
+        return "w_none()"
+
+    def _prepare_oop_prototypes(self) -> None:
+        for cls_name in self.class_order:
+            cdecl = self.classes[cls_name]
+            for m in cdecl.methods:
+                params = ["WVal v_self"] + [f"WVal v_{p.name}" for p in m.params]
+                self.fn_Prototypes.append(f"static WVal w_method_{cls_name}__{m.name}({', '.join(params)});")
+            init_res = self._find_class_method(cls_name, "init")
+            if init_res is not None:
+                _, init_m = init_res
+                init_sig = ", ".join([f"WVal v_{p.name}" for p in init_m.params]) if init_m.params else "void"
+            else:
+                init_sig = "void"
+            self.fn_Prototypes.append(f"static WVal w_new_{cls_name}({init_sig});")
+
+        for mname, arity in self.dispatch_methods:
+            params = ["WVal v_self"] + [f"WVal _a{i}" for i in range(arity)]
+            self.fn_Prototypes.append(f"static WVal w_dispatch__{mname}__{arity}({', '.join(params)});")
+
+    def _emit_class_decl(self, stmt: ClassDecl) -> None:
+        prev_cls = self.current_class
+        self.current_class = stmt
+        try:
+            for m in stmt.methods:
+                c_name = f"w_method_{stmt.name}__{m.name}"
+                params = ["WVal v_self"] + [f"WVal v_{p.name}" for p in m.params]
+                prev_fallible = self.current_fn_fallible
+                self.current_fn_fallible = isinstance(m.return_type, ResultType)
+
+                body_stmts: List[str] = ["v_self = w_clone(v_self);"]
+                for p in m.params:
+                    body_stmts.append(f"v_{p.name} = w_clone(v_{p.name});")
+
+                ret_expr = self.emit_block_value(m.body, body_stmts)
+                if self.current_fn_fallible:
+                    body_stmts.append(f"return w_ok({ret_expr});")
+                else:
+                    body_stmts.append(f"return {ret_expr};")
+
+                fn_lines = [f"static WVal {c_name}({', '.join(params)}) {{"]
+                for s in body_stmts:
+                    fn_lines.append(f"    {s}")
+                fn_lines.append("}")
+                self.fn_Definitions.append("\n".join(fn_lines))
+                self.current_fn_fallible = prev_fallible
+
+            # Emit constructor helper w_new_<ClassName>
+            all_fields = self._collect_class_fields(stmt.name)
+            init_res = self._find_class_method(stmt.name, "init")
+            if init_res is not None:
+                init_cls, init_m = init_res
+                init_sig = ", ".join([f"WVal v_{p.name}" for p in init_m.params]) if init_m.params else "void"
+                init_args = ["v_self"] + [f"v_{p.name}" for p in init_m.params]
+            else:
+                init_cls = ""
+                init_m = None
+                init_sig = "void"
+                init_args = []
+
+            new_lines = [f"static WVal w_new_{stmt.name}({init_sig}) {{"]
+            if all_fields:
+                f_names = ", ".join([f'"{f.name}"' for f in all_fields])
+                f_defaults = ", ".join([self._default_c_expr_for_type(f.type_ann) for f in all_fields])
+                new_lines.append(f"    const char* _k[{len(all_fields)}] = {{ {f_names} }};")
+                new_lines.append(f"    WVal _v[{len(all_fields)}] = {{ {f_defaults} }};")
+                new_lines.append(f'    WVal v_self = w_make_object("{stmt.name}", {len(all_fields)}, _k, _v);')
+            else:
+                new_lines.append(f'    WVal v_self = w_make_object("{stmt.name}", 0, NULL, NULL);')
+            if init_m is not None:
+                new_lines.append(f"    (void)w_method_{init_cls}__init({', '.join(init_args)});")
+            new_lines.append("    return v_self;")
+            new_lines.append("}")
+            self.fn_Definitions.append("\n".join(new_lines))
+        finally:
+            self.current_class = prev_cls
+
+    def _emit_oop_dispatchers(self) -> None:
+        for mname, arity in self.dispatch_methods:
+            params = ["WVal v_self"] + [f"WVal _a{i}" for i in range(arity)]
+            call_args = ["v_self"] + [f"_a{i}" for i in range(arity)]
+            d_lines = [f"static WVal w_dispatch__{mname}__{arity}({', '.join(params)}) {{"]
+            for cls_name in self.class_order:
+                resolved = self._find_class_method(cls_name, mname)
+                if resolved is not None:
+                    def_cls, m_decl = resolved
+                    if len(m_decl.params) == arity:
+                        d_lines.append(
+                            f'    if (v_self.tag == W_OBJECT && strcmp(v_self.as.st->name, "{cls_name}") == 0) '
+                            f'return w_method_{def_cls}__{mname}({", ".join(call_args)});'
+                        )
+            d_lines.append("    return w_none();")
+            d_lines.append("}")
+            self.fn_Definitions.append("\n".join(d_lines))
+
     def _emit_module_body(self, program: Program, ns: str, out_main_stmts: List[str]) -> None:
         prev_ns = self.current_ns
         self.current_ns = ns
@@ -130,11 +285,13 @@ class CCodeGen:
         for stmt in program.body:
             if isinstance(stmt, ImportDecl):
                 self._handle_import(stmt, out_main_stmts)
+            elif isinstance(stmt, ClassDecl):
+                self._emit_class_decl(stmt)
             elif isinstance(stmt, FnDecl):
                 self._emit_fn_decl(stmt, ns=ns)
 
         for stmt in program.body:
-            if not isinstance(stmt, (FnDecl, StructDecl, EnumDecl, ImportDecl)):
+            if not isinstance(stmt, (FnDecl, StructDecl, EnumDecl, InterfaceDecl, ClassDecl, ImportDecl)):
                 if isinstance(stmt, LetDecl):
                     gv_name = f"v_{ns}_{stmt.name}" if ns else f"v_{stmt.name}"
                     val_expr = self.emit_expr(stmt.initializer, out_main_stmts)
@@ -299,6 +456,8 @@ class CCodeGen:
     # ==========================================
 
     def emit_lvalue_ref(self, target: Expr, out: List[str]) -> str:
+        if isinstance(target, ThisExpr):
+            return "&v_self"
         if isinstance(target, IdentExpr):
             return f"&{self.c_var(target.name)}"
         if isinstance(target, IndexExpr):
@@ -330,6 +489,13 @@ class CCodeGen:
 
         if isinstance(expr, NoneLiteral):
             return "w_none()"
+
+        if isinstance(expr, ThisExpr):
+            return "v_self"
+
+        if isinstance(expr, NewExpr):
+            arg_vals = [self.emit_expr(a, out) for a in expr.args]
+            return f"w_new_{expr.class_name}({', '.join(arg_vals)})"
 
         if isinstance(expr, IdentExpr):
             return self.c_var(expr.name)
@@ -508,6 +674,17 @@ class CCodeGen:
                 obj_expr = expr.callee.object
                 method = expr.callee.property
 
+                # super.init(...) or super.method(...)
+                if isinstance(obj_expr, SuperExpr):
+                    arg_vals = [self.emit_expr(a, out) for a in expr.args]
+                    call_args = ["v_self"] + arg_vals
+                    if self.current_class is not None and self.current_class.superclass is not None:
+                        resolved = self._find_class_method(self.current_class.superclass, method)
+                        if resolved is not None:
+                            def_cls, _ = resolved
+                            return f"w_method_{def_cls}__{method}({', '.join(call_args)})"
+                    return "w_unit()"
+
                 # Check if module call: mod.fn(...)
                 if isinstance(obj_expr, IdentExpr):
                     mod_fn = self.c_fn(method, ns=obj_expr.name)
@@ -536,6 +713,12 @@ class CCodeGen:
                 if method == "values":
                     obj_v = self.emit_expr(obj_expr, out)
                     return f"w_dict_values({obj_v})"
+
+                # OOP dynamic method dispatch
+                obj_v = self.emit_expr(obj_expr, out)
+                arg_vals = [self.emit_expr(a, out) for a in expr.args]
+                call_args = [obj_v] + arg_vals
+                return f"w_dispatch__{method}__{len(arg_vals)}({', '.join(call_args)})"
 
         if isinstance(expr, ListExpr):
             if not expr.elements:

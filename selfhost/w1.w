@@ -10,6 +10,16 @@ struct ExprRes {
     lref: str,
 }
 
+struct ClassMeta {
+    name: str,
+    super_name: str,
+    field_names: list[str],
+    field_defaults: list[str],
+    method_names: list[str],
+    method_arities: list[int],
+    init_params: list[str],
+}
+
 let mut g_tokens: list[Token] = []
 let mut g_pos: int = 0
 let mut g_temp_id: int = 0
@@ -17,6 +27,11 @@ let mut g_fn_fallible: bool = false
 let mut g_ns: str = ""
 let mut g_enums: list[str] = []
 let mut g_modules: list[str] = []
+let mut g_classes: list[ClassMeta] = []
+let mut g_dispatch_names: list[str] = []
+let mut g_dispatch_arities: list[int] = []
+let mut g_cur_class: str = ""
+let mut g_cur_super: str = ""
 let mut g_globals: list[str] = []
 let mut g_protos: list[str] = []
 let mut g_fn_defs: list[str] = []
@@ -55,6 +70,15 @@ fn keyword_kind(word: str) -> str {
     if word == "mut" { return "MUT" }
     if word == "struct" { return "STRUCT" }
     if word == "enum" { return "ENUM" }
+    if word == "class" { return "CLASS" }
+    if word == "interface" { return "INTERFACE" }
+    if word == "extends" { return "EXTENDS" }
+    if word == "implements" { return "IMPLEMENTS" }
+    if word == "new" { return "NEW" }
+    if word == "this" { return "THIS" }
+    if word == "super" { return "SUPER" }
+    if word == "public" { return "PUBLIC" }
+    if word == "private" { return "PRIVATE" }
     if word == "if" { return "IF" }
     if word == "elif" { return "ELIF" }
     if word == "else" { return "ELSE" }
@@ -404,6 +428,89 @@ fn parse_type_ann() -> bool {
     return is_fallible
 }
 
+fn parse_field_default() -> str {
+    let tname = at_tok().val
+    let mut def_c = "w_none()"
+    if tname == "int" { def_c = "w_int(0LL)" }
+    elif tname == "float" { def_c = "w_float(0.0)" }
+    elif tname == "bool" { def_c = "w_bool(false)" }
+    elif tname == "str" { def_c = "w_str(\"\")" }
+    elif tname == "list" { def_c = "w_make_list(0, NULL)" }
+    elif tname == "dict" { def_c = "w_make_dict(0, NULL, NULL)" }
+    advance_tok()
+    if match_kind("LBRACKET") {
+        while not check_kind("RBRACKET") and not is_eof() {
+            parse_type_ann()
+            match_kind("COMMA")
+        }
+        expect_kind("RBRACKET")
+    }
+    if match_kind("QUESTION") {
+        def_c = "w_none()"
+    }
+    return def_c
+}
+
+fn find_class_meta_idx(cls_name: str) -> int {
+    for i in 0..len(g_classes) {
+        if g_classes[i].name == cls_name {
+            return i
+        }
+    }
+    return -1
+}
+
+fn find_class_method_owner(start_cls: str, m_name: str) -> str {
+    let mut cur = start_cls
+    while cur != "" {
+        let idx = find_class_meta_idx(cur)
+        if idx == -1 {
+            return ""
+        }
+        let cm = g_classes[idx]
+        for mi in 0..len(cm.method_names) {
+            if cm.method_names[mi] == m_name {
+                return cm.name
+            }
+        }
+        cur = cm.super_name
+    }
+    return ""
+}
+
+fn find_class_method_arity(start_cls: str, m_name: str) -> int {
+    let mut cur = start_cls
+    while cur != "" {
+        let idx = find_class_meta_idx(cur)
+        if idx == -1 {
+            return -1
+        }
+        let cm = g_classes[idx]
+        for mi in 0..len(cm.method_names) {
+            if cm.method_names[mi] == m_name {
+                return cm.method_arities[mi]
+            }
+        }
+        cur = cm.super_name
+    }
+    return -1
+}
+
+fn register_dispatch(m_name: str, arity: int) -> unit {
+    for i in 0..len(g_dispatch_names) {
+        if g_dispatch_names[i] == m_name and g_dispatch_arities[i] == arity {
+            return
+        }
+    }
+    g_dispatch_names.append(m_name)
+    g_dispatch_arities.append(arity)
+    let mut sig = "WVal v_self"
+    for ai in 0..arity {
+        sig = sig + ", WVal _a" + str(ai)
+    }
+    g_protos.append("static WVal w_dispatch__" + m_name + "__" + str(arity) + "(" + sig + ");")
+}
+
 fn op_precedence(k: str) -> int {
     if k == "ASSIGN" { return 1 }
     if k == "QQ" { return 2 }
@@ -473,6 +580,18 @@ fn emit_call(callee: ExprRes, args_c: list[str]) -> ExprRes {
         let recv_lref = clean_lref(slice(raw, s2 + 2, s3))
         let recv_val = slice(raw, s3 + 2, n)
 
+        if recv_val == "v_super" {
+            let def_cls = find_class_method_owner(g_cur_super, method)
+            if def_cls != "" {
+                let mut joined = "v_self"
+                for idx in 0..len(args_c) {
+                    joined = joined + ", " + args_c[idx]
+                }
+                return ExprRes { val: "w_method_" + def_cls + "__" + method + "(" + joined + ")", lref: "" }
+            }
+            return ExprRes { val: "w_unit()", lref: "" }
+        }
+
         if len(recv_val) >= 2 and slice(recv_val, 0, 2) == "v_" {
             let obj_name = slice(recv_val, 2, len(recv_val))
             if is_module_name(obj_name) {
@@ -503,6 +622,12 @@ fn emit_call(callee: ExprRes, args_c: list[str]) -> ExprRes {
         if method == "values" {
             return ExprRes { val: "w_dict_values(" + recv_val + ")", lref: "" }
         }
+
+        let mut d_args = recv_val
+        for idx in 0..len(args_c) {
+            d_args = d_args + ", " + args_c[idx]
+        }
+        return ExprRes { val: "w_dispatch__" + method + "__" + str(len(args_c)) + "(" + d_args + ")", lref: "" }
     }
 
     if len(callee.val) >= 2 and slice(callee.val, 0, 2) == "v_" {
@@ -790,6 +915,35 @@ fn parse_prefix_expr(allow_struct: bool) -> ExprRes {
     }
     if match_kind("NONE") {
         return ExprRes { val: "w_none()", lref: "" }
+    }
+    if match_kind("THIS") {
+        return ExprRes { val: "v_self", lref: "&v_self" }
+    }
+    if match_kind("SUPER") {
+        return ExprRes { val: "v_super", lref: "&v_super" }
+    }
+    if match_kind("NEW") {
+        let cname_tok = expect_kind("IDENT")
+        expect_kind("LPAREN")
+        let mut args_c: list[str] = []
+        if not check_kind("RPAREN") {
+            let a0 = parse_expr(0, true)
+            args_c.append(a0.val)
+            while match_kind("COMMA") {
+                if check_kind("RPAREN") {
+                    break
+                }
+                let an = parse_expr(0, true)
+                args_c.append(an.val)
+            }
+        }
+        expect_kind("RPAREN")
+        let mut joined = ""
+        for idx in 0..len(args_c) {
+            if idx > 0 { joined = joined + ", " }
+            joined = joined + args_c[idx]
+        }
+        return ExprRes { val: "w_new_" + cname_tok.val + "(" + joined + ")", lref: "" }
     }
 
     if match_kind("IDENT") {
@@ -1284,6 +1438,254 @@ fn parse_enum_decl() -> unit {
     expect_kind("RBRACE")
 }
 
+fn parse_interface_decl() -> unit {
+    expect_kind("INTERFACE")
+    expect_kind("IDENT")
+    expect_kind("LBRACE")
+    while not check_kind("RBRACE") and not is_eof() {
+        expect_kind("FN")
+        expect_kind("IDENT")
+        expect_kind("LPAREN")
+        if not check_kind("RPAREN") {
+            expect_kind("IDENT")
+            expect_kind("COLON")
+            parse_type_ann()
+            while match_kind("COMMA") {
+                if check_kind("RPAREN") {
+                    break
+                }
+                expect_kind("IDENT")
+                expect_kind("COLON")
+                parse_type_ann()
+            }
+        }
+        expect_kind("RPAREN")
+        if match_kind("ARROW") {
+            parse_type_ann()
+        }
+        match_kind("COMMA")
+    }
+    expect_kind("RBRACE")
+}
+
+fn parse_class_decl() -> unit {
+    expect_kind("CLASS")
+    let cname_tok = expect_kind("IDENT")
+    let cls_name = cname_tok.val
+    let mut sup_name = ""
+    if match_kind("EXTENDS") {
+        let s_tok = expect_kind("IDENT")
+        sup_name = s_tok.val
+    }
+    if match_kind("IMPLEMENTS") {
+        expect_kind("IDENT")
+        while match_kind("COMMA") {
+            expect_kind("IDENT")
+        }
+    }
+
+    let mut f_names: list[str] = []
+    let mut f_defaults: list[str] = []
+    let mut m_names: list[str] = []
+    let mut m_arities: list[int] = []
+    let mut init_p: list[str] = []
+
+    let prev_cls = g_cur_class
+    let prev_sup = g_cur_super
+    g_cur_class = cls_name
+    g_cur_super = sup_name
+
+    expect_kind("LBRACE")
+    while not check_kind("RBRACE") and not is_eof() {
+        if check_kind("PUBLIC") or check_kind("PRIVATE") {
+            advance_tok()
+        }
+        if check_kind("FN") {
+            advance_tok()
+            let m_tok = expect_kind("IDENT")
+            let mname = m_tok.val
+            expect_kind("LPAREN")
+            let mut p_names: list[str] = []
+            if not check_kind("RPAREN") {
+                let p0 = expect_kind("IDENT")
+                expect_kind("COLON")
+                parse_type_ann()
+                p_names.append(p0.val)
+                while match_kind("COMMA") {
+                    if check_kind("RPAREN") {
+                        break
+                    }
+                    let pn = expect_kind("IDENT")
+                    expect_kind("COLON")
+                    parse_type_ann()
+                    p_names.append(pn.val)
+                }
+            }
+            expect_kind("RPAREN")
+            let mut fallible = false
+            if match_kind("ARROW") {
+                fallible = parse_type_ann()
+            }
+
+            m_names.append(mname)
+            m_arities.append(len(p_names))
+            if mname == "init" {
+                init_p = p_names
+            } else {
+                register_dispatch(mname, len(p_names))
+            }
+
+            let mut m_sig = "WVal v_self"
+            for idx in 0..len(p_names) {
+                m_sig = m_sig + ", WVal v_" + p_names[idx]
+            }
+            let c_mname = "w_method_" + cls_name + "__" + mname
+            g_protos.append("static WVal " + c_mname + "(" + m_sig + ");")
+
+            let prev_fall = g_fn_fallible
+            g_fn_fallible = fallible
+            let saved = g_cur_stmts
+            let empty: list[str] = []
+            g_cur_stmts = empty
+
+            emit_line("v_self = w_clone(v_self);")
+            for p in p_names {
+                emit_line("v_" + p + " = w_clone(v_" + p + ");")
+            }
+            let ret_v = parse_block_expr()
+            if g_fn_fallible {
+                emit_line("return w_ok(" + ret_v + ");")
+            } else {
+                emit_line("return " + ret_v + ";")
+            }
+            let body_lines = g_cur_stmts
+            g_cur_stmts = saved
+            g_fn_fallible = prev_fall
+
+            let mut m_str = "static WVal " + c_mname + "(" + m_sig + ") {\n"
+            for l in body_lines {
+                m_str = m_str + "    " + l + "\n"
+            }
+            m_str = m_str + "}"
+            g_fn_defs.append(m_str)
+        } else {
+            let f_tok = expect_kind("IDENT")
+            expect_kind("COLON")
+            let f_def = parse_field_default()
+            match_kind("COMMA")
+            f_names.append(f_tok.val)
+            f_defaults.append(f_def)
+        }
+    }
+    expect_kind("RBRACE")
+
+    g_cur_class = prev_cls
+    g_cur_super = prev_sup
+
+    g_classes.append(ClassMeta {
+        name: cls_name,
+        super_name: sup_name,
+        field_names: f_names,
+        field_defaults: f_defaults,
+        method_names: m_names,
+        method_arities: m_arities,
+        init_params: init_p,
+    })
+
+    # Collect all fields from root ancestor down to cls_name
+    let mut lineage: list[int] = []
+    let mut cur_c = cls_name
+    while cur_c != "" {
+        let cidx = find_class_meta_idx(cur_c)
+        if cidx == -1 {
+            break
+        }
+        lineage.append(cidx)
+        cur_c = g_classes[cidx].super_name
+    }
+    let mut all_fnames: list[str] = []
+    let mut all_fdefs: list[str] = []
+    let mut li = len(lineage) - 1
+    while li >= 0 {
+        let cm = g_classes[lineage[li]]
+        for fi in 0..len(cm.field_names) {
+            all_fnames.append(cm.field_names[fi])
+            all_fdefs.append(cm.field_defaults[fi])
+        }
+        li = li - 1
+    }
+
+    let init_owner = find_class_method_owner(cls_name, "init")
+    let mut eff_init_p: list[str] = []
+    if init_owner != "" {
+        let oidx = find_class_meta_idx(init_owner)
+        if oidx != -1 {
+            eff_init_p = g_classes[oidx].init_params
+        }
+    }
+
+    let mut new_sig = "void"
+    let mut init_call_args = "v_self"
+    if len(eff_init_p) > 0 {
+        new_sig = ""
+        for idx in 0..len(eff_init_p) {
+            if idx > 0 { new_sig = new_sig + ", " }
+            new_sig = new_sig + "WVal v_" + eff_init_p[idx]
+            init_call_args = init_call_args + ", v_" + eff_init_p[idx]
+        }
+    }
+    g_protos.append("static WVal w_new_" + cls_name + "(" + new_sig + ");")
+
+    let mut new_str = "static WVal w_new_" + cls_name + "(" + new_sig + ") {\n"
+    if len(all_fnames) > 0 {
+        let mut kj = ""
+        let mut vj = ""
+        for fi in 0..len(all_fnames) {
+            if fi > 0 {
+                kj = kj + ", "
+                vj = vj + ", "
+            }
+            kj = kj + "\"" + all_fnames[fi] + "\""
+            vj = vj + all_fdefs[fi]
+        }
+        let fcnt = str(len(all_fnames))
+        new_str = new_str + "    const char* _k[" + fcnt + "] = { " + kj + " };\n"
+        new_str = new_str + "    WVal _v[" + fcnt + "] = { " + vj + " };\n"
+        new_str = new_str + "    WVal v_self = w_make_object(\"" + cls_name + "\", " + fcnt + ", _k, _v);\n"
+    } else {
+        new_str = new_str + "    WVal v_self = w_make_object(\"" + cls_name + "\", 0, NULL, NULL);\n"
+    }
+    if init_owner != "" {
+        new_str = new_str + "    (void)w_method_" + init_owner + "__init(" + init_call_args + ");\n"
+    }
+    new_str = new_str + "    return v_self;\n}"
+    g_fn_defs.append(new_str)
+}
+
+fn emit_oop_dispatchers() -> unit {
+    for di in 0..len(g_dispatch_names) {
+        let mname = g_dispatch_names[di]
+        let arity = g_dispatch_arities[di]
+        let mut sig = "WVal v_self"
+        let mut call_args = "v_self"
+        for ai in 0..arity {
+            sig = sig + ", WVal _a" + str(ai)
+            call_args = call_args + ", _a" + str(ai)
+        }
+        let mut d_str = "static WVal w_dispatch__" + mname + "__" + str(arity) + "(" + sig + ") {\n"
+        for ci in 0..len(g_classes) {
+            let cname = g_classes[ci].name
+            let owner = find_class_method_owner(cname, mname)
+            let m_arity = find_class_method_arity(cname, mname)
+            if owner != "" and m_arity == arity {
+                d_str = d_str + "    if (v_self.tag == W_OBJECT && strcmp(v_self.as.st->name, \"" + cname + "\") == 0) return w_method_" + owner + "__" + mname + "(" + call_args + ");\n"
+            }
+        }
+        d_str = d_str + "    return w_none();\n}"
+        g_fn_defs.append(d_str)
+    }
+}
+
 fn parse_import_decl() -> unit {
     expect_kind("IMPORT")
     let path_tok = expect_kind("STR")
@@ -1311,6 +1713,10 @@ fn parse_import_decl() -> unit {
             parse_struct_decl()
         } elif check_kind("ENUM") {
             parse_enum_decl()
+        } elif check_kind("INTERFACE") {
+            parse_interface_decl()
+        } elif check_kind("CLASS") {
+            parse_class_decl()
         } elif check_kind("FN") {
             parse_fn_decl()
         } elif check_kind("LET") {
@@ -1401,8 +1807,15 @@ fn compile_source(src: str) -> str {
     g_fn_fallible = false
     g_ns = ""
     let empty_s: list[str] = []
+    let empty_i: list[int] = []
+    let empty_c: list[ClassMeta] = []
     g_enums = empty_s
     g_modules = empty_s
+    g_classes = empty_c
+    g_dispatch_names = empty_s
+    g_dispatch_arities = empty_i
+    g_cur_class = ""
+    g_cur_super = ""
     g_globals = empty_s
     g_protos = empty_s
     g_fn_defs = empty_s
@@ -1416,6 +1829,10 @@ fn compile_source(src: str) -> str {
             parse_struct_decl()
         } elif check_kind("ENUM") {
             parse_enum_decl()
+        } elif check_kind("INTERFACE") {
+            parse_interface_decl()
+        } elif check_kind("CLASS") {
+            parse_class_decl()
         } elif check_kind("IMPORT") {
             parse_import_decl()
         } elif check_kind("FN") {
@@ -1438,6 +1855,8 @@ fn compile_source(src: str) -> str {
             emit_line("(void)" + expr_r.val + ";")
         }
     }
+
+    emit_oop_dispatchers()
 
     let mut out = "#include \"runtime/w_runtime.h\"\n\n"
     if len(g_globals) > 0 {
