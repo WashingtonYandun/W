@@ -221,3 +221,19 @@ Verifies all **13 phases (190 / 190 tests)**:
 12. **Showcase Examples E2E Suite (7/7)**
 13. **3-Stage Fixed-Point Bootstrap (`1/1`)**
 
+---
+
+## Language Roadmap
+
+| Version | Milestone | Scope |
+| :--- | :--- | :--- |
+| **`v0.1.0`** | **Core + Self-Host + OOP** ✅ | 31 keywords, pure value CoW, Java-style OOP, C99 backend, 3-stage `W1` self-hosting fixed point, CLI & CI |
+| **`v0.1.1`** | **Harden & Oracle** ✅ | Formalized semantic guarantees, recursive nested CoW, constructor calls without `new`, $L \rightarrow R$ C99 sequence points, 3-engine differential oracle & fuzzer |
+| **`v0.1.2`** | **Diagnostics & Stress** | Stable diagnostic codes (`W0xxx`–`W4xxx`), unified JSON diagnostics, full-behavior differential oracle, reproducible stress fuzzing, benchmark harness (`w bench`), HIR & `TypeId` architecture specs |
+| **`v0.2`** | **Generics + Monomorphization** | Parametric polymorphism (`fn`, `struct`, `enum`, `class`) compiled via monomorphization with container invariance |
+| **`v0.3`** | **Function Types + Typed HIR** | First-class `fn(A) -> B` types and shared `AST -> Typed HIR -> C99` lowering pipeline |
+| **`v0.4`** | **Closures + HOFs** | Anonymous functions, value-captured closures, and typed `map` / `filter` / `fold` |
+| **`v0.5`** | **Modules + Self-Host Split** | Scoped module system and modular decomposition of `selfhost/w1.w` into multi-file `.w` compiler passes |
+| **`v0.6`** | **Stdlib + LSP** | Standard library (`std.io`, `std.fs`, `std.json`, `std.testing`) and Language Server Protocol (LSP) |
+
+

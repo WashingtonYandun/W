@@ -296,18 +296,28 @@ class Interpreter:
             if expr.op == "/":
                 if isinstance(lhs, WInt) and isinstance(rhs, WInt):
                     if rhs.value == 0:
-                        raise WRuntimeError("Division by zero", line=expr.line, col=expr.col, file=self.file)
-                    return WInt(lhs.value // rhs.value)
+                        raise WRuntimeError("Division by zero", line=expr.line, col=expr.col, file=self.file, code="W4001")
+                    if lhs.value == -9223372036854775808 and rhs.value == -1:
+                        return WInt(-9223372036854775808)
+                    q = abs(lhs.value) // abs(rhs.value)
+                    if (lhs.value < 0) ^ (rhs.value < 0):
+                        q = -q
+                    return WInt(q)
                 if isinstance(lhs, WFloat) and isinstance(rhs, WFloat):
                     if rhs.value == 0.0:
-                        raise WRuntimeError("Division by zero", line=expr.line, col=expr.col, file=self.file)
+                        raise WRuntimeError("Division by zero", line=expr.line, col=expr.col, file=self.file, code="W4001")
                     return WFloat(lhs.value / rhs.value)
 
             if expr.op == "%":
                 if isinstance(lhs, WInt) and isinstance(rhs, WInt):
                     if rhs.value == 0:
-                        raise WRuntimeError("Modulo by zero", line=expr.line, col=expr.col, file=self.file)
-                    return WInt(lhs.value % rhs.value)
+                        raise WRuntimeError("Modulo by zero", line=expr.line, col=expr.col, file=self.file, code="W4001")
+                    if lhs.value == -9223372036854775808 and rhs.value == -1:
+                        return WInt(0)
+                    q = abs(lhs.value) // abs(rhs.value)
+                    if (lhs.value < 0) ^ (rhs.value < 0):
+                        q = -q
+                    return WInt(lhs.value - q * rhs.value)
 
             if expr.op == "==":
                 return WBool(lhs == rhs)

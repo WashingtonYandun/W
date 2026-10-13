@@ -58,7 +58,7 @@ class Lexer:
             start_col = self.col
 
             # Reject leading dot float, e.g. '.5'
-            if ch == '.' and self.peek(1) is not None and self.peek(1).isdigit():
+            if ch == '.' and self.peek(1) is not None and self.peek(1).isascii() and self.peek(1).isdigit():
                 raise LexerError(
                     message="Float literals must have leading digits before decimal point",
                     line=start_line,
@@ -68,7 +68,7 @@ class Lexer:
                 )
 
             # Numbers (Integers & Floats)
-            if ch.isdigit():
+            if ch.isascii() and ch.isdigit():
                 tokens.append(self._lex_number(start_line, start_col))
                 continue
 
@@ -78,7 +78,7 @@ class Lexer:
                 continue
 
             # Identifiers and Keywords
-            if ch.isalpha() or ch == '_':
+            if (ch.isascii() and ch.isalpha()) or ch == '_':
                 tokens.append(self._lex_identifier(start_line, start_col))
                 continue
 
@@ -97,7 +97,7 @@ class Lexer:
         while self.peek() is not None:
             c = self.peek()
 
-            if c.isdigit():
+            if c.isascii() and c.isdigit():
                 num_str += c
                 self.advance()
                 prev_was_underscore = False
@@ -113,7 +113,7 @@ class Lexer:
                     )
                 # Next char must be digit or '.'
                 nxt = self.peek(1)
-                if nxt is None or not (nxt.isdigit() or nxt == '.'):
+                if nxt is None or not ((nxt.isascii() and nxt.isdigit()) or nxt == '.'):
                     raise LexerError(
                         message="Invalid numeric separator placement",
                         line=self.line,
@@ -136,7 +136,7 @@ class Lexer:
 
                 # Must be followed by a digit: e.g. '12.34'
                 nxt = self.peek(1)
-                if nxt is None or not nxt.isdigit():
+                if nxt is None or not (nxt.isascii() and nxt.isdigit()):
                     raise LexerError(
                         message="Trailing decimal point in float literal is not allowed",
                         line=self.line,
@@ -172,10 +172,24 @@ class Lexer:
             )
 
         clean_str = num_str.replace("_", "")
-        if is_float:
-            return Token(value=float(clean_str), type=TokenType.FLOAT, line=start_line, col=start_col)
-        else:
-            return Token(value=int(clean_str), type=TokenType.INT, line=start_line, col=start_col)
+        try:
+            if is_float:
+                return Token(value=float(clean_str), type=TokenType.FLOAT, line=start_line, col=start_col)
+            else:
+                if len(clean_str) > 20:
+                    raise ValueError("Integer literal exceeds 64-bit range")
+                ival = int(clean_str)
+                if ival > 9223372036854775808:
+                    raise ValueError("Integer literal exceeds 64-bit range")
+                return Token(value=ival, type=TokenType.INT, line=start_line, col=start_col)
+        except (ValueError, OverflowError):
+            raise LexerError(
+                message=f"Malformed or out-of-range numeric literal '{num_str}'",
+                line=start_line,
+                col=start_col,
+                file=self.file,
+                code="W0002",
+            )
 
     def _lex_string(self, start_line: int, start_col: int) -> Token:
         # Consume opening quote
@@ -315,7 +329,7 @@ class Lexer:
 
     def _lex_identifier(self, start_line: int, start_col: int) -> Token:
         ident = ""
-        while self.peek() is not None and (self.peek().isalnum() or self.peek() == '_'):
+        while self.peek() is not None and ((self.peek().isascii() and self.peek().isalnum()) or self.peek() == '_'):
             ident += self.peek()
             self.advance()
 
