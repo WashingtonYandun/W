@@ -45,12 +45,15 @@ and       or        not
 ### 3.1 Identifiers
 Identifiers must start with an ASCII letter (`a-z`, `A-Z`) or underscore `_`, followed by letters, digits, or underscores. Identifiers cannot match any of the reserved keywords.
 
-### 3.2 Literals & Integer Arithmetic Semantics
+### 3.2 Literals, Integer Arithmetic & IEEE-754 Floating-Point Semantics
 * **Integers (`int`):** 64-bit signed two's complement integers (`-9_223_372_036_854_775_808` to `9_223_372_036_854_775_807`). Supports optional `_` digit separators:
   `0`, `42`, `-10`, `1_000_000`.
 * **Integer Overflow & Division:** Integer addition (`+`), subtraction (`-`), multiplication (`*`), and unary negation (`-`) use **defined 64-bit two's complement wrapping semantics** (via unsigned cast arithmetic in C99, never undefined behavior). Integer division (`/`) truncates toward zero; division or modulo (`%`) by zero triggers a deterministic runtime panic.
-* **Floats (`float`):** IEEE 754 64-bit floating point numbers. Must include digits both before and after the decimal point:
-  `3.14`, `-0.5`, `100.0`. Forms such as `.5` or `1.` are invalid.
+* **Floats (`float` — IEEE-754 `binary64`):** IEEE-754 64-bit double-precision floating-point numbers. Literals must include digits both before and after the decimal point (`3.14`, `-0.5`, `100.0`; forms such as `.5` or `1.` are invalid):
+  - **Signed Zero:** `+0.0 == -0.0` evaluates to `true`, and `+0.0 != -0.0` evaluates to `false`.
+  - **`NaN` Semantics:** Following IEEE-754, `NaN` is unordered and irreflexive: `NaN == x` is always `false` (including `NaN == NaN`, which is `false`), `NaN != x` is always `true` (including `NaN != NaN`, which is `true`), and all relational comparisons (`<`, `<=`, `>`, `>=`) where either operand is `NaN` evaluate to `false`.
+  - **Infinities (`+Inf` / `-Inf`):** Overflowing floating-point operations or conversions (`float("inf")`, `float("-inf")`) obey IEEE-754 ordering (`-Inf < finite < +Inf`, `+Inf == +Inf` is `true`, `-Inf == -Inf` is `true`). Doing arithmetic such as `Inf - Inf` yields `NaN`.
+  - **Float Division by Zero:** Explicit division by zero (`x / 0.0` or `x / -0.0`) triggers a deterministic runtime panic (`RuntimeError: Division by zero`) rather than silently producing `NaN` or `±Inf`.
 * **Booleans (`bool`):** `true` and `false`.
 * **None (`none`):** The singular value of an empty optional.
 
@@ -102,7 +105,8 @@ Identifiers must start with an ASCII letter (`a-z`, `A-Z`) or underscore `_`, fo
 
 ### 4.3 Composite Collections
 * `list[T]`: Dynamically sized contiguous homogeneous array (`[1, 2, 3]`).
-* `dict[K, V]`: Associative hash table (`{"key": 42}`).
+* `dict[K, V]`: Associative key-value table (`{"key": 42}`).
+  - **Key Domain & `float` Restriction:** Dictionary keys `K` must have reflexive equality (`k == k` for every value of `K`) and canonical equivalence. Because IEEE-754 `float` violates reflexivity on `NaN` (`NaN != NaN`) and has signed zeros (`+0.0 == -0.0`), `float` (and any composite type containing `float`) is **disallowed as a dictionary key type `K`** (`dict[float, V]` is a compile-time type error). Valid key types in `v0.1.x` are `int`, `str`, `bool`, and `enum`.
 * `tuple[T1, T2, ...]`: Fixed-size heterogeneous immutable product type (`(1, "ok", true)`).
 
 ### 4.4 Sum Types (`enum`)
@@ -346,7 +350,13 @@ Handling strategies:
    - When a mutating operation occurs (`append`, `pop`, `clear`, indexed assignment, or field assignment on a `struct`), any buffer along the access path with `refcount > 1` is detached (`w_cow_detach`) before applying the mutation.
 3. **Reference Types (`class`):**
    - Unlike `struct`, instances of `class` (`W_OBJECT`) have reference identity semantics: assigning `let b = a` shares the same underlying instance without CoW detachment on field mutation.
-4. **No Value Reference Cycles:** Because value structures (`struct`, `list`, `dict`) clone on mutation when shared, pure value aliases cannot form cyclic graphs.
+4. **Acyclic Value Graphs:**
+   - **The current W value model does not expose operations capable of constructing cyclic value graphs.**
+   - Copy-on-Write by itself is an internal storage-sharing optimization and does not inherently guarantee acyclicity in arbitrary languages. Rather, pure W value structures (`struct`, `list`, `dict`, `tuple`) are guaranteed to form directed acyclic graphs (DAGs) because:
+     1. W provides no raw pointers, addresses, or shared mutable references to value containers;
+     2. Every composite literal construction and every mutating value operation (`xs[i] = v`, `xs.append(v)`, `s.field = v`) captures an independent semantic snapshot of `v` (detaching any shared container along the target lvalue path before writing); and
+     3. Consequently, no value container can ever be mutated to hold a live reference to itself or to an ancestor value container.
+   - Reference cycles can only arise when reference-type objects (`class` instances) hold references to one another.
 
 ---
 
