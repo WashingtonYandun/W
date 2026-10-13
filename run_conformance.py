@@ -24,6 +24,16 @@ def sha256_file(path: str) -> str:
 
 
 def run_suite() -> None:
+    repo_root = os.path.dirname(os.path.realpath(__file__))
+    prev_cwd = os.getcwd()
+    os.chdir(repo_root)
+    try:
+        _run_suite_in_repo(repo_root)
+    finally:
+        os.chdir(prev_cwd)
+
+
+def _run_suite_in_repo(repo_root: str) -> None:
     print("==================================================")
     print("W Language Conformance Runner (SPEC v0.1)")
     print("==================================================")
@@ -284,8 +294,36 @@ def run_suite() -> None:
                 run_res = subprocess.run([w1_bin_path], capture_output=True, text=True, cwd=repo_root)
                 assert run_res.stdout == expected
                 w1_runtime_passed += 1
+
+            # 10. Verify Showcase Examples (examples/*.w) on W0 Interpreter, W0 C99, and W1 Stage-2 Native
+            examples_dir = "examples"
+            example_files = sorted([f for f in os.listdir(examples_dir) if f.endswith(".w")]) if os.path.exists(examples_dir) else []
+            examples_passed = 0
+            for f in example_files:
+                ex_path = os.path.join(examples_dir, f)
+                exp_path = os.path.join(examples_dir, f[:-2] + ".expected")
+                with open(ex_path, "r", encoding="utf-8") as sf:
+                    ex_code = sf.read()
+                with open(exp_path, "r", encoding="utf-8") as ef:
+                    ex_expected = ef.read()
+
+                ex_ast = Parser(file=ex_path).parse(ex_code)
+                TypeChecker(file=ex_path).check(ex_ast)
+                ex_buf = io.StringIO()
+                Interpreter(stdout=ex_buf, file=ex_path).interpret(ex_ast)
+                assert ex_buf.getvalue() == ex_expected, f"Interpreter mismatch on {f}"
+
+                ex_c_path = os.path.join(tmpdir, "ex_" + f[:-2] + ".c")
+                ex_bin_path = os.path.join(tmpdir, "ex_" + f[:-2])
+                subprocess.run([s2_bin, ex_path, ex_c_path], check=True, capture_output=True, cwd=repo_root)
+                subprocess.run(["cc", "-std=c99", f"-I{repo_root}", ex_c_path, "-o", ex_bin_path], check=True, capture_output=True)
+                ex_res = subprocess.run([ex_bin_path], capture_output=True, text=True, cwd=repo_root)
+                assert ex_res.stdout == ex_expected, f"W1 native mismatch on {f}"
+                examples_passed += 1
         except Exception as e:
             print(f"  [BOOTSTRAP/W1 FAIL] {e}")
+            example_files = []
+            examples_passed = 0
 
     # Clean temporary files if any
     temp_file = os.path.join(runtime_dir, "temp_file.txt")
@@ -297,6 +335,7 @@ def run_suite() -> None:
 
     print(f"C99 Native Backend:  {c99_passed}/{len(c99_targets)}")
     print(f"W1 Stage-2 Runtime:  {w1_runtime_passed}/{len(c99_targets)}")
+    print(f"Examples E2E Suite:  {examples_passed}/{len(example_files)}")
     print(f"Bootstrap FixedPoint:{'1/1 (SHA256 verified)' if bootstrap_ok else '0/1'}")
 
     print("==================================================")
@@ -312,6 +351,7 @@ def run_suite() -> None:
         and runtime_passed == len(runtime_files)
         and c99_passed == len(c99_targets)
         and w1_runtime_passed == len(c99_targets)
+        and examples_passed == len(example_files)
         and bootstrap_ok
     )
 
@@ -319,9 +359,9 @@ def run_suite() -> None:
         total = (
             v_lex_passed + i_lex_passed + v_parse_passed + i_parse_passed +
             v_type_passed + i_type_passed + err_passed + fmt_passed +
-            runtime_passed + c99_passed + w1_runtime_passed + 1
+            runtime_passed + c99_passed + w1_runtime_passed + examples_passed + 1
         )
-        print(f"ALL {total}/{total} CONFORMANCE & SELF-HOSTING BOOTSTRAP TESTS PASSED (100%).")
+        print(f"ALL {total}/{total} CONFORMANCE, EXAMPLES & SELF-HOSTING TESTS PASSED (100%).")
         sys.exit(0)
     else:
         print("FAILURES DETECTED.")

@@ -1,0 +1,72 @@
+name: W Language CI & Examples Verification
+
+on:
+  push:
+    branches: [ main, develop, "feat/**" ]
+  pull_request:
+    branches: [ main, develop ]
+
+jobs:
+  examples-e2e:
+    name: Showcase Examples E2E (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ ubuntu-latest, macos-latest ]
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install W CLI & Pre-build Self-Hosted W1 Compiler
+        run: |
+          chmod +x w install.sh
+          ./install.sh "$HOME/.local/bin"
+          export PATH="$HOME/.local/bin:$PATH"
+          w version
+
+      - name: Run & Verify All 6 Showcase Examples (W0 Interpreter + W0 C99 + W1 Native)
+        run: |
+          export PATH="$HOME/.local/bin:$PATH"
+          for f in examples/*.w; do
+            base="${f%.w}"
+            expected_file="${base}.expected"
+            echo "=================================================="
+            echo "Running Example: $f"
+            echo "=================================================="
+            w check "$f"
+
+            out_interp=$(w run "$f")
+            w build "$f" -o /tmp/w0_bin
+            out_w0_c=$(/tmp/w0_bin)
+            w build --selfhost "$f" -o /tmp/w1_bin
+            out_w1_native=$(/tmp/w1_bin)
+            rm -f /tmp/w0_bin /tmp/w1_bin
+
+            expected=$(cat "$expected_file")
+            echo "$out_w1_native"
+
+            if [ "$out_interp" != "$expected" ]; then
+              echo "[FAIL] W0 Interpreter output mismatch on $f"
+              exit 1
+            fi
+            if [ "$out_w0_c" != "$expected" ]; then
+              echo "[FAIL] W0 C99 output mismatch on $f"
+              exit 1
+            fi
+            if [ "$out_w1_native" != "$expected" ]; then
+              echo "[FAIL] W1 Self-Hosted Native output mismatch on $f"
+              exit 1
+            fi
+            echo "[PASS] $f verified across W0 Interpreter, W0 C99, and W1 Self-Hosted Native"
+          done
+
+      - name: Run Full 170-Test Conformance & 3-Stage Bootstrap Suite
+        run: |
+          ./w test

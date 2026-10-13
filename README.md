@@ -28,6 +28,27 @@
 
 ---
 
+## Quick Start & Installation
+
+**Requirements:** `python3` ($\ge 3.10$) and a C99 compiler (`clang` or `gcc`). Zero external Python dependencies are needed.
+
+```bash
+git clone https://github.com/WashingtonYandun/W.git
+cd W
+
+# 1. Pre-build the Stage-2 native W1 compiler and install 'w' globally (~/.local/bin/w)
+./install.sh
+# (Or via Makefile / pip):
+# make install
+# pip install -e .
+
+# 2. Verify installation & run the 164-test conformance suite
+w version
+w test
+```
+
+---
+
 ## Language Tour
 
 ```w
@@ -83,34 +104,66 @@ fn main() -> unit {
 
 ---
 
-## CLI Usage (`./w`)
+## CLI Usage (`w` / `./w`)
 
-The canonical `./w` CLI supports interpretation, static type checking, formatting, AST inspection, C99 emission, and native binary compilation:
+The canonical `w` CLI supports interpretation, static type checking, formatting, AST inspection, C99 emission, and native binary compilation (via either `W0` or the self-hosted `W1` native compiler with `--selfhost`):
 
 ```bash
 # Run a .w file via the W0 interpreter
-./w run examples/hello.w
+./w run examples/01_hello_world.w
 
 # Static type checking (human-readable or structured JSON diagnostics)
 ./w check selfhost/w1.w
-./w check file.w --json
+./w check examples/03_enums_and_match.w --json
 
 # Canonical idempotent code formatter
-./w fmt file.w
-./w fmt file.w --write
+./w fmt examples/01_hello_world.w
+./w fmt examples/01_hello_world.w --write
 
 # Inspect AST or lexical token stream
-./w ast file.w --json
-./w tokens file.w --json
+./w ast examples/01_hello_world.w --json
+./w tokens examples/01_hello_world.w
 
-# Transpile W to portable C99 (backed by runtime/w_runtime.h)
-./w emit-c file.w -o out.c
+# Transpile W to portable C99 (using W0 or self-hosted W1)
+./w emit-c examples/05_utf8_and_algorithms.w -o out.c
+./w emit-c --selfhost examples/05_utf8_and_algorithms.w -o out_w1.c
 
-# Compile W directly to a native executable via clang/gcc
-./w build selfhost/w1.w -o w1_native
+# Compile W directly to a native executable (using W0 or self-hosted W1)
+./w build examples/05_utf8_and_algorithms.w -o app
+./w build --selfhost examples/05_utf8_and_algorithms.w -o app_w1
 
 # Run the full 9-stage conformance & self-hosting test suite
 ./w test
+```
+
+---
+
+## Runnable Examples (`examples/`)
+
+| Example | Features Demonstrated |
+| :--- | :--- |
+| [`examples/01_hello_world.w`](examples/01_hello_world.w) | Functions, explicit types, inclusive ranges (`1..=limit`), loops |
+| [`examples/02_value_semantics_cow.w`](examples/02_value_semantics_cow.w) | ARC + Copy-on-Write value semantics across `list`, `dict`, and `struct` |
+| [`examples/03_enums_and_match.w`](examples/03_enums_and_match.w) | `enum`, named `struct` initialization, exhaustive `match` expressions, `enumerate()` |
+| [`examples/04_optionals_and_errors.w`](examples/04_optionals_and_errors.w) | `T?`, `??` coalescing, `T ! E` fallible functions, postfix `?`, `else err` recovery |
+| [`examples/05_utf8_and_algorithms.w`](examples/05_utf8_and_algorithms.w) | UTF-8 code-point indexing (`"José"[3] == "é"`), `bytes()`, binary search |
+| [`examples/06_game_of_life.w`](examples/06_game_of_life.w) | Conway's Game of Life (Glider simulation using `struct`, 2D grid indexing, and CoW state transitions) |
+
+---
+
+## Editor Support (VS Code / Cursor / Antigravity)
+
+Syntax highlighting and bracket/comment configuration for `.w` files are included in [`editors/vscode-w/`](editors/vscode-w/README.md):
+
+```bash
+# VS Code
+ln -sfn "$(pwd)/editors/vscode-w" ~/.vscode/extensions/w-lang-0.1.0
+
+# Cursor
+ln -sfn "$(pwd)/editors/vscode-w" ~/.cursor/extensions/w-lang-0.1.0
+
+# Antigravity
+ln -sfn "$(pwd)/editors/vscode-w" ~/.antigravity/extensions/w-lang-0.1.0
 ```
 
 ---
@@ -120,17 +173,20 @@ The canonical `./w` CLI supports interpretation, static type checking, formattin
 | Path | Description |
 | :--- | :--- |
 | [`SPEC.md`](SPEC.md) | Frozen W v0.1 Language Specification |
-| [`w`](w) / [`main.py`](main.py) | Unified CLI entrypoint (`run`, `check`, `fmt`, `ast`, `tokens`, `emit-c`, `build`, `test`) |
+| [`w`](w) / [`main.py`](main.py) | Unified CLI entrypoint (`run`, `check`, `fmt`, `ast`, `tokens`, `emit-c`, `build`, `test`, `version`) |
+| [`install.sh`](install.sh) / [`Makefile`](Makefile) | One-command toolchain installer and build automation |
+| [`pyproject.toml`](pyproject.toml) | PEP 621 package configuration for `pip` / `pipx` |
 | [`lexer/Lexer.py`](lexer/Lexer.py) | W v0.1 Lexer (22 keywords, strict numbers, UTF-8 escapes, spans) |
 | [`parser/Parser.py`](parser/Parser.py) | Recursive descent parser with 12-level operator precedence |
-| [`ast_nodes.py`](ast_nodes.py) | Canonical AST nodes with JSON serialization (`w_ast_version: "0.1"`) |
+| [`node/NodeType.py`](node/NodeType.py) | Canonical AST nodes with JSON serialization (`w_ast_version: "0.1"`) |
 | [`checker/TypeChecker.py`](checker/TypeChecker.py) | Two-pass static type checker, nullability/error enforcement, exhaustive `match` |
 | [`formatter/Formatter.py`](formatter/Formatter.py) | Deterministic, idempotent source code formatter (`w fmt`) |
-| [`interpreter/Interpreter.py`](interpreter/Interpreter.py) | Reference W0 runtime with ARC + Copy-on-Write value semantics |
+| [`runtime/Interpreter.py`](runtime/Interpreter.py) | Reference W0 runtime with ARC + Copy-on-Write value semantics |
 | [`codegen/CCodeGen.py`](codegen/CCodeGen.py) | W0 C99 code generator |
 | [`runtime/w_runtime.h`](runtime/w_runtime.h) | Single-header C99 runtime (ARC + CoW, UTF-8 code points, collections, I/O) |
 | [`selfhost/w1.w`](selfhost/w1.w) | **Self-hosted W1 compiler** written in 100% pure W |
-| [`run_conformance.py`](run_conformance.py) | Automated 9-stage conformance test runner (164/164 tests) |
+| [`run_conformance.py`](run_conformance.py) | Automated 10-stage conformance test runner (170/170 tests) |
+| [`.github/workflows/ci.yml`](.github/workflows/ci.yml) | Cross-platform CI pipeline (Linux & macOS) |
 
 ---
 
@@ -140,11 +196,12 @@ The canonical `./w` CLI supports interpretation, static type checking, formattin
 ./w test
 ```
 
-Verifies all 9 stages:
-1. **Lexer Valid (11/11)** & **Lexer Invalid (7/7)**
-2. **Parser Valid (13/13)** & **Parser Invalid (7/7)**
-3. **Checker Valid (15/15)** & **Checker Invalid (25/25)**
-4. **Runtime W0 Interpreter (20/20)**
-5. **Formatter Idempotence & Semantic Preservation (26/26)**
+Verifies all 10 stages (**170 / 170 tests**):
+1. **Lexer Valid (12/12)** & **Lexer Invalid (7/7)**
+2. **Parser Valid (18/18)** & **Parser Invalid (8/8)**
+3. **Checker Valid (13/13)**, **Checker Invalid (20/20)** & **Error Handling (2/2)**
+4. **Formatter Idempotence (`w fmt`) (22/22)**
+5. **Runtime W0 Interpreter (21/21)**
 6. **C99 Native Backend W0 (20/20)**
-7. **W1 Stage-2 Native Compiler Runtime Parity (20/20)** & **3-Stage Fixed-Point Bootstrap**
+7. **W1 Stage-2 Native Compiler Runtime Parity (20/20)**
+8. **Showcase Examples E2E Suite (6/6)** & **3-Stage Fixed-Point Bootstrap (`1/1`)**
