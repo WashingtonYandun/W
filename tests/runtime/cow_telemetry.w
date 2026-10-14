@@ -84,7 +84,16 @@ fn test_list_of_structs() -> unit {
     print(counter.count)
 }
 
+fn test_exclusive_containers() -> unit {
+    let mut values = [1, 2]
+    eprint("__COW_CHECKPOINT__:exclusive_before")
+    values[0] = 5
+    eprint("__COW_CHECKPOINT__:exclusive_after")
+    print(values[0])
+}
+
 fn main() -> unit {
+    test_exclusive_containers()
     test_matrix_scaling()
     test_struct_with_list()
     test_dict_of_lists()

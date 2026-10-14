@@ -92,6 +92,8 @@ def run_cow_telemetry_suite() -> bool:
     py_checkpoints = parse_checkpoints(interp_err.getvalue())
     print("  -> Interpreter passed output & checkpoints validated.")
 
+    assert py_checkpoints["exclusive_after"] == py_checkpoints["exclusive_before"], "Exclusive writes must not detach"
+
     # Validate mathematical properties on interpreter checkpoints
     c_init = py_checkpoints["matrix_aliased"]
     c_w1 = py_checkpoints["first_write"]

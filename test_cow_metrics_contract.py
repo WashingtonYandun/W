@@ -9,7 +9,7 @@ import tempfile
 
 from runtime.Environment import create_global_environment
 from runtime.Interpreter import Interpreter
-from runtime.Values import WStr, cow_telemetry
+from runtime.Values import WStr, WInt, WList, WDict, WStructInstance, cow_telemetry
 
 
 NATIVE_CONTRACT = r'''
@@ -96,6 +96,15 @@ def run_metrics_contract():
             os.environ.pop('W_COW_METRICS', None)
         else:
             os.environ['W_COW_METRICS'] = previous
+    for value in [WList(elements=[WInt(1)]), WDict(pairs={"key": WInt(1)}),
+                  WStructInstance("Record", fields={"value": WInt(1)})]:
+        alias = value.clone_value()
+        assert value.storage.refcount == 2
+        del alias
+        assert value.storage.refcount == 1, "Dead aliases must release their buffer reference"
+        cow_telemetry.reset()
+        value.ensure_unique()
+        assert cow_telemetry.copied_slots == 0
     root = Path(__file__).resolve().parent
     with tempfile.TemporaryDirectory(prefix='w-cow-contract-') as directory:
         source, binary = Path(directory) / 'contract.c', Path(directory) / 'contract'

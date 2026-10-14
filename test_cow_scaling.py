@@ -49,12 +49,16 @@ def matrix_program():
         functions.append('\n'.join(lines))
         calls.append(name + '()')
         expected.append(f'{rows} {columns} 5 6 3 4 0 0 1\n')
+    functions.append('fn constructor_retention() -> unit {\n    let mut nested = [[1, 2]]\n    eprint("__COW_CHECKPOINT__:retention/before")\n    nested[0][0] = 9\n    eprint("__COW_CHECKPOINT__:retention/after")\n    print(nested[0][0])\n}')
+    calls.append('constructor_retention()')
+    expected.append('9\n')
     return '\n'.join(functions + calls), ''.join(expected), dimensions
 
 
 def validate_scaling(checkpoints, dimensions):
     phases = ['baseline', 'first', 'second', 'third', 'fourth', 'renew', 'fifth', 'sixth']
-    assert set(checkpoints) == {f'{name}/{phase}' for name, _, _ in dimensions for phase in phases}
+    labels = {f'{name}/{phase}' for name, _, _ in dimensions for phase in phases}
+    assert set(checkpoints) == labels | {'retention/before', 'retention/after'}
     for name, rows, columns in dimensions:
         previous = checkpoints[f'{name}/baseline']
         for phase, detaches, slots in [('first', 2, rows + columns), ('second', 0, 0),
@@ -103,6 +107,7 @@ def run_scaling_tests():
     assert output.getvalue() == expected
     reference = parse_checkpoints(errors.getvalue())
     validate_scaling(reference, dimensions)
+    assert reference['retention/after'] == reference['retention/before']
     hir = HirBuilder(checker.interner).lower(ast)
     with tempfile.TemporaryDirectory(prefix='w-cow-scaling-') as directory:
         w_path = Path(directory) / 'scaling.w'
@@ -128,10 +133,18 @@ def run_scaling_tests():
             assert result.stdout == expected, (backend, result.stdout)
             metrics = parse_checkpoints(result.stderr)
             validate_scaling(metrics, dimensions)
-            assert logical_metrics(metrics) == reference, backend
+            before, after = metrics['retention/before'], metrics['retention/after']
+            assert after['detach_list'] - before['detach_list'] == 1
+            assert after['copied_slots'] - before['copied_slots'] == 2
+            comparable = {label: value for label, value in logical_metrics(metrics).items()
+                          if not label.startswith('retention/')}
+            expected_metrics = {label: value for label, value in reference.items()
+                                if not label.startswith('retention/')}
+            assert comparable == expected_metrics, backend
             if native_reference is None:
                 native_reference = metrics
             assert metrics == native_reference, backend
+    print('  [PASS] B02 constructor retention cost: native 1 detach/2 slots; interpreter 0')
     print('  [PASS] B02 independent N/M matrix sizes, three aliases and repeated writes on four engines')
 
 

@@ -273,7 +273,15 @@ class SharedBuffer:
         return f"SharedBuffer(refcount={self.refcount}, data={self.data})"
 
 
-class WList(WValue):
+class CowOwner(WValue):
+    """Each live value wrapper owns one reference to its shared buffer."""
+    def __del__(self):
+        storage = getattr(self, "storage", None)
+        if storage is not None:
+            storage.refcount -= 1
+
+
+class WList(CowOwner):
     def __init__(self, storage: Optional[SharedBuffer] = None, elements: Optional[List[WValue]] = None):
         if storage is not None:
             self.storage = storage
@@ -329,7 +337,7 @@ class WList(WValue):
         return f"[{elems}]"
 
 
-class WDict(WValue):
+class WDict(CowOwner):
     def __init__(self, storage: Optional[SharedBuffer] = None, pairs: Optional[Dict[Any, WValue]] = None):
         if storage is not None:
             self.storage = storage
@@ -379,7 +387,7 @@ class WDict(WValue):
         return "{" + ", ".join(items) + "}"
 
 
-class WStructInstance(WValue):
+class WStructInstance(CowOwner):
     def __init__(self, struct_name: str, storage: Optional[SharedBuffer] = None, fields: Optional[Dict[str, WValue]] = None):
         self.struct_name = struct_name
         if storage is not None:
