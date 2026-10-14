@@ -33,7 +33,13 @@ class CCodeGen:
         self.file = file
         self.temp_counter = 0
         self.aux_counter = 0
-        self.enum_names: Set[str] = set()
+        self.enum_names: Set[str] = {"Option", "Result"}
+        self.enum_variants: Dict[str, str] = {
+            "Some": "Option",
+            "None": "Option",
+            "Ok": "Result",
+            "Err": "Result",
+        }
         self.classes: Dict[str, ClassDecl] = {}
         self.class_order: List[str] = []
         self.dispatch_methods: List[Tuple[str, int]] = []
@@ -191,6 +197,9 @@ class CCodeGen:
         for stmt in program.body:
             if isinstance(stmt, EnumDecl):
                 self.enum_names.add(stmt.name)
+                for v in stmt.variants:
+                    v_name = v.name if hasattr(v, "name") else str(v)
+                    self.enum_variants[v_name] = stmt.name
             elif isinstance(stmt, ClassDecl):
                 if stmt.name not in self.classes:
                     self.classes[stmt.name] = stmt
@@ -543,23 +552,101 @@ class CCodeGen:
 
     def _emit_pattern_bindings(self, pattern: Pattern, val_expr: str, out: List[str]) -> None:
         if isinstance(pattern, IdentifierPattern):
-            self._declare_owned_var(f"v_{pattern.name}", f"w_clone({val_expr})", out)
+            if pattern.name not in ("None", "none"):
+                self._declare_owned_var(f"v_{pattern.name}", f"w_clone({val_expr})", out)
         elif isinstance(pattern, TuplePattern):
             for idx, elem_pat in enumerate(pattern.elements):
                 sub_expr = f"({val_expr}).as.tuple->items[{idx}]"
                 self._emit_pattern_bindings(elem_pat, sub_expr, out)
+        elif isinstance(pattern, EnumPattern):
+            if pattern.variant in ("None", "none"):
+                pass
+            elif pattern.variant == "Some":
+                if pattern.args:
+                    sub_val = f"w_unwrap_ok({val_expr})"
+                    sub_tmp = self.new_aux("_some_val")
+                    self._declare_owned_var(sub_tmp, sub_val, out)
+                    self._emit_pattern_bindings(pattern.args[0], sub_tmp, out)
+            elif pattern.variant == "Ok":
+                if pattern.args:
+                    sub_val = f"w_unwrap_ok({val_expr})"
+                    sub_tmp = self.new_aux("_ok_val")
+                    self._declare_owned_var(sub_tmp, sub_val, out)
+                    self._emit_pattern_bindings(pattern.args[0], sub_tmp, out)
+            elif pattern.variant == "Err":
+                if pattern.args:
+                    sub_val = f"w_unwrap_err({val_expr})"
+                    sub_tmp = self.new_aux("_err_val")
+                    self._declare_owned_var(sub_tmp, sub_val, out)
+                    self._emit_pattern_bindings(pattern.args[0], sub_tmp, out)
+            else:
+                if len(pattern.args) == 1:
+                    sub_val = f"({val_expr}).as.en.box->val"
+                    self._emit_pattern_bindings(pattern.args[0], sub_val, out)
+                elif len(pattern.args) > 1:
+                    for idx, arg_pat in enumerate(pattern.args):
+                        sub_val = f"({val_expr}).as.en.box->val.as.tuple->items[{idx}]"
+                        self._emit_pattern_bindings(arg_pat, sub_val, out)
 
     def _emit_pattern_cond(self, pattern: Pattern, val_expr: str, out: List[str]) -> str:
-        if isinstance(pattern, (WildcardPattern, IdentifierPattern)):
+        if isinstance(pattern, WildcardPattern):
+            return "true"
+        if isinstance(pattern, IdentifierPattern):
+            if pattern.name in ("None", "none"):
+                return f"(({val_expr}).tag == W_NONE || (({val_expr}).tag == W_ENUM && strcmp(({val_expr}).as.en.enum_name, \"Option\") == 0 && strcmp(({val_expr}).as.en.variant, \"None\") == 0))"
             return "true"
         if isinstance(pattern, LiteralPattern):
             lit_v = self.emit_expr(pattern.literal, out)
             return f"w_eq({val_expr}, {lit_v})"
         if isinstance(pattern, EnumPattern):
-            en_v = f'w_enum("{pattern.enum_name}", "{pattern.variant}")'
-            return f"w_eq({val_expr}, {en_v})"
+            if pattern.variant in ("None", "none"):
+                return f"(({val_expr}).tag == W_NONE || (({val_expr}).tag == W_ENUM && strcmp(({val_expr}).as.en.enum_name, \"Option\") == 0 && strcmp(({val_expr}).as.en.variant, \"None\") == 0))"
+            if pattern.variant == "Some":
+                base_cond = f"(!(({val_expr}).tag == W_NONE || (({val_expr}).tag == W_ENUM && strcmp(({val_expr}).as.en.enum_name, \"Option\") == 0 && strcmp(({val_expr}).as.en.variant, \"None\") == 0)))"
+                if not pattern.args:
+                    return base_cond
+                sub_cond = self._emit_pattern_cond(pattern.args[0], f"w_peek_ok({val_expr})", out)
+                if sub_cond == "true":
+                    return base_cond
+                return f"({base_cond} && {sub_cond})"
+            if pattern.variant == "Ok":
+                base_cond = f"(({val_expr}).tag == W_OK || (({val_expr}).tag == W_ENUM && strcmp(({val_expr}).as.en.enum_name, \"Result\") == 0 && strcmp(({val_expr}).as.en.variant, \"Ok\") == 0))"
+                if not pattern.args:
+                    return base_cond
+                sub_cond = self._emit_pattern_cond(pattern.args[0], f"w_peek_ok({val_expr})", out)
+                if sub_cond == "true":
+                    return base_cond
+                return f"({base_cond} && {sub_cond})"
+            if pattern.variant == "Err":
+                base_cond = f"(({val_expr}).tag == W_ERR || (({val_expr}).tag == W_ENUM && strcmp(({val_expr}).as.en.enum_name, \"Result\") == 0 && strcmp(({val_expr}).as.en.variant, \"Err\") == 0))"
+                if not pattern.args:
+                    return base_cond
+                sub_cond = self._emit_pattern_cond(pattern.args[0], f"w_peek_err({val_expr})", out)
+                if sub_cond == "true":
+                    return base_cond
+                return f"({base_cond} && {sub_cond})"
+
+            conds: List[str] = [f"(({val_expr}).tag == W_ENUM && strcmp(({val_expr}).as.en.variant, \"{pattern.variant}\") == 0)"]
+            if pattern.enum_name:
+                conds.append(f"(strcmp(({val_expr}).as.en.enum_name, \"{pattern.enum_name}\") == 0)")
+            if not pattern.args:
+                return "(" + " && ".join(conds) + ")"
+
+            conds.append(f"(({val_expr}).as.en.box != NULL)")
+            if len(pattern.args) == 1:
+                sub_c = self._emit_pattern_cond(pattern.args[0], f"({val_expr}).as.en.box->val", out)
+                if sub_c != "true":
+                    conds.append(sub_c)
+            else:
+                conds.append(f"(({val_expr}).as.en.box->val.tag == W_TUPLE && ({val_expr}).as.en.box->val.as.tuple->len == {len(pattern.args)})")
+                for idx, arg_pat in enumerate(pattern.args):
+                    sub_c = self._emit_pattern_cond(arg_pat, f"({val_expr}).as.en.box->val.as.tuple->items[{idx}]", out)
+                    if sub_c != "true":
+                        conds.append(sub_c)
+            return "(" + " && ".join(conds) + ")"
+
         if isinstance(pattern, TuplePattern):
-            conds: List[str] = [f"(({val_expr}).tag == W_TUPLE && ({val_expr}).as.tuple->len == {len(pattern.elements)})"]
+            conds = [f"(({val_expr}).tag == W_TUPLE && ({val_expr}).as.tuple->len == {len(pattern.elements)})"]
             for idx, elem_pat in enumerate(pattern.elements):
                 sub_c = self._emit_pattern_cond(elem_pat, f"({val_expr}).as.tuple->items[{idx}]", out)
                 if sub_c != "true":
@@ -621,6 +708,11 @@ class CCodeGen:
             return self._bind_call(f"w_new_{expr.class_name}({', '.join(arg_vals)})", out)
 
         if isinstance(expr, IdentExpr):
+            if expr.name in ("None", "none"):
+                return "w_none()"
+            if expr.name in self.enum_variants and not self._is_local_var(f"v_{expr.name}"):
+                en_name = self.enum_variants[expr.name]
+                return f'w_enum("{en_name}", "{expr.name}")'
             return self.c_var(expr.name)
 
         if isinstance(expr, UnaryExpr):
@@ -765,6 +857,8 @@ class CCodeGen:
         if isinstance(expr, MemberExpr):
             if isinstance(expr.object, IdentExpr):
                 if expr.object.name in self.enum_names:
+                    if expr.object.name == "Option" and expr.property in ("None", "none"):
+                        return "w_none()"
                     return f'w_enum("{expr.object.name}", "{expr.property}")'
                 if f"v_{expr.object.name}_{expr.property}" in self.global_vars:
                     return f"v_{expr.object.name}_{expr.property}"
@@ -781,6 +875,26 @@ class CCodeGen:
             if isinstance(expr.callee, IdentExpr):
                 fn_name = expr.callee.name
                 arg_vals = [self.emit_expr(a, out) for a in expr.args]
+
+                if fn_name == "Some" and len(arg_vals) == 1:
+                    return self._bind_call(f"w_enum_payload(\"Option\", \"Some\", {arg_vals[0]})", out)
+                if fn_name == "Ok" and len(arg_vals) == 1:
+                    return self._bind_call(f"w_ok({arg_vals[0]})", out)
+                if fn_name == "Err" and len(arg_vals) == 1:
+                    return self._bind_call(f"w_err({arg_vals[0]})", out)
+
+                if fn_name in self.enum_variants and not self._is_local_var(f"v_{fn_name}"):
+                    en_name = self.enum_variants[fn_name]
+                    if len(arg_vals) == 0:
+                        return f'w_enum("{en_name}", "{fn_name}")'
+                    elif len(arg_vals) == 1:
+                        return self._bind_call(f'w_enum_payload("{en_name}", "{fn_name}", {arg_vals[0]})', out)
+                    else:
+                        tup_tmp = self.new_temp()
+                        elems_c = ", ".join(arg_vals)
+                        out.append(f"WVal _elems_{tup_tmp}[{len(arg_vals)}] = {{ {elems_c} }};")
+                        out.append(f"WVal {tup_tmp} = w_make_tuple({len(arg_vals)}, _elems_{tup_tmp});")
+                        return self._bind_call(f'w_enum_payload("{en_name}", "{fn_name}", {tup_tmp})', out)
 
                 if fn_name == "print":
                     if not arg_vals:
@@ -835,6 +949,26 @@ class CCodeGen:
             if isinstance(expr.callee, MemberExpr):
                 obj_expr = expr.callee.object
                 method = expr.callee.property
+
+                if isinstance(obj_expr, IdentExpr) and obj_expr.name in self.enum_names:
+                    en_name = obj_expr.name
+                    arg_vals = [self.emit_expr(a, out) for a in expr.args]
+                    if (en_name == "Result" or en_name.startswith("Result__")) and method == "Ok" and len(arg_vals) == 1:
+                        return self._bind_call(f"w_ok({arg_vals[0]})", out)
+                    if (en_name == "Result" or en_name.startswith("Result__")) and method == "Err" and len(arg_vals) == 1:
+                        return self._bind_call(f"w_err({arg_vals[0]})", out)
+                    if (en_name == "Option" or en_name.startswith("Option__")) and method in ("None", "none"):
+                        return "w_none()"
+                    if len(arg_vals) == 0:
+                        return f'w_enum("{en_name}", "{method}")'
+                    elif len(arg_vals) == 1:
+                        return self._bind_call(f'w_enum_payload("{en_name}", "{method}", {arg_vals[0]})', out)
+                    else:
+                        tup_tmp = self.new_temp()
+                        elems_c = ", ".join(arg_vals)
+                        out.append(f"WVal _elems_{tup_tmp}[{len(arg_vals)}] = {{ {elems_c} }};")
+                        out.append(f"WVal {tup_tmp} = w_make_tuple({len(arg_vals)}, _elems_{tup_tmp});")
+                        return self._bind_call(f'w_enum_payload("{en_name}", "{method}", {tup_tmp})', out)
 
                 # super.init(...) or super.method(...)
                 if isinstance(obj_expr, SuperExpr):

@@ -1,0 +1,7 @@
+Success: 100
+Error: failed
+Success: 51
+Error: must be positive
+eq ok: true
+eq err: true
+eq diff: false
