@@ -1,3 +1,4 @@
+from error.Error import WError
 """
 hir/HirCCodeGen.py - Direct C99 Code Generator from Typed HIR.
 
@@ -895,7 +896,9 @@ class HirCCodeGen:
             self._emit_match_arms(expr.arms, 0, subj_tmp, res, out)
             return res
 
-        return "w_unit()"
+        raise WError(f"Unsupported HIR expression: {type(expr).__name__}",
+                     line=expr.span.line, col=expr.span.col, file=self.file_path,
+                     code="W9999", stage="codegen")
 
     def _emit_elifs(
         self,

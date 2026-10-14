@@ -1,3 +1,4 @@
+from error.Error import WError
 import os
 from parser.Parser import Parser
 from typing import Any, Dict, List, Optional, Tuple, Set
@@ -284,7 +285,9 @@ class HirBuilder:
             return HirExprStmt(self._lower_expr(stmt.expr), span)
 
         # Fallback to expression statement
-        return HirExprStmt(HirConstUnit(TYPE_UNIT, span), span)
+        raise WError(f"Unsupported AST statement: {type(stmt).__name__}",
+                     line=span.line, col=span.col, file=self.file_path,
+                     code="W9999", stage="hir")
 
     # -------------------------------------------------------------
     # Expressions
@@ -450,8 +453,9 @@ class HirBuilder:
             e_hir = self._lower_expr(expr.end)
             return HirRange(s_hir, e_hir, expr.inclusive, tid, span)
 
-        # Fallback
-        return HirConstUnit(tid or TYPE_UNIT, span)
+        raise WError(f"Unsupported AST expression: {type(expr).__name__}",
+                     line=span.line, col=span.col, file=self.file_path,
+                     code="W9999", stage="hir")
 
     # -------------------------------------------------------------
     # Type Resolution Helpers
