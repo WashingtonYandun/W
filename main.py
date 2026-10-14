@@ -137,7 +137,7 @@ def run_pipeline(
             return 0
 
         # 4. C99 Code Generation / Native Build
-        if emit_c_path is not None or build_bin_path is not None or show_stats:
+        if emit_c_path is not None or build_bin_path is not None:
             repo_root = get_repo_root()
             codegen_inst = None
             if use_selfhost and file_name != "<stdin>":
@@ -179,9 +179,7 @@ def run_pipeline(
                         "codegen": codegen_inst.telemetry.to_dict() if codegen_inst else None
                     }
                 }
-                print(json.dumps(stat_obj, indent=2))
-                if emit_c_path is None and build_bin_path is None:
-                    return 0
+                print(json.dumps(stat_obj, indent=2), file=sys.stderr)
 
             if emit_c_path is not None:
                 with open(emit_c_path, "w", encoding="utf-8") as f:
@@ -206,6 +204,12 @@ def run_pipeline(
                 return 0
 
         # 5. Runtime Interpretation
+        if show_stats:
+            print(json.dumps({
+                "status": "ok",
+                "file": file_name,
+                "telemetry": {"monomorphization": checker.telemetry.to_dict()}
+            }, indent=2), file=sys.stderr)
         interp = Interpreter(file=file_name)
         res = interp.interpret(ast)
 
@@ -283,7 +287,7 @@ def print_help() -> None:
     print(f"W Language Compiler & Toolchain v{W_VERSION}")
     print("Usage:")
     print("  w                                           # Start interactive REPL")
-    print("  w [run] <file.w>                            # Execute W source file (W0 interpreter)")
+    print("  w [run] [--stats] <file.w>                  # Execute W source file (W0 interpreter)")
     print("  w check [--json] [--stats] <file.w>         # Static typecheck without execution")
     print("  w fmt [--write] <file.w>                    # Canonical deterministic formatter")
     print("  w ast [--json] <file.w>                     # Emit canonical JSON AST (v0.1)")

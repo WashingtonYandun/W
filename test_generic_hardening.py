@@ -4,12 +4,13 @@ test_generic_hardening.py - Conformance tests for generic hardening and code blo
 Verifies:
 1. Canonical GenericInstanceKey hash and equality semantics.
 2. Monomorphization caching and deduplication telemetry.
-3. Structural growth cycle detection (W2011).
+3. Instantiation depth budget (W2011) without finite-growth false positives.
 4. Direct recursive struct cycle detection (W2011).
 5. CLI --stats output format and telemetry fields.
 """
 
 import json
+import tempfile
 import os
 import subprocess
 import sys
@@ -61,7 +62,7 @@ def test_canonical_deduplication_telemetry():
     print("  [PASS] Canonical deduplication telemetry")
 
 
-def test_structural_growth_cycle_detection():
+def test_unbounded_instantiation_budget():
     code = """
     fn expand[T](x: T) {
         expand([x])
@@ -76,10 +77,10 @@ def test_structural_growth_cycle_detection():
         checker.check(ast)
     except TypeError as err:
         assert err.code == "W2011", f"Expected W2011, got {err.code}"
-        assert "Structurally growing" in str(err), f"Expected structural growth message, got {err}"
+        assert "depth limit exceeded" in str(err), f"Expected resource limit message, got {err}"
         caught = True
     assert caught, "Expected TypeError W2011 for structural growth cycle"
-    print("  [PASS] Structural growth cycle detection (W2011)")
+    print("  [PASS] Unbounded expansion depth budget (W2011)")
 
 
 def test_direct_struct_recursion_cycle_detection():
@@ -109,13 +110,14 @@ def test_cli_stats_output():
     main_py = os.path.join(repo_root, "main.py")
     test_w = os.path.join(repo_root, "tests", "runtime", "generic_tree_recursive.w")
     proc = subprocess.run(
-        [sys.executable, main_py, test_w, "--stats"],
+        [sys.executable, main_py, "emit-c", test_w, "--stats", "-o", os.devnull],
         capture_output=True,
         text=True,
-        cwd=repo_root
+        cwd=repo_root,
+        timeout=20
     )
     assert proc.returncode == 0, f"CLI error: {proc.stderr}"
-    data = json.loads(proc.stdout)
+    data = json.loads(proc.stderr)
     assert data.get("status") == "ok", "Expected status ok in JSON stats"
     telemetry = data.get("telemetry", {})
     assert "monomorphization" in telemetry, "Expected monomorphization in telemetry"
@@ -128,6 +130,87 @@ def test_cli_stats_output():
     print("  [PASS] CLI --stats JSON output and telemetry verification")
 
 
+def test_hardening_regressions():
+    from checker.WType import IntType, TupleType, ResultType, OptionalType, ListType, FunctionType
+    from codegen.CCodeGen import CCodeGen
+    from hir.HirBuilder import HirBuilder
+    from hir.HirCCodeGen import HirCCodeGen
+
+    key = GenericInstanceKey("Box", (3,))
+    for attr, value in [("type_ids", (4,)), ("template_name", "Other")]:
+        try:
+            setattr(key, attr, value)
+        except AttributeError:
+            pass
+        else:
+            raise AssertionError("Specialization keys must be immutable")
+
+    checker = TypeChecker()
+    assert checker._type_complexity(TupleType([])) == 1
+    assert checker._type_complexity(TupleType([IntType, ListType(IntType)])) == 4
+    assert checker._type_complexity(ResultType(IntType, OptionalType(IntType))) == 4
+    assert checker._type_complexity(FunctionType([IntType], IntType)) == 3
+
+    sources = [
+        ("fn id[T](x: T) -> T { return x }\nlet pair = id((1, true))", 1),
+        ("fn fixed[T](x: T) -> unit { fixed[list[int]]([1]) }\nfixed(1)", 2),
+        ("fn fixed[T](x: T) -> unit { fixed([1]) }\nfixed(1)", 2),
+        ("fn a[T](x: T) -> unit { b[list[int]]([1]) }\nfn b[T](x: T) -> unit { a[list[int]]([1]) }\na(1)", 3),
+    ]
+    for source, expected in sources:
+        ast = Parser().parse(source)
+        checker = TypeChecker()
+        checker.check(ast)
+        assert len(checker.monomorphized_fns) == expected
+
+    checker._monomorphize_depth = 64
+    template = checker.generic_fn_templates["a"]
+    assert checker._monomorphize_fn(template, [IntType], 1, 1) is not None
+
+    for filename in ["generic_pair.w", "generic_tree_recursive.w"]:
+        path = os.path.join("tests", "runtime", filename)
+        with open(path, encoding="utf-8") as stream:
+            ast = Parser(file=path).parse(stream.read())
+        checker = TypeChecker(file=path)
+        checker.check(ast)
+        hir = HirBuilder(checker.interner, file_path=path).lower(ast)
+        for generator, unit in [(CCodeGen(file=path), ast), (HirCCodeGen(checker.interner, file_path=path), hir)]:
+            output = generator.generate(unit)
+            assert generator.telemetry.generated_c_lines == len(output.splitlines())
+            assert generator.telemetry.generated_c_bytes == len(output.encode("utf-8"))
+
+    for source in [
+        "fn expand[T](x: T) { expand([x]) }\nexpand(1)",
+        "fn a[T](x: T) { b([x]) }\nfn b[T](x: T) { a([x]) }\na(1)",
+    ]:
+        try:
+            TypeChecker().check(Parser().parse(source))
+        except TypeError as error:
+            assert error.code == "W2011"
+            assert "depth limit exceeded" in str(error)
+        else:
+            raise AssertionError("Unbounded instantiation must exhaust the depth budget")
+    print("  [PASS] Compound types, finite recursion, cache boundary, immutable keys, and C metrics")
+
+
+def test_run_stats_preserves_execution():
+    with tempfile.TemporaryDirectory() as directory:
+        source = os.path.join(directory, "stats.w")
+        with open(source, "w", encoding="utf-8") as stream:
+            stream.write('print("executed")\n')
+        for flag in ["--stats", "--metrics"]:
+            result = subprocess.run([sys.executable, "main.py", "run", source, flag],
+                                    capture_output=True, text=True, timeout=20)
+            assert result.returncode == 0, result.stderr
+            assert result.stdout == "executed\n", result.stdout
+            assert "monomorphization" in json.loads(result.stderr)["telemetry"]
+        checked = subprocess.run([sys.executable, "main.py", "check", source, "--stats"],
+                                 capture_output=True, text=True, timeout=20)
+        assert checked.returncode == 0, checked.stderr
+        assert json.loads(checked.stdout)["status"] == "ok"
+    print("  [PASS] Run stats preserve program stdout; check stats remain JSON")
+
+
 def run_generic_hardening_tests() -> bool:
     print("==================================================")
     print("Generic Hardening & Code Bloat Metrics Conformance")
@@ -135,9 +218,11 @@ def run_generic_hardening_tests() -> bool:
     try:
         test_generic_instance_key()
         test_canonical_deduplication_telemetry()
-        test_structural_growth_cycle_detection()
+        test_unbounded_instantiation_budget()
         test_direct_struct_recursion_cycle_detection()
         test_cli_stats_output()
+        test_hardening_regressions()
+        test_run_stats_preserves_execution()
         return True
     except Exception as e:
         print(f"  [FAIL] Generic Hardening Test Failed: {e}")

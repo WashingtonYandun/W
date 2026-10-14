@@ -1,6 +1,6 @@
 import copy
 import os
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple, NamedTuple
 from node.NodeType import (
     Node, Program, Stmt, Expr, TypeNode, Pattern, Block,
     NamedType, OptionalType as AstOptionalType, ListType as AstListType,
@@ -30,23 +30,10 @@ from checker.TypeInterner import TypeInterner
 from error.Error import TypeError
 
 
-class GenericInstanceKey:
-    """Canonical, immutable key for generic instantiations."""
-    def __init__(self, template_name: str, type_ids: Tuple[int, ...]) -> None:
-        self.template_name = template_name
-        self.type_ids = type_ids
-        self._hash = hash((template_name, type_ids))
-
-    def __hash__(self) -> int:
-        return self._hash
-
-    def __eq__(self, other: object) -> bool:
-        if not isinstance(other, GenericInstanceKey):
-            return False
-        return self.template_name == other.template_name and self.type_ids == other.type_ids
-
-    def __repr__(self) -> str:
-        return f"GenericInstanceKey({self.template_name}, {self.type_ids})"
+class GenericInstanceKey(NamedTuple):
+    """Session-local specialization identity; not a persistent hash or ABI name."""
+    template_name: str
+    type_ids: Tuple[int, ...]
 
 
 class MonomorphizationTelemetry:
@@ -2559,11 +2546,11 @@ class TypeChecker:
         if isinstance(t, OptionalType):
             return 1 + self._type_complexity(t.inner)
         if isinstance(t, ResultType):
-            return 1 + self._type_complexity(t.ok_type) + self._type_complexity(t.err_type)
+            return 1 + self._type_complexity(t.ok) + self._type_complexity(t.err)
         if isinstance(t, (StructType, EnumType)) and getattr(t, "type_args", None):
             return 1 + sum(self._type_complexity(a) for a in t.type_args)
-        if isinstance(t, TupleType) and t.types:
-            return 1 + sum(self._type_complexity(a) for a in t.types)
+        if isinstance(t, TupleType):
+            return 1 + sum(self._type_complexity(a) for a in t.elements)
         if isinstance(t, FunctionType):
             return 1 + sum(self._type_complexity(p) for p in t.params) + self._type_complexity(t.ret)
         return 1
@@ -2575,14 +2562,6 @@ class TypeChecker:
         line: int,
         col: int
     ) -> StructType:
-        if self._monomorphize_depth > 64:
-            raise TypeError(
-                message=f"Monomorphization recursion depth limit exceeded for struct '{template.name}'",
-                line=line,
-                col=col,
-                file=self.file,
-                code="W2011"
-            )
         if len(concrete_args) != len(template.type_params):
             raise TypeError(
                 message=f"Generic struct '{template.name}' expects {len(template.type_params)} type arguments, found {len(concrete_args)}",
@@ -2600,17 +2579,16 @@ class TypeChecker:
             self.telemetry.deduplicated_hits += 1
             return self.monomorphized_structs[key]
 
+        if self._monomorphize_depth >= 64:
+            raise TypeError(
+                message=f"Monomorphization recursion depth limit exceeded for struct '{template.name}'",
+                line=line,
+                col=col,
+                file=self.file,
+                code="W2011"
+            )
+
         curr_complexity = sum(self._type_complexity(a) for a in concrete_args)
-        for prev_name, prev_ids, prev_complexity in self._instantiation_stack:
-            if prev_name == template.name:
-                if curr_complexity > prev_complexity:
-                    raise TypeError(
-                        message=f"Structurally growing generic instantiation cycle detected for struct '{template.name}' (complexity {prev_complexity} -> {curr_complexity})",
-                        line=line,
-                        col=col,
-                        file=self.file,
-                        code="W2011"
-                    )
 
         # Direct layout recursion detection
         for f in template.ast_decl.fields:
@@ -2687,14 +2665,6 @@ class TypeChecker:
         line: int,
         col: int
     ) -> Symbol:
-        if self._monomorphize_depth > 64:
-            raise TypeError(
-                message=f"Monomorphization recursion depth limit exceeded for function '{template.name}'",
-                line=line,
-                col=col,
-                file=self.file,
-                code="W2011"
-            )
         if len(concrete_args) != len(template.type_params):
             raise TypeError(
                 message=f"Generic function '{template.name}' expects {len(template.type_params)} type arguments, found {len(concrete_args)}",
@@ -2712,17 +2682,16 @@ class TypeChecker:
             self.telemetry.deduplicated_hits += 1
             return self.monomorphized_fns[key]
 
+        if self._monomorphize_depth >= 64:
+            raise TypeError(
+                message=f"Monomorphization recursion depth limit exceeded for function '{template.name}'",
+                line=line,
+                col=col,
+                file=self.file,
+                code="W2011"
+            )
+
         curr_complexity = sum(self._type_complexity(a) for a in concrete_args)
-        for prev_name, prev_ids, prev_complexity in self._instantiation_stack:
-            if prev_name == template.name:
-                if curr_complexity > prev_complexity:
-                    raise TypeError(
-                        message=f"Structurally growing generic instantiation cycle detected for function '{template.name}' (complexity {prev_complexity} -> {curr_complexity})",
-                        line=line,
-                        col=col,
-                        file=self.file,
-                        code="W2011"
-                    )
 
         subst: Dict[str, WType] = {}
         for p, arg in zip(template.type_params, concrete_args):
@@ -2769,14 +2738,6 @@ class TypeChecker:
         line: int,
         col: int
     ) -> EnumType:
-        if self._monomorphize_depth > 64:
-            raise TypeError(
-                message=f"Monomorphization recursion depth limit exceeded for enum '{template.name}'",
-                line=line,
-                col=col,
-                file=self.file,
-                code="W2011"
-            )
         if len(concrete_args) != len(template.type_params):
             raise TypeError(
                 message=f"Generic enum '{template.name}' expects {len(template.type_params)} type arguments, found {len(concrete_args)}",
@@ -2794,17 +2755,16 @@ class TypeChecker:
             self.telemetry.deduplicated_hits += 1
             return self.monomorphized_enums[key]
 
+        if self._monomorphize_depth >= 64:
+            raise TypeError(
+                message=f"Monomorphization recursion depth limit exceeded for enum '{template.name}'",
+                line=line,
+                col=col,
+                file=self.file,
+                code="W2011"
+            )
+
         curr_complexity = sum(self._type_complexity(a) for a in concrete_args)
-        for prev_name, prev_ids, prev_complexity in self._instantiation_stack:
-            if prev_name == template.name:
-                if curr_complexity > prev_complexity:
-                    raise TypeError(
-                        message=f"Structurally growing generic instantiation cycle detected for enum '{template.name}' (complexity {prev_complexity} -> {curr_complexity})",
-                        line=line,
-                        col=col,
-                        file=self.file,
-                        code="W2011"
-                    )
 
         self._instantiation_stack.append((template.name, type_ids, curr_complexity))
         self._monomorphize_depth += 1

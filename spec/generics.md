@@ -4,9 +4,9 @@
 - **`[W-SPEC-GEN-001]` Monomorphization**: Generic structs, functions, and enums are template declarations. They emit concrete definitions only upon instantiation with concrete types.
 - **`[W-SPEC-GEN-002]` Mangled Identifiers**: Specialized symbols follow deterministic naming:
   `TemplateName__T1__T2` where `T1`, `T2` are recursively mangled concrete type names.
-- **`[W-SPEC-GEN-003]` Instantiation Caching**: The compiler caches monomorphized declarations using a canonical tuple key `GenericInstanceKey(TemplateDeclId, (TypeId, ...))`. Repeated references to the same specialization share identical C99 type definitions.
-- **`[W-SPEC-GEN-004]` Structural Growth Cycle Detection**: Beyond a hard recursion depth limit (`MAX_DEPTH = 64`), the TypeChecker detects structurally expanding generic instantiations (where type nesting complexity monotonically grows: $C_{k+1} > C_k$) and aborts immediately with diagnostic code `W2011`.
-- **`[W-SPEC-GEN-005]` Code Bloat Metrics & Telemetry**: The compiler tracks specialization requests, cache deduplication hits, and generated C lines/bytes, exposing them via CLI flag `--stats` / `--metrics`.
+- **`[W-SPEC-GEN-003]` Instantiation Caching**: The compiler caches monomorphized declarations using a canonical tuple key `GenericInstanceKey(template_name, (TypeId, ...))`. Repeated references within one TypeChecker share the cached declaration. Keys are immutable and session-local; cross-module DeclId identity remains pending.
+- **`[W-SPEC-GEN-004]` Presupuesto de instanciación**: Cache-first permite reutilizar una instancia recursiva antes de aplicar el límite de 64 instanciaciones nuevas activas. Excederlo produce W2011 por agotamiento de recursos. Mayor complejidad no demuestra un ciclo infinito; no se rechazan especializaciones finitas solo por ese aumento.
+- **`[W-SPEC-GEN-005]` Code Bloat Metrics & Telemetry**: The compiler tracks specialization requests, cache deduplication hits, and generated C lines/bytes, exposing them via CLI flag `--stats` / `--metrics`. Líneas se cuentan sobre el C final; bytes usan UTF-8. Run conserva ejecución y stdout; run/build/emit-c escriben métricas en stderr. Check --stats devuelve JSON en stdout. Run solo reporta monomorfización; no ejecuta codegen para obtener estadísticas.
 
 ## 2. Layouts & Recursive ADTs
 - **`[W-SPEC-GEN-010]` Finite Size Invariant**: Every struct and enum must have a statically determinable finite layout in C99.
