@@ -27,7 +27,8 @@ def run_session_tests():
                 fn shadow(value: int) -> int { return value }
                 fn identity[Item](x: Item) -> Item { return x }
                 fn id[T](x: T) -> T { return x }
-                fn value() -> int { return id(3) }
+                let values = [3]
+                fn value() -> int { return id(values[0]) }
             """.strip(),
             'left.w': """
                 import "shared.w"
@@ -129,9 +130,14 @@ def run_session_tests():
         Interpreter(stdout=alias_output).interpret(alias_unit.program)
         assert alias_output.getvalue() == 'init\n3 3\n'
         unit = session.check_source(sources['main.w'], str(entry))
-        (root / 'shared.w').write_text(sources['shared.w'].replace('id(3)', 'id(9)'))
+        previous_stat = (root / 'shared.w').stat()
+        (root / 'shared.w').write_text(sources['shared.w'].replace('[3]', '[9]'))
+        os.utime(root / 'shared.w', ns=(previous_stat.st_atime_ns, previous_stat.st_mtime_ns))
         refreshed = session.check_source(sources['main.w'], str(entry))
         assert refreshed is not unit and refreshed.generation == unit.generation + 1
+        refreshed_output = io.StringIO()
+        Interpreter(stdout=refreshed_output).interpret(refreshed.program)
+        assert refreshed_output.getvalue() == 'init\n9 right 7 yes 4\nItem { value: 9 } Item { value: "right" } 9 Mode.On 2\n'
         try:
             session.link(unit.program)
         except WError as error:

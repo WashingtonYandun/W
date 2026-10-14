@@ -3,6 +3,9 @@
     "core": {},
     "generics": {
       "w1": "D02: generic specialization and diagnostics are not implemented in W1"
+    },
+    "checked_modules": {
+      "w1": "D02: W1 does not implement checked-module identity, reuse or imported generic specialization"
     }
   },
   "fixtures": {
@@ -19,9 +22,13 @@
     "tests/types/invalid/generic_nominal_constraint_violation.w": "generics",
     "tests/types/invalid/generic_recursive_infinite_layout.w": "generics",
     "tests/types/invalid/generic_struct_recursive_cycle.w": "generics",
-    "tests/types/invalid/generic_structural_growth_cycle.w": "generics"
+    "tests/types/invalid/generic_structural_growth_cycle.w": "generics",
+    "tests/modules/checked_session/main.w": "checked_modules"
   },
   "support_files": {
-    "tests/runtime/math_lib.w": "Imported library exercised by tests/runtime/import_module.w"
+    "tests/runtime/math_lib.w": "Imported library exercised by tests/runtime/import_module.w",
+    "tests/modules/checked_session/left.w": "Checked-module fixture dependency exercised by tests/modules/checked_session/main.w",
+    "tests/modules/checked_session/right.w": "Checked-module fixture dependency exercised by tests/modules/checked_session/main.w",
+    "tests/modules/checked_session/shared.w": "Checked-module fixture dependency exercised by tests/modules/checked_session/main.w"
   }
 }
