@@ -229,6 +229,8 @@ destroy object storage and drop the implicit weak reference. A self-stored weak
 handle therefore cannot free its control block during object teardown.
 
 `w_builtin_weak` borrows a class reference and returns one owned weak handle.
+`w_builtin_weak_owned` consumes the evaluated language-call snapshot immediately,
+so weak creation does not accidentally keep its target alive until scope cleanup.
 `w_builtin_upgrade` borrows a weak handle and returns a retained strong object or
 None. `w_empty_weak` owns a new expired control block for a default weak field;
 constructor initializer arrays release their temporary defaults after storing

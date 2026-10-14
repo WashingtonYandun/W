@@ -821,6 +821,13 @@ static inline WVal w_builtin_weak(WVal object) {
     return value;
 }
 
+/* Language weak calls consume their evaluated argument snapshot immediately. */
+static inline WVal w_builtin_weak_owned(WVal object) {
+    WVal handle = w_builtin_weak(object);
+    w_release(object);
+    return handle;
+}
+
 static inline WVal w_builtin_upgrade(WVal weak) {
     if (weak.tag != W_WEAK) {
         fprintf(stderr, "[W4003] RuntimeError: upgrade expects a weak reference\n");

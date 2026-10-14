@@ -39,6 +39,13 @@ fn weak_back_reference() -> Weak[Node] {
 }
 
 fn exercise() -> unit {
+    let temporary = weak(Node(99))
+    print(temporary, upgrade(temporary) == none)
+    let mut replaceable = Node(98)
+    let observer = weak(replaceable)
+    replaceable = Node(97)
+    print(observer, upgrade(observer) == none)
+
     let empty = DefaultHandle()
     let other_empty = DefaultHandle()
     print(empty.value, upgrade(empty.value) == none, empty.value == other_empty.value)

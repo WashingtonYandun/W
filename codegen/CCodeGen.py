@@ -960,6 +960,8 @@ class CCodeGen:
                     out.append(f"WVal {arr_tmp}[{len(arg_vals)}] = {{ {elems_c} }};")
                     return self._bind_call(f"w_builtin_eprint({len(arg_vals)}, {arr_tmp})", out)
 
+                if fn_name == "weak" and len(arg_vals) == 1:
+                    return self._bind_call(f"w_builtin_weak_owned({self._own_expr(arg_vals[0])})", out)
                 builtin_1 = {
                     "weak": "w_builtin_weak", "upgrade": "w_builtin_upgrade",
                     "len": "w_builtin_len",
