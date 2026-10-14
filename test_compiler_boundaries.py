@@ -154,6 +154,21 @@ def test_compiler_boundaries():
     broken.functions[0].params[0].type_id = bad_signature
     rejected(broken, '.component')
 
+    broken = deepcopy(module)
+    broken.top_level_stmts.append(H.HirExprStmt(H.HirBuiltinCall("missing", [], TYPE_INT, Span()), Span()))
+    rejected(broken, 'Unresolved HIR builtin')
+    broken = deepcopy(module)
+    broken.top_level_stmts.append(H.HirExprStmt(H.HirConstructObject("Missing", [], TYPE_INT, Span()), Span()))
+    rejected(broken, 'Unresolved HIR class constructor')
+    broken = deepcopy(module)
+    declaration = broken.structs[0]
+    broken.top_level_stmts.append(H.HirExprStmt(H.HirConstructStruct(declaration.name, [], declaration.type_id, Span()), Span()))
+    rejected(broken, 'Struct constructor fields')
+    broken = deepcopy(module)
+    bad_optional = H.HirConstructEnum("Option", "Some", 0, checker.interner.mk_optional(TYPE_INT), Span(), H.HirConstBool(True, TYPE_BOOL, Span()))
+    broken.top_level_stmts.append(H.HirExprStmt(bad_optional, Span()))
+    rejected(broken, 'Builtin constructor payload')
+
     from checker.TypeInterner import TYPE_STR
     integer = H.HirConstInt(1, TYPE_INT, Span())
     boolean = H.HirConstBool(True, TYPE_BOOL, Span())

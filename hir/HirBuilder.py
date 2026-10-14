@@ -149,8 +149,11 @@ class HirBuilder:
         return HirStructDecl(decl.name, tid, fields, Span(decl.line, decl.col))
 
     def _lower_enum_decl(self, decl: EnumDecl) -> HirEnumDecl:
-        tid = self.interner.mk_enum(decl.name, decl.variants)
-        return HirEnumDecl(decl.name, tid, decl.variants, Span(decl.line, decl.col))
+        variants = [variant.name if hasattr(variant, "name") else variant for variant in decl.variants]
+        tid = self.interner.mk_enum(decl.name, variants)
+        payloads = {variant.name: [self._get_type_id_from_node(type_) for type_ in variant.payload_types]
+                    for variant in decl.variants if hasattr(variant, "payload_types")}
+        return HirEnumDecl(decl.name, tid, variants, Span(decl.line, decl.col), payloads)
 
     def _lower_interface_decl(self, decl: InterfaceDecl) -> HirInterfaceDecl:
         methods: List[Tuple[str, int]] = []
@@ -304,6 +307,10 @@ class HirBuilder:
         entry = self.interner.get_entry(type_id)
         if entry.tag in ("optional", "result"):
             name = "Option" if entry.tag == "optional" else "Result"
+        if entry.tag == "enum":
+            definition = self.interner.enum_defs.get(entry.data)
+            if definition and variant in definition.variants:
+                index = definition.variants.index(variant)
         return HirConstructEnum(name, variant, index, type_id, span, payload)
 
     def _lower_expr(self, expr: Expr) -> HirExpr:

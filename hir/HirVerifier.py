@@ -208,6 +208,10 @@ class HirVerifier:
                 if field == 'body' and isinstance(value, (H.HirWhile, H.HirForList)):
                     child_depth += 1
                 self._visit(child, child_depth, in_function)
+            if isinstance(value, H.HirEnumDecl):
+                for types in value.payload_types.values():
+                    for type_id in types:
+                        self._type(type_id, value, "enum payload")
             if isinstance(value, H.HirInterfaceDecl):
                 for _, type_id in value.methods:
                     self._type(type_id, value, 'methods')

@@ -1,30 +1,21 @@
-# HIR type validation boundary
+# HIR verification boundary
 
-HIR is verified after lowering and again before C emission. The verifier traverses HIR declarations, parameters, fields, blocks, tail expressions, methods, match arms and nested list/tuple children. It checks scalar type_id fields, type_id lists, function return types and interface method signature IDs against the current interner. TYPE_ERROR, negative/out-of-range IDs, None and booleans used as IDs produce W9999 at stage hir-verification.
+HIR is verified after lowering and again before C emission. Invalid internal input raises W9999 at `hir-verification`; unsupported backend nodes never silently become unit.
 
-The checker now records types on assignment targets and resolved type annotations. HirBuilder consumes those annotation IDs rather than reconstructing generic or builtin types from mangled strings. Imported functions are checked using the same interner before lowering; this repairs missing annotations without pretending to implement the planned CompilationSession/module cache.
+## Verified contracts
 
-Regression coverage verifies malformed parameter IDs and return types, including direct backend entry. The existing 48-file HIR corpus is exercised through the active verification boundary.
+- Required TypeIds and recursive type components belong to the current interner and are neither TYPE_ERROR nor malformed IDs. Recursive nominal types are supported.
+- Declarations, parameters, fields, blocks, tails, match arms, guards and typed patterns are traversed. Active-path cycle detection rejects cyclic nodes and containers while allowing shared acyclic nodes.
+- Break/continue require loops; returns require functions; conditions and guards are bool. Function boundaries reset loop context.
+- Literals, operators, ranges, tuples and collection metadata agree with their interned types. Collection elements, bindings, assignments and returns satisfy checked assignability.
+- Lexical local references resolve with matching types. Direct functions, class/inherited methods, interface methods and collection methods resolve with checked arity, arguments and result types.
+- Class and struct constructors resolve; struct fields are complete and unique. Enum constructors resolve to declared variants with matching indices and payload types. Builtin constructor families are canonical.
+- Propagation agrees with the outer optional/result channel and the enclosing return type. Match patterns carry inferred types; guards retain their bindings and execution semantics.
 
-This is a type-decoration verifier. It does not yet prove operand/result compatibility, lexical binding correctness, ownership, arena provenance for an in-range ID from another arena, or the semantic validity of AST patterns retained in HIR. Canonical type identity, typed patterns, resolved symbols and module sessions remain separate roadmap tasks. Passing this boundary is not a claim of complete semantic HIR verification.
+Lowering consumes checker annotation IDs, including synthesized generic constructors, assignments and imported functions, rather than reconstructing types from mangled strings. Enum declarations retain payload metadata for independent constructor validation.
 
+## Evidence and limits
 
-## Additional structural and control-flow checks
+`test_compiler_boundaries.py` mutates checked HIR and requires rejection before C emission. `test_hir_conformance.py` exercises the 52-file supported HIR corpus. `test_phase_a.py` checks canonical aliases, nested errors, guards and native sanitized execution.
 
-- Required type decorations on expressions, parameters, fields, typed declarations and function returns are checked even when an attribute was removed. Missing IDs are not silently skipped.
-- Active-path cycle detection rejects cyclic HIR nodes and list/tuple containers before emission. Shared acyclic nodes are allowed and revisited in their control-flow context; a previous visit cannot hide an invalid placement.
-- Break/continue require an enclosing loop body, return requires a function, and function boundaries reset loop context. While/if/elif conditions must carry the builtin bool TypeId.
-- Tuple element metadata must match its interned tuple type and element count.
-- Unknown HIR statements passed directly to the backend raise W9999 rather than disappearing from generated code.
-
-Negative regression tests mutate checked HIR and assert rejection at the backend boundary. Positive tests preserve shared nodes and valid loop transfers. These checks do not yet establish lexical binding, value coercions, ownership, complete node schemas or operand/result compatibility for every expression.
-
-The tuple check exposed an existing multi-payload enum lowering defect: the synthetic payload tuple carried the enum TypeId. Both qualified and unqualified variant construction now intern the actual payload tuple type. generic_tree_recursive.w covers the qualified multi-payload path in the conformance corpus.
-
-## Operand and result relations
-
-The verifier now checks literal kind/type agreement, numeric/string arithmetic, integer modulo, boolean logic, numeric comparisons, unary negation/not, range bounds/result and tuple operand metadata. Equality operators must return bool; alias-aware equality operand compatibility remains a frontend obligation until canonical Optional/Result identity is implemented.
-
-List/dictionary element metadata must match the interned result type. Lowering now derives that metadata from the checked collection type instead of the first element or an arbitrary empty-container default. This fixes typed empty lists such as list[str] carrying int metadata. Contextual typing of an empty dictionary is a separate frontend limitation and is not introduced here.
-
-Regression mutations cover wrong literal/operand/result types, bad range bounds, tuple element mismatch and collection metadata mismatch. Positive coverage includes typed empty lists and dictionaries with concrete key/value types. Collection element assignability, call/return contracts and all expression forms remain future verification work.
+This validates the current name-based HIR. It does not introduce SymbolIds, a typed module session, arena provenance tokens, an ownership proof or W1 generic parity. An in-range ID transplanted from another arena cannot be distinguished without provenance metadata. Builtin runtime helper contracts and broader ownership paths remain covered by their separate regression suites and later roadmap tasks.

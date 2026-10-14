@@ -24,6 +24,13 @@ def run_phase_a_tests():
         assert interner.intern(enum) == interner.intern(sugar)
     assert interner.mk_optional(interner.mk_optional(3)) != interner.mk_optional(3)
 
+    source = "fn id[T](x: T) -> T { return x }\nlet sugar: int? = 1\nlet alias: Option[int] = Some(1)\nlet first = id(sugar)\nlet second = id(alias)"
+    ast = Parser().parse(source)
+    checker = TypeChecker()
+    checker.check(ast)
+    assert checker.telemetry.specialized_functions == 1
+
+
     parser, formatter = Parser(), Formatter()
     for annotation in ['int?', 'int ! str', '(int?) ! str', '(int ! str)?', '(int ! str) ! bool', '(int?)?']:
         source = 'fn signature() -> ' + annotation + ' {}'

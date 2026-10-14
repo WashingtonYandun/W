@@ -88,11 +88,12 @@ class HirStructDecl(HirNode):
 
 
 class HirEnumDecl(HirNode):
-    def __init__(self, name: str, type_id: int, variants: List[str], span: Span):
+    def __init__(self, name: str, type_id: int, variants: List[str], span: Span, payload_types=None):
         super().__init__(span)
         self.name = name
         self.type_id = type_id
         self.variants = variants
+        self.payload_types = payload_types or {}
 
 
 class HirInterfaceDecl(HirNode):
