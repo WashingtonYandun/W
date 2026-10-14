@@ -51,21 +51,24 @@ def ensure_selfhost_w1_binary(repo_root: str) -> str:
             cf.write(c0_code)
 
         subprocess.run(
-            ["cc", "-std=c99", "-O2", f"-I{repo_root}", c0_path, "-o", s1_bin],
+            [os.environ.get("CC", "cc"), "-std=c99", "-O2", f"-I{repo_root}", c0_path, "-o", s1_bin],
             check=True,
+            timeout=120,
             capture_output=True,
             text=True,
         )
         subprocess.run(
             [s1_bin, w1_src_path, c1_path],
             check=True,
+            timeout=120,
             capture_output=True,
             text=True,
             cwd=repo_root,
         )
         subprocess.run(
-            ["cc", "-std=c99", "-O2", f"-I{repo_root}", c1_path, "-o", w1_bin],
+            [os.environ.get("CC", "cc"), "-std=c99", "-O2", f"-I{repo_root}", c1_path, "-o", w1_bin],
             check=True,
+            timeout=120,
             capture_output=True,
             text=True,
         )

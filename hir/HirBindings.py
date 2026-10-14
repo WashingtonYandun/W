@@ -40,10 +40,31 @@ class HirBindings:
         scope.update((parameter.name, parameter.type_id) for parameter in function.params)
         try:
             self.visit(function.body, scope)
-            if function.body.tail_expr is not None and not self.compatible(function.body.tail_expr.type_id, function.return_type_id):
+            if (function.body.tail_expr is not None
+                    and not self.always_returns(function.body.tail_expr)
+                    and not self.compatible(function.body.tail_expr.type_id, function.return_type_id)):
                 self.verifier._fail(function, 'Function tail type does not match return type')
         finally:
             self.return_type = previous
+
+    def always_returns(self, node):
+        """A terminating tail has no value to compare with the function result."""
+        if isinstance(node, H.HirReturn):
+            return True
+        if isinstance(node, H.HirExprStmt):
+            return self.always_returns(node.expr)
+        if isinstance(node, H.HirBlock):
+            return any(self.always_returns(statement) for statement in node.statements) or self.always_returns(node.tail_expr)
+        if isinstance(node, H.HirIf):
+            blocks = [node.then_block] + [block for _, block in node.elifs]
+            return node.else_block is not None and all(self.always_returns(block) for block in blocks + [node.else_block])
+        if isinstance(node, H.HirMatch):
+            from checker.TypeChecker import TypeChecker
+            subject_type = self.interner.to_wtype(node.subject.type_id)
+            rows = [[arm.pattern] for arm in node.arms if arm.guard is None]
+            exhaustive = TypeChecker()._pattern_matrix_exhaustive([subject_type], rows)
+            return bool(node.arms) and exhaustive and all(self.always_returns(arm.body) for arm in node.arms)
+        return False
 
     def bind(self, pattern, scope, type_id=None):
         type_id = getattr(pattern, "inferred_type_id", type_id)
