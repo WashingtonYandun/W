@@ -1,5 +1,4 @@
 import glob
-import io
 import os
 import random
 import subprocess
@@ -15,281 +14,11 @@ from codegen.CCodeGen import CCodeGen
 from error.Error import DIAGNOSTIC_CODES, WError, WRuntimeError
 
 
-def extract_diag_code(stderr_text: str) -> str:
-    s = stderr_text.strip()
-    if s.startswith("[") and "]" in s:
-        candidate = s[1:s.index("]")]
-        if candidate in DIAGNOSTIC_CODES:
-            return candidate
-    return ""
+from tests.engine_harness import ENGINES, unsupported_reason, verify
 
 
-class EngineResult:
-    def __init__(
-        self,
-        engine: str,
-        stdout: str,
-        stderr: str,
-        exit_code: int,
-        compile_ok: bool,
-        runtime_ok: bool,
-        diag_code: str = "",
-    ) -> None:
-        self.engine = engine
-        self.stdout = stdout
-        self.stderr = stderr
-        self.exit_code = exit_code
-        self.compile_ok = compile_ok
-        self.runtime_ok = runtime_ok
-        self.diag_code = diag_code or extract_diag_code(stderr)
-
-
-def run_w0_interpreter(source_code: str, file_name: str) -> EngineResult:
-    old_stdout = sys.stdout
-    buf_out = io.StringIO()
-    sys.stdout = buf_out
-    try:
-        ast = Parser(file=file_name).parse(source_code)
-        TypeChecker(file=file_name).check(ast)
-    except WError as err:
-        sys.stdout = old_stdout
-        return EngineResult(
-            engine="W0_Interpreter",
-            stdout="",
-            stderr=str(err),
-            exit_code=1,
-            compile_ok=False,
-            runtime_ok=False,
-            diag_code=err.code,
-        )
-    try:
-        Interpreter(file=file_name).interpret(ast)
-        return EngineResult(
-            engine="W0_Interpreter",
-            stdout=buf_out.getvalue(),
-            stderr="",
-            exit_code=0,
-            compile_ok=True,
-            runtime_ok=True,
-        )
-    except WRuntimeError as rerr:
-        return EngineResult(
-            engine="W0_Interpreter",
-            stdout=buf_out.getvalue(),
-            stderr=str(rerr),
-            exit_code=1,
-            compile_ok=True,
-            runtime_ok=False,
-            diag_code=rerr.code,
-        )
-    except WError as err:
-        return EngineResult(
-            engine="W0_Interpreter",
-            stdout=buf_out.getvalue(),
-            stderr=str(err),
-            exit_code=1,
-            compile_ok=False,
-            runtime_ok=False,
-            diag_code=err.code,
-        )
-    finally:
-        sys.stdout = old_stdout
-
-
-def run_w0_c99_native(source_code: str, file_name: str, repo_root: str, work_dir: str) -> EngineResult:
-    try:
-        ast = Parser(file=file_name).parse(source_code)
-        TypeChecker(file=file_name).check(ast)
-        c_code = CCodeGen(file=file_name).generate(ast)
-    except WError as err:
-        return EngineResult(
-            engine="W0_C99_Native",
-            stdout="",
-            stderr=str(err),
-            exit_code=1,
-            compile_ok=False,
-            runtime_ok=False,
-            diag_code=err.code,
-        )
-
-    c_path = os.path.join(work_dir, "w0_prog.c")
-    bin_path = os.path.join(work_dir, "w0_prog_bin")
-    with open(c_path, "w", encoding="utf-8") as cf:
-        cf.write(c_code)
-
-    comp = subprocess.run(
-        ["cc", "-std=c99", "-O1", f"-I{repo_root}", c_path, "-o", bin_path],
-        capture_output=True,
-        text=True,
-    )
-    if comp.returncode != 0:
-        return EngineResult(
-            engine="W0_C99_Native",
-            stdout="",
-            stderr=comp.stderr,
-            exit_code=comp.returncode,
-            compile_ok=False,
-            runtime_ok=False,
-        )
-
-    exec_proc = subprocess.run(
-        [bin_path],
-        capture_output=True,
-        text=True,
-        cwd=repo_root,
-    )
-    return EngineResult(
-        engine="W0_C99_Native",
-        stdout=exec_proc.stdout,
-        stderr=exec_proc.stderr,
-        exit_code=exec_proc.returncode,
-        compile_ok=True,
-        runtime_ok=(exec_proc.returncode == 0),
-        diag_code=extract_diag_code(exec_proc.stderr),
-    )
-
-
-def run_w1_c99_native(source_code: str, file_name: str, w1_bin: str, repo_root: str, work_dir: str) -> EngineResult:
-    src_path = os.path.join(work_dir, "w1_input.w")
-    c_path = os.path.join(work_dir, "w1_prog.c")
-    bin_path = os.path.join(work_dir, "w1_prog_bin")
-
-    with open(src_path, "w", encoding="utf-8") as sf:
-        sf.write(source_code)
-
-    w1_comp = subprocess.run(
-        [w1_bin, src_path, c_path],
-        capture_output=True,
-        text=True,
-        cwd=repo_root,
-    )
-    if w1_comp.returncode != 0:
-        return EngineResult(
-            engine="W1_C99_Native",
-            stdout="",
-            stderr=w1_comp.stderr,
-            exit_code=w1_comp.returncode,
-            compile_ok=False,
-            runtime_ok=False,
-            diag_code=extract_diag_code(w1_comp.stderr),
-        )
-
-    cc_comp = subprocess.run(
-        ["cc", "-std=c99", "-O1", f"-I{repo_root}", c_path, "-o", bin_path],
-        capture_output=True,
-        text=True,
-    )
-    if cc_comp.returncode != 0:
-        return EngineResult(
-            engine="W1_C99_Native",
-            stdout="",
-            stderr=cc_comp.stderr,
-            exit_code=cc_comp.returncode,
-            compile_ok=False,
-            runtime_ok=False,
-        )
-
-    exec_proc = subprocess.run(
-        [bin_path],
-        capture_output=True,
-        text=True,
-        cwd=repo_root,
-    )
-    return EngineResult(
-        engine="W1_C99_Native",
-        stdout=exec_proc.stdout,
-        stderr=exec_proc.stderr,
-        exit_code=exec_proc.returncode,
-        compile_ok=True,
-        runtime_ok=(exec_proc.returncode == 0),
-        diag_code=extract_diag_code(exec_proc.stderr),
-    )
-
-
-def verify_three_way_equivalence(
-    source_code: str,
-    label: str,
-    w1_bin: str,
-    repo_root: str,
-    work_dir: str,
-) -> Tuple[bool, str]:
-    res_interp = run_w0_interpreter(source_code, label)
-    res_w0_c = run_w0_c99_native(source_code, label, repo_root, work_dir)
-
-    is_generic = "generic" in label.lower()
-    if is_generic:
-        if res_interp.compile_ok != res_w0_c.compile_ok:
-            return False, f"compile_ok mismatch on {label}:\n  W0 Interp: compile_ok={res_interp.compile_ok}\n  W0 C99: compile_ok={res_w0_c.compile_ok}"
-        if res_interp.runtime_ok != res_w0_c.runtime_ok:
-            return False, f"runtime_ok mismatch on {label}:\n  W0 Interp: runtime_ok={res_interp.runtime_ok}\n  W0 C99: runtime_ok={res_w0_c.runtime_ok}"
-        if res_interp.exit_code != res_w0_c.exit_code:
-            return False, f"Exit code mismatch on {label}:\n  W0 Interp: {res_interp.exit_code}\n  W0 C99: {res_w0_c.exit_code}"
-        if res_interp.stdout != res_w0_c.stdout:
-            return False, f"Stdout mismatch on {label}:\n  --- W0 Interp ---\n{res_interp.stdout}  --- W0 C99 ---\n{res_w0_c.stdout}"
-        if not res_interp.compile_ok or not res_interp.runtime_ok:
-            if not res_interp.diag_code or res_interp.diag_code != res_w0_c.diag_code:
-                return False, f"Diagnostic code mismatch on {label}:\n  W0 Interp: {res_interp.diag_code!r}\n  W0 C99: {res_w0_c.diag_code!r}"
-        return True, ""
-
-    res_w1_c = run_w1_c99_native(source_code, label, w1_bin, repo_root, work_dir)
-
-    if (
-        res_interp.compile_ok != res_w0_c.compile_ok
-        or res_interp.compile_ok != res_w1_c.compile_ok
-    ):
-        msg = (
-            f"compile_ok mismatch on {label}:\n"
-            f"  W0 Interp: compile_ok={res_interp.compile_ok} ({res_interp.stderr.strip()})\n"
-            f"  W0 C99:    compile_ok={res_w0_c.compile_ok} ({res_w0_c.stderr.strip()})\n"
-            f"  W1 C99:    compile_ok={res_w1_c.compile_ok} ({res_w1_c.stderr.strip()})"
-        )
-        return False, msg
-
-    if (
-        res_interp.runtime_ok != res_w0_c.runtime_ok
-        or res_interp.runtime_ok != res_w1_c.runtime_ok
-    ):
-        msg = (
-            f"runtime_ok mismatch on {label}:\n"
-            f"  W0 Interp: runtime_ok={res_interp.runtime_ok} ({res_interp.stderr.strip()})\n"
-            f"  W0 C99:    runtime_ok={res_w0_c.runtime_ok} ({res_w0_c.stderr.strip()})\n"
-            f"  W1 C99:    runtime_ok={res_w1_c.runtime_ok} ({res_w1_c.stderr.strip()})"
-        )
-        return False, msg
-
-    if res_interp.exit_code != res_w0_c.exit_code or res_interp.exit_code != res_w1_c.exit_code:
-        msg = (
-            f"Exit code mismatch on {label}:\n"
-            f"  W0 Interp: {res_interp.exit_code} ({res_interp.stderr.strip()})\n"
-            f"  W0 C99:    {res_w0_c.exit_code} ({res_w0_c.stderr.strip()})\n"
-            f"  W1 C99:    {res_w1_c.exit_code} ({res_w1_c.stderr.strip()})"
-        )
-        return False, msg
-
-    if res_interp.stdout != res_w0_c.stdout or res_interp.stdout != res_w1_c.stdout:
-        msg = (
-            f"Stdout mismatch on {label}:\n"
-            f"  --- W0 Interp ---\n{res_interp.stdout}"
-            f"  --- W0 C99 ---\n{res_w0_c.stdout}"
-            f"  --- W1 C99 ---\n{res_w1_c.stdout}"
-        )
-        return False, msg
-
-    if not res_interp.compile_ok or not res_interp.runtime_ok:
-        if (
-            not res_interp.diag_code
-            or res_interp.diag_code != res_w0_c.diag_code
-            or res_interp.diag_code != res_w1_c.diag_code
-        ):
-            msg = (
-                f"Diagnostic code mismatch on {label}:\n"
-                f"  W0 Interp: {res_interp.diag_code!r} ({res_interp.stderr.strip()})\n"
-                f"  W0 C99:    {res_w0_c.diag_code!r} ({res_w0_c.stderr.strip()})\n"
-                f"  W1 C99:    {res_w1_c.diag_code!r} ({res_w1_c.stderr.strip()})"
-            )
-            return False, msg
-
-    return True, "OK"
+def verify_four_way_equivalence(source_code, label, w1_bin, repo_root, work_dir):
+    return verify(source_code, label, w1_bin, work_dir, sanitize=os.environ.get('W_SANITIZE') == '1')
 
 
 def generate_valid_program(seed: int) -> str:
@@ -450,6 +179,12 @@ def run_differential_suite(repo_root: str, w1_bin: str, generated_count: int = 2
         ),
     ]
 
+    labels = [os.path.basename(path) for path in case_files]
+    labels += [label for label, _ in runtime_panic_cases]
+    labels += [os.path.relpath(path, repo_root) for path in invalid_files]
+    labels += [f'seed_{base_seed + offset}.w' for offset in range(generated_count)]
+    unsupported_rows = sum(bool(unsupported_reason(label, engine)) for label in labels for engine in ENGINES)
+    engine_rows = len(labels) * len(ENGINES) - unsupported_rows
     passed_cases = 0
     total_cases = len(case_files) + len(runtime_panic_cases) + len(invalid_files) + generated_count
 
@@ -458,14 +193,14 @@ def run_differential_suite(repo_root: str, w1_bin: str, generated_count: int = 2
             label = os.path.basename(path)
             with open(path, "r", encoding="utf-8") as f:
                 code = f.read()
-            ok, detail = verify_three_way_equivalence(code, label, w1_bin, repo_root, work_dir)
+            ok, detail = verify_four_way_equivalence(code, label, w1_bin, repo_root, work_dir)
             if ok:
                 passed_cases += 1
             else:
                 print(f"  [DIFF FAIL] {label}: {detail}")
 
         for label, code in runtime_panic_cases:
-            ok, detail = verify_three_way_equivalence(code, label, w1_bin, repo_root, work_dir)
+            ok, detail = verify_four_way_equivalence(code, label, w1_bin, repo_root, work_dir)
             if ok:
                 passed_cases += 1
             else:
@@ -475,7 +210,7 @@ def run_differential_suite(repo_root: str, w1_bin: str, generated_count: int = 2
             rel_label = os.path.relpath(path, repo_root)
             with open(path, "r", encoding="utf-8") as f:
                 code = f.read()
-            ok, detail = verify_three_way_equivalence(code, rel_label, w1_bin, repo_root, work_dir)
+            ok, detail = verify_four_way_equivalence(code, rel_label, w1_bin, repo_root, work_dir)
             if ok:
                 passed_cases += 1
             else:
@@ -485,7 +220,7 @@ def run_differential_suite(repo_root: str, w1_bin: str, generated_count: int = 2
             seed = base_seed + offset
             code = generate_valid_program(seed)
             label = f"seed_{seed}.w"
-            ok, detail = verify_three_way_equivalence(code, label, w1_bin, repo_root, work_dir)
+            ok, detail = verify_four_way_equivalence(code, label, w1_bin, repo_root, work_dir)
             if ok:
                 passed_cases += 1
             else:
@@ -497,7 +232,8 @@ def run_differential_suite(repo_root: str, w1_bin: str, generated_count: int = 2
     print(
         f"Differential Oracle: {passed_cases}/{total_cases} "
         f"(cases={len(case_files)}, panics={len(runtime_panic_cases)}, "
-        f"invalid={len(invalid_files)}, generated={generated_count})"
+        f"invalid={len(invalid_files)}, generated={generated_count}, "
+        f"executed_engine_rows={engine_rows}, unsupported_rows={unsupported_rows})"
     )
     return passed_cases == total_cases
 

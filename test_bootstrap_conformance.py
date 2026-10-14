@@ -7,6 +7,7 @@ import tempfile
 from parser.Parser import Parser
 from checker.TypeChecker import TypeChecker
 from codegen.CCodeGen import CCodeGen
+from tests.engine_harness import unsupported_reason
 
 
 def sha256_file(path: str) -> str:
@@ -39,8 +40,8 @@ def run_bootstrap_test() -> bool:
             f.write(c0_code)
 
         res1 = subprocess.run(
-            ["cc", "-std=c99", "-O2", f"-I{repo_root}", compiler0_c, "-o", w1_stage1],
-            capture_output=True,
+            [os.environ.get("CC", "cc"), "-std=c99", "-O2", f"-I{repo_root}", compiler0_c, "-o", w1_stage1],
+            timeout=120, capture_output=True,
             text=True
         )
         if res1.returncode != 0:
@@ -51,14 +52,14 @@ def run_bootstrap_test() -> bool:
         # 2. Stage 1 (w1_stage1 native binary -> compiler1.c -> w1_stage2 binary)
         compiler1_c = os.path.join(tmpdir, "compiler1.c")
         w1_stage2 = os.path.join(tmpdir, "w1_stage2")
-        run1 = subprocess.run([w1_stage1, w1_src_path, compiler1_c], capture_output=True, text=True)
+        run1 = subprocess.run([w1_stage1, w1_src_path, compiler1_c], timeout=120, capture_output=True, text=True)
         if run1.returncode != 0 or not os.path.exists(compiler1_c):
             print(f"[FAIL] Stage 1 execution failed:\n{run1.stderr}\n{run1.stdout}")
             return False
 
         res2 = subprocess.run(
-            ["cc", "-std=c99", "-O2", f"-I{repo_root}", compiler1_c, "-o", w1_stage2],
-            capture_output=True,
+            [os.environ.get("CC", "cc"), "-std=c99", "-O2", f"-I{repo_root}", compiler1_c, "-o", w1_stage2],
+            timeout=120, capture_output=True,
             text=True
         )
         if res2.returncode != 0:
@@ -68,7 +69,7 @@ def run_bootstrap_test() -> bool:
 
         # 3. Stage 2 (w1_stage2 native binary -> compiler2.c)
         compiler2_c = os.path.join(tmpdir, "compiler2.c")
-        run2 = subprocess.run([w1_stage2, w1_src_path, compiler2_c], capture_output=True, text=True)
+        run2 = subprocess.run([w1_stage2, w1_src_path, compiler2_c], timeout=120, capture_output=True, text=True)
         if run2.returncode != 0 or not os.path.exists(compiler2_c):
             print(f"[FAIL] Stage 2 execution failed:\n{run2.stderr}\n{run2.stdout}")
             return False
@@ -97,6 +98,10 @@ def run_bootstrap_test() -> bool:
             exp_file = w_file[:-2] + ".expected"
             if not os.path.exists(exp_file):
                 continue
+            reason = unsupported_reason(os.path.relpath(w_file, repo_root), 'w1')
+            if reason:
+                print(f'  [UNSUPPORTED W1] {os.path.relpath(w_file, repo_root)}: {reason}')
+                continue
             w1_total += 1
             with open(exp_file, "r", encoding="utf-8") as ef:
                 expected = ef.read()
@@ -104,16 +109,16 @@ def run_bootstrap_test() -> bool:
             out_c = os.path.join(tmpdir, f"w1_{base}.c")
             out_bin = os.path.join(tmpdir, f"w1_{base}")
 
-            r_w1 = subprocess.run([w1_stage2, w_file, out_c], capture_output=True, text=True, cwd=repo_root)
+            r_w1 = subprocess.run([w1_stage2, w_file, out_c], timeout=120, capture_output=True, text=True, cwd=repo_root)
             if r_w1.returncode != 0:
                 print(f"  [FAIL W1] {base}.w compile failed: {r_w1.stderr}")
                 return False
-            r_cc = subprocess.run(["cc", "-std=c99", f"-I{repo_root}", out_c, "-o", out_bin], capture_output=True, text=True)
+            r_cc = subprocess.run([os.environ.get("CC", "cc"), "-std=c99", f"-I{repo_root}", out_c, "-o", out_bin], timeout=120, capture_output=True, text=True)
             if r_cc.returncode != 0:
                 print(f"  [FAIL W1 CC] {base}.c failed: {r_cc.stderr}")
                 return False
-            r_run = subprocess.run([out_bin], capture_output=True, text=True, cwd=repo_root)
-            if r_run.stdout != expected:
+            r_run = subprocess.run([out_bin], timeout=30, capture_output=True, text=True, cwd=repo_root)
+            if r_run.returncode != 0 or r_run.stdout != expected:
                 print(f"  [FAIL W1 RUN] {base}.w mismatch: got {r_run.stdout!r}, expected {expected!r}")
                 return False
             w1_passed += 1
