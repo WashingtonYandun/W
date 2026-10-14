@@ -36,6 +36,21 @@ def run_ci_harness_tests():
                 os.environ.pop('W_CI_ARTIFACTS')
             else:
                 os.environ['W_CI_ARTIFACTS'] = previous
+    with tempfile.TemporaryDirectory() as temporary:
+        original_execute = harness.execute
+        commands = []
+        def simulate(command, directory, phase, timeout, env=None):
+            commands.append(command)
+            return {'returncode': 0, 'stdout': '',
+                    'stderr': 'ERROR: AddressSanitizer: heap-use-after-free' if phase == 'run' else ''}
+        try:
+            harness.execute = simulate
+            result = harness.run_engine('w1', '', 'probe.w', '/standalone-w1', temporary, True)
+            assert commands[0][0] == '/standalone-w1'
+            assert result.infrastructure_error == 'memory or sanitizer failure'
+            assert not harness.compare([result], '')[0]
+        finally:
+            harness.execute = original_execute
     print('CI harness: output, exit status, sanitizer failure, timeout, signal, direct rejection and release coverage contracts passed')
 
 

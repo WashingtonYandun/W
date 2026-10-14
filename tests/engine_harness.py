@@ -13,9 +13,12 @@ ENGINES = ('interpreter', 'ast', 'hir', 'w1')
 PROFILES = json.loads((ROOT / 'tests/engine_profiles.json').read_text())
 
 
+def feature_for(label):
+    return PROFILES['fixtures'].get(label.replace(os.sep, '/'), 'core')
+
+
 def unsupported_reason(label, engine):
-    feature = PROFILES['fixtures'].get(label.replace(os.sep, '/'), 'core')
-    return PROFILES['features'][feature].get(engine, '')
+    return PROFILES['features'][feature_for(label)].get(engine, '')
 
 
 class EngineResult:
@@ -125,7 +128,7 @@ def compare(results, expected=None):
     return True, 'OK'
 
 
-def verify(source, label, w1_bin, work_dir, expected=None, sanitize=False, strict=False, expect_rejection=False):
+def verify_case(source, label, w1_bin, work_dir, expected=None, sanitize=False, strict=False, expect_rejection=False):
     artifacts = Path(os.environ.get('W_CI_ARTIFACTS', ROOT / '.w_cache/ci-artifacts'))
     case_id = hashlib.sha256(label.encode()).hexdigest()[:12]
     directory = Path(work_dir) / case_id
@@ -144,8 +147,14 @@ def verify(source, label, w1_bin, work_dir, expected=None, sanitize=False, stric
                 ok, detail = False, f'{result.engine}: invalid fixture was not rejected by the frontend: {asdict(result)}'
     if strict and unsupported:
         ok, detail = False, 'release profile requires all engines: ' + str(unsupported)
-    report = {'label': label, 'sanitize': sanitize, 'status': 'passed' if ok else 'failed',
-              'unsupported': unsupported, 'results': [asdict(result) for result in results]}
+    rows = []
+    for result in results:
+        row_ok, _ = compare([results[0], result], expected)
+        if expect_rejection and (result.compile_ok or result.exit_code != 1 or not result.diag_code):
+            row_ok = False
+        rows.append(dict(asdict(result), status='passed' if row_ok else 'failed'))
+    report = {'label': label, 'feature': feature_for(label), 'sanitize': sanitize, 'status': 'passed' if ok else 'failed',
+              'unsupported': unsupported, 'results': rows}
     artifacts.mkdir(parents=True, exist_ok=True)
     (artifacts / (case_id + '.json')).write_text(json.dumps(report, indent=2))
     if unsupported:
@@ -153,4 +162,9 @@ def verify(source, label, w1_bin, work_dir, expected=None, sanitize=False, stric
     if not ok:
         import shutil
         shutil.copytree(directory, artifacts / case_id, dirs_exist_ok=True)
+    return ok, detail, report
+
+
+def verify(*args, **kwargs):
+    ok, detail, _ = verify_case(*args, **kwargs)
     return ok, detail

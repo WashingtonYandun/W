@@ -10,7 +10,7 @@ import tempfile
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
-from tests.engine_harness import ENGINES, PROFILES, unsupported_reason, verify
+from tests.engine_harness import ENGINES, PROFILES, execute, verify_case
 
 
 def main():
@@ -30,13 +30,12 @@ def main():
         'compiler': compiler.stdout, 'profile': profile, 'sanitize': sanitize,
         'compile_timeout_seconds': 120, 'run_timeout_seconds': 30}, indent=2))
     # This subprocess is bounded separately because it builds the compiler itself.
-    bootstrap = subprocess.run([sys.executable, '-c',
+    bootstrap = execute([sys.executable, '-c',
         'from main import ensure_selfhost_w1_binary; '
         'print(ensure_selfhost_w1_binary(' + repr(str(ROOT)) + '))'],
-        cwd=ROOT, capture_output=True, text=True, timeout=600)
-    (artifacts / 'bootstrap.txt').write_text(bootstrap.stdout + bootstrap.stderr)
-    if bootstrap.returncode:
-        print(bootstrap.stderr)
+        artifacts, 'bootstrap', 600)
+    if bootstrap['returncode']:
+        print(bootstrap['stderr'])
         return 1
     w1 = ROOT / '.w_cache/w1_stage2'
     positives = sorted((ROOT / 'tests/runtime').glob('*.w')) + sorted((ROOT / 'examples').glob('*.w'))
@@ -49,6 +48,7 @@ def main():
     if stale or not positives or not negatives:
         raise RuntimeError(f'Empty corpus or stale profile entries: {stale}')
     passed = 0
+    feature_coverage = {}
     coverage = {engine: {'passed': 0, 'failed': 0, 'unsupported': 0} for engine in ENGINES}
     with tempfile.TemporaryDirectory(prefix='w-ci-') as directory:
         for path in fixtures:
@@ -56,15 +56,21 @@ def main():
             expected = path.with_suffix('.expected').read_text() if path in positives else None
             if path in positives and expected is None:
                 raise RuntimeError(f'Missing expected output: {label}')
-            ok, detail = verify(path.read_text(), label, w1, directory, expected,
+            ok, detail, report = verify_case(path.read_text(), label, w1, directory, expected,
                                 sanitize, profile == 'release', path in negatives)
             passed += int(ok)
+            feature_rows = feature_coverage.setdefault(report['feature'], {
+                engine: {'passed': 0, 'failed': 0, 'unsupported': 0} for engine in ENGINES})
             for engine in ENGINES:
-                state = 'unsupported' if unsupported_reason(label, engine) else ('passed' if ok else 'failed')
+                if engine in report['unsupported']:
+                    state = 'unsupported'
+                else:
+                    state = next(row['status'] for row in report['results'] if row['engine'] == engine)
                 coverage[engine][state] += 1
+                feature_rows[engine][state] += 1
             print(f"  [{'PASS' if ok else 'FAIL'}] {label}" + ('' if ok else ': ' + detail), flush=True)
     summary = {'profile': profile, 'passed_cases': passed, 'total_cases': len(fixtures),
-               'coverage': coverage, 'support_files': support_files}
+               'coverage': coverage, 'features': feature_coverage, 'support_files': support_files}
     (artifacts / 'summary.json').write_text(json.dumps(summary, indent=2))
     print(json.dumps(summary, indent=2))
     return 0 if passed == len(fixtures) else 1
