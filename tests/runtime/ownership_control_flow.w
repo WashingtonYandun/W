@@ -1,0 +1,107 @@
+class Box {
+    public text: str
+    public calls: int
+    fn init(text: str) { this.text = text
+this.calls = 0 }
+    fn replace() -> str {
+        this.text = "new" + " value"
+        return this.text
+    }
+    fn index() -> int { this.calls = this.calls + 1
+return 0 }
+    fn target_index() -> int { this.text = this.text + ":index"
+return 0 }
+    fn yes() -> bool { this.calls = this.calls + 1
+return true }
+    fn text_value() -> str { return this.text }
+}
+fn pair(first: str, second: str) -> str { return first + ":" + second }
+fn local_field() -> str { let b = Box("local" + " field")
+return b.text }
+fn local_index() -> str { let xs = ["local" + " index"]
+return xs[0] }
+fn nested_exit(stop: bool) -> str {
+    for i in 0..3 {
+        let outer = "outer" + str(i)
+        for j in 0..3 {
+            let inner = "inner" + str(j)
+            if j == 0 { continue }
+            if stop { return outer + inner }
+            break
+        }
+    }
+    return "done" + "!"
+}
+fn fail() -> str ! str { return Err("failure" + "!") }
+fn pass() -> str ! str { return Ok("success" + "!") }
+fn propagate() -> str ! str {
+    let held = ["scope" + " payload"]
+    return match true {
+        true => { let value = fail()?
+value },
+        false => "unused"
+    }
+}
+fn absent() -> str? { let held = "held" + " optional"
+return none }
+fn optional_exit() -> str? {
+    let held = ["before" + " propagation"]
+    let value = absent()?
+    return value
+}
+fn index_failure() -> int ! str { return Err("bad" + " index") }
+fn assignment_exit() -> str ! str {
+    let mut items = ["original" + " value"]
+    items[index_failure()?] = "owned" + " rhs"
+    return items[0]
+}
+fn exercise() -> unit {
+    if true { []
+        let separator1 = 0 }
+    if true { {}
+        let separator2 = 0 }
+    if true { ()
+        let separator3 = 0 }
+    0..2
+    let effects = Box("effect")
+    print(effects.calls + effects.index(), effects.calls)
+    let dictionary = Box("old" + " key")
+    print({dictionary.text: dictionary.replace()})
+    let box = Box("old" + " value")
+    print(pair(box.text, box.replace()))
+    let other = Box("old" + " list")
+    print([other.text, other.replace()])
+    let receiver = Box("old" + " receiver")
+    print(receiver.text_value())
+    print(Box("temporary" + " receiver").text_value())
+    let mut xs = ["index" + " value"]
+    xs[box.index()] = xs[0] + "!"
+    print(xs, box.calls)
+    let ordering = Box("before")
+    xs[ordering.target_index()] = ordering.replace()
+    print(xs, ordering.text)
+    xs = xs
+    xs.append(xs[0])
+    print(xs)
+    let mut text = "self" + " assignment"
+    text = text
+    print(text)
+    print(local_field(), local_index())
+    print(nested_exit(true), nested_exit(false))
+    print(propagate() else error { "caught " + error })
+    print(pass() else error { "unexpected " + error })
+    print(optional_exit() ?? "fallback")
+    print(assignment_exit() else error { error })
+    print(false and box.yes(), true or box.yes(), box.calls)
+    print(absent() ?? ("coalesced" + "!"))
+    let present: str? = "present"
+    print(present ?? box.replace())
+    while box.calls < 4 {
+        let managed = "loop" + str(box.calls)
+        box.index()
+        if box.calls < 3 { continue }
+        break
+    }
+    print(box.calls)
+}
+exercise()

@@ -1,3 +1,24 @@
+fn snapshot_callee(callee: ExprRes) -> ExprRes {
+    let raw = callee.lref
+    let mut separators: list[int] = []
+    let mut skip = -1
+    for i in 0..len(raw) - 1 {
+        if i > skip and slice(raw, i, i + 2) == "::" {
+            separators.append(i)
+            skip = i + 1
+        }
+    }
+    if len(separators) < 3 { return callee }
+    let method = slice(raw, separators[0] + 2, separators[1])
+    let receiver = slice(raw, separators[2] + 2, len(raw))
+    if method == "append" or method == "pop" or method == "clear" or receiver == "v_super" { return callee }
+    if len(receiver) >= 2 and slice(receiver, 0, 2) == "v_" {
+        if is_module_name(slice(receiver, 2, len(receiver))) { return callee }
+    }
+    let held = snapshot_value(receiver)
+    return ExprRes { val: callee.val, lref: slice(raw, 0, separators[2] + 2) + held }
+}
+
 fn projection_is_mutated() -> bool {
     let mut offset = 0
     while true {
@@ -29,9 +50,11 @@ fn emit_call(callee: ExprRes, args_c: list[str]) -> ExprRes {
     let mut s1 = -1
     let mut s2 = -1
     let mut s3 = -1
+    let mut skip = -1
     if n >= 2 {
         for i in 0..n - 1 {
-            if slice(raw, i, i + 2) == "::" {
+            if i > skip and slice(raw, i, i + 2) == "::" {
+                skip = i + 1
                 if s1 == -1 {
                     s1 = i
                 } elif s2 == -1 {
@@ -97,6 +120,12 @@ fn emit_call(callee: ExprRes, args_c: list[str]) -> ExprRes {
     }
     if len(callee.val) >= 2 and slice(callee.val, 0, 2) == "v_" {
         let fn_name = slice(callee.val, 2, len(callee.val))
+        if fn_name == "Ok" and len(args_c) == 1 {
+            return bind_call("w_ok(" + own_expr(args_c[0]) + ")")
+        }
+        if fn_name == "Err" and len(args_c) == 1 {
+            return bind_call("w_err(" + own_expr(args_c[0]) + ")")
+        }
         if fn_name == "print" {
             if len(args_c) == 0 {
                 return bind_call("w_builtin_print(0, NULL)")
@@ -430,13 +459,13 @@ fn parse_prefix_expr(allow_struct: bool) -> ExprRes {
         let mut args_c: list[str] = []
         if not check_kind("RPAREN") {
             let a0 = parse_expr(0, true)
-            args_c.append(a0.val)
+            args_c.append(snapshot_value(a0.val))
             while match_kind("COMMA") {
                 if check_kind("RPAREN") {
                     break
                 }
                 let an = parse_expr(0, true)
-                args_c.append(an.val)
+                args_c.append(snapshot_value(an.val))
             }
         }
         expect_kind("RPAREN")
@@ -463,12 +492,12 @@ fn parse_prefix_expr(allow_struct: bool) -> ExprRes {
                     expect_kind("COLON")
                     let f_v = parse_expr(0, true)
                     f_names.append("\"" + f_tok.val + "\"")
-                    f_vals.append(f_v.val)
+                    f_vals.append(snapshot_value(f_v.val))
                     match_kind("COMMA")
                 }
                 expect_kind("RBRACE")
                 if len(f_names) == 0 {
-                    return ExprRes { val: "w_make_struct(\"" + name + "\", 0, NULL, NULL)", lref: "" }
+                    return bind_call("w_make_struct(\"" + name + "\", 0, NULL, NULL)")
                 }
                 let k_tmp = new_aux("_k")
                 let v_tmp = new_aux("_v")
@@ -500,20 +529,20 @@ fn parse_prefix_expr(allow_struct: bool) -> ExprRes {
     }
     if match_kind("LPAREN") {
         if match_kind("RPAREN") {
-            return ExprRes { val: "w_make_tuple(0, NULL)", lref: "" }
+            return bind_call("w_make_tuple(0, NULL)")
         }
         let first = parse_expr(0, true)
         if match_kind("COMMA") {
-            let mut t_elems: list[str] = [first.val]
+            let mut t_elems: list[str] = [snapshot_value(first.val)]
             if not check_kind("RPAREN") {
                 let second = parse_expr(0, true)
-                t_elems.append(second.val)
+                t_elems.append(snapshot_value(second.val))
                 while match_kind("COMMA") {
                     if check_kind("RPAREN") {
                         break
                     }
                     let nxt = parse_expr(0, true)
-                    t_elems.append(nxt.val)
+                    t_elems.append(snapshot_value(nxt.val))
                 }
             }
             expect_kind("RPAREN")
@@ -536,18 +565,18 @@ fn parse_prefix_expr(allow_struct: bool) -> ExprRes {
         let mut elems: list[str] = []
         if not check_kind("RBRACKET") {
             let first = parse_expr(0, true)
-            elems.append(first.val)
+            elems.append(snapshot_value(first.val))
             while match_kind("COMMA") {
                 if check_kind("RBRACKET") {
                     break
                 }
                 let nxt = parse_expr(0, true)
-                elems.append(nxt.val)
+                elems.append(snapshot_value(nxt.val))
             }
         }
         expect_kind("RBRACKET")
         if len(elems) == 0 {
-            return ExprRes { val: "w_make_list(0, NULL)", lref: "" }
+            return bind_call("w_make_list(0, NULL)")
         }
         let arr_tmp = new_aux("_arr")
         let mut joined = ""
@@ -570,9 +599,10 @@ fn parse_prefix_expr(allow_struct: bool) -> ExprRes {
                 report_error("W2010", at_tok().line, at_tok().col, "invalid dictionary key type: float is not allowed as dictionary key")
             }
             expect_kind("COLON")
+            let key0 = snapshot_value(k0.val)
             let v0 = parse_expr(0, true)
-            d_keys.append(k0.val)
-            d_vals.append(v0.val)
+            d_keys.append(key0)
+            d_vals.append(snapshot_value(v0.val))
             while match_kind("COMMA") {
                 if check_kind("RBRACE") {
                     break
@@ -582,14 +612,15 @@ fn parse_prefix_expr(allow_struct: bool) -> ExprRes {
                     report_error("W2010", at_tok().line, at_tok().col, "invalid dictionary key type: float is not allowed as dictionary key")
                 }
                 expect_kind("COLON")
+                let keyn = snapshot_value(kn.val)
                 let vn = parse_expr(0, true)
-                d_keys.append(kn.val)
-                d_vals.append(vn.val)
+                d_keys.append(keyn)
+                d_vals.append(snapshot_value(vn.val))
             }
         }
         expect_kind("RBRACE")
         if len(d_keys) == 0 {
-            return ExprRes { val: "w_make_dict(0, NULL, NULL)", lref: "" }
+            return bind_call("w_make_dict(0, NULL, NULL)")
         }
         let k_tmp = new_temp()
         let v_tmp = new_temp()
@@ -619,21 +650,27 @@ fn parse_prefix_expr(allow_struct: bool) -> ExprRes {
 }
 
 fn parse_expr(min_prec: int, allow_struct: bool) -> ExprRes {
+    let expression_start = g_pos
+    let statements_before = g_cur_stmts
+    let scopes_before = g_scope_stack
+    let temps_before = g_temp_id
+    let aux_before = g_aux_id
     let mut left = parse_prefix_expr(allow_struct)
     while true {
         while true {
             if check_kind("LPAREN") {
+                left = snapshot_callee(left)
                 advance_tok()
                 let mut args_c: list[str] = []
                 if not check_kind("RPAREN") {
                     let a0 = parse_expr(0, true)
-                    args_c.append(a0.val)
+                    args_c.append(snapshot_value(a0.val))
                     while match_kind("COMMA") {
                         if check_kind("RPAREN") {
                             break
                         }
                         let an = parse_expr(0, true)
-                        args_c.append(an.val)
+                        args_c.append(snapshot_value(an.val))
                     }
                 }
                 expect_kind("RPAREN")
@@ -652,15 +689,26 @@ fn parse_expr(min_prec: int, allow_struct: bool) -> ExprRes {
                 } else {
                     left = ExprRes { val: "w_member_get(" + left.val + ", \"" + prop + "\")", lref: "w_member_ref(" + clean_lref(left.lref) + ", \"" + prop + "\")::" + prop + "::" + clean_lref(left.lref) + "::" + left.val }
                 }
+                if not projection_is_mutated() and not check_kind("LPAREN") and left.lref != "" {
+                    left = ExprRes { val: bind_call("w_clone(" + left.val + ")").val, lref: left.lref }
+                }
             } elif check_kind("LBRACKET") {
+                let mutated = projection_is_mutated()
                 advance_tok()
-                let idx_r = parse_expr(0, true)
+                let mut object_value = left.val
+                if not mutated {
+                    object_value = snapshot_value(left.val)
+                }
+                let mut idx_r = parse_expr(0, true)
                 expect_kind("RBRACKET")
+                if mutated {
+                    idx_r = ExprRes { val: snapshot_value(idx_r.val), lref: idx_r.lref }
+                }
                 let index_lref = "w_index_ref(" + clean_lref(left.lref) + ", " + idx_r.val + ")"
-                if projection_is_mutated() {
+                if mutated {
                     left = ExprRes { val: "w_index_get(" + left.val + ", " + idx_r.val + ")", lref: index_lref }
                 } else {
-                    left = ExprRes { val: bind_call("w_index_get_owned(" + left.val + ", " + idx_r.val + ")").val, lref: index_lref }
+                    left = ExprRes { val: bind_call("w_index_get_owned(" + object_value + ", " + idx_r.val + ")").val, lref: index_lref }
                 }
             } elif check_kind("QUESTION") {
                 advance_tok()
@@ -783,25 +831,39 @@ fn parse_expr(min_prec: int, allow_struct: bool) -> ExprRes {
             emit_line("}")
             left = ExprRes { val: res, lref: "" }
         } else {
+            if op_tok.kind == "ASSIGN" {
+                # Replay the target after the owned RHS, matching the interpreter contract.
+                g_cur_stmts = statements_before
+                g_scope_stack = scopes_before
+                g_temp_id = temps_before
+                g_aux_id = aux_before
+            }
+            if op_tok.kind != "ASSIGN" {
+                left = ExprRes { val: snapshot_value(left.val), lref: left.lref }
+            }
             let right = parse_expr(next_min, allow_struct)
             if op_tok.kind == "ASSIGN" {
                 if (len(left.val) < 2 or slice(left.val, 0, 2) != "v_") and left.lref == "" {
                     report_error("W2002", op_tok.line, op_tok.col, "invalid assignment target")
                 }
                 let rhs_hold = new_aux("_rhs")
-                emit_line("WVal " + rhs_hold + " = " + own_expr(right.val) + ";")
+                declare_owned_var(rhs_hold, own_expr(right.val))
+                let expression_end = g_pos
+                g_pos = expression_start
+                left = parse_expr(prec, allow_struct)
+                g_pos = expression_end
                 if len(left.val) >= 2 and slice(left.val, 0, 2) == "v_" {
-                    emit_line("w_assign(&" + left.val + ", " + rhs_hold + ");")
+                    emit_line("w_assign(&" + left.val + ", " + "w_move(&" + rhs_hold + "));")
                     left = ExprRes { val: left.val, lref: left.lref }
                 } else {
                     let target_ref = clean_lref(left.lref)
-                    emit_line("w_assign(" + target_ref + ", " + rhs_hold + ");")
+                    emit_line("w_assign(" + target_ref + ", " + "w_move(&" + rhs_hold + "));")
                     left = ExprRes { val: "w_unit()", lref: "" }
                 }
             } elif op_tok.kind == "DOT_DOT" {
-                left = ExprRes { val: "w_make_range(" + left.val + ", " + right.val + ", false)", lref: "" }
+                left = bind_call("w_make_range(" + left.val + ", " + right.val + ", false)")
             } elif op_tok.kind == "DOT_DOT_EQ" {
-                left = ExprRes { val: "w_make_range(" + left.val + ", " + right.val + ", true)", lref: "" }
+                left = bind_call("w_make_range(" + left.val + ", " + right.val + ", true)")
             } elif op_tok.kind == "PLUS" {
                 left = ExprRes { val: bind_call("w_add(" + left.val + ", " + right.val + ")").val, lref: "" }
             } elif op_tok.kind == "MINUS" {
