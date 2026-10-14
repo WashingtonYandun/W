@@ -15,7 +15,7 @@ from hir.HirBuilder import HirBuilder
 from hir.HirCCodeGen import HirCCodeGen
 from error.Error import WError
 
-W_VERSION = "0.1.4"
+W_VERSION = "0.2.1"
 
 
 def get_repo_root() -> str:
@@ -87,6 +87,7 @@ def run_pipeline(
     use_selfhost: bool = False,
     use_hir: bool = False,
     sanitize: bool = False,
+    show_stats: bool = False,
 ) -> int:
     try:
         # 1. Lexing
@@ -120,15 +121,25 @@ def run_pipeline(
         checker.check(ast)
 
         if check_only:
-            if json_diagnostics:
+            if show_stats:
+                stat_obj = {
+                    "status": "ok",
+                    "file": file_name,
+                    "telemetry": {
+                        "monomorphization": checker.telemetry.to_dict()
+                    }
+                }
+                print(json.dumps(stat_obj, indent=2))
+            elif json_diagnostics:
                 print(json.dumps({"status": "ok", "file": file_name, "diagnostics": []}, indent=2))
             else:
                 print(f"[OK] Check passed for {file_name}")
             return 0
 
         # 4. C99 Code Generation / Native Build
-        if emit_c_path is not None or build_bin_path is not None:
+        if emit_c_path is not None or build_bin_path is not None or show_stats:
             repo_root = get_repo_root()
+            codegen_inst = None
             if use_selfhost and file_name != "<stdin>":
                 w1_bin = ensure_selfhost_w1_binary(repo_root)
                 abs_input = os.path.abspath(file_name)
@@ -153,9 +164,24 @@ def run_pipeline(
             elif use_hir:
                 builder = HirBuilder(checker.interner, file_path=file_name)
                 hir_mod = builder.lower(ast)
-                c_code = HirCCodeGen(checker.interner, file_path=file_name).generate(hir_mod)
+                codegen_inst = HirCCodeGen(checker.interner, file_path=file_name)
+                c_code = codegen_inst.generate(hir_mod)
             else:
-                c_code = CCodeGen(file=file_name).generate(ast)
+                codegen_inst = CCodeGen(file=file_name)
+                c_code = codegen_inst.generate(ast)
+
+            if show_stats:
+                stat_obj = {
+                    "status": "ok",
+                    "file": file_name,
+                    "telemetry": {
+                        "monomorphization": checker.telemetry.to_dict(),
+                        "codegen": codegen_inst.telemetry.to_dict() if codegen_inst else None
+                    }
+                }
+                print(json.dumps(stat_obj, indent=2))
+                if emit_c_path is None and build_bin_path is None:
+                    return 0
 
             if emit_c_path is not None:
                 with open(emit_c_path, "w", encoding="utf-8") as f:
@@ -258,12 +284,12 @@ def print_help() -> None:
     print("Usage:")
     print("  w                                           # Start interactive REPL")
     print("  w [run] <file.w>                            # Execute W source file (W0 interpreter)")
-    print("  w check [--json] <file.w>                   # Static typecheck without execution")
+    print("  w check [--json] [--stats] <file.w>         # Static typecheck without execution")
     print("  w fmt [--write] <file.w>                    # Canonical deterministic formatter")
     print("  w ast [--json] <file.w>                     # Emit canonical JSON AST (v0.1)")
     print("  w tokens <file.w>                           # Emit lexical token stream")
-    print("  w emit-c [--hir] [--selfhost] <file.w> [-o <out.c>] # Transpile W source to C99")
-    print("  w build [--hir] [--selfhost] <file.w> [-o <bin>]    # Compile W source to native binary")
+    print("  w emit-c [--hir] [--selfhost] [--stats] <file.w> [-o <out.c>] # Transpile W source to C99")
+    print("  w build [--hir] [--selfhost] [--stats] <file.w> [-o <bin>]    # Compile W source to native binary")
     print("  w test [--differential [N]] [--fuzz [N]]            # Run conformance, differential, or fuzz suite")
     print("  w bench [--update-baseline]                         # Run W0/W1 performance benchmark harness")
     print("  w version                                           # Show compiler version")
@@ -275,6 +301,7 @@ def main() -> None:
     show_ast = False
     check_only = False
     json_diagnostics = False
+    show_stats = False
     fmt_only = False
     fmt_write = False
     use_selfhost = False
@@ -360,6 +387,8 @@ def main() -> None:
             check_only = True
         elif arg == "--json":
             json_diagnostics = True
+        elif arg in ("--stats", "--metrics"):
+            show_stats = True
         elif arg == "--fmt":
             fmt_only = True
         elif arg in ("--write", "-w"):
@@ -424,6 +453,7 @@ def main() -> None:
             use_selfhost=use_selfhost,
             use_hir=use_hir,
             sanitize=sanitize,
+            show_stats=show_stats,
         )
         sys.exit(code)
     else:
