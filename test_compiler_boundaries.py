@@ -78,7 +78,66 @@ def test_compiler_boundaries():
         assert 'return_type_id' in error.message
     else:
         raise AssertionError('Invalid function return types must be rejected')
-    print('  [PASS] Constraint validation, constructor types, lowering and HIR verification boundaries')
+    from hir import HirNodes as H
+    from checker.TypeInterner import TYPE_BOOL, TYPE_INT
+
+    def rejected(unit, message):
+        try:
+            HirCCodeGen(checker.interner, file_path=path).generate(unit)
+        except WError as error:
+            assert error.code == 'W9999'
+            assert message in error.message, str(error)
+        else:
+            raise AssertionError('Malformed HIR must block C emission')
+
+    for field, owner in [('type_id', 'parameter'), ('return_type_id', 'function')]:
+        broken = deepcopy(module)
+        target = broken.functions[0].params[0] if owner == 'parameter' else broken.functions[0]
+        delattr(target, field)
+        rejected(broken, field)
+
+    broken = deepcopy(module)
+    broken.functions.append(broken.functions)
+    rejected(broken, 'Cyclic HIR container')
+    broken = deepcopy(module)
+    broken.functions[0].body.statements.append(broken.functions[0].body)
+    rejected(broken, 'Cyclic HIR node')
+
+    for transfer in [H.HirBreak, H.HirContinue]:
+        broken = deepcopy(module)
+        broken.functions[0].body.statements.append(transfer(Span(5, 2)))
+        rejected(broken, 'outside a loop')
+    broken = deepcopy(module)
+    broken.top_level_stmts.append(H.HirReturn(H.HirConstInt(1, TYPE_INT, Span()), Span()))
+    rejected(broken, 'outside a function')
+    broken = deepcopy(module)
+    broken.top_level_stmts.append(H.HirWhile(H.HirConstInt(1, TYPE_INT, Span()), H.HirBlock([], Span()), Span()))
+    rejected(broken, 'bool type')
+
+    tuple_id = checker.interner.mk_tuple((TYPE_INT,))
+    for metadata, elements in [([TYPE_BOOL], [H.HirConstInt(1, TYPE_INT, Span())]), ([TYPE_INT], [])]:
+        broken = deepcopy(module)
+        bad_tuple = H.HirConstructTuple(metadata, elements, tuple_id, Span())
+        broken.top_level_stmts.append(H.HirExprStmt(bad_tuple, Span()))
+        rejected(broken, 'Tuple element')
+
+    valid = deepcopy(module)
+    loop = H.HirWhile(H.HirConstBool(True, TYPE_BOOL, Span()),
+                     H.HirBlock([H.HirBreak(Span())], Span()), Span())
+    valid.top_level_stmts.append(loop)
+    HirVerifier(checker.interner, path).verify(valid)
+    shared = deepcopy(module)
+    shared.functions.append(shared.functions[0])
+    HirVerifier(checker.interner, path).verify(shared)
+
+    try:
+        generator.emit_stmt(H.HirStmt(Span(7, 8)), [])
+    except WError as error:
+        assert error.code == 'W9999' and error.stage == 'codegen'
+        assert error.line == 7 and error.col == 8
+    else:
+        raise AssertionError('Unknown statements must not be silently ignored')
+    print('  [PASS] Required types, cyclic HIR, control flow, tuples and statement boundaries')
 
 
 if __name__ == '__main__':

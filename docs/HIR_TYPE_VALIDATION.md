@@ -7,3 +7,16 @@ The checker now records types on assignment targets and resolved type annotation
 Regression coverage verifies malformed parameter IDs and return types, including direct backend entry. The existing 48-file HIR corpus is exercised through the active verification boundary.
 
 This is a type-decoration verifier. It does not yet prove operand/result compatibility, lexical binding correctness, ownership, arena provenance for an in-range ID from another arena, or the semantic validity of AST patterns retained in HIR. Canonical type identity, typed patterns, resolved symbols and module sessions remain separate roadmap tasks. Passing this boundary is not a claim of complete semantic HIR verification.
+
+
+## Additional structural and control-flow checks
+
+- Required type decorations on expressions, parameters, fields, typed declarations and function returns are checked even when an attribute was removed. Missing IDs are not silently skipped.
+- Active-path cycle detection rejects cyclic HIR nodes and list/tuple containers before emission. Shared acyclic nodes are allowed and revisited in their control-flow context; a previous visit cannot hide an invalid placement.
+- Break/continue require an enclosing loop body, return requires a function, and function boundaries reset loop context. While/if/elif conditions must carry the builtin bool TypeId.
+- Tuple element metadata must match its interned tuple type and element count.
+- Unknown HIR statements passed directly to the backend raise W9999 rather than disappearing from generated code.
+
+Negative regression tests mutate checked HIR and assert rejection at the backend boundary. Positive tests preserve shared nodes and valid loop transfers. These checks do not yet establish lexical binding, value coercions, ownership, complete node schemas or operand/result compatibility for every expression.
+
+The tuple check exposed an existing multi-payload enum lowering defect: the synthetic payload tuple carried the enum TypeId. Both qualified and unqualified variant construction now intern the actual payload tuple type. generic_tree_recursive.w covers the qualified multi-payload path in the conformance corpus.

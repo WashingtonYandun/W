@@ -374,7 +374,7 @@ class HirBuilder:
                 if c_name in self.enum_variants:
                     en_name = self.enum_variants[c_name]
                     args_hir = [self._lower_expr(a) for a in raw_args]
-                    payload_hir = args_hir[0] if len(args_hir) == 1 else (HirConstructTuple([a.type_id for a in args_hir], args_hir, tid, span) if len(args_hir) > 1 else None)
+                    payload_hir = args_hir[0] if len(args_hir) == 1 else (HirConstructTuple([a.type_id for a in args_hir], args_hir, self.interner.mk_tuple(tuple(a.type_id for a in args_hir)), span) if len(args_hir) > 1 else None)
                     return HirConstructEnum(en_name, c_name, 0, tid or self.interner.mk_enum(en_name), span, payload_hir)
 
             # Check if this call is a qualified Enum variant constructor: Enum.Variant(...)
@@ -382,7 +382,7 @@ class HirBuilder:
                 en_name = expr.callee.object.name
                 v_name = expr.callee.property
                 args_hir = [self._lower_expr(a) for a in raw_args]
-                payload_hir = args_hir[0] if len(args_hir) == 1 else (HirConstructTuple([a.type_id for a in args_hir], args_hir, tid, span) if len(args_hir) > 1 else None)
+                payload_hir = args_hir[0] if len(args_hir) == 1 else (HirConstructTuple([a.type_id for a in args_hir], args_hir, self.interner.mk_tuple(tuple(a.type_id for a in args_hir)), span) if len(args_hir) > 1 else None)
                 return HirConstructEnum(en_name, v_name, 0, tid or self.interner.mk_enum(en_name), span, payload_hir)
 
             # Check if this call is an object construction: ClassName(...)

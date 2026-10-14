@@ -555,6 +555,10 @@ class HirCCodeGen:
             out.append("}")
             return
 
+        raise WError(f"Unsupported HIR statement: {type(stmt).__name__}",
+                     line=stmt.span.line, col=stmt.span.col, file=self.file_path,
+                     code="W9999", stage="codegen")
+
     # -------------------------------------------------------------
     # Expression Emission
     # -------------------------------------------------------------
