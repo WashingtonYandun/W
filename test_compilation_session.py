@@ -24,6 +24,7 @@ def run_session_tests():
                 struct Item { value: bool }
                 enum Mode { On, Off }
                 fn mode() -> Mode { return On }
+                fn main() { print("imported entry must not run") }
                 fn shadow(value: int) -> int { return value }
                 fn identity[Item](x: Item) -> Item { return x }
                 fn id[T](x: T) -> T { return x }
@@ -46,7 +47,7 @@ def run_session_tests():
                 import "shared.w"
                 fn main() { let a = left.make()
                 let b = right.make()
-                print(a.value, b.value, shared.id(7), shared.id[str]("yes"), shared.id(Some(4)) ?? 0)
+                print(a.value, b.value, shared.id(7), shared.id[str]("yes"), shared.id(Some(4)) ?? 0, left.shared.value())
                 let c = shared.identity(a)
                 print(a, b, c.value, shared.mode(), shared.shadow(2)) }
             """.strip(),
@@ -74,7 +75,7 @@ def run_session_tests():
         session.sources.read = lambda path: (_ for _ in ()).throw(AssertionError('Source reread during lowering'))
         TypeChecker._check_program = lambda *args: (_ for _ in ()).throw(AssertionError('Rechecked during lowering'))
         try:
-            expected = 'init\n3 right 7 yes 4\nItem { value: 3 } Item { value: \"right\" } 3 Mode.On 2\n'
+            expected = 'init\n3 right 7 yes 4 3\nItem { value: 3 } Item { value: \"right\" } 3 Mode.On 2\n'
             output = io.StringIO()
             Interpreter(stdout=output).interpret(unit.program)
             assert output.getvalue() == expected, output.getvalue()
@@ -137,7 +138,7 @@ def run_session_tests():
         assert refreshed is not unit and refreshed.generation == unit.generation + 1
         refreshed_output = io.StringIO()
         Interpreter(stdout=refreshed_output).interpret(refreshed.program)
-        assert refreshed_output.getvalue() == 'init\n9 right 7 yes 4\nItem { value: 9 } Item { value: "right" } 9 Mode.On 2\n'
+        assert refreshed_output.getvalue() == 'init\n9 right 7 yes 4 9\nItem { value: 9 } Item { value: "right" } 9 Mode.On 2\n'
         try:
             session.link(unit.program)
         except WError as error:

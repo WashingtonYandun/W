@@ -27,3 +27,7 @@ let values = [3]
 fn value() -> int {
     return id(values[0])
 }
+
+fn main() -> unit {
+    print("imported entry must not run")
+}
