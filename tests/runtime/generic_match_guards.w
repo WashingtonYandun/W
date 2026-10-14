@@ -1,0 +1,12 @@
+fn guarded(x: Option[Result[int, str]]) -> str {
+    match x {
+        Some(Ok(value)) if value > 100 => "large",
+        Some(Ok(value)) => str(value),
+        Some(Err(error)) => error,
+        None => "empty"
+    }
+}
+print(guarded(Some(Ok(5))))
+print(guarded(Some(Ok(200))))
+print(guarded(Some(Err("failed"))))
+print(guarded(none))

@@ -313,6 +313,19 @@ def is_assignable(source: WType, target: WType) -> bool:
     if source == target:
         return True
 
+    def optional_inner(value):
+        if isinstance(value, OptionalType):
+            return value.inner
+        if isinstance(value, EnumType) and getattr(value, "template_name", None) == "Option":
+            return value.type_args[0]
+        return None
+
+    source_inner, target_inner = optional_inner(source), optional_inner(target)
+    if source_inner is not None and target_inner is not None:
+        if (optional_inner(source_inner) is not None) != (optional_inner(target_inner) is not None):
+            return False
+        return is_assignable(source_inner, target_inner)
+
     # Canonical Option[T] <-> OptionalType(T) assignability
     if isinstance(target, EnumType) and getattr(target, "template_name", None) == "Option" and getattr(target, "type_args", None):
         if source == NoneType:

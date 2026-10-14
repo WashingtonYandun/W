@@ -98,7 +98,7 @@ class HirBuilder:
             else:
                 top_stmts.append(self._lower_stmt(stmt))
 
-        return HirModule(
+        module = HirModule(
             file_path=self.file_path,
             structs=struct_decls,
             enums=enum_decls,
@@ -107,6 +107,9 @@ class HirBuilder:
             functions=fn_decls,
             top_level_stmts=top_stmts
         )
+        from hir.HirVerifier import HirVerifier
+        HirVerifier(self.interner, self.file_path).verify(module)
+        return module
 
     def _handle_import(self, stmt: ImportDecl, fn_decls: List[HirFnDecl]) -> None:
         current_dir = os.path.dirname(os.path.abspath(self.file_path)) if self.file_path != "<stdin>" else os.getcwd()
@@ -123,6 +126,10 @@ class HirBuilder:
             code = f.read()
 
         sub_ast = Parser(file=abs_path).parse(code)
+        from checker.TypeChecker import TypeChecker
+        checker = TypeChecker(file=abs_path)
+        checker.interner = self.interner
+        checker.check(sub_ast)
         for s in sub_ast.body:
             if isinstance(s, FnDecl):
                 fn_hir = self._lower_fn_decl(s)
@@ -142,8 +149,11 @@ class HirBuilder:
         return HirStructDecl(decl.name, tid, fields, Span(decl.line, decl.col))
 
     def _lower_enum_decl(self, decl: EnumDecl) -> HirEnumDecl:
-        tid = self.interner.mk_enum(decl.name, decl.variants)
-        return HirEnumDecl(decl.name, tid, decl.variants, Span(decl.line, decl.col))
+        variants = [variant.name if hasattr(variant, "name") else variant for variant in decl.variants]
+        tid = self.interner.mk_enum(decl.name, variants)
+        payloads = {variant.name: [self._get_type_id_from_node(type_) for type_ in variant.payload_types]
+                    for variant in decl.variants if hasattr(variant, "payload_types")}
+        return HirEnumDecl(decl.name, tid, variants, Span(decl.line, decl.col), payloads)
 
     def _lower_interface_decl(self, decl: InterfaceDecl) -> HirInterfaceDecl:
         methods: List[Tuple[str, int]] = []
@@ -293,7 +303,24 @@ class HirBuilder:
     # Expressions
     # -------------------------------------------------------------
 
+    def _construct_enum(self, name, variant, index, type_id, span, payload=None):
+        entry = self.interner.get_entry(type_id)
+        if entry.tag in ("optional", "result"):
+            name = "Option" if entry.tag == "optional" else "Result"
+        if entry.tag == "enum":
+            definition = self.interner.enum_defs.get(entry.data)
+            if definition and variant in definition.variants:
+                index = definition.variants.index(variant)
+        return HirConstructEnum(name, variant, index, type_id, span, payload)
+
     def _lower_expr(self, expr: Expr) -> HirExpr:
+        value = self._lower_expr_impl(expr)
+        if hasattr(expr, "force_result_wrap_id"):
+            return self._construct_enum("Result", "Ok", 0, expr.force_result_wrap_id,
+                                    Span(expr.line, expr.col), value)
+        return value
+
+    def _lower_expr_impl(self, expr: Expr) -> HirExpr:
         span = Span(expr.line, expr.col)
         tid = self._get_expr_type_id(expr)
 
@@ -312,7 +339,7 @@ class HirBuilder:
                 return HirConstNone(tid or TYPE_NONE, span)
             if expr.name in self.enum_variants:
                 en_name = self.enum_variants[expr.name]
-                return HirConstructEnum(en_name, expr.name, 0, tid or self.interner.mk_enum(en_name), span)
+                return self._construct_enum(en_name, expr.name, 0, tid or self.interner.mk_enum(en_name), span)
             return HirLocalRef(expr.name, tid, span)
         elif isinstance(expr, ThisExpr):
             return HirThisRef(tid, span)
@@ -335,7 +362,8 @@ class HirBuilder:
             return HirConstructStruct(s_name, fields_hir, tid, span)
         elif isinstance(expr, ListExpr):
             elems_hir = [self._lower_expr(e) for e in expr.elements]
-            elem_tid = elems_hir[0].type_id if elems_hir else TYPE_INT
+            entry = self.interner.get_entry(tid)
+            elem_tid = entry.data if entry.tag == "list" else (elems_hir[0].type_id if elems_hir else TYPE_INT)
             return HirConstructList(elem_tid, elems_hir, tid or self.interner.mk_list(elem_tid), span)
         elif isinstance(expr, DictExpr):
             entries_hir = [
@@ -343,8 +371,8 @@ class HirBuilder:
                 else (self._lower_expr(e[0]), self._lower_expr(e[1]))
                 for e in expr.entries
             ]
-            k_tid = entries_hir[0][0].type_id if entries_hir else TYPE_STR
-            v_tid = entries_hir[0][1].type_id if entries_hir else TYPE_INT
+            entry = self.interner.get_entry(tid)
+            k_tid, v_tid = entry.data if entry.tag == "dict" else (TYPE_STR, TYPE_INT)
             return HirConstructDict(k_tid, v_tid, entries_hir, tid or self.interner.mk_dict(k_tid, v_tid), span)
         elif isinstance(expr, TupleExpr):
             elems_hir = [self._lower_expr(e) for e in expr.elements]
@@ -357,26 +385,26 @@ class HirBuilder:
                 c_name = expr.callee.name
                 if c_name == "Some" and len(raw_args) == 1:
                     arg_hir = self._lower_expr(raw_args[0])
-                    return HirConstructEnum("Option", "Some", 0, tid or self.interner.mk_enum("Option"), span, arg_hir)
+                    return self._construct_enum("Option", "Some", 0, tid or self.interner.mk_enum("Option"), span, arg_hir)
                 if c_name == "Ok" and len(raw_args) == 1:
                     arg_hir = self._lower_expr(raw_args[0])
-                    return HirConstructEnum("Result", "Ok", 0, tid or self.interner.mk_enum("Result"), span, arg_hir)
+                    return self._construct_enum("Result", "Ok", 0, tid or self.interner.mk_enum("Result"), span, arg_hir)
                 if c_name == "Err" and len(raw_args) == 1:
                     arg_hir = self._lower_expr(raw_args[0])
-                    return HirConstructEnum("Result", "Err", 1, tid or self.interner.mk_enum("Result"), span, arg_hir)
+                    return self._construct_enum("Result", "Err", 1, tid or self.interner.mk_enum("Result"), span, arg_hir)
                 if c_name in self.enum_variants:
                     en_name = self.enum_variants[c_name]
                     args_hir = [self._lower_expr(a) for a in raw_args]
-                    payload_hir = args_hir[0] if len(args_hir) == 1 else (HirConstructTuple([a.type_id for a in args_hir], args_hir, tid, span) if len(args_hir) > 1 else None)
-                    return HirConstructEnum(en_name, c_name, 0, tid or self.interner.mk_enum(en_name), span, payload_hir)
+                    payload_hir = args_hir[0] if len(args_hir) == 1 else (HirConstructTuple([a.type_id for a in args_hir], args_hir, self.interner.mk_tuple(tuple(a.type_id for a in args_hir)), span) if len(args_hir) > 1 else None)
+                    return self._construct_enum(en_name, c_name, 0, tid or self.interner.mk_enum(en_name), span, payload_hir)
 
             # Check if this call is a qualified Enum variant constructor: Enum.Variant(...)
             if isinstance(expr.callee, MemberExpr) and isinstance(expr.callee.object, IdentExpr) and expr.callee.object.name in self.enums:
                 en_name = expr.callee.object.name
                 v_name = expr.callee.property
                 args_hir = [self._lower_expr(a) for a in raw_args]
-                payload_hir = args_hir[0] if len(args_hir) == 1 else (HirConstructTuple([a.type_id for a in args_hir], args_hir, tid, span) if len(args_hir) > 1 else None)
-                return HirConstructEnum(en_name, v_name, 0, tid or self.interner.mk_enum(en_name), span, payload_hir)
+                payload_hir = args_hir[0] if len(args_hir) == 1 else (HirConstructTuple([a.type_id for a in args_hir], args_hir, self.interner.mk_tuple(tuple(a.type_id for a in args_hir)), span) if len(args_hir) > 1 else None)
+                return self._construct_enum(en_name, v_name, 0, tid or self.interner.mk_enum(en_name), span, payload_hir)
 
             # Check if this call is an object construction: ClassName(...)
             if isinstance(expr.callee, IdentExpr) and expr.callee.name in self.classes:
@@ -418,7 +446,7 @@ class HirBuilder:
                     return HirConstNone(tid or TYPE_NONE, span)
                 edef = self.interner.enum_defs.get(enum_name)
                 v_idx = edef.variants.index(variant_name) if edef and variant_name in edef.variants else 0
-                return HirConstructEnum(enum_name, variant_name, v_idx, tid or self.interner.mk_enum(enum_name), span)
+                return self._construct_enum(enum_name, variant_name, v_idx, tid or self.interner.mk_enum(enum_name), span)
             obj_hir = self._lower_expr(expr.object)
             return HirFieldRead(obj_hir, expr.property, tid, span)
         elif isinstance(expr, IndexExpr):
@@ -427,7 +455,7 @@ class HirBuilder:
             return HirIndexRead(obj_hir, idx_hir, tid, span)
         elif isinstance(expr, PostfixTryExpr):
             op_hir = self._lower_expr(expr.operand)
-            return HirTryPropagate(op_hir, "result" if "!" in self.interner.to_string(op_hir.type_id) else "optional", tid, span)
+            return HirTryPropagate(op_hir, expr.propagation_kind, tid, span)
         elif isinstance(expr, CoalesceExpr):
             opt_hir = self._lower_expr(expr.left)
             fb_hir = self._lower_expr(expr.right)
@@ -446,7 +474,7 @@ class HirBuilder:
             return HirIf(cond_hir, then_hir, elifs_hir, else_hir, tid, span)
         elif isinstance(expr, MatchExpr):
             sub_hir = self._lower_expr(expr.subject)
-            arms_hir = [HirMatchArm(arm.pattern, self._lower_block(arm.body), Span(arm.line, arm.col)) for arm in expr.arms]
+            arms_hir = [HirMatchArm(arm.pattern, self._lower_block(arm.body), Span(arm.line, arm.col), self._lower_expr(arm.guard) if arm.guard is not None else None) for arm in expr.arms]
             return HirMatch(sub_hir, arms_hir, tid, span)
         elif isinstance(expr, RangeExpr):
             s_hir = self._lower_expr(expr.start)
@@ -471,6 +499,8 @@ class HirBuilder:
     def _get_type_id_from_node(self, node: Optional[TypeNode]) -> int:
         if node is None:
             return TYPE_UNIT
+        if hasattr(node, "resolved_type_id"):
+            return node.resolved_type_id
         if isinstance(node, NamedType):
             name = node.name
             if name == "int":

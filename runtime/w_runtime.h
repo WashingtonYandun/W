@@ -65,7 +65,14 @@ typedef struct {
     WBoxBuf* box;
 } WEnumVal;
 
+typedef struct {
+    int32_t refcount;
+    size_t byte_length;
+    char* data;
+} WStringBuf;
+
 struct WVal {
+    WStringBuf* string_owner;
     WTag tag;
     union {
         int64_t i;
@@ -152,33 +159,65 @@ static inline WVal w_bool(bool x) {
 }
 
 static inline WVal w_str(const char* s) {
-    WVal v; v.tag = W_STR; v.as.s = s ? s : ""; return v;
+    WVal v; v.tag = W_STR; v.string_owner = NULL; v.as.s = s ? s : ""; return v;
+}
+
+/* Takes ownership of a heap buffer; w_str is for static storage only. */
+static inline WVal w_owned_str(char* data) {
+    WStringBuf* buffer = (WStringBuf*)malloc(sizeof(WStringBuf));
+    buffer->refcount = 1;
+    buffer->byte_length = strlen(data);
+    buffer->data = data;
+    w_mem_on_alloc();
+    WVal value = w_str(data);
+    value.string_owner = buffer;
+    return value;
+}
+
+static inline WVal w_copy_str(const char* data) {
+    size_t length = strlen(data);
+    char* copy = (char*)malloc(length + 1);
+    memcpy(copy, data, length + 1);
+    return w_owned_str(copy);
+}
+
+static inline WVal w_ok(WVal inner);
+static inline WVal w_err(WVal inner);
+
+static inline bool w_builtin_name(const char* name, const char* base) {
+    size_t length = strlen(base);
+    return strcmp(name, base) == 0 || (strncmp(name, base, length) == 0 &&
+        name[length] == '_' && name[length + 1] == '_');
 }
 
 static inline WVal w_enum(const char* enum_name, const char* variant) {
+    if (w_builtin_name(enum_name, "Option") && strcmp(variant, "None") == 0) return w_none();
     WVal v;
     v.tag = W_ENUM;
-    v.as.en.enum_name = enum_name;
+    v.as.en.enum_name = w_builtin_name(enum_name, "Option") ? "Option" : enum_name;
     v.as.en.variant = variant;
     v.as.en.box = NULL;
     return v;
 }
 
 static inline WVal w_enum_payload(const char* enum_name, const char* variant, WVal payload) {
+    if (w_builtin_name(enum_name, "Result")) {
+        if (strcmp(variant, "Ok") == 0) return w_ok(payload);
+        if (strcmp(variant, "Err") == 0) return w_err(payload);
+    }
     WBoxBuf* b = (WBoxBuf*)malloc(sizeof(WBoxBuf));
     b->refcount = 1;
     b->val = payload;
     w_mem_on_alloc();
     WVal v;
     v.tag = W_ENUM;
-    v.as.en.enum_name = enum_name;
+    v.as.en.enum_name = w_builtin_name(enum_name, "Option") ? "Option" : enum_name;
     v.as.en.variant = variant;
     v.as.en.box = b;
     return v;
 }
 
 static inline WVal w_ok(WVal inner) {
-    if (inner.tag == W_OK || inner.tag == W_ERR) return inner;
     WBoxBuf* b = (WBoxBuf*)malloc(sizeof(WBoxBuf));
     b->refcount = 1;
     b->val = inner;
@@ -190,7 +229,6 @@ static inline WVal w_ok(WVal inner) {
 }
 
 static inline WVal w_err(WVal inner) {
-    if (inner.tag == W_ERR) return inner;
     WBoxBuf* b = (WBoxBuf*)malloc(sizeof(WBoxBuf));
     b->refcount = 1;
     b->val = inner;
@@ -203,37 +241,17 @@ static inline WVal w_err(WVal inner) {
 
 static inline WVal w_wrap_result(WVal v, const char* err_type) {
     if (v.tag == W_OK || v.tag == W_ERR) return v;
-    if (v.tag == W_ENUM && (strcmp(v.as.en.enum_name, "Result") == 0 || strncmp(v.as.en.enum_name, "Result__", 8) == 0)) {
-        if (strcmp(v.as.en.variant, "Ok") == 0) {
-            return v.as.en.box ? w_ok(v.as.en.box->val) : w_ok(w_unit());
-        }
-        if (strcmp(v.as.en.variant, "Err") == 0) {
-            return v.as.en.box ? w_err(v.as.en.box->val) : w_err(w_unit());
-        }
-    }
-    if (err_type && err_type[0] != '\0') {
-        if ((v.tag == W_STRUCT || v.tag == W_OBJECT) && v.as.st && strcmp(v.as.st->name, err_type) == 0) {
-            return w_err(v);
-        }
-        if (v.tag == W_ENUM && strcmp(v.as.en.enum_name, err_type) == 0) {
-            return w_err(v);
-        }
-        if (strcmp(err_type, "str") == 0 && v.tag == W_STR) {
-            return w_err(v);
-        }
-        if (strcmp(err_type, "int") == 0 && v.tag == W_INT) {
-            return w_err(v);
-        }
-        if (strcmp(err_type, "bool") == 0 && v.tag == W_BOOL) {
-            return w_err(v);
-        }
-    }
+    (void)err_type;
     return w_ok(v);
 }
 
 /* Deterministic RC + Copy-on-Write */
 static inline WVal w_clone(WVal v) {
-    if (v.tag == W_LIST && v.as.list) {
+    if (v.tag == W_STR && v.string_owner) {
+        w_check_refcount(v.string_owner->refcount, "retain/string");
+        v.string_owner->refcount++;
+        w_g_retain_count++;
+    } else if (v.tag == W_LIST && v.as.list) {
         w_check_refcount(v.as.list->refcount, "retain/list");
         v.as.list->refcount++;
         w_g_retain_count++;
@@ -262,7 +280,16 @@ static inline WVal w_clone(WVal v) {
 }
 
 static inline void w_release(WVal v) {
-    if (v.tag == W_LIST && v.as.list) {
+    if (v.tag == W_STR && v.string_owner) {
+        WStringBuf* buffer = v.string_owner;
+        w_check_refcount(buffer->refcount, "release/string");
+        w_g_release_count++;
+        if (--buffer->refcount == 0) {
+            free(buffer->data);
+            free(buffer);
+            w_mem_on_free();
+        }
+    } else if (v.tag == W_LIST && v.as.list) {
         WListBuf* b = v.as.list;
         w_check_refcount(b->refcount, "release/list");
         w_g_release_count++;
@@ -364,22 +391,41 @@ static inline WVal w_assign(WVal* dst, WVal owned_src) {
     return *dst;
 }
 
+static inline bool w_is_none(WVal value) {
+    return value.tag == W_NONE || (value.tag == W_ENUM &&
+        strcmp(value.as.en.enum_name, "Option") == 0 && strcmp(value.as.en.variant, "None") == 0);
+}
+
+static inline WVal w_peek_optional(WVal value) {
+    if (value.tag == W_ENUM && strcmp(value.as.en.enum_name, "Option") == 0 &&
+        strcmp(value.as.en.variant, "Some") == 0 && value.as.en.box) return value.as.en.box->val;
+    return value;
+}
+
+static inline WVal w_unwrap_optional(WVal value) {
+    if (value.tag == W_ENUM && strcmp(value.as.en.enum_name, "Option") == 0 &&
+        strcmp(value.as.en.variant, "Some") == 0 && value.as.en.box) {
+        return w_clone(value.as.en.box->val);
+    }
+    return w_clone(value);
+}
+
 static inline WVal w_unwrap_ok(WVal v) {
     if (v.tag == W_OK && v.as.box) {
         return w_clone(v.as.box->val);
     }
-    if (v.tag == W_ENUM && v.as.en.box && (strcmp(v.as.en.variant, "Some") == 0 || strcmp(v.as.en.variant, "Ok") == 0)) {
-        return w_clone(v.as.en.box->val);
-    }
     return w_clone(v);
+}
+
+static inline WVal w_unwrap_success(WVal value) {
+    if (value.tag == W_ENUM && strcmp(value.as.en.enum_name, "Option") == 0)
+        return w_unwrap_optional(value);
+    return w_unwrap_ok(value);
 }
 
 static inline WVal w_unwrap_err(WVal v) {
     if (v.tag == W_ERR && v.as.box) {
         return w_clone(v.as.box->val);
-    }
-    if (v.tag == W_ENUM && v.as.en.box && strcmp(v.as.en.variant, "Err") == 0) {
-        return w_clone(v.as.en.box->val);
     }
     return w_none();
 }
@@ -388,18 +434,12 @@ static inline WVal w_peek_ok(WVal v) {
     if (v.tag == W_OK && v.as.box) {
         return v.as.box->val;
     }
-    if (v.tag == W_ENUM && v.as.en.box && (strcmp(v.as.en.variant, "Some") == 0 || strcmp(v.as.en.variant, "Ok") == 0)) {
-        return v.as.en.box->val;
-    }
     return v;
 }
 
 static inline WVal w_peek_err(WVal v) {
     if (v.tag == W_ERR && v.as.box) {
         return v.as.box->val;
-    }
-    if (v.tag == W_ENUM && v.as.en.box && strcmp(v.as.en.variant, "Err") == 0) {
-        return v.as.en.box->val;
     }
     return w_none();
 }
@@ -467,6 +507,10 @@ static inline void w_struct_detach(WVal* v) {
 
 /* Structural Equality */
 static inline bool w_eq(WVal a, WVal b) {
+    bool a_some = a.tag == W_ENUM && strcmp(a.as.en.enum_name, "Option") == 0 && strcmp(a.as.en.variant, "Some") == 0;
+    bool b_some = b.tag == W_ENUM && strcmp(b.as.en.enum_name, "Option") == 0 && strcmp(b.as.en.variant, "Some") == 0;
+    if (a_some && !b_some && b.tag != W_NONE) return w_eq(a.as.en.box->val, b);
+    if (b_some && !a_some && a.tag != W_NONE) return w_eq(a, b.as.en.box->val);
     if (a.tag != b.tag) {
         if ((a.tag == W_NONE && b.tag == W_ENUM && strcmp(b.as.en.enum_name, "Option") == 0 && strcmp(b.as.en.variant, "None") == 0) ||
             (b.tag == W_NONE && a.tag == W_ENUM && strcmp(a.as.en.enum_name, "Option") == 0 && strcmp(a.as.en.variant, "None") == 0)) {
@@ -714,7 +758,7 @@ static inline WVal w_index_get(WVal obj, WVal idx) {
         char* buf = (char*)malloc(blen + 1);
         memcpy(buf, obj.as.s + off, blen);
         buf[blen] = '\0';
-        return w_str(buf);
+        return w_owned_str(buf);
     }
     if (obj.tag == W_DICT) {
         for (int32_t i = 0; i < obj.as.dict->len; i++) {
@@ -725,6 +769,18 @@ static inline WVal w_index_get(WVal obj, WVal idx) {
         return w_none();
     }
     return w_none();
+}
+
+static inline WVal w_index_get_owned(WVal object, WVal index) {
+    if (object.tag == W_DICT) {
+        for (int32_t i = 0; i < object.as.dict->len; i++) {
+            if (w_eq(object.as.dict->keys[i], index))
+                return w_enum_payload("Option", "Some", w_clone(object.as.dict->vals[i]));
+        }
+        return w_none();
+    }
+    WVal value = w_index_get(object, index);
+    return object.tag == W_STR ? value : w_clone(value);
 }
 
 static inline WVal* w_index_ref(WVal* obj, WVal idx) {
@@ -822,7 +878,7 @@ static inline WVal w_list_clear(WVal* list_val) {
 }
 
 static inline WVal w_dict_get(WVal dict_val, WVal key) {
-    return w_index_get(dict_val, key);
+    return w_index_get_owned(dict_val, key);
 }
 
 static inline WVal w_dict_keys(WVal dict_val) {
@@ -846,7 +902,7 @@ static inline WVal w_add(WVal a, WVal b) {
         memcpy(res, a.as.s, la);
         memcpy(res + la, b.as.s, lb);
         res[la + lb] = '\0';
-        return w_str(res);
+        return w_owned_str(res);
     }
     return w_unit();
 }
@@ -949,6 +1005,8 @@ static inline char* w_to_cstr(WVal v, bool quote_str) {
             return buf;
         }
         case W_ENUM: {
+            if (strcmp(v.as.en.enum_name, "Option") == 0 && strcmp(v.as.en.variant, "Some") == 0 && v.as.en.box)
+                return w_to_cstr(v.as.en.box->val, quote_str);
             if (v.as.en.box) {
                 if (v.as.en.box->val.tag == W_TUPLE) {
                     size_t cap = 64;
@@ -1145,8 +1203,8 @@ static inline WVal w_builtin_len(WVal v) {
 }
 
 static inline WVal w_builtin_str(WVal v) {
-    if (v.tag == W_STR) return v;
-    return w_str(w_to_cstr(v, false));
+    if (v.tag == W_STR) return w_clone(v);
+    return w_owned_str(w_to_cstr(v, false));
 }
 
 static inline WVal w_builtin_int(WVal v) {
@@ -1200,7 +1258,7 @@ static inline WVal w_builtin_chr(WVal v) {
         buf[3] = (char)(0x80 | (cp & 0x3F));
         buf[4] = '\0';
     }
-    return w_str(buf);
+    return w_owned_str(buf);
 }
 
 static inline WVal w_builtin_slice(WVal s, WVal start, WVal end) {
@@ -1219,7 +1277,7 @@ static inline WVal w_builtin_slice(WVal s, WVal start, WVal end) {
     char* buf = (char*)malloc(blen + 1);
     memcpy(buf, s.as.s + st_off, blen);
     buf[blen] = '\0';
-    return w_str(buf);
+    return w_owned_str(buf);
 }
 
 static inline WVal w_builtin_bytes(WVal s) {
@@ -1280,7 +1338,7 @@ static inline WVal w_builtin_read_file(WVal path) {
     size_t read_bytes = fread(buf, 1, (size_t)sz, f);
     buf[read_bytes] = '\0';
     fclose(f);
-    return w_ok(w_str(buf));
+    return w_ok(w_owned_str(buf));
 }
 
 static inline WVal w_builtin_write_file(WVal path, WVal content) {
@@ -1312,7 +1370,7 @@ static inline WVal w_builtin_args(void) {
     b->data = (WVal*)malloc(sizeof(WVal) * b->cap);
     w_mem_on_alloc();
     for (int i = 0; i < w_g_argc; i++) {
-        b->data[i] = w_str(w_g_argv[i]);
+        b->data[i] = w_copy_str(w_g_argv[i]);
     }
     WVal v; v.tag = W_LIST; v.as.list = b; return v;
 }

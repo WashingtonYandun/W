@@ -68,7 +68,7 @@ class Formatter:
             args = ", ".join([self.format_type(e) for e in t.type_args])
             return f"{t.name}[{args}]"
         if isinstance(t, OptionalType):
-            return f"{self.format_type(t.inner)}?"
+            return f"({self.format_type(t.inner)})?" if isinstance(t.inner, (ResultType, OptionalType)) else f"{self.format_type(t.inner)}?"
         if isinstance(t, ListType):
             return f"list[{self.format_type(t.element_type)}]"
         if isinstance(t, DictType):
@@ -77,7 +77,10 @@ class Formatter:
             inner = ", ".join([self.format_type(e) for e in t.element_types])
             return f"tuple[{inner}]"
         if isinstance(t, ResultType):
-            return f"{self.format_type(t.ok_type)} ! {self.format_type(t.err_type)}"
+            ok = self.format_type(t.ok_type)
+            if isinstance(t.ok_type, ResultType):
+                ok = f"({ok})"
+            return f"{ok} ! {self.format_type(t.err_type)}"
         return "unit"
 
     # ==========================================

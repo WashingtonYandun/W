@@ -1,11 +1,18 @@
 from typing import Any, Dict, List, Optional
 
+def display_value(value, quote_string=False):
+    while isinstance(value, WEnumValue) and value.enum_name == "Option" and value.variant == "Some" and value.payload:
+        value = value.payload[0]
+    return repr(value) if quote_string and isinstance(value, WStr) else str(value)
+
 class WValue:
     """Base class for all runtime values in W Language v0.1."""
     def clone_value(self) -> 'WValue':
         return self
 
     def __eq__(self, other: Any) -> bool:
+        if isinstance(other, WEnumValue) and other.enum_name == "Option" and other.variant == "Some":
+            return other == self
         raise NotImplementedError
 
     def __str__(self) -> str:
@@ -27,6 +34,8 @@ class WInt(WValue):
         self.value = v
 
     def __eq__(self, other: Any) -> bool:
+        if isinstance(other, WEnumValue) and other.enum_name == "Option" and other.variant == "Some":
+            return other == self
         return isinstance(other, WInt) and self.value == other.value
 
     def __hash__(self) -> int:
@@ -41,6 +50,8 @@ class WFloat(WValue):
         self.value = float(value)
 
     def __eq__(self, other: Any) -> bool:
+        if isinstance(other, WEnumValue) and other.enum_name == "Option" and other.variant == "Some":
+            return other == self
         return isinstance(other, WFloat) and self.value == other.value
 
     def __hash__(self) -> int:
@@ -55,6 +66,8 @@ class WBool(WValue):
         self.value = bool(value)
 
     def __eq__(self, other: Any) -> bool:
+        if isinstance(other, WEnumValue) and other.enum_name == "Option" and other.variant == "Some":
+            return other == self
         return isinstance(other, WBool) and self.value == other.value
 
     def __hash__(self) -> int:
@@ -69,6 +82,8 @@ class WStr(WValue):
         self.value = str(value)
 
     def __eq__(self, other: Any) -> bool:
+        if isinstance(other, WEnumValue) and other.enum_name == "Option" and other.variant == "Some":
+            return other == self
         return isinstance(other, WStr) and self.value == other.value
 
     def __hash__(self) -> int:
@@ -83,6 +98,8 @@ class WStr(WValue):
 
 class WUnit(WValue):
     def __eq__(self, other: Any) -> bool:
+        if isinstance(other, WEnumValue) and other.enum_name == "Option" and other.variant == "Some":
+            return other == self
         return isinstance(other, WUnit)
 
     def __str__(self) -> str:
@@ -91,6 +108,8 @@ class WUnit(WValue):
 
 class WNone(WValue):
     def __eq__(self, other: Any) -> bool:
+        if isinstance(other, WEnumValue) and other.enum_name == "Option" and other.variant == "Some":
+            return other == self
         if isinstance(other, WNone):
             return True
         if isinstance(other, WEnumValue) and (other.enum_name == "Option" or other.enum_name.startswith("Option__")) and other.variant == "None":
@@ -109,10 +128,12 @@ class WTuple(WValue):
         return WTuple([e.clone_value() for e in self.elements])
 
     def __eq__(self, other: Any) -> bool:
+        if isinstance(other, WEnumValue) and other.enum_name == "Option" and other.variant == "Some":
+            return other == self
         return isinstance(other, WTuple) and self.elements == other.elements
 
     def __str__(self) -> str:
-        elems = ", ".join(repr(e) if isinstance(e, WStr) else str(e) for e in self.elements)
+        elems = ", ".join(display_value(e, True) for e in self.elements)
         return f"({elems})"
 
 
@@ -133,8 +154,16 @@ class WRange(WValue):
 
 
 class WEnumValue(WValue):
+    def __new__(cls, enum_name, variant, payload=None):
+        builtin = enum_name.split("__", 1)[0]
+        if builtin == "Result" and variant in ("Ok", "Err") and payload is not None:
+            return (WOk if variant == "Ok" else WErr)(payload[0] if payload else WUnit())
+        if builtin == "Option" and variant in ("None", "none"):
+            return WNone()
+        return super().__new__(cls)
+
     def __init__(self, enum_name: str, variant: str, payload: Optional[List[WValue]] = None):
-        self.enum_name = enum_name
+        self.enum_name = "Option" if enum_name.startswith("Option__") else enum_name
         self.variant = variant
         self.payload: List[WValue] = payload if payload is not None else []
 
@@ -142,6 +171,12 @@ class WEnumValue(WValue):
         return WEnumValue(self.enum_name, self.variant, [p.clone_value() for p in self.payload])
 
     def __eq__(self, other: Any) -> bool:
+        self_some = self.enum_name == "Option" and self.variant == "Some"
+        other_some = isinstance(other, WEnumValue) and other.enum_name == "Option" and other.variant == "Some"
+        if self_some and not other_some and not isinstance(other, WNone):
+            return bool(self.payload) and self.payload[0] == other
+        if other_some and not self_some:
+            return other == self
         if isinstance(other, WEnumValue):
             return self.enum_name == other.enum_name and self.variant == other.variant and self.payload == other.payload
         if (self.enum_name == "Option" or self.enum_name.startswith("Option__")) and self.variant == "None" and isinstance(other, WNone):
@@ -153,8 +188,10 @@ class WEnumValue(WValue):
         return False
 
     def __str__(self) -> str:
+        if self.enum_name == "Option" and self.variant == "Some" and self.payload:
+            return str(self.payload[0])
         if self.payload:
-            args_str = ", ".join(repr(p) if isinstance(p, WStr) else str(p) for p in self.payload)
+            args_str = ", ".join(display_value(p, True) for p in self.payload)
             return f"{self.enum_name}.{self.variant}({args_str})"
         return f"{self.enum_name}.{self.variant}"
 
@@ -174,6 +211,8 @@ class WOk(WResult):
         return WOk(self.value.clone_value())
 
     def __eq__(self, other: Any) -> bool:
+        if isinstance(other, WEnumValue) and other.enum_name == "Option" and other.variant == "Some":
+            return other == self
         if isinstance(other, WOk):
             return self.value == other.value
         if isinstance(other, WEnumValue) and (other.enum_name == "Result" or other.enum_name.startswith("Result__")) and other.variant == "Ok" and len(other.payload) == 1:
@@ -191,6 +230,8 @@ class WErr(WResult):
         return WErr(self.error.clone_value())
 
     def __eq__(self, other: Any) -> bool:
+        if isinstance(other, WEnumValue) and other.enum_name == "Option" and other.variant == "Some":
+            return other == self
         if isinstance(other, WErr):
             return self.error == other.error
         if isinstance(other, WEnumValue) and (other.enum_name == "Result" or other.enum_name.startswith("Result__")) and other.variant == "Err" and len(other.payload) == 1:
@@ -259,10 +300,12 @@ class WList(WValue):
         return iter(self.storage.data)
 
     def __eq__(self, other: Any) -> bool:
+        if isinstance(other, WEnumValue) and other.enum_name == "Option" and other.variant == "Some":
+            return other == self
         return isinstance(other, WList) and self.storage.data == other.storage.data
 
     def __str__(self) -> str:
-        elems = ", ".join(repr(e) if isinstance(e, WStr) else str(e) for e in self.storage.data)
+        elems = ", ".join(display_value(e, True) for e in self.storage.data)
         return f"[{elems}]"
 
 
@@ -300,13 +343,15 @@ class WDict(WValue):
         return len(self.storage.data)
 
     def __eq__(self, other: Any) -> bool:
+        if isinstance(other, WEnumValue) and other.enum_name == "Option" and other.variant == "Some":
+            return other == self
         return isinstance(other, WDict) and self.storage.data == other.storage.data
 
     def __str__(self) -> str:
         items = []
         for k, v in self.storage.data.items():
             k_str = f'"{k}"' if isinstance(k, str) else str(k)
-            v_str = f'"{v}"' if isinstance(v, WStr) else str(v)
+            v_str = display_value(v, True)
             items.append(f"{k_str}: {v_str}")
         return "{" + ", ".join(items) + "}"
 
@@ -337,10 +382,12 @@ class WStructInstance(WValue):
         self.storage.data[name] = val.clone_value()
 
     def __eq__(self, other: Any) -> bool:
+        if isinstance(other, WEnumValue) and other.enum_name == "Option" and other.variant == "Some":
+            return other == self
         return isinstance(other, WStructInstance) and self.struct_name == other.struct_name and self.storage.data == other.storage.data
 
     def __str__(self) -> str:
-        fields_str = ", ".join(f"{k}: {repr(v) if isinstance(v, WStr) else str(v)}" for k, v in self.storage.data.items())
+        fields_str = ", ".join(f"{k}: {display_value(v, True)}" for k, v in self.storage.data.items())
         return f"{self.struct_name} {{ {fields_str} }}"
 
 
@@ -405,10 +452,12 @@ class WObjectInstance(WValue):
         self.fields[name] = val.clone_value()
 
     def __eq__(self, other: Any) -> bool:
+        if isinstance(other, WEnumValue) and other.enum_name == "Option" and other.variant == "Some":
+            return other == self
         return self is other
 
     def __str__(self) -> str:
-        fields_str = ", ".join(f"{k}: {repr(v) if isinstance(v, WStr) else str(v)}" for k, v in self.fields.items())
+        fields_str = ", ".join(f"{k}: {display_value(v, True)}" for k, v in self.fields.items())
         return f"{self.class_name} {{ {fields_str} }}"
 
 
