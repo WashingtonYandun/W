@@ -91,7 +91,11 @@ class WUnit(WValue):
 
 class WNone(WValue):
     def __eq__(self, other: Any) -> bool:
-        return isinstance(other, WNone)
+        if isinstance(other, WNone):
+            return True
+        if isinstance(other, WEnumValue) and (other.enum_name == "Option" or other.enum_name.startswith("Option__")) and other.variant == "None":
+            return True
+        return False
 
     def __str__(self) -> str:
         return "none"
@@ -129,14 +133,29 @@ class WRange(WValue):
 
 
 class WEnumValue(WValue):
-    def __init__(self, enum_name: str, variant: str):
+    def __init__(self, enum_name: str, variant: str, payload: Optional[List[WValue]] = None):
         self.enum_name = enum_name
         self.variant = variant
+        self.payload: List[WValue] = payload if payload is not None else []
+
+    def clone_value(self) -> 'WEnumValue':
+        return WEnumValue(self.enum_name, self.variant, [p.clone_value() for p in self.payload])
 
     def __eq__(self, other: Any) -> bool:
-        return isinstance(other, WEnumValue) and self.enum_name == other.enum_name and self.variant == other.variant
+        if isinstance(other, WEnumValue):
+            return self.enum_name == other.enum_name and self.variant == other.variant and self.payload == other.payload
+        if (self.enum_name == "Option" or self.enum_name.startswith("Option__")) and self.variant == "None" and isinstance(other, WNone):
+            return True
+        if (self.enum_name == "Result" or self.enum_name.startswith("Result__")) and self.variant == "Ok" and isinstance(other, WOk):
+            return len(self.payload) == 1 and self.payload[0] == other.value
+        if (self.enum_name == "Result" or self.enum_name.startswith("Result__")) and self.variant == "Err" and isinstance(other, WErr):
+            return len(self.payload) == 1 and self.payload[0] == other.error
+        return False
 
     def __str__(self) -> str:
+        if self.payload:
+            args_str = ", ".join(repr(p) if isinstance(p, WStr) else str(p) for p in self.payload)
+            return f"{self.enum_name}.{self.variant}({args_str})"
         return f"{self.enum_name}.{self.variant}"
 
 
@@ -155,7 +174,11 @@ class WOk(WResult):
         return WOk(self.value.clone_value())
 
     def __eq__(self, other: Any) -> bool:
-        return isinstance(other, WOk) and self.value == other.value
+        if isinstance(other, WOk):
+            return self.value == other.value
+        if isinstance(other, WEnumValue) and (other.enum_name == "Result" or other.enum_name.startswith("Result__")) and other.variant == "Ok" and len(other.payload) == 1:
+            return self.value == other.payload[0]
+        return False
 
     def __str__(self) -> str:
         return f"Ok({self.value})"
@@ -168,7 +191,11 @@ class WErr(WResult):
         return WErr(self.error.clone_value())
 
     def __eq__(self, other: Any) -> bool:
-        return isinstance(other, WErr) and self.error == other.error
+        if isinstance(other, WErr):
+            return self.error == other.error
+        if isinstance(other, WEnumValue) and (other.enum_name == "Result" or other.enum_name.startswith("Result__")) and other.variant == "Err" and len(other.payload) == 1:
+            return self.error == other.payload[0]
+        return False
 
     def __str__(self) -> str:
         return f"Err({self.error})"
@@ -396,9 +423,15 @@ class WSuperProxy(WValue):
 
 
 class WEnumNamespace(WValue):
-    def __init__(self, name: str, variants: List[str]):
+    def __init__(self, name: str, variants: Any):
         self.name = name
-        self.variants = set(variants)
+        self.variants: Set[str] = set()
+        if isinstance(variants, (list, set)):
+            for v in variants:
+                if hasattr(v, "name"):
+                    self.variants.add(v.name)
+                else:
+                    self.variants.add(str(v))
 
     def get_variant(self, variant: str) -> WEnumValue:
         if variant not in self.variants:

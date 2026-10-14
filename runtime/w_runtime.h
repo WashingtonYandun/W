@@ -57,12 +57,13 @@ typedef struct {
     WVal* vals;
 } WStructBuf;
 
+typedef struct WBoxBuf WBoxBuf;
+
 typedef struct {
     const char* enum_name;
     const char* variant;
+    WBoxBuf* box;
 } WEnumVal;
-
-typedef struct WBoxBuf WBoxBuf;
 
 struct WVal {
     WTag tag;
@@ -159,6 +160,20 @@ static inline WVal w_enum(const char* enum_name, const char* variant) {
     v.tag = W_ENUM;
     v.as.en.enum_name = enum_name;
     v.as.en.variant = variant;
+    v.as.en.box = NULL;
+    return v;
+}
+
+static inline WVal w_enum_payload(const char* enum_name, const char* variant, WVal payload) {
+    WBoxBuf* b = (WBoxBuf*)malloc(sizeof(WBoxBuf));
+    b->refcount = 1;
+    b->val = payload;
+    w_mem_on_alloc();
+    WVal v;
+    v.tag = W_ENUM;
+    v.as.en.enum_name = enum_name;
+    v.as.en.variant = variant;
+    v.as.en.box = b;
     return v;
 }
 
@@ -188,6 +203,14 @@ static inline WVal w_err(WVal inner) {
 
 static inline WVal w_wrap_result(WVal v, const char* err_type) {
     if (v.tag == W_OK || v.tag == W_ERR) return v;
+    if (v.tag == W_ENUM && (strcmp(v.as.en.enum_name, "Result") == 0 || strncmp(v.as.en.enum_name, "Result__", 8) == 0)) {
+        if (strcmp(v.as.en.variant, "Ok") == 0) {
+            return v.as.en.box ? w_ok(v.as.en.box->val) : w_ok(w_unit());
+        }
+        if (strcmp(v.as.en.variant, "Err") == 0) {
+            return v.as.en.box ? w_err(v.as.en.box->val) : w_err(w_unit());
+        }
+    }
     if (err_type && err_type[0] != '\0') {
         if ((v.tag == W_STRUCT || v.tag == W_OBJECT) && v.as.st && strcmp(v.as.st->name, err_type) == 0) {
             return w_err(v);
@@ -229,6 +252,10 @@ static inline WVal w_clone(WVal v) {
     } else if ((v.tag == W_OK || v.tag == W_ERR) && v.as.box) {
         w_check_refcount(v.as.box->refcount, "retain/box");
         v.as.box->refcount++;
+        w_g_retain_count++;
+    } else if (v.tag == W_ENUM && v.as.en.box) {
+        w_check_refcount(v.as.en.box->refcount, "retain/enum_box");
+        v.as.en.box->refcount++;
         w_g_retain_count++;
     }
     return v;
@@ -305,6 +332,17 @@ static inline void w_release(WVal v) {
             free(bx);
             w_mem_on_free();
         }
+    } else if (v.tag == W_ENUM && v.as.en.box) {
+        WBoxBuf* bx = v.as.en.box;
+        w_check_refcount(bx->refcount, "release/enum_box");
+        w_g_release_count++;
+        bx->refcount--;
+        if (bx->refcount == 0) {
+            bx->refcount = -1;
+            w_release(bx->val);
+            free(bx);
+            w_mem_on_free();
+        }
     }
 }
 
@@ -330,12 +368,38 @@ static inline WVal w_unwrap_ok(WVal v) {
     if (v.tag == W_OK && v.as.box) {
         return w_clone(v.as.box->val);
     }
+    if (v.tag == W_ENUM && v.as.en.box && (strcmp(v.as.en.variant, "Some") == 0 || strcmp(v.as.en.variant, "Ok") == 0)) {
+        return w_clone(v.as.en.box->val);
+    }
     return w_clone(v);
 }
 
 static inline WVal w_unwrap_err(WVal v) {
     if (v.tag == W_ERR && v.as.box) {
         return w_clone(v.as.box->val);
+    }
+    if (v.tag == W_ENUM && v.as.en.box && strcmp(v.as.en.variant, "Err") == 0) {
+        return w_clone(v.as.en.box->val);
+    }
+    return w_none();
+}
+
+static inline WVal w_peek_ok(WVal v) {
+    if (v.tag == W_OK && v.as.box) {
+        return v.as.box->val;
+    }
+    if (v.tag == W_ENUM && v.as.en.box && (strcmp(v.as.en.variant, "Some") == 0 || strcmp(v.as.en.variant, "Ok") == 0)) {
+        return v.as.en.box->val;
+    }
+    return v;
+}
+
+static inline WVal w_peek_err(WVal v) {
+    if (v.tag == W_ERR && v.as.box) {
+        return v.as.box->val;
+    }
+    if (v.tag == W_ENUM && v.as.en.box && strcmp(v.as.en.variant, "Err") == 0) {
+        return v.as.en.box->val;
     }
     return w_none();
 }
@@ -403,7 +467,25 @@ static inline void w_struct_detach(WVal* v) {
 
 /* Structural Equality */
 static inline bool w_eq(WVal a, WVal b) {
-    if (a.tag != b.tag) return false;
+    if (a.tag != b.tag) {
+        if ((a.tag == W_NONE && b.tag == W_ENUM && strcmp(b.as.en.enum_name, "Option") == 0 && strcmp(b.as.en.variant, "None") == 0) ||
+            (b.tag == W_NONE && a.tag == W_ENUM && strcmp(a.as.en.enum_name, "Option") == 0 && strcmp(a.as.en.variant, "None") == 0)) {
+            return true;
+        }
+        if (a.tag == W_OK && b.tag == W_ENUM && strcmp(b.as.en.enum_name, "Result") == 0 && strcmp(b.as.en.variant, "Ok") == 0) {
+            return b.as.en.box ? w_eq(a.as.box->val, b.as.en.box->val) : false;
+        }
+        if (b.tag == W_OK && a.tag == W_ENUM && strcmp(a.as.en.enum_name, "Result") == 0 && strcmp(a.as.en.variant, "Ok") == 0) {
+            return a.as.en.box ? w_eq(a.as.en.box->val, b.as.box->val) : false;
+        }
+        if (a.tag == W_ERR && b.tag == W_ENUM && strcmp(b.as.en.enum_name, "Result") == 0 && strcmp(b.as.en.variant, "Err") == 0) {
+            return b.as.en.box ? w_eq(a.as.box->val, b.as.en.box->val) : false;
+        }
+        if (b.tag == W_ERR && a.tag == W_ENUM && strcmp(a.as.en.enum_name, "Result") == 0 && strcmp(a.as.en.variant, "Err") == 0) {
+            return a.as.en.box ? w_eq(a.as.en.box->val, b.as.box->val) : false;
+        }
+        return false;
+    }
     switch (a.tag) {
         case W_UNIT:
         case W_NONE:
@@ -417,8 +499,13 @@ static inline bool w_eq(WVal a, WVal b) {
         case W_STR:
             return strcmp(a.as.s, b.as.s) == 0;
         case W_ENUM:
-            return strcmp(a.as.en.enum_name, b.as.en.enum_name) == 0 &&
-                   strcmp(a.as.en.variant, b.as.en.variant) == 0;
+            if (strcmp(a.as.en.enum_name, b.as.en.enum_name) != 0 ||
+                strcmp(a.as.en.variant, b.as.en.variant) != 0) {
+                return false;
+            }
+            if (!a.as.en.box && !b.as.en.box) return true;
+            if (!a.as.en.box || !b.as.en.box) return false;
+            return w_eq(a.as.en.box->val, b.as.en.box->val);
         case W_LIST:
             if (a.as.list->len != b.as.list->len) return false;
             for (int32_t i = 0; i < a.as.list->len; i++) {
@@ -862,6 +949,43 @@ static inline char* w_to_cstr(WVal v, bool quote_str) {
             return buf;
         }
         case W_ENUM: {
+            if (v.as.en.box) {
+                if (v.as.en.box->val.tag == W_TUPLE) {
+                    size_t cap = 64;
+                    size_t pos = 0;
+                    buf = (char*)malloc(cap);
+                    size_t l1 = strlen(v.as.en.enum_name);
+                    size_t l2 = strlen(v.as.en.variant);
+                    while (pos + l1 + l2 + 2 >= cap) { cap *= 2; buf = (char*)realloc(buf, cap); }
+                    memcpy(buf + pos, v.as.en.enum_name, l1); pos += l1;
+                    buf[pos++] = '.';
+                    memcpy(buf + pos, v.as.en.variant, l2); pos += l2;
+                    buf[pos++] = '(';
+                    for (int32_t i = 0; i < v.as.en.box->val.as.tuple->len; i++) {
+                        if (i > 0) {
+                            if (pos + 3 >= cap) { cap *= 2; buf = (char*)realloc(buf, cap); }
+                            buf[pos++] = ','; buf[pos++] = ' ';
+                        }
+                        char* sub = w_to_cstr(v.as.en.box->val.as.tuple->items[i], true);
+                        size_t lsub = strlen(sub);
+                        while (pos + lsub + 3 >= cap) { cap *= 2; buf = (char*)realloc(buf, cap); }
+                        memcpy(buf + pos, sub, lsub); pos += lsub;
+                        free(sub);
+                    }
+                    buf[pos++] = ')';
+                    buf[pos] = '\0';
+                    return buf;
+                } else {
+                    char* sub = w_to_cstr(v.as.en.box->val, true);
+                    size_t l1 = strlen(v.as.en.enum_name);
+                    size_t l2 = strlen(v.as.en.variant);
+                    size_t lsub = strlen(sub);
+                    buf = (char*)malloc(l1 + l2 + lsub + 4);
+                    snprintf(buf, l1 + l2 + lsub + 4, "%s.%s(%s)", v.as.en.enum_name, v.as.en.variant, sub);
+                    free(sub);
+                    return buf;
+                }
+            }
             size_t l1 = strlen(v.as.en.enum_name);
             size_t l2 = strlen(v.as.en.variant);
             buf = (char*)malloc(l1 + l2 + 2);

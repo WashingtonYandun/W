@@ -2,45 +2,47 @@
 
 <p align="center">
   <a href="https://github.com/WashingtonYandun/W/actions"><img src="https://img.shields.io/badge/build-passing-brightgreen?style=flat-square" alt="Build Status"></a>
-  <a href="https://github.com/WashingtonYandun/W"><img src="https://img.shields.io/badge/conformance-312%2F312%20(100%25)-success?style=flat-square" alt="Conformance Tests"></a>
+  <a href="https://github.com/WashingtonYandun/W"><img src="https://img.shields.io/badge/conformance-347%2F347%20(100%25)-success?style=flat-square" alt="Conformance Tests"></a>
   <a href="https://github.com/WashingtonYandun/W"><img src="https://img.shields.io/badge/sanitizers-ASan%20%7C%20UBSan%20clean-blue?style=flat-square" alt="Sanitizers"></a>
   <a href="https://github.com/WashingtonYandun/W"><img src="https://img.shields.io/badge/self--hosting-3--stage%20fixed--point-purple?style=flat-square" alt="Self-Hosting"></a>
+  <a href="https://github.com/WashingtonYandun/W"><img src="https://img.shields.io/badge/version-v0.2.0--alpha-informational?style=flat-square" alt="Version"></a>
   <a href="https://github.com/WashingtonYandun/W"><img src="https://img.shields.io/badge/backend-portable%20C99-orange?style=flat-square" alt="Backend"></a>
   <a href="https://github.com/WashingtonYandun/W/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue?style=flat-square" alt="License"></a>
 </p>
 
 <p align="center">
   <strong>Compact &bull; Deterministic &bull; Statically Typed &bull; Self-Hostable Systems Language</strong><br>
-  <em>Designed for semantic clarity, deterministic lifetimes, copy-on-write efficiency, and seamless human & AI collaboration.</em>
+  <em>Engineered with pure Value Semantics, Copy-on-Write (CoW), Deterministic ARC, Monomorphized Generics, Algebraic Data Types, and portable C99 compilation without Garbage Collection pauses.</em>
 </p>
 
 ---
 
 ## ⚡ What is W?
 
-**W** is a modern, statically typed programming language with a modular, self-hosted compiler that emits portable C99. W bridges the gap between high-level expressive programming and predictable, low-level systems engineering.
+**W** is a modern systems and application programming language combining the expressive safety of modern functional languages with the raw speed, minimal footprint, and portability of C99. W features a self-hosting compiler, deterministic memory management without a tracing garbage collector, monomorphized generics, first-class Algebraic Data Types (ADTs), and seamless nominal object-oriented programming.
 
-### Why W?
+### Key Architectural Pillars
 
-| Feature | How W Solves It | Benefit |
+| Pillar | How W Solves It | Technical & Operational Benefit |
 | :--- | :--- | :--- |
-| **Memory Safety** | Pure Value Semantics + Copy-on-Write (CoW) for data, single-threaded ARC for objects | Zero garbage collector pauses; deterministic `CleanupScope` frees memory at scope exit |
-| **Nullability & Errors** | Explicit `T?` nullability and `T ! E` error channels with unified postfix `?` operator | No unexpected `null` dereferences; no runtime exception unwinding overhead |
-| **Expressive OOP** | Java-style `class`, `interface`, single-inheritance `extends`, `implements`, `super` | Familiar object-oriented modeling with clean encapsulation (`public`/`private`) |
-| **Self-Hosting Compiler** | 3-stage bootstrap fixed-point: $\text{SHA256}(c_0) == \text{SHA256}(c_1) == \text{SHA256}(c_2)$ | True compiler autonomy and language stability |
-| **Modern Architecture** | Lexer $\to$ Parser $\to$ TypeInterner $\to$ Typed HIR $\to$ HirCCodeGen | Rock-solid multi-pass design ready for Monomorphized Generics and optimizations |
-| **Zero Runtime Bloat** | Emits standard C99; single-header runtime (`w_runtime.h`), binaries are $\approx 34\text{ KB}$ | High portability across Linux, macOS, BSD, and embedded targets |
+| **Hybrid Memory Architecture** | Pure Value Semantics + Copy-on-Write (CoW) for data structures (`list`, `dict`, `struct`); Single-threaded ARC for OOP `class` objects | Zero garbage collector pauses; deterministic `CleanupScope` releases memory immediately at scope exit; ASan/UBSan clean. |
+| **Semantic Unification (`Option` & `Result`)** | Formal equivalence: `T?` $\equiv$ `Option[T]` (`Some(T)`, `None`) and `T ! E` $\equiv$ `Result[T, E]` (`Ok(T)`, `Err(E)`) | Single mental model: use `?` and `??` for concise control flow or `match` for structural destructuring interchangeably. |
+| **Monomorphized Generics & ADTs** | Compile-time specialization of generic `struct[T]`, `enum[T]`, and `fn[T]` with deterministic `TypeId` tuple mangling | Zero runtime dispatch overhead for generics; static detection of infinite recursive layouts (`T025`); nominal constraints (`[T: Printable]`). |
+| **Nominal OOP & Polymorphism** | Single-inheritance `class` hierarchies, nominal `interface`, explicit `implements`, `super`, and field encapsulation (`public`/`private`) | Reliable enterprise software modeling with static vtable layout and dynamic method dispatch. |
+| **Self-Hosting Fixed-Point** | 3-stage bootstrap fixed-point: $\text{SHA256}(c_0) == \text{SHA256}(c_1) == \text{SHA256}(c_2)$ | Proof of linguistic maturity, deterministic code generation, and complete compiler autonomy. |
+| **Typed HIR Multi-Pass Pipeline** | `Lexer` $\to$ `Parser` $\to$ `TypeInterner` $\to$ `Typed HIR` $\to$ `HirCCodeGen` $\to$ `C99` | Clean separation between semantic validation, generic monomorphization, intermediate representation, and target code generation. |
+| **Ultra-Lightweight Footprint** | Standalone single-header runtime (`runtime/w_runtime.h`), zero external runtime dependencies | Generated binaries are $\approx 34\text{ KB}$, portable across Linux, macOS, BSD, and embedded targets. |
 
 ---
 
 ## 🚀 Quick Start & Installation
 
 ### Prerequisites
-- **Python** $\ge 3.10$ (for reference tools)
+- **Python** $\ge 3.10$ (driver and reference compiler)
 - **C99 Compiler** (`clang` or `gcc`)
 - Zero external package dependencies.
 
-### One-Line Install
+### One-Line Install & Verification
 
 ```bash
 git clone https://github.com/WashingtonYandun/W.git
@@ -49,7 +51,7 @@ cd W
 # Compile Stage-2 native W1 compiler and install globally to ~/.local/bin/w
 ./install.sh
 
-# Verify installation & test suite
+# Verify installation & run the 347-test conformance matrix
 w version
 w test
 ```
@@ -58,78 +60,110 @@ w test
 
 ## 💻 Language Tour
 
+### 1. Monomorphized Generics & Algebraic Data Types (ADTs)
+
+W provides full parametric polymorphism with monomorphization and recursive data structure protection:
+
 ```w
-enum Status {
-    Pending
-    Active
-    Done
+# Generic Struct
+struct Box[T] {
+    val: T
 }
 
-struct Task {
-    id: int
-    title: str
-    status: Status
+# Recursive Algebraic Data Type (explicit heap indirection via Box[T])
+enum Tree[T] {
+    Leaf(T),
+    Node(Box[Tree[T]], Box[Tree[T]])
 }
 
-# Explicit fallibility with T ! E and unified '?' error propagation
+fn sum_tree(t: Tree[int]) -> int {
+    return match t {
+        Leaf(v) => v,
+        Node(l, r) => sum_tree(l.val) + sum_tree(r.val)
+    }
+}
+
+let left = Tree.Leaf(10)
+let right = Tree.Leaf(20)
+let root = Tree.Node(Box(left), Box(right))
+
+print("Tree sum:", sum_tree(root)) # 30
+```
+
+### 2. Canonical Option & Result Unification
+
+In W, `T?` is identical to `Option[T]`, and `T ! E` is identical to `Result[T, E]`:
+
+```w
 fn parse_id(raw: str) -> int ! str {
     if len(raw) == 0 {
-        return "empty string"
+        return Err("empty raw id")
     }
-    return 101 # Simulated parsing
+    return Ok(101)
 }
 
-# Exhaustive pattern matching over enums
-fn describe(task: Task) -> str {
-    match task.status {
-        Status.Pending => { return "Pending: " + task.title }
-        Status.Active  => { return "Active: "  + task.title }
-        Status.Done    => { return "Done: "    + task.title }
+fn fetch_user(id: int) -> str? {
+    if id == 101 {
+        return Some("Alice")
     }
+    return None
 }
 
-# Object-Oriented Programming with interfaces and classes
+fn process_request(raw_id: str) {
+    # 1. Postfix error propagation with '?'
+    let id: int = parse_id(raw_id)?
+
+    # 2. Pattern matching over Option / Result
+    match fetch_user(id) {
+        Some(name) => print("User found:", name),
+        None       => print("User not found")
+    }
+}
+```
+
+### 3. Pure Value Semantics + Copy-on-Write (CoW)
+
+Collections and structs behave as mathematical values with zero unintended side effects:
+
+```w
+let original = [1, 2, 3]
+let mut copy = original
+
+# Mutating copy triggers transparent Copy-on-Write detachment
+copy.append(4)
+
+print(original) # [1, 2, 3] - completely untouched
+print(copy)     # [1, 2, 3, 4]
+```
+
+### 4. Object-Oriented Contracts & Nominal Constraints
+
+```w
 interface Printable {
     fn to_string() -> str
 }
 
-class Project implements Printable {
-    private var name: str
-    private var tasks: list[Task]
+class User implements Printable {
+    private name: str
+    private age: int
 
-    fn init(name: str) {
+    fn init(name: str, age: int) {
         this.name = name
-        this.tasks = []
-    }
-
-    public fn add_task(task: Task) -> unit {
-        this.tasks.append(task)
+        this.age = age
     }
 
     public fn to_string() -> str {
-        return "Project '" + this.name + "' with " + str(len(this.tasks)) + " tasks"
+        return this.name + " (" + str(this.age) + ")"
     }
 }
 
-fn main() -> unit {
-    # 1. Pure Value Semantics + Copy-on-Write (CoW)
-    let a = [1, 2, 3]
-    let mut b = a
-    b.append(4) # CoW: 'b' is detached; 'a' remains exactly [1, 2, 3]
-    print(a)    # [1, 2, 3]
-    print(b)    # [1, 2, 3, 4]
-
-    # 2. Error channel recovery
-    let id = parse_id("42") else err {
-        print("Failed to parse:", err)
-        return
-    }
-
-    # 3. Object-Oriented Polymorphism
-    let p = Project("W Compiler")
-    p.add_task(Task { id: id, title: "Typed HIR Backend", status: Status.Done })
-    print(p.to_string())
+# Strictly nominal constraint: T must explicitly declare 'implements Printable'
+fn print_item[T: Printable](item: T) {
+    print("Item:", item.to_string())
 }
+
+let user = new User("Washo", 28)
+print_item(user)
 ```
 
 ---
@@ -149,25 +183,25 @@ w check examples/03_enums_and_match.w --json
 # 3. Canonical code formatter (idempotent, standard style)
 w fmt examples/01_hello_world.w --write
 
-# 4. Transpile W to C99 via Typed HIR backend or self-hosted W1
+# 4. Transpile W to portable C99 via Typed HIR backend or self-hosted W1
 w emit-c --hir examples/05_utf8_and_algorithms.w -o out.c
 w emit-c --selfhost examples/05_utf8_and_algorithms.w -o out_w1.c
 
-# 5. Compile directly to optimized native binary
+# 5. Compile directly to optimized native binary (~34 KB)
 w build --hir examples/05_utf8_and_algorithms.w -o app
 w build --selfhost examples/05_utf8_and_algorithms.w -o app_w1
 
-# 6. Run full 312-test conformance suite (100% pass)
+# 6. Run full 347-test conformance suite (100% pass)
 w test
 
-# 7. Run AddressSanitizer & UndefinedBehaviorSanitizer suite
+# 7. Run AddressSanitizer & UndefinedBehaviorSanitizer checks
 w test --sanitize
 
-# 8. Run 3-engine differential testing oracle & compiler fuzzer
+# 8. Run differential testing oracle & compiler fuzzer
 w test --differential 50 --seed 20260416
 w test --fuzz 2000 --seed 20260416
 
-# 9. Performance benchmarks
+# 9. Performance benchmark harness
 w bench
 ```
 
@@ -175,39 +209,39 @@ w bench
 
 ## 🏛️ Compiler Architecture
 
-W follows a modular compiler architecture designed for formal correctness and maintainability:
+W follows a multi-pass pipeline designed for mathematical correctness, invariant preservation, and formal verification:
 
 ```text
 Source Code (.w)
        │
        ▼
  ┌──────────┐
- │  Lexer   │  ──▶ 31 Keywords, UTF-8 codepoints, strict numbers
+ │  Lexer   │  ──▶ 31 Keywords, UTF-8 codepoints, strict numeric literals
  └────┬─────┘
        ▼
  ┌──────────┐
- │  Parser  │  ──▶ Pratt precedence parser, AST with source spans
+ │  Parser  │  ──▶ Precedence parser, AST with source spans & error recovery
  └────┬─────┘
        ▼
  ┌───────────────┐
- │  TypeChecker  │ ──▶ Two-pass analysis, TypeInterner (TypeId), OOP subtyping
+ │  TypeChecker  │ ──▶ Two-pass analysis, TypeInterner (TypeId), Nominal Subtyping
  └────┬──────────┘
        ▼
  ┌───────────────┐
  │   Typed HIR   │ ──▶ Canonical High-level Intermediate Representation
  └────┬──────────┘
        │
-       ├──▶ Monomorphization (v0.2 Generics)
+       ├──▶ Monomorphization (TypeId tuple canonical key, recursion limit guard)
        │
        ▼
  ┌───────────────┐
  │  HirCCodeGen  │ ──▶ Deterministic CleanupScope ARC, dynamic dispatch, CoW
  └────┬──────────┘
        ▼
-  Portable C99 ──▶ Clang / GCC (-O2) ──▶ Native Binary (~34 KB)
+  Portable C99 ──▶ Clang / GCC (-O2) ──▶ Standalone Native Binary (~34 KB)
 ```
 
-### Self-Hosted Compiler (`selfhost/src/`)
+### Self-Hosted Compiler Modules (`selfhost/src/`)
 The self-hosted compiler is decomposed into 9 single-responsibility modules:
 - `selfhost/src/01_ast.w`: AST node definitions, `ExprRes`, and `CleanupScope`.
 - `selfhost/src/02_lexer.w`: Lexical scanner and keyword predicates.
@@ -238,18 +272,22 @@ Run `./w bench` to benchmark the reference interpreter against the native C99 ba
 
 ---
 
-## 🗺️ Roadmap
+## 🗺️ Roadmap & Language Evolution
 
-- [x] **v0.1.0** — Core language, OOP (classes & interfaces), C99 backend, 3-stage self-hosting fixed-point.
+- [x] **v0.1.0** — Core language, OOP (`class` & `interface`), C99 backend, 3-stage self-hosting fixed-point.
 - [x] **v0.1.1** — Semantic hardening, recursive nested CoW, constructor desugaring, 3-engine differential oracle.
 - [x] **v0.1.2** — Stable diagnostic codes (`W0xxx`–`W4xxx`), fuzzing suite, benchmark harness (`w bench`).
 - [x] **v0.1.3** — Deterministic RC lifetimes (`CleanupScope`), memory leak tracking (`W_MEM_CHECK=1`).
-- [x] **v0.1.4** — Compiler Architecture Foundation: `TypeId`, `TypeInterner`, Typed HIR, modular W1 split (`selfhost/src/`), Clang ASan/UBSan integration.
-- [ ] **v0.2.0** — **Generics & Monomorphization**: Parametric polymorphism for `struct` and functions (`Box[T]`, `Pair[A, B]`, `fn id[T]`), invariance enforcement.
-- [ ] **v0.3.0** — **Function Types**: First-class function types `fn(A) -> B` and callable representation.
-- [ ] **v0.4.0** — **Closures & HOFs**: Capture analysis, anonymous functions, `map`/`filter`/`reduce`.
-- [ ] **v0.5.0** — **Modules & Packages**: Hierarchical package namespace, explicit FFI integration.
-- [ ] **v0.6.0** — **Stdlib & Tooling**: Standard library (`std.io`, `std.fs`, `std.json`), Language Server Protocol (LSP).
+- [x] **v0.1.4** — Compiler Architecture: `TypeId`, `TypeInterner`, Typed HIR, modular W1 split (`selfhost/src/`), Clang ASan/UBSan integration.
+- [x] **v0.2.0** — **Generics, ADTs & Monomorphization**:
+  - [x] Phase 1: Parametric polymorphism for `struct Box[T]` and `fn id[T]`, nominal constraints, invariance enforcement.
+  - [x] Phase 2: Generic Enums & Algebraic Data Types (ADTs), `Option[T]` $\equiv$ `T?` and `Result[T, E]` $\equiv$ `T ! E` canonical unification, `T025` infinite recursive layout detection.
+- [ ] **v0.2.1** — **Generic Hardening & Code Bloat Metrics**: Canonical monomorphization cache, specialization telemetry.
+- [ ] **v0.3.0** — **Function Types**: First-class function types `fn(A) -> B` and indirect calls without closures.
+- [ ] **v0.3.1** — **Weak References & Memory Hardening**: Control block separation for cycle prevention.
+- [ ] **v0.4.0** — **Closures & Higher-Order Functions**: Environment capture analysis, heap ARC fat pointers, `map`/`filter`/`reduce`.
+- [ ] **v0.5.0** — **Modules & Packages**: Hierarchical package namespace, explicit C FFI bindings.
+- [ ] **v0.6.0** — **Standard Library & Tooling**: Standard library (`std.io`, `std.fs`, `std.json`), Language Server Protocol (LSP).
 
 ---
 

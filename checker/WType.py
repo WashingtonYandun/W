@@ -39,7 +39,11 @@ class OptionalType(WType):
         self.inner = inner
 
     def __eq__(self, other: Any) -> bool:
-        return isinstance(other, OptionalType) and self.inner == other.inner
+        if isinstance(other, OptionalType):
+            return self.inner == other.inner
+        if isinstance(other, EnumType) and getattr(other, "template_name", None) == "Option" and getattr(other, "type_args", None) and len(other.type_args) == 1:
+            return self.inner == other.type_args[0]
+        return False
 
     def __str__(self) -> str:
         return f"{self.inner}?"
@@ -93,12 +97,21 @@ class StructType(WType):
 
 
 class EnumType(WType):
-    def __init__(self, name: str, variants: List[str]):
+    def __init__(self, name: str, variants: List[str], variant_payloads: Optional[Dict[str, List[WType]]] = None):
         self.name = name
         self.variants = variants
+        self.variant_payloads: Dict[str, List[WType]] = variant_payloads if variant_payloads is not None else {v: [] for v in variants}
+        self.template_name: Optional[str] = None
+        self.type_args: Optional[List[WType]] = None
 
     def __eq__(self, other: Any) -> bool:
-        return isinstance(other, EnumType) and self.name == other.name
+        if isinstance(other, EnumType):
+            return self.name == other.name
+        if self.template_name == "Option" and self.type_args and len(self.type_args) == 1 and isinstance(other, OptionalType):
+            return self.type_args[0] == other.inner
+        if self.template_name == "Result" and self.type_args and len(self.type_args) == 2 and isinstance(other, ResultType):
+            return self.type_args[0] == other.ok and self.type_args[1] == other.err
+        return False
 
     def __str__(self) -> str:
         return self.name
@@ -110,7 +123,11 @@ class ResultType(WType):
         self.err = err
 
     def __eq__(self, other: Any) -> bool:
-        return isinstance(other, ResultType) and self.ok == other.ok and self.err == other.err
+        if isinstance(other, ResultType):
+            return self.ok == other.ok and self.err == other.err
+        if isinstance(other, EnumType) and getattr(other, "template_name", None) == "Result" and getattr(other, "type_args", None) and len(other.type_args) == 2:
+            return self.ok == other.type_args[0] and self.err == other.type_args[1]
+        return False
 
     def __str__(self) -> str:
         return f"{self.ok} ! {self.err}"
@@ -212,7 +229,10 @@ class ModuleType(WType):
 class AnyType(WType):
     """Wildcard type for variadic builtins like print()."""
     def __eq__(self, other: Any) -> bool:
-        return True
+        return isinstance(other, AnyType)
+
+    def __hash__(self) -> int:
+        return hash("AnyType")
 
     def __str__(self) -> str:
         return "any"
@@ -261,6 +281,21 @@ class GenericFnTemplate(WType):
         return f"{self.name}[{params_str}]"
 
 
+class GenericEnumTemplate(WType):
+    """Represents an uninstantiated generic enum template: enum Option[T] { Some(T), None }"""
+    def __init__(self, name: str, type_params: List[Any], ast_decl: Any):
+        self.name = name
+        self.type_params = type_params
+        self.ast_decl = ast_decl
+
+    def __eq__(self, other: Any) -> bool:
+        return isinstance(other, GenericEnumTemplate) and self.name == other.name
+
+    def __str__(self) -> str:
+        params_str = ", ".join(p.name if hasattr(p, "name") else str(p) for p in self.type_params)
+        return f"{self.name}[{params_str}]"
+
+
 def is_assignable(source: WType, target: WType) -> bool:
     """
     Check if a value of type `source` can be assigned to a variable/param of type `target`.
@@ -270,12 +305,38 @@ def is_assignable(source: WType, target: WType) -> bool:
     - A result T ! E accepts T (auto-wrapping ok value).
     - A non-optional T rejects none.
     - Subclass is assignable to Superclass or implemented Interface.
+    - Canonical Option[T] <-> T? and Result[T, E] <-> T ! E equivalence.
     """
-    if target == AnyType() or source == AnyType():
+    if isinstance(target, AnyType) or isinstance(source, AnyType):
         return True
 
     if source == target:
         return True
+
+    # Canonical Option[T] <-> OptionalType(T) assignability
+    if isinstance(target, EnumType) and getattr(target, "template_name", None) == "Option" and getattr(target, "type_args", None):
+        if source == NoneType:
+            return True
+        opt_inner = target.type_args[0]
+        if is_assignable(source, opt_inner):
+            return True
+        if isinstance(source, OptionalType) and is_assignable(source.inner, opt_inner):
+            return True
+        if isinstance(source, EnumType) and getattr(source, "template_name", None) == "Option" and getattr(source, "type_args", None):
+            return is_assignable(source.type_args[0], opt_inner)
+    if isinstance(source, EnumType) and getattr(source, "template_name", None) == "Option" and getattr(source, "type_args", None) and isinstance(target, OptionalType):
+        return is_assignable(source.type_args[0], target.inner)
+
+    # Canonical Result[T, E] <-> ResultType(T, E) assignability
+    if isinstance(target, EnumType) and getattr(target, "template_name", None) == "Result" and getattr(target, "type_args", None) and len(target.type_args) == 2:
+        if is_assignable(source, target.type_args[0]):
+            return True
+        if isinstance(source, ResultType) and is_assignable(source.ok, target.type_args[0]) and is_assignable(source.err, target.type_args[1]):
+            return True
+        if isinstance(source, EnumType) and getattr(source, "template_name", None) == "Result" and getattr(source, "type_args", None) and len(source.type_args) == 2:
+            return is_assignable(source.type_args[0], target.type_args[0]) and is_assignable(source.type_args[1], target.type_args[1])
+    if isinstance(source, EnumType) and getattr(source, "template_name", None) == "Result" and getattr(source, "type_args", None) and len(source.type_args) == 2 and isinstance(target, ResultType):
+        return is_assignable(source.type_args[0], target.ok) and is_assignable(source.type_args[1], target.err)
 
     # OOP Subtyping: Class -> Superclass
     if isinstance(source, ClassType) and isinstance(target, ClassType):

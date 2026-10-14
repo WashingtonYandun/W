@@ -8,7 +8,7 @@ from node.NodeType import (
     Node, Program, Stmt, Expr, TypeNode, Pattern, Block,
     NamedType, GenericType, TypeParam, OptionalType, ListType, DictType, TupleType, ResultType,
     IdentifierPattern, TuplePattern, EnumPattern, LiteralPattern, WildcardPattern,
-    FnDecl, Param, StructDecl, StructField, EnumDecl,
+    FnDecl, Param, StructDecl, StructField, EnumDecl, VariantDecl,
     InterfaceDecl, InterfaceMethod, ClassDecl, ClassField, MethodDecl,
     ImportDecl, LetDecl,
     WhileStmt, ForStmt, ReturnStmt, BreakStmt, ContinueStmt, ExprStmt,
@@ -193,18 +193,59 @@ class Parser:
     # Pattern Parsing
     # ==========================================
 
-    def parse_pattern(self) -> Pattern:
+    def parse_pattern(self, allow_tuple: bool = True) -> Pattern:
         token = self.at()
+
+        if self.match(TokenType.LPAREN):
+            elements: List[Pattern] = []
+            if not self.check(TokenType.RPAREN):
+                elements.append(self.parse_pattern(allow_tuple=False))
+                while self.match(TokenType.COMMA):
+                    if self.check(TokenType.RPAREN):
+                        break
+                    elements.append(self.parse_pattern(allow_tuple=False))
+            self.expect(TokenType.RPAREN, code="P002", msg="Expected ')' after tuple pattern")
+            if len(elements) == 1:
+                return elements[0]
+            return TuplePattern(elements=elements, line=token.line, col=token.col)
 
         if self.match(TokenType.IDENTIFIER):
             first_name = token.value
-            # Check for EnumPattern: EnumName.Variant
+
+            if first_name == "_":
+                return WildcardPattern(line=token.line, col=token.col)
+
+            # Check for EnumPattern: EnumName.Variant(args...)
             if self.match(TokenType.DOT):
                 variant_tok = self.expect(TokenType.IDENTIFIER, code="P002", msg="Expected enum variant name after '.'")
-                return EnumPattern(enum_name=first_name, variant=variant_tok.value, line=token.line, col=token.col)
+                payload_args: List[Pattern] = []
+                if self.match(TokenType.LPAREN):
+                    if not self.check(TokenType.RPAREN):
+                        payload_args.append(self.parse_pattern(allow_tuple=False))
+                        while self.match(TokenType.COMMA):
+                            if self.check(TokenType.RPAREN):
+                                break
+                            payload_args.append(self.parse_pattern(allow_tuple=False))
+                    self.expect(TokenType.RPAREN, code="P002", msg="Expected ')' after pattern arguments")
+                return EnumPattern(enum_name=first_name, variant=variant_tok.value, args=payload_args, line=token.line, col=token.col)
+
+            # Check for unqualified Enum variant with payload: Some(x), Ok(v), Err(e)
+            if self.match(TokenType.LPAREN):
+                payload_args = []
+                if not self.check(TokenType.RPAREN):
+                    payload_args.append(self.parse_pattern(allow_tuple=False))
+                    while self.match(TokenType.COMMA):
+                        if self.check(TokenType.RPAREN):
+                            break
+                        payload_args.append(self.parse_pattern(allow_tuple=False))
+                self.expect(TokenType.RPAREN, code="P002", msg="Expected ')' after pattern arguments")
+                return EnumPattern(enum_name=None, variant=first_name, args=payload_args, line=token.line, col=token.col)
+
+            if first_name in ("None", "none"):
+                return EnumPattern(enum_name=None, variant="None", args=[], line=token.line, col=token.col)
 
             # Check for TuplePattern: a, b
-            if self.check(TokenType.COMMA):
+            if allow_tuple and self.check(TokenType.COMMA):
                 elements: List[Pattern] = [IdentifierPattern(first_name, line=token.line, col=token.col)]
                 while self.match(TokenType.COMMA):
                     next_tok = self.expect(TokenType.IDENTIFIER, code="P002", msg="Expected identifier in tuple pattern")
@@ -305,9 +346,7 @@ class Parser:
                     break
         return params
 
-    def parse_fn_decl(self) -> FnDecl:
-        start_tok = self.expect(TokenType.FN, code="P004", msg="Expected 'fn'")
-        name_tok = self.expect(TokenType.IDENTIFIER, code="P004", msg="Expected function name after 'fn'")
+    def _parse_type_params(self) -> List[TypeParam]:
         type_params: List[TypeParam] = []
         if self.match(TokenType.LBRACKET):
             while not self.check(TokenType.RBRACKET) and not self.is_at_end():
@@ -319,6 +358,12 @@ class Parser:
                 if not self.match(TokenType.COMMA):
                     break
             self.expect(TokenType.RBRACKET, code="P006", msg="Expected ']' after type parameters")
+        return type_params
+
+    def parse_fn_decl(self) -> FnDecl:
+        start_tok = self.expect(TokenType.FN, code="P004", msg="Expected 'fn'")
+        name_tok = self.expect(TokenType.IDENTIFIER, code="P004", msg="Expected function name after 'fn'")
+        type_params = self._parse_type_params()
         self.expect(TokenType.LPAREN, code="P002", msg="Expected '(' after function name")
         params = self._parse_param_list(allow_receiver=False)
         self.expect(TokenType.RPAREN, code="P002", msg="Expected ')' after parameters")
@@ -437,17 +482,7 @@ class Parser:
     def parse_struct_decl(self) -> StructDecl:
         start_tok = self.expect(TokenType.STRUCT, code="P004", msg="Expected 'struct'")
         name_tok = self.expect(TokenType.IDENTIFIER, code="P004", msg="Expected struct name")
-        type_params: List[TypeParam] = []
-        if self.match(TokenType.LBRACKET):
-            while not self.check(TokenType.RBRACKET) and not self.is_at_end():
-                p_tok = self.expect(TokenType.IDENTIFIER, code="P004", msg="Expected type parameter identifier")
-                constraint: Optional[TypeNode] = None
-                if self.match(TokenType.COLON):
-                    constraint = self.parse_type()
-                type_params.append(TypeParam(p_tok.value, constraint, line=p_tok.line, col=p_tok.col))
-                if not self.match(TokenType.COMMA):
-                    break
-            self.expect(TokenType.RBRACKET, code="P006", msg="Expected ']' after type parameters")
+        type_params = self._parse_type_params()
         self.expect(TokenType.LBRACE, code="P002", msg="Expected '{' to start struct body")
 
         fields: List[StructField] = []
@@ -464,16 +499,26 @@ class Parser:
     def parse_enum_decl(self) -> EnumDecl:
         start_tok = self.expect(TokenType.ENUM, code="P004", msg="Expected 'enum'")
         name_tok = self.expect(TokenType.IDENTIFIER, code="P004", msg="Expected enum name")
+        type_params = self._parse_type_params()
         self.expect(TokenType.LBRACE, code="P002", msg="Expected '{' to start enum body")
 
-        variants: List[str] = []
+        variants: List[VariantDecl] = []
         while not self.check(TokenType.RBRACE) and not self.is_at_end():
             v_tok = self.expect(TokenType.IDENTIFIER, code="P004", msg="Expected enum variant identifier")
-            variants.append(v_tok.value)
+            payload_types: List[TypeNode] = []
+            if self.match(TokenType.LPAREN):
+                if not self.check(TokenType.RPAREN):
+                    payload_types.append(self.parse_type())
+                    while self.match(TokenType.COMMA):
+                        if self.check(TokenType.RPAREN):
+                            break
+                        payload_types.append(self.parse_type())
+                self.expect(TokenType.RPAREN, code="P002", msg="Expected ')' after variant payload types")
+            variants.append(VariantDecl(name=v_tok.value, payload_types=payload_types, line=v_tok.line, col=v_tok.col))
             self.match(TokenType.COMMA)
 
         self.expect(TokenType.RBRACE, code="P007", msg="Unterminated enum body, expected '}'")
-        return EnumDecl(name=name_tok.value, variants=variants, line=start_tok.line, col=start_tok.col)
+        return EnumDecl(name=name_tok.value, variants=variants, type_params=type_params, line=start_tok.line, col=start_tok.col)
 
     def parse_import_decl(self) -> ImportDecl:
         start_tok = self.expect(TokenType.IMPORT, code="P004", msg="Expected 'import'")
@@ -846,6 +891,10 @@ class Parser:
             else:
                 pattern = self.parse_pattern()
 
+            guard: Optional[Expr] = None
+            if self.match(TokenType.IF):
+                guard = self.parse_expr()
+
             self.expect(TokenType.FAT_ARROW, code="P002", msg="Expected '=>' after match pattern")
 
             body: Block
@@ -857,7 +906,7 @@ class Parser:
                 body = Block(statements=[], tail_expr=expr, line=expr.line, col=expr.col)
 
             self.match(TokenType.COMMA)
-            arms.append(MatchArm(pattern=pattern, body=body, line=arm_tok.line, col=arm_tok.col))
+            arms.append(MatchArm(pattern=pattern, body=body, guard=guard, line=arm_tok.line, col=arm_tok.col))
 
         self.expect(TokenType.RBRACE, code="P007", msg="Unterminated match body, expected '}'")
         return MatchExpr(subject=subject, arms=arms, line=start_tok.line, col=start_tok.col)

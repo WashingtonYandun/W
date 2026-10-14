@@ -3,7 +3,7 @@ from typing import Any, Dict, List, Optional, Set, TextIO
 from error.Error import WRuntimeError
 from runtime.Values import (
     WValue, WInt, WFloat, WBool, WStr, WUnit, WNone,
-    WList, WDict, WTuple, WStructInstance, WEnumValue,
+    WList, WDict, WTuple, WStructInstance, WEnumValue, WEnumNamespace,
     WOk, WErr, WFunction, WNativeFunction
 )
 
@@ -252,6 +252,21 @@ def create_global_environment(stdout: Optional[TextIO] = None) -> Environment:
     def args_fn(args_list: List[WValue]) -> WValue:
         return WList(elements=[WStr(a) for a in sys.argv])
 
+    def some_fn(args: List[WValue]) -> WValue:
+        if len(args) != 1:
+            raise WRuntimeError("Some() takes exactly 1 argument")
+        return WEnumValue("Option", "Some", [args[0]])
+
+    def ok_fn(args: List[WValue]) -> WValue:
+        if len(args) != 1:
+            raise WRuntimeError("Ok() takes exactly 1 argument")
+        return WOk(args[0])
+
+    def err_fn(args: List[WValue]) -> WValue:
+        if len(args) != 1:
+            raise WRuntimeError("Err() takes exactly 1 argument")
+        return WErr(args[0])
+
     # Register builtins
     env.declare("print", WNativeFunction("print", print_fn), is_mut=False)
     env.declare("len", WNativeFunction("len", len_fn), is_mut=False)
@@ -267,6 +282,13 @@ def create_global_environment(stdout: Optional[TextIO] = None) -> Environment:
     env.declare("read_file", WNativeFunction("read_file", read_file_fn), is_mut=False)
     env.declare("write_file", WNativeFunction("write_file", write_file_fn), is_mut=False)
     env.declare("args", WNativeFunction("args", args_fn), is_mut=False)
+
+    env.declare("Some", WNativeFunction("Some", some_fn), is_mut=False)
+    env.declare("Ok", WNativeFunction("Ok", ok_fn), is_mut=False)
+    env.declare("Err", WNativeFunction("Err", err_fn), is_mut=False)
+    env.declare("None", WEnumValue("Option", "None"), is_mut=False)
+    env.declare("Option", WEnumNamespace("Option", ["Some", "None"]), is_mut=False)
+    env.declare("Result", WEnumNamespace("Result", ["Ok", "Err"]), is_mut=False)
 
     return env
 

@@ -51,7 +51,13 @@ class HirBuilder:
         self.file_path = file_path
         self.classes: Set[str] = set()
         self.structs: Set[str] = set()
-        self.enums: Set[str] = set()
+        self.enums: Set[str] = {"Option", "Result"}
+        self.enum_variants: Dict[str, str] = {
+            "Some": "Option",
+            "None": "Option",
+            "Ok": "Result",
+            "Err": "Result",
+        }
         self.modules: Set[str] = set()
         self.imported_files: Set[str] = set()
 
@@ -64,6 +70,9 @@ class HirBuilder:
                 self.structs.add(stmt.name)
             elif isinstance(stmt, EnumDecl):
                 self.enums.add(stmt.name)
+                for v in stmt.variants:
+                    v_name = v.name if hasattr(v, "name") else str(v)
+                    self.enum_variants[v_name] = stmt.name
 
         struct_decls: List[HirStructDecl] = []
         enum_decls: List[HirEnumDecl] = []
@@ -296,6 +305,11 @@ class HirBuilder:
         elif isinstance(expr, NoneLiteral):
             return HirConstNone(tid or TYPE_NONE, span)
         elif isinstance(expr, IdentExpr):
+            if expr.name in ("None", "none"):
+                return HirConstNone(tid or TYPE_NONE, span)
+            if expr.name in self.enum_variants:
+                en_name = self.enum_variants[expr.name]
+                return HirConstructEnum(en_name, expr.name, 0, tid or self.interner.mk_enum(en_name), span)
             return HirLocalRef(expr.name, tid, span)
         elif isinstance(expr, ThisExpr):
             return HirThisRef(tid, span)
@@ -335,6 +349,32 @@ class HirBuilder:
             return HirConstructTuple(elem_tids, elems_hir, tid or self.interner.mk_tuple(tuple(elem_tids)), span)
         elif isinstance(expr, CallExpr):
             raw_args = getattr(expr, "args", getattr(expr, "arguments", []))
+            # Check if this call is an unqualified Enum variant constructor
+            if isinstance(expr.callee, IdentExpr):
+                c_name = expr.callee.name
+                if c_name == "Some" and len(raw_args) == 1:
+                    arg_hir = self._lower_expr(raw_args[0])
+                    return HirConstructEnum("Option", "Some", 0, tid or self.interner.mk_enum("Option"), span, arg_hir)
+                if c_name == "Ok" and len(raw_args) == 1:
+                    arg_hir = self._lower_expr(raw_args[0])
+                    return HirConstructEnum("Result", "Ok", 0, tid or self.interner.mk_enum("Result"), span, arg_hir)
+                if c_name == "Err" and len(raw_args) == 1:
+                    arg_hir = self._lower_expr(raw_args[0])
+                    return HirConstructEnum("Result", "Err", 1, tid or self.interner.mk_enum("Result"), span, arg_hir)
+                if c_name in self.enum_variants:
+                    en_name = self.enum_variants[c_name]
+                    args_hir = [self._lower_expr(a) for a in raw_args]
+                    payload_hir = args_hir[0] if len(args_hir) == 1 else (HirConstructTuple([a.type_id for a in args_hir], args_hir, tid, span) if len(args_hir) > 1 else None)
+                    return HirConstructEnum(en_name, c_name, 0, tid or self.interner.mk_enum(en_name), span, payload_hir)
+
+            # Check if this call is a qualified Enum variant constructor: Enum.Variant(...)
+            if isinstance(expr.callee, MemberExpr) and isinstance(expr.callee.object, IdentExpr) and expr.callee.object.name in self.enums:
+                en_name = expr.callee.object.name
+                v_name = expr.callee.property
+                args_hir = [self._lower_expr(a) for a in raw_args]
+                payload_hir = args_hir[0] if len(args_hir) == 1 else (HirConstructTuple([a.type_id for a in args_hir], args_hir, tid, span) if len(args_hir) > 1 else None)
+                return HirConstructEnum(en_name, v_name, 0, tid or self.interner.mk_enum(en_name), span, payload_hir)
+
             # Check if this call is an object construction: ClassName(...)
             if isinstance(expr.callee, IdentExpr) and expr.callee.name in self.classes:
                 args_hir = [self._lower_expr(a) for a in raw_args]
@@ -371,6 +411,8 @@ class HirBuilder:
             if isinstance(expr.object, IdentExpr) and expr.object.name in self.enums:
                 enum_name = expr.object.name
                 variant_name = expr.property
+                if enum_name == "Option" and variant_name in ("None", "none"):
+                    return HirConstNone(tid or TYPE_NONE, span)
                 edef = self.interner.enum_defs.get(enum_name)
                 v_idx = edef.variants.index(variant_name) if edef and variant_name in edef.variants else 0
                 return HirConstructEnum(enum_name, variant_name, v_idx, tid or self.interner.mk_enum(enum_name), span)

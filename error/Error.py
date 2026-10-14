@@ -28,6 +28,8 @@ DIAGNOSTIC_CODES: Dict[str, str] = {
     "W2006": "Invalid optional ('?') or fallible ('T ! E' / 'else err') propagation",
     "W2007": "Missing or invalid struct initialization field",
     "W2010": "Invalid dictionary key type",
+    "W2011": "Recursive generic instantiation cycle or infinite layout",
+    "W2012": "Generic constraint violation",
     # W3xxx — Mutability & OOP Contracts
     "W3001": "Mutation of immutable value binding",
     "W3002": "Invalid member access/mutation or private visibility violation",
@@ -72,6 +74,8 @@ LEGACY_CODE_MAP: Dict[str, str] = {
     "T013": "W2007",
     "T014": "W1002",
     "T015": "W2005",
+    "T024": "W2001",
+    "T025": "W2011",
     # Runtime / Environment legacy codes
     "E300": "W4003",
     "E400": "W4003",

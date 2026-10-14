@@ -649,6 +649,17 @@ class HirCCodeGen:
             return self._bind_call(f'w_make_struct("{expr.struct_name}", {len(f_names)}, {k_tmp}, {v_tmp})', out)
 
         if isinstance(expr, HirConstructEnum):
+            if (expr.enum_name == "Result" or expr.enum_name.startswith("Result__")) and expr.variant_name == "Ok":
+                p_val = self.emit_expr(expr.payload, out) if getattr(expr, "payload", None) is not None else "w_unit()"
+                return self._bind_call(f"w_ok({p_val})", out)
+            if (expr.enum_name == "Result" or expr.enum_name.startswith("Result__")) and expr.variant_name == "Err":
+                p_val = self.emit_expr(expr.payload, out) if getattr(expr, "payload", None) is not None else "w_unit()"
+                return self._bind_call(f"w_err({p_val})", out)
+            if (expr.enum_name == "Option" or expr.enum_name.startswith("Option__")) and expr.variant_name in ("None", "none"):
+                return "w_none()"
+            if getattr(expr, "payload", None) is not None:
+                p_val = self.emit_expr(expr.payload, out)
+                return self._bind_call(f'w_enum_payload("{expr.enum_name}", "{expr.variant_name}", {p_val})', out)
             return f'w_enum("{expr.enum_name}", "{expr.variant_name}")'
 
         if isinstance(expr, HirConstructObject):
@@ -790,7 +801,7 @@ class HirCCodeGen:
 
             none_cleanup: List[str] = []
             self._emit_cleanup_until_fn(none_cleanup)
-            out.append(f"if ({tmp}.tag == W_NONE) {{")
+            out.append(f"if ({tmp}.tag == W_NONE || ({tmp}.tag == W_ENUM && strcmp({tmp}.as.en.enum_name, \"Option\") == 0 && strcmp({tmp}.as.en.variant, \"None\") == 0)) {{")
             for cl in none_cleanup:
                 out.append(f"    {cl}")
             out.append("    return w_none();")
@@ -799,7 +810,7 @@ class HirCCodeGen:
             err_hold = self.new_aux("_err")
             err_cleanup: List[str] = []
             self._emit_cleanup_until_fn(err_cleanup)
-            out.append(f"if ({tmp}.tag == W_ERR) {{")
+            out.append(f"if ({tmp}.tag == W_ERR || ({tmp}.tag == W_ENUM && strcmp({tmp}.as.en.enum_name, \"Result\") == 0 && strcmp({tmp}.as.en.variant, \"Err\") == 0)) {{")
             out.append(f"    WVal {err_hold} = w_clone({tmp});")
             for cl in err_cleanup:
                 out.append(f"    {cl}")
@@ -814,7 +825,7 @@ class HirCCodeGen:
             lhs = self.emit_expr(expr.opt_expr, out)
             res = self.new_temp()
             self._declare_owned_var(res, self._own_expr(lhs), out)
-            out.append(f"if ({res}.tag == W_NONE) {{")
+            out.append(f"if ({res}.tag == W_NONE || ({res}.tag == W_ENUM && strcmp({res}.as.en.enum_name, \"Option\") == 0 && strcmp({res}.as.en.variant, \"None\") == 0)) {{")
             self._push_scope("block")
             rhs_stmts: List[str] = []
             rhs = self.emit_expr(expr.fallback_expr, rhs_stmts)
@@ -822,6 +833,8 @@ class HirCCodeGen:
             self._pop_scope(rhs_stmts)
             for s in rhs_stmts:
                 out.append(f"    {s}")
+            out.append("} else {")
+            out.append(f"    w_assign(&{res}, w_unwrap_ok({res}));")
             out.append("}")
             return res
 
@@ -831,7 +844,7 @@ class HirCCodeGen:
             self._declare_owned_var(tmp, self._own_expr(op_val), out)
             res = self.new_temp()
             self._declare_owned_var(res, "w_unit()", out)
-            out.append(f"if ({tmp}.tag == W_ERR || {tmp}.tag == W_NONE) {{")
+            out.append(f"if ({tmp}.tag == W_ERR || {tmp}.tag == W_NONE || ({tmp}.tag == W_ENUM && (strcmp({tmp}.as.en.variant, \"Err\") == 0 || strcmp({tmp}.as.en.variant, \"None\") == 0))) {{")
             self._push_scope("block")
             handler_stmts: List[str] = []
             if expr.err_var is not None:
@@ -950,23 +963,101 @@ class HirCCodeGen:
 
     def _emit_pattern_bindings(self, pattern: Pattern, val_expr: str, out: List[str]) -> None:
         if isinstance(pattern, IdentifierPattern):
-            self._declare_owned_var(f"v_{pattern.name}", f"w_clone({val_expr})", out)
+            if pattern.name not in ("None", "none"):
+                self._declare_owned_var(f"v_{pattern.name}", f"w_clone({val_expr})", out)
         elif isinstance(pattern, TuplePattern):
             for idx, elem_pat in enumerate(pattern.elements):
                 sub_expr = f"({val_expr}).as.tuple->items[{idx}]"
                 self._emit_pattern_bindings(elem_pat, sub_expr, out)
+        elif isinstance(pattern, EnumPattern):
+            if pattern.variant in ("None", "none"):
+                pass
+            elif pattern.variant == "Some":
+                if pattern.args:
+                    sub_val = f"w_unwrap_ok({val_expr})"
+                    sub_tmp = self.new_aux("_some_val")
+                    self._declare_owned_var(sub_tmp, sub_val, out)
+                    self._emit_pattern_bindings(pattern.args[0], sub_tmp, out)
+            elif pattern.variant == "Ok":
+                if pattern.args:
+                    sub_val = f"w_unwrap_ok({val_expr})"
+                    sub_tmp = self.new_aux("_ok_val")
+                    self._declare_owned_var(sub_tmp, sub_val, out)
+                    self._emit_pattern_bindings(pattern.args[0], sub_tmp, out)
+            elif pattern.variant == "Err":
+                if pattern.args:
+                    sub_val = f"w_unwrap_err({val_expr})"
+                    sub_tmp = self.new_aux("_err_val")
+                    self._declare_owned_var(sub_tmp, sub_val, out)
+                    self._emit_pattern_bindings(pattern.args[0], sub_tmp, out)
+            else:
+                if len(pattern.args) == 1:
+                    sub_val = f"({val_expr}).as.en.box->val"
+                    self._emit_pattern_bindings(pattern.args[0], sub_val, out)
+                elif len(pattern.args) > 1:
+                    for idx, arg_pat in enumerate(pattern.args):
+                        sub_val = f"({val_expr}).as.en.box->val.as.tuple->items[{idx}]"
+                        self._emit_pattern_bindings(arg_pat, sub_val, out)
 
     def _emit_pattern_cond(self, pattern: Pattern, val_expr: str, out: List[str]) -> str:
-        if isinstance(pattern, (WildcardPattern, IdentifierPattern)):
+        if isinstance(pattern, WildcardPattern):
+            return "true"
+        if isinstance(pattern, IdentifierPattern):
+            if pattern.name in ("None", "none"):
+                return f"(({val_expr}).tag == W_NONE || (({val_expr}).tag == W_ENUM && strcmp(({val_expr}).as.en.enum_name, \"Option\") == 0 && strcmp(({val_expr}).as.en.variant, \"None\") == 0))"
             return "true"
         if isinstance(pattern, LiteralPattern):
             lit_v = self.emit_expr(self._literal_to_hir(pattern.literal), out)
             return f"w_eq({val_expr}, {lit_v})"
         if isinstance(pattern, EnumPattern):
-            en_v = f'w_enum("{pattern.enum_name}", "{pattern.variant}")'
-            return f"w_eq({val_expr}, {en_v})"
+            if pattern.variant in ("None", "none"):
+                return f"(({val_expr}).tag == W_NONE || (({val_expr}).tag == W_ENUM && strcmp(({val_expr}).as.en.enum_name, \"Option\") == 0 && strcmp(({val_expr}).as.en.variant, \"None\") == 0))"
+            if pattern.variant == "Some":
+                base_cond = f"(!(({val_expr}).tag == W_NONE || (({val_expr}).tag == W_ENUM && strcmp(({val_expr}).as.en.enum_name, \"Option\") == 0 && strcmp(({val_expr}).as.en.variant, \"None\") == 0)))"
+                if not pattern.args:
+                    return base_cond
+                sub_cond = self._emit_pattern_cond(pattern.args[0], f"w_peek_ok({val_expr})", out)
+                if sub_cond == "true":
+                    return base_cond
+                return f"({base_cond} && {sub_cond})"
+            if pattern.variant == "Ok":
+                base_cond = f"(({val_expr}).tag == W_OK || (({val_expr}).tag == W_ENUM && strcmp(({val_expr}).as.en.enum_name, \"Result\") == 0 && strcmp(({val_expr}).as.en.variant, \"Ok\") == 0))"
+                if not pattern.args:
+                    return base_cond
+                sub_cond = self._emit_pattern_cond(pattern.args[0], f"w_peek_ok({val_expr})", out)
+                if sub_cond == "true":
+                    return base_cond
+                return f"({base_cond} && {sub_cond})"
+            if pattern.variant == "Err":
+                base_cond = f"(({val_expr}).tag == W_ERR || (({val_expr}).tag == W_ENUM && strcmp(({val_expr}).as.en.enum_name, \"Result\") == 0 && strcmp(({val_expr}).as.en.variant, \"Err\") == 0))"
+                if not pattern.args:
+                    return base_cond
+                sub_cond = self._emit_pattern_cond(pattern.args[0], f"w_peek_err({val_expr})", out)
+                if sub_cond == "true":
+                    return base_cond
+                return f"({base_cond} && {sub_cond})"
+
+            conds: List[str] = [f"(({val_expr}).tag == W_ENUM && strcmp(({val_expr}).as.en.variant, \"{pattern.variant}\") == 0)"]
+            if pattern.enum_name:
+                conds.append(f"(strcmp(({val_expr}).as.en.enum_name, \"{pattern.enum_name}\") == 0)")
+            if not pattern.args:
+                return "(" + " && ".join(conds) + ")"
+
+            conds.append(f"(({val_expr}).as.en.box != NULL)")
+            if len(pattern.args) == 1:
+                sub_c = self._emit_pattern_cond(pattern.args[0], f"({val_expr}).as.en.box->val", out)
+                if sub_c != "true":
+                    conds.append(sub_c)
+            else:
+                conds.append(f"(({val_expr}).as.en.box->val.tag == W_TUPLE && ({val_expr}).as.en.box->val.as.tuple->len == {len(pattern.args)})")
+                for idx, arg_pat in enumerate(pattern.args):
+                    sub_c = self._emit_pattern_cond(arg_pat, f"({val_expr}).as.en.box->val.as.tuple->items[{idx}]", out)
+                    if sub_c != "true":
+                        conds.append(sub_c)
+            return "(" + " && ".join(conds) + ")"
+
         if isinstance(pattern, TuplePattern):
-            conds: List[str] = [f"(({val_expr}).tag == W_TUPLE && ({val_expr}).as.tuple->len == {len(pattern.elements)})"]
+            conds = [f"(({val_expr}).tag == W_TUPLE && ({val_expr}).as.tuple->len == {len(pattern.elements)})"]
             for idx, elem_pat in enumerate(pattern.elements):
                 sub_c = self._emit_pattern_cond(elem_pat, f"({val_expr}).as.tuple->items[{idx}]", out)
                 if sub_c != "true":

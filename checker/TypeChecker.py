@@ -16,14 +16,14 @@ from node.NodeType import (
     UnaryExpr, BinaryExpr, CoalesceExpr, RangeExpr, PostfixTryExpr, ElseErrExpr,
     CallExpr, MemberExpr, IndexExpr, AssignmentExpr,
     StructInitExpr, FieldInit, ListExpr, DictExpr, TupleExpr,
-    IfExpr, ElifBranch, MatchExpr, MatchArm
+    IfExpr, ElifBranch, MatchExpr, MatchArm, VariantDecl
 )
 from checker.WType import (
     WType, IntType, FloatType, BoolType, StrType, UnitType, NoneType,
     OptionalType, ListType, DictType, TupleType, StructType, EnumType,
     InterfaceType, ClassFieldInfo, ClassMethodInfo, ClassType,
     ResultType, FunctionType, ModuleType, AnyType,
-    TypeParamType, GenericStructTemplate, GenericFnTemplate, is_assignable
+    TypeParamType, GenericStructTemplate, GenericFnTemplate, GenericEnumTemplate, is_assignable
 )
 from checker.SymbolTable import Scope, Symbol, create_global_scope
 from checker.TypeInterner import TypeInterner
@@ -45,6 +45,7 @@ class TypeChecker:
         self.global_scope = create_global_scope()
         self.current_scope = self.global_scope
         self.current_fn_ret_type: Optional[WType] = None
+        self.expected_type: Optional[WType] = None
         self.current_class: Optional[ClassType] = None
         self.loop_depth: int = 0
         self.checked_modules: Dict[str, ModuleType] = checked_modules if checked_modules is not None else {}
@@ -52,11 +53,37 @@ class TypeChecker:
         self.interner: TypeInterner = TypeInterner()
         self.generic_struct_templates: Dict[str, GenericStructTemplate] = {}
         self.generic_fn_templates: Dict[str, GenericFnTemplate] = {}
-        self.monomorphized_structs: Dict[Tuple[str, Tuple[WType, ...]], StructType] = {}
-        self.monomorphized_fns: Dict[Tuple[str, Tuple[WType, ...]], Symbol] = {}
+        self.generic_enum_templates: Dict[str, GenericEnumTemplate] = {}
+        self.monomorphized_structs: Dict[Tuple[str, Tuple[int, ...]], StructType] = {}
+        self.monomorphized_fns: Dict[Tuple[str, Tuple[int, ...]], Symbol] = {}
+        self.monomorphized_enums: Dict[Tuple[str, Tuple[int, ...]], EnumType] = {}
         self.monomorphized_struct_decls: List[StructDecl] = []
         self.monomorphized_fn_decls: List[FnDecl] = []
+        self.monomorphized_enum_decls: List[EnumDecl] = []
         self._monomorphize_depth: int = 0
+        self._instantiation_stack: List[Tuple[str, Tuple[int, ...]]] = []
+
+        # Canonical built-in Option[T] template
+        opt_decl = EnumDecl(
+            name="Option",
+            variants=[
+                VariantDecl(name="Some", payload_types=[NamedType(name="T")]),
+                VariantDecl(name="None", payload_types=[])
+            ],
+            type_params=[TypeParam(name="T")]
+        )
+        self.generic_enum_templates["Option"] = GenericEnumTemplate("Option", [TypeParam(name="T")], opt_decl)
+
+        # Canonical built-in Result[T, E] template
+        res_decl = EnumDecl(
+            name="Result",
+            variants=[
+                VariantDecl(name="Ok", payload_types=[NamedType(name="T")]),
+                VariantDecl(name="Err", payload_types=[NamedType(name="E")])
+            ],
+            type_params=[TypeParam(name="T"), TypeParam(name="E")]
+        )
+        self.generic_enum_templates["Result"] = GenericEnumTemplate("Result", [TypeParam(name="T"), TypeParam(name="E")], res_decl)
 
     def check(self, program: Program) -> None:
         # Pass 1: Collect declarations
@@ -68,12 +95,13 @@ class TypeChecker:
         # Filter out uninstantiated generic templates and insert monomorphized declarations
         filtered_body: List[Stmt] = []
         for stmt in program.body:
-            if isinstance(stmt, (StructDecl, FnDecl)) and stmt.type_params:
+            if isinstance(stmt, (StructDecl, FnDecl, EnumDecl)) and stmt.type_params:
                 continue
             filtered_body.append(stmt)
 
         final_body: List[Stmt] = []
         final_body.extend(self.monomorphized_struct_decls)
+        final_body.extend(self.monomorphized_enum_decls)
         final_body.extend(self.monomorphized_fn_decls)
         final_body.extend(filtered_body)
         program.body = final_body
@@ -132,18 +160,34 @@ class TypeChecker:
         # Step 1a: Pre-register nominal type shells (Enums, Interfaces, Classes, Imports)
         for stmt in program.body:
             if isinstance(stmt, EnumDecl):
+                if stmt.type_params:
+                    template = GenericEnumTemplate(stmt.name, stmt.type_params, stmt)
+                    self.generic_enum_templates[stmt.name] = template
+                    self.global_scope.define_type(stmt.name, template, line=stmt.line, col=stmt.col, file=self.file)
+                    continue
+
                 seen_variants: Set[str] = set()
+                variant_names: List[str] = []
+                variant_payloads: Dict[str, List[WType]] = {}
                 for v in stmt.variants:
-                    if v in seen_variants:
+                    v_name = v.name if hasattr(v, "name") else str(v)
+                    if v_name in seen_variants:
                         raise TypeError(
-                            message=f"Duplicate variant '{v}' in enum '{stmt.name}'",
+                            message=f"Duplicate variant '{v_name}' in enum '{stmt.name}'",
                             line=stmt.line,
                             col=stmt.col,
                             file=self.file,
                             code="T008"
                         )
-                    seen_variants.add(v)
-                enum_type = EnumType(name=stmt.name, variants=stmt.variants)
+                    seen_variants.add(v_name)
+                    variant_names.append(v_name)
+                    payload_wtypes: List[WType] = []
+                    if hasattr(v, "payload_types") and v.payload_types:
+                        for pt in v.payload_types:
+                            payload_wtypes.append(self._resolve_type_node(pt))
+                    variant_payloads[v_name] = payload_wtypes
+
+                enum_type = EnumType(name=stmt.name, variants=variant_names, variant_payloads=variant_payloads)
                 self.global_scope.define_type(stmt.name, enum_type, line=stmt.line, col=stmt.col, file=self.file)
 
             elif isinstance(stmt, InterfaceDecl):
@@ -621,8 +665,14 @@ class TypeChecker:
         return class_t
 
 
-    def _check_block(self, block: Block, is_statement_context: bool = False) -> Optional[WType]:
+    def _check_block(self, block: Block, is_statement_context: bool = False, initial_bindings: Optional[Dict[str, WType]] = None) -> Optional[WType]:
         block_scope = Scope(parent=self.current_scope)
+        if initial_bindings:
+            for b_name, b_type in initial_bindings.items():
+                block_scope.define_symbol(
+                    Symbol(b_name, b_type, is_mut=False, kind="var", line=block.line, col=block.col),
+                    file=self.file
+                )
         old_scope = self.current_scope
         self.current_scope = block_scope
 
@@ -655,10 +705,18 @@ class TypeChecker:
                 code="T011"
             )
 
-        init_type = self._check_expr(stmt.initializer)
-
+        expected_type: Optional[WType] = None
         if stmt.type_ann is not None:
             expected_type = self._resolve_type_node(stmt.type_ann)
+
+        old_expected = self.expected_type
+        self.expected_type = expected_type
+        try:
+            init_type = self._check_expr(stmt.initializer)
+        finally:
+            self.expected_type = old_expected
+
+        if expected_type is not None:
             if not is_assignable(init_type, expected_type):
                 raise TypeError(
                     message=f"Type mismatch: cannot assign value of type '{init_type}' to variable '{stmt.name}' of type '{expected_type}'",
@@ -753,6 +811,8 @@ class TypeChecker:
             return NoneType
 
         if isinstance(expr, IdentExpr):
+            if expr.name in ("None", "none"):
+                return NoneType
             sym = self.current_scope.lookup_symbol(expr.name)
             if sym is not None:
                 return sym.type
@@ -760,6 +820,17 @@ class TypeChecker:
             enum_type = self.current_scope.lookup_type(expr.name)
             if enum_type is not None and isinstance(enum_type, EnumType):
                 return enum_type
+            # Check if referencing an unqualified enum variant
+            for t in self.global_scope.types.values():
+                if isinstance(t, EnumType) and expr.name in t.variants:
+                    return t
+            for tmpl in self.generic_enum_templates.values():
+                var_names = [v.name if hasattr(v, "name") else str(v) for v in tmpl.ast_decl.variants]
+                if expr.name in var_names:
+                    if tmpl.name == "Option" and expr.name in ("None", "none"):
+                        return NoneType
+                    concrete_args = [AnyType() for _ in tmpl.type_params]
+                    return self._monomorphize_enum(tmpl, concrete_args, expr.line, expr.col)
             raise TypeError(
                 message=f"Unknown identifier '{expr.name}'",
                 line=expr.line,
@@ -885,7 +956,15 @@ class TypeChecker:
 
         if isinstance(expr, CoalesceExpr):
             lhs_t = self._check_expr(expr.left)
-            if not isinstance(lhs_t, OptionalType):
+            opt_inner = None
+            if isinstance(lhs_t, OptionalType):
+                opt_inner = lhs_t.inner
+            elif isinstance(lhs_t, EnumType) and getattr(lhs_t, "template_name", None) == "Option" and getattr(lhs_t, "type_args", None):
+                opt_inner = lhs_t.type_args[0]
+            elif lhs_t == NoneType:
+                rhs_t = self._check_expr(expr.right)
+                return rhs_t
+            if opt_inner is None:
                 raise TypeError(
                     message=f"Left operand of '??' must be an optional type (T?), found '{lhs_t}'",
                     line=expr.line,
@@ -894,20 +973,22 @@ class TypeChecker:
                     code="T009"
                 )
             rhs_t = self._check_expr(expr.right)
-            if not is_assignable(rhs_t, lhs_t.inner):
+            if not is_assignable(rhs_t, opt_inner):
                 raise TypeError(
-                    message=f"Right operand of '??' type mismatch: expected '{lhs_t.inner}', found '{rhs_t}'",
+                    message=f"Right operand of '??' type mismatch: expected '{opt_inner}', found '{rhs_t}'",
                     line=expr.line,
                     col=expr.col,
                     file=self.file,
                     code="T003"
                 )
-            return lhs_t.inner
+            return opt_inner
 
         if isinstance(expr, PostfixTryExpr):
             operand_t = self._check_expr(expr.operand)
-            if isinstance(operand_t, OptionalType):
-                if not isinstance(self.current_fn_ret_type, OptionalType):
+            if isinstance(operand_t, OptionalType) or (isinstance(operand_t, EnumType) and getattr(operand_t, "template_name", None) == "Option" and getattr(operand_t, "type_args", None)):
+                opt_inner = operand_t.inner if isinstance(operand_t, OptionalType) else operand_t.type_args[0]
+                is_ret_opt = isinstance(self.current_fn_ret_type, OptionalType) or (isinstance(self.current_fn_ret_type, EnumType) and getattr(self.current_fn_ret_type, "template_name", None) == "Option")
+                if not is_ret_opt:
                     raise TypeError(
                         message=f"Cannot use '?' on optional in function returning non-optional type '{self.current_fn_ret_type}'",
                         line=expr.line,
@@ -915,10 +996,13 @@ class TypeChecker:
                         file=self.file,
                         code="T010"
                     )
-                return operand_t.inner
+                return opt_inner
 
-            if isinstance(operand_t, ResultType):
-                if not isinstance(self.current_fn_ret_type, ResultType):
+            if isinstance(operand_t, ResultType) or (isinstance(operand_t, EnumType) and getattr(operand_t, "template_name", None) == "Result" and getattr(operand_t, "type_args", None) and len(operand_t.type_args) == 2):
+                res_ok = operand_t.ok if isinstance(operand_t, ResultType) else operand_t.type_args[0]
+                res_err = operand_t.err if isinstance(operand_t, ResultType) else operand_t.type_args[1]
+                is_ret_res = isinstance(self.current_fn_ret_type, ResultType) or (isinstance(self.current_fn_ret_type, EnumType) and getattr(self.current_fn_ret_type, "template_name", None) == "Result")
+                if not is_ret_res:
                     raise TypeError(
                         message=f"Cannot use '?' on result in function returning non-result type '{self.current_fn_ret_type}'",
                         line=expr.line,
@@ -926,15 +1010,16 @@ class TypeChecker:
                         file=self.file,
                         code="T010"
                     )
-                if operand_t.err != self.current_fn_ret_type.err:
+                cur_err = self.current_fn_ret_type.err if isinstance(self.current_fn_ret_type, ResultType) else self.current_fn_ret_type.type_args[1]
+                if res_err != cur_err:
                     raise TypeError(
-                        message=f"Error type mismatch in '?' propagation: '{operand_t.err}' vs declared '{self.current_fn_ret_type.err}'",
+                        message=f"Error type mismatch in '?' propagation: '{res_err}' vs declared '{cur_err}'",
                         line=expr.line,
                         col=expr.col,
                         file=self.file,
                         code="T010"
                     )
-                return operand_t.ok
+                return res_ok
 
             raise TypeError(
                 message=f"Operator '?' requires optional (T?) or result (T ! E), found '{operand_t}'",
@@ -949,10 +1034,10 @@ class TypeChecker:
             unwrapped_t: WType
             bound_err_t: Optional[WType] = None
 
-            if isinstance(operand_t, ResultType):
-                unwrapped_t = operand_t.ok
-                bound_err_t = operand_t.err
-            elif isinstance(operand_t, OptionalType):
+            if isinstance(operand_t, ResultType) or (isinstance(operand_t, EnumType) and getattr(operand_t, "template_name", None) == "Result" and getattr(operand_t, "type_args", None) and len(operand_t.type_args) == 2):
+                unwrapped_t = operand_t.ok if isinstance(operand_t, ResultType) else operand_t.type_args[0]
+                bound_err_t = operand_t.err if isinstance(operand_t, ResultType) else operand_t.type_args[1]
+            elif isinstance(operand_t, OptionalType) or (isinstance(operand_t, EnumType) and getattr(operand_t, "template_name", None) == "Option" and getattr(operand_t, "type_args", None)):
                 if expr.err_name is not None:
                     raise TypeError(
                         message=f"Cannot bind error variable '{expr.err_name}' on optional type '{operand_t}'; use 'else {{ ... }}' or '??'",
@@ -961,7 +1046,7 @@ class TypeChecker:
                         file=self.file,
                         code="T009"
                     )
-                unwrapped_t = operand_t.inner
+                unwrapped_t = operand_t.inner if isinstance(operand_t, OptionalType) else operand_t.type_args[0]
             else:
                 raise TypeError(
                     message=f"'else' handler requires result (T ! E) or optional (T?), found '{operand_t}'",
@@ -1212,6 +1297,8 @@ class TypeChecker:
         if isinstance(expr, MemberExpr):
             # Enum variant access: Enum.Variant
             if isinstance(expr.object, IdentExpr):
+                if expr.object.name == "Option" and expr.property in ("None", "none"):
+                    return NoneType
                 enum_t = self.current_scope.lookup_type(expr.object.name)
                 if isinstance(enum_t, EnumType):
                     if expr.property not in enum_t.variants:
@@ -1223,6 +1310,21 @@ class TypeChecker:
                             code="T001"
                         )
                     return enum_t
+                if expr.object.name in self.generic_enum_templates:
+                    tmpl = self.generic_enum_templates[expr.object.name]
+                    var_names = [v.name if hasattr(v, "name") else str(v) for v in tmpl.ast_decl.variants]
+                    if expr.property not in var_names:
+                        raise TypeError(
+                            message=f"Generic enum '{tmpl.name}' has no variant '{expr.property}'",
+                            line=expr.line,
+                            col=expr.col,
+                            file=self.file,
+                            code="T001"
+                        )
+                    if tmpl.name == "Option" and expr.property in ("None", "none"):
+                        return NoneType
+                    concrete_args = [AnyType() for _ in tmpl.type_params]
+                    return self._monomorphize_enum(tmpl, concrete_args, expr.line, expr.col)
 
             obj_t = self._check_expr(expr.object)
             if isinstance(obj_t, ClassType):
@@ -1449,19 +1551,187 @@ class TypeChecker:
                     ctor_sym = self.global_scope.lookup_symbol(struct_t.name)
                     callee_t = ctor_sym.type if ctor_sym else FunctionType([struct_t.fields[f.name] for f in template.ast_decl.fields], struct_t)
 
-                elif expr.type_args:
+                elif callee_name == "Some":
+                    if len(expr.args) != 1:
+                        raise TypeError(
+                            message=f"Constructor 'Some' expects 1 argument, found {len(expr.args)}",
+                            line=expr.line,
+                            col=expr.col,
+                            file=self.file,
+                            code="T015"
+                        )
+                    arg_t = self._check_expr(expr.args[0])
+                    template = self.generic_enum_templates["Option"]
+                    opt_t = self._monomorphize_enum(template, [arg_t], expr.line, expr.col)
+                    return opt_t
+
+                elif callee_name == "Ok":
+                    if len(expr.args) != 1:
+                        raise TypeError(
+                            message=f"Constructor 'Ok' expects 1 argument, found {len(expr.args)}",
+                            line=expr.line,
+                            col=expr.col,
+                            file=self.file,
+                            code="T015"
+                        )
+                    arg_t = self._check_expr(expr.args[0])
+                    err_t = AnyType()
+                    ctx_t = self.expected_type or self.current_fn_ret_type
+                    if isinstance(ctx_t, ResultType):
+                        err_t = ctx_t.err
+                    elif isinstance(ctx_t, EnumType) and getattr(ctx_t, "template_name", None) == "Result" and ctx_t.type_args and len(ctx_t.type_args) == 2:
+                        err_t = ctx_t.type_args[1]
+                    template = self.generic_enum_templates["Result"]
+                    res_t = self._monomorphize_enum(template, [arg_t, err_t], expr.line, expr.col)
+                    return res_t
+
+                elif callee_name == "Err":
+                    if len(expr.args) != 1:
+                        raise TypeError(
+                            message=f"Constructor 'Err' expects 1 argument, found {len(expr.args)}",
+                            line=expr.line,
+                            col=expr.col,
+                            file=self.file,
+                            code="T015"
+                        )
+                    err_t = self._check_expr(expr.args[0])
+                    ok_t = AnyType()
+                    ctx_t = self.expected_type or self.current_fn_ret_type
+                    if isinstance(ctx_t, ResultType):
+                        ok_t = ctx_t.ok
+                    elif isinstance(ctx_t, EnumType) and getattr(ctx_t, "template_name", None) == "Result" and ctx_t.type_args and len(ctx_t.type_args) == 2:
+                        ok_t = ctx_t.type_args[0]
+                    template = self.generic_enum_templates["Result"]
+                    res_t = self._monomorphize_enum(template, [ok_t, err_t], expr.line, expr.col)
+                    return res_t
+
+                else:
+                    found_tmpl = None
+                    found_var = None
+                    for tmpl_name, tmpl in self.generic_enum_templates.items():
+                        for v in tmpl.ast_decl.variants:
+                            v_name = v.name if hasattr(v, "name") else str(v)
+                            if v_name == callee_name:
+                                found_tmpl = tmpl
+                                found_var = v
+                                break
+                        if found_tmpl:
+                            break
+                    if found_tmpl and found_var:
+                        payload_types = getattr(found_var, "payload_types", [])
+                        if len(expr.args) != len(payload_types):
+                            raise TypeError(
+                                message=f"Variant '{callee_name}' expects {len(payload_types)} arguments, found {len(expr.args)}",
+                                line=expr.line,
+                                col=expr.col,
+                                file=self.file,
+                                code="T015"
+                            )
+                        type_params_set = {p.name if hasattr(p, "name") else str(p) for p in found_tmpl.type_params}
+                        bindings = {}
+                        for pt, a_expr in zip(payload_types, expr.args):
+                            a_type = self._check_expr(a_expr)
+                            self._unify_type(pt, a_type, type_params_set, bindings)
+                        for p in found_tmpl.type_params:
+                            p_name = p.name if hasattr(p, "name") else str(p)
+                            if p_name not in bindings:
+                                raise TypeError(
+                                    message=f"Could not infer type parameter '{p_name}' for enum constructor '{callee_name}'",
+                                    line=expr.line,
+                                    col=expr.col,
+                                    file=self.file,
+                                    code="T003"
+                                )
+                        concrete_args = [bindings[p.name if hasattr(p, "name") else str(p)] for p in found_tmpl.type_params]
+                        enum_t = self._monomorphize_enum(found_tmpl, concrete_args, expr.line, expr.col)
+                        expr.callee = MemberExpr(IdentExpr(enum_t.name, line=expr.line, col=expr.col), callee_name, line=expr.line, col=expr.col)
+                        expr.type_args = []
+                        return enum_t
+
+                    if expr.type_args:
+                        raise TypeError(
+                            message=f"Symbol '{callee_name}' is not a generic function or struct",
+                            line=expr.line,
+                            col=expr.col,
+                            file=self.file,
+                            code="T002"
+                        )
+
+                    if self.current_scope.lookup_symbol(expr.callee.name) is None:
+                        maybe_cls = self.current_scope.lookup_type(expr.callee.name)
+                        if isinstance(maybe_cls, ClassType):
+                            return self._check_class_instantiation(maybe_cls, expr.args, expr.line, expr.col)
+
+            if isinstance(expr.callee, MemberExpr) and isinstance(expr.callee.object, IdentExpr) and expr.callee.object.name in self.generic_enum_templates:
+                template = self.generic_enum_templates[expr.callee.object.name]
+                variant_name = expr.callee.property
+                var_decl = next((v for v in template.ast_decl.variants if (v.name if hasattr(v, "name") else str(v)) == variant_name), None)
+                if var_decl is None:
                     raise TypeError(
-                        message=f"Symbol '{callee_name}' is not a generic function or struct",
+                        message=f"Generic enum '{template.name}' has no variant '{variant_name}'",
                         line=expr.line,
                         col=expr.col,
                         file=self.file,
-                        code="T002"
+                        code="T001"
                     )
+                payload_types = getattr(var_decl, "payload_types", [])
+                if len(expr.args) != len(payload_types):
+                    raise TypeError(
+                        message=f"Variant '{variant_name}' expects {len(payload_types)} arguments, found {len(expr.args)}",
+                        line=expr.line,
+                        col=expr.col,
+                        file=self.file,
+                        code="T015"
+                    )
+                if expr.type_args:
+                    concrete_args = [self._resolve_type_node(a) for a in expr.type_args]
+                else:
+                    type_params_set = {p.name if hasattr(p, "name") else str(p) for p in template.type_params}
+                    bindings = {}
+                    for pt, a_expr in zip(payload_types, expr.args):
+                        a_type = self._check_expr(a_expr)
+                        self._unify_type(pt, a_type, type_params_set, bindings)
+                    ctx_t = self.expected_type or self.current_fn_ret_type
+                    if template.name == "Result":
+                        if "E" not in bindings:
+                            if isinstance(ctx_t, ResultType):
+                                bindings["E"] = ctx_t.err
+                            elif isinstance(ctx_t, EnumType) and getattr(ctx_t, "template_name", None) == "Result" and ctx_t.type_args and len(ctx_t.type_args) == 2:
+                                bindings["E"] = ctx_t.type_args[1]
+                            else:
+                                bindings["E"] = AnyType()
+                        if "T" not in bindings:
+                            if isinstance(ctx_t, ResultType):
+                                bindings["T"] = ctx_t.ok
+                            elif isinstance(ctx_t, EnumType) and getattr(ctx_t, "template_name", None) == "Result" and ctx_t.type_args and len(ctx_t.type_args) == 2:
+                                bindings["T"] = ctx_t.type_args[0]
+                            else:
+                                bindings["T"] = AnyType()
+                    elif template.name == "Option":
+                        if "T" not in bindings:
+                            if isinstance(ctx_t, OptionalType):
+                                bindings["T"] = ctx_t.inner
+                            elif isinstance(ctx_t, EnumType) and getattr(ctx_t, "template_name", None) == "Option" and ctx_t.type_args and len(ctx_t.type_args) == 1:
+                                bindings["T"] = ctx_t.type_args[0]
+                            else:
+                                bindings["T"] = AnyType()
 
-                elif self.current_scope.lookup_symbol(expr.callee.name) is None:
-                    maybe_cls = self.current_scope.lookup_type(expr.callee.name)
-                    if isinstance(maybe_cls, ClassType):
-                        return self._check_class_instantiation(maybe_cls, expr.args, expr.line, expr.col)
+                    for p in template.type_params:
+                        p_name = p.name if hasattr(p, "name") else str(p)
+                        if p_name not in bindings:
+                            raise TypeError(
+                                message=f"Could not infer type parameter '{p_name}' for enum constructor '{template.name}.{variant_name}'",
+                                line=expr.line,
+                                col=expr.col,
+                                file=self.file,
+                                code="T003"
+                            )
+                    concrete_args = [bindings[p.name if hasattr(p, "name") else str(p)] for p in template.type_params]
+
+                enum_t = self._monomorphize_enum(template, concrete_args, expr.line, expr.col)
+                expr.callee.object.name = enum_t.name
+                expr.type_args = []
+                return enum_t
 
             # Mutating method check on receiver (transitive across value-type paths)
             if callee_t is None:
@@ -1796,47 +2066,132 @@ class TypeChecker:
             has_wildcard = False
             arm_types: List[WType] = []
 
+            # Determine expected variants and variant payload types for subject_t
+            expected_variants: Optional[Set[str]] = None
+            payload_types_map: Dict[str, List[WType]] = {}
+
+            if isinstance(subject_t, OptionalType):
+                expected_variants = {"Some", "None"}
+                payload_types_map = {"Some": [subject_t.inner], "None": []}
+            elif isinstance(subject_t, ResultType):
+                expected_variants = {"Ok", "Err"}
+                payload_types_map = {"Ok": [subject_t.ok], "Err": [subject_t.err]}
+            elif isinstance(subject_t, EnumType):
+                if getattr(subject_t, "template_name", None) == "Option" and getattr(subject_t, "type_args", None):
+                    expected_variants = {"Some", "None"}
+                    payload_types_map = {"Some": [subject_t.type_args[0]], "None": []}
+                elif getattr(subject_t, "template_name", None) == "Result" and getattr(subject_t, "type_args", None) and len(subject_t.type_args) == 2:
+                    expected_variants = {"Ok", "Err"}
+                    payload_types_map = {"Ok": [subject_t.type_args[0]], "Err": [subject_t.type_args[1]]}
+                else:
+                    expected_variants = set(subject_t.variants)
+                    payload_types_map = subject_t.variant_payloads
+
             for arm in expr.arms:
+                arm_bindings: Dict[str, WType] = {}
+
                 if isinstance(arm.pattern, WildcardPattern):
                     has_wildcard = True
-                elif isinstance(arm.pattern, EnumPattern):
-                    if not isinstance(subject_t, EnumType) or arm.pattern.enum_name != subject_t.name:
-                        raise TypeError(
-                            message=f"Pattern '{arm.pattern.enum_name}' is incompatible with match subject '{subject_t}'",
-                            line=arm.line,
-                            col=arm.col,
-                            file=self.file,
-                            code="T003"
-                        )
-                    if arm.pattern.variant not in subject_t.variants:
-                        raise TypeError(
-                            message=f"Enum '{subject_t.name}' has no variant '{arm.pattern.variant}'",
-                            line=arm.line,
-                            col=arm.col,
-                            file=self.file,
-                            code="T001"
-                        )
-                    covered_variants.add(arm.pattern.variant)
-                elif isinstance(arm.pattern, LiteralPattern):
-                    lit_t = self._check_expr(arm.pattern.literal)
-                    if not is_assignable(lit_t, subject_t):
-                        raise TypeError(
-                            message=f"Literal pattern type '{lit_t}' incompatible with subject '{subject_t}'",
-                            line=arm.line,
-                            col=arm.col,
-                            file=self.file,
-                            code="T003"
-                        )
 
-                arm_t = self._check_block(arm.body) or UnitType
+                elif isinstance(arm.pattern, IdentifierPattern):
+                    if arm.pattern.name in ("None", "none") and expected_variants and "None" in expected_variants:
+                        covered_variants.add("None")
+                    else:
+                        has_wildcard = True
+                        arm_bindings[arm.pattern.name] = subject_t
+
+                elif isinstance(arm.pattern, LiteralPattern):
+                    if isinstance(arm.pattern.literal, NoneLiteral) and expected_variants and "None" in expected_variants:
+                        covered_variants.add("None")
+                    else:
+                        lit_t = self._check_expr(arm.pattern.literal)
+                        if not is_assignable(lit_t, subject_t):
+                            raise TypeError(
+                                message=f"Literal pattern type '{lit_t}' incompatible with subject '{subject_t}'",
+                                line=arm.line,
+                                col=arm.col,
+                                file=self.file,
+                                code="T003"
+                            )
+
+                elif isinstance(arm.pattern, EnumPattern):
+                    v_name = arm.pattern.variant
+                    if arm.pattern.enum_name:
+                        if isinstance(subject_t, EnumType):
+                            if arm.pattern.enum_name != subject_t.name and arm.pattern.enum_name != getattr(subject_t, "template_name", None):
+                                raise TypeError(
+                                    message=f"Pattern '{arm.pattern.enum_name}.{v_name}' is incompatible with match subject '{subject_t}'",
+                                    line=arm.line,
+                                    col=arm.col,
+                                    file=self.file,
+                                    code="T003"
+                                )
+                        elif isinstance(subject_t, OptionalType) and arm.pattern.enum_name != "Option":
+                            raise TypeError(
+                                message=f"Pattern '{arm.pattern.enum_name}.{v_name}' is incompatible with optional subject '{subject_t}'",
+                                line=arm.line,
+                                col=arm.col,
+                                file=self.file,
+                                code="T003"
+                            )
+                        elif isinstance(subject_t, ResultType) and arm.pattern.enum_name != "Result":
+                            raise TypeError(
+                                message=f"Pattern '{arm.pattern.enum_name}.{v_name}' is incompatible with result subject '{subject_t}'",
+                                line=arm.line,
+                                col=arm.col,
+                                file=self.file,
+                                code="T003"
+                            )
+
+                    if expected_variants is not None and v_name not in expected_variants:
+                        raise TypeError(
+                            message=f"Pattern variant '{v_name}' is incompatible with match subject '{subject_t}'",
+                            line=arm.line,
+                            col=arm.col,
+                            file=self.file,
+                            code="T003"
+                        )
+                    covered_variants.add(v_name)
+                    expected_payloads = payload_types_map.get(v_name, [])
+                    if len(arm.pattern.args) != len(expected_payloads):
+                        raise TypeError(
+                            message=f"Variant '{v_name}' expects {len(expected_payloads)} arguments, found {len(arm.pattern.args)}",
+                            line=arm.line,
+                            col=arm.col,
+                            file=self.file,
+                            code="T015"
+                        )
+                    for arg_pat, arg_type in zip(arm.pattern.args, expected_payloads):
+                        self._bind_pattern_type(arg_pat, arg_type, arm_bindings, arm.line, arm.col)
+
+                if arm.guard is not None:
+                    guard_scope = Scope(parent=self.current_scope)
+                    for bn, bt in arm_bindings.items():
+                        guard_scope.define_symbol(Symbol(bn, bt, is_mut=False, kind="var", line=arm.line, col=arm.col), file=self.file)
+                    old_s = self.current_scope
+                    self.current_scope = guard_scope
+                    try:
+                        g_t = self._check_expr(arm.guard)
+                        if g_t != BoolType:
+                            raise TypeError(
+                                message=f"Match guard must be bool, found '{g_t}'",
+                                line=arm.guard.line,
+                                col=arm.guard.col,
+                                file=self.file,
+                                code="T003"
+                            )
+                    finally:
+                        self.current_scope = old_s
+
+                arm_t = self._check_block(arm.body, initial_bindings=arm_bindings) or UnitType
                 arm_types.append(arm_t)
 
-            # Exhaustiveness check for Enum
-            if isinstance(subject_t, EnumType) and not has_wildcard:
-                missing = [v for v in subject_t.variants if v not in covered_variants]
+            # Exhaustiveness check
+            if expected_variants is not None and not has_wildcard:
+                missing = [v for v in expected_variants if v not in covered_variants]
                 if missing:
                     raise TypeError(
-                        message=f"Non-exhaustive match on enum '{subject_t.name}'. Missing: {', '.join(missing)}",
+                        message=f"Non-exhaustive match on '{subject_t}'. Missing: {', '.join(missing)}",
                         line=expr.line,
                         col=expr.col,
                         file=self.file,
@@ -1859,11 +2214,40 @@ class TypeChecker:
 
         return UnitType
 
+    def _bind_pattern_type(self, pattern: Pattern, expected_type: WType, bindings: Dict[str, WType], line: int, col: int) -> None:
+        if isinstance(pattern, IdentifierPattern):
+            bindings[pattern.name] = expected_type
+        elif isinstance(pattern, WildcardPattern):
+            pass
+        elif isinstance(pattern, TuplePattern):
+            if not isinstance(expected_type, TupleType) or len(pattern.elements) != len(expected_type.elements):
+                raise TypeError(
+                    message=f"Tuple pattern cannot match type '{expected_type}'",
+                    line=line,
+                    col=col,
+                    file=self.file,
+                    code="T003"
+                )
+            for sub_p, sub_t in zip(pattern.elements, expected_type.elements):
+                self._bind_pattern_type(sub_p, sub_t, bindings, line, col)
+        elif isinstance(pattern, LiteralPattern):
+            lit_t = self._check_expr(pattern.literal)
+            if not is_assignable(lit_t, expected_type):
+                raise TypeError(
+                    message=f"Literal pattern type '{lit_t}' incompatible with '{expected_type}'",
+                    line=line,
+                    col=col,
+                    file=self.file,
+                    code="T003"
+                )
+
     # ==========================================
     # Generics and Monomorphization Helpers
     # ==========================================
 
     def _mangle_type_name(self, t: WType) -> str:
+        if isinstance(t, AnyType):
+            return "any"
         if t == IntType:
             return "int"
         if t == FloatType:
@@ -1900,6 +2284,8 @@ class TypeChecker:
         return str(t).replace("[", "__").replace("]", "").replace(", ", "__").replace(" ", "_")
 
     def _wtype_to_type_node(self, t: WType) -> TypeNode:
+        if isinstance(t, AnyType):
+            return NamedType("any")
         if t == IntType:
             return NamedType("int")
         if t == FloatType:
@@ -2085,7 +2471,7 @@ class TypeChecker:
             return (self._unify_type(param_type_node.ok_type, arg_wtype.ok, type_params, bindings) and
                     self._unify_type(param_type_node.err_type, arg_wtype.err, type_params, bindings))
 
-        if isinstance(param_type_node, GenericType) and isinstance(arg_wtype, StructType):
+        if isinstance(param_type_node, GenericType) and isinstance(arg_wtype, (StructType, EnumType)):
             tmpl_name = getattr(arg_wtype, "template_name", None)
             tmpl_args = getattr(arg_wtype, "type_args", None)
             if tmpl_name == param_type_node.name and tmpl_args and len(tmpl_args) == len(param_type_node.type_args):
@@ -2107,25 +2493,15 @@ class TypeChecker:
                         line=line,
                         col=col,
                         file=self.file,
-                        code="T003"
+                        code="T024"
                     )
-            elif isinstance(type_arg, StructType):
-                for m_name, _ in c_type.methods.items():
-                    if m_name not in type_arg.fields:
-                        raise TypeError(
-                            message=f"Struct '{type_arg}' does not satisfy interface constraint '{c_name}'",
-                            line=line,
-                            col=col,
-                            file=self.file,
-                            code="T003"
-                        )
             else:
                 raise TypeError(
-                    message=f"Type '{type_arg}' cannot satisfy interface constraint '{c_name}'",
+                    message=f"Type '{type_arg}' does not satisfy interface constraint '{c_name}'",
                     line=line,
                     col=col,
                     file=self.file,
-                    code="T003"
+                    code="T024"
                 )
 
     def _monomorphize_struct(
@@ -2152,7 +2528,8 @@ class TypeChecker:
                 code="T003"
             )
 
-        key = (template.name, tuple(self._mangle_type_name(a) for a in concrete_args))
+        type_ids = tuple(self.interner.intern(a) for a in concrete_args)
+        key = (template.name, type_ids)
         if key in self.monomorphized_structs:
             return self.monomorphized_structs[key]
 
@@ -2234,7 +2611,8 @@ class TypeChecker:
                 code="T003"
             )
 
-        key = (template.name, tuple(self._mangle_type_name(a) for a in concrete_args))
+        type_ids = tuple(self.interner.intern(a) for a in concrete_args)
+        key = (template.name, type_ids)
         if key in self.monomorphized_fns:
             return self.monomorphized_fns[key]
 
@@ -2273,6 +2651,104 @@ class TypeChecker:
         finally:
             self._monomorphize_depth -= 1
 
+    def _monomorphize_enum(
+        self,
+        template: GenericEnumTemplate,
+        concrete_args: List[WType],
+        line: int,
+        col: int
+    ) -> EnumType:
+        if self._monomorphize_depth > 64:
+            raise TypeError(
+                message=f"Monomorphization recursion depth limit exceeded for enum '{template.name}'",
+                line=line,
+                col=col,
+                file=self.file,
+                code="W2011"
+            )
+        if len(concrete_args) != len(template.type_params):
+            raise TypeError(
+                message=f"Generic enum '{template.name}' expects {len(template.type_params)} type arguments, found {len(concrete_args)}",
+                line=line,
+                col=col,
+                file=self.file,
+                code="T003"
+            )
+
+        type_ids = tuple(self.interner.intern(a) for a in concrete_args)
+        key = (template.name, type_ids)
+        if key in self.monomorphized_enums:
+            return self.monomorphized_enums[key]
+
+        # Structural recursion cycle check
+        same_tmpl_count = sum(1 for (n, _) in self._instantiation_stack if n == template.name)
+        if same_tmpl_count > 10:
+            raise TypeError(
+                message=f"Recursive generic instantiation cycle detected for '{template.name}'",
+                line=line,
+                col=col,
+                file=self.file,
+                code="W2011"
+            )
+
+        self._instantiation_stack.append((template.name, type_ids))
+        self._monomorphize_depth += 1
+        try:
+            subst: Dict[str, WType] = {}
+            for p, arg in zip(template.type_params, concrete_args):
+                p_name = p.name if hasattr(p, "name") else str(p)
+                p_constraint = getattr(p, "constraint", None)
+                if p_constraint:
+                    self._check_type_constraint(arg, p_constraint, line, col)
+                subst[p_name] = arg
+
+            arg_mangles = [self._mangle_type_name(a) for a in concrete_args]
+            mangled = f"{template.name}__{'__'.join(arg_mangles)}"
+
+            enum_t = EnumType(name=mangled, variants=[], variant_payloads={})
+            enum_t.template_name = template.name
+            enum_t.type_args = concrete_args
+            self.monomorphized_enums[key] = enum_t
+            self.global_scope.define_type(mangled, enum_t, line=line, col=col, file=self.file)
+
+            variant_names: List[str] = []
+            variant_payloads: Dict[str, List[WType]] = {}
+            new_variants: List[VariantDecl] = []
+
+            for v in template.ast_decl.variants:
+                v_name = v.name if hasattr(v, "name") else str(v)
+                variant_names.append(v_name)
+                payload_wtypes: List[WType] = []
+                new_payload_types: List[TypeNode] = []
+                if hasattr(v, "payload_types") and v.payload_types:
+                    for pt in v.payload_types:
+                        # Infinite recursive layout rule: T025
+                        if isinstance(pt, (NamedType, GenericType)) and pt.name == template.name:
+                            raise TypeError(
+                                message=f"Recursive ADT variant '{v_name}' contains '{template.name}' directly without indirection; use 'Box[...]'",
+                                line=v.line if hasattr(v, "line") else line,
+                                col=v.col if hasattr(v, "col") else col,
+                                file=self.file,
+                                code="T025"
+                            )
+                        subst_pt = self._substitute_type_node(pt, subst)
+                        resolved_pt = self._resolve_type_node(subst_pt)
+                        payload_wtypes.append(resolved_pt)
+                        new_payload_types.append(subst_pt)
+                variant_payloads[v_name] = payload_wtypes
+                new_variants.append(VariantDecl(name=v_name, payload_types=new_payload_types, line=v.line if hasattr(v, "line") else line, col=v.col if hasattr(v, "col") else col))
+
+            enum_t.variants = variant_names
+            enum_t.variant_payloads = variant_payloads
+
+            concrete_decl = EnumDecl(name=mangled, variants=new_variants, type_params=[], line=template.ast_decl.line, col=template.ast_decl.col)
+            self.monomorphized_enum_decls.append(concrete_decl)
+
+            return enum_t
+        finally:
+            self._monomorphize_depth -= 1
+            self._instantiation_stack.pop()
+
     # ==========================================
     # Type Node Resolution
     # ==========================================
@@ -2288,8 +2764,18 @@ class TypeChecker:
 
     def _resolve_type_node(self, node: TypeNode) -> WType:
         if isinstance(node, NamedType):
+            if node.name == "any":
+                return AnyType()
             resolved = self.current_scope.lookup_type(node.name)
             if resolved is None:
+                if node.name in self.generic_enum_templates:
+                    raise TypeError(
+                        message=f"Generic enum '{node.name}' requires type arguments",
+                        line=node.line,
+                        col=node.col,
+                        file=self.file,
+                        code="T003"
+                    )
                 raise TypeError(
                     message=f"Unknown type '{node.name}'",
                     line=node.line,
@@ -2297,15 +2783,28 @@ class TypeChecker:
                     file=self.file,
                     code="T002"
                 )
+            if isinstance(resolved, (GenericStructTemplate, GenericEnumTemplate)):
+                raise TypeError(
+                    message=f"Generic type '{node.name}' requires type arguments",
+                    line=node.line,
+                    col=node.col,
+                    file=self.file,
+                    code="T003"
+                )
             return resolved
 
         if isinstance(node, GenericType):
             lookup = self.current_scope.lookup_type(node.name)
             if lookup is None:
                 lookup = self.generic_struct_templates.get(node.name)
+            if lookup is None:
+                lookup = self.generic_enum_templates.get(node.name)
             if isinstance(lookup, GenericStructTemplate):
                 resolved_args = [self._resolve_type_node(a) for a in node.type_args]
                 return self._monomorphize_struct(lookup, resolved_args, node.line, node.col)
+            if isinstance(lookup, GenericEnumTemplate):
+                resolved_args = [self._resolve_type_node(a) for a in node.type_args]
+                return self._monomorphize_enum(lookup, resolved_args, node.line, node.col)
             raise TypeError(
                 message=f"Unknown generic type '{node.name}'",
                 line=node.line,

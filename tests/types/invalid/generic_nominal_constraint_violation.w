@@ -1,0 +1,17 @@
+# ERROR: W2001
+interface Printable {
+    fn print_val() -> unit
+}
+
+class Duck {
+    public fn print_val() -> unit {
+        print("quack")
+    }
+}
+
+fn display[T: Printable](item: T) {
+    item.print_val()
+}
+
+let d = new Duck()
+display(d)

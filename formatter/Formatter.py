@@ -90,7 +90,10 @@ class Formatter:
         if isinstance(p, IdentifierPattern):
             return p.name
         if isinstance(p, EnumPattern):
-            return f"{p.enum_name}.{p.variant}"
+            args_str = f"({', '.join([self.format_pattern(a) for a in p.args])})" if p.args else ""
+            if p.enum_name:
+                return f"{p.enum_name}.{p.variant}{args_str}"
+            return f"{p.variant}{args_str}"
         if isinstance(p, LiteralPattern):
             return self.format_expr(p.literal, 0)
         if isinstance(p, TuplePattern):
@@ -108,8 +111,18 @@ class Formatter:
             return f'{ind}import {self._escape_str(stmt.path)}'
 
         if isinstance(stmt, EnumDecl):
-            variants = ", ".join(stmt.variants)
-            return f"{ind}enum {stmt.name} {{ {variants} }}"
+            tparams = f"[{', '.join(str(p) for p in stmt.type_params)}]" if stmt.type_params else ""
+            var_strs = []
+            for v in stmt.variants:
+                if hasattr(v, "payload_types") and v.payload_types:
+                    types_s = ", ".join(self.format_type(t) for t in v.payload_types)
+                    var_strs.append(f"{v.name}({types_s})")
+                elif hasattr(v, "name"):
+                    var_strs.append(v.name)
+                else:
+                    var_strs.append(str(v))
+            variants = ", ".join(var_strs)
+            return f"{ind}enum {stmt.name}{tparams} {{ {variants} }}"
 
         if isinstance(stmt, StructDecl):
             tparams = f"[{', '.join(str(p) for p in stmt.type_params)}]" if stmt.type_params else ""

@@ -47,6 +47,14 @@ class Interpreter:
                     WEnumNamespace(stmt.name, stmt.variants),
                     is_mut=False
                 )
+                if not (stmt.name.startswith("Option__") or stmt.name.startswith("Result__")):
+                    for v in stmt.variants:
+                        v_name = v.name if hasattr(v, "name") else str(v)
+                        self.global_env.declare(
+                            v_name,
+                            WEnumValue(stmt.name, v_name),
+                            is_mut=False
+                        )
             elif isinstance(stmt, ClassDecl):
                 methods_map = {m.name: m for m in stmt.methods}
                 self.global_env.declare(
@@ -346,8 +354,10 @@ class Interpreter:
 
         if isinstance(expr, CoalesceExpr):
             lhs = self.eval_expr(expr.left, env)
-            if isinstance(lhs, WNone):
+            if isinstance(lhs, WNone) or (isinstance(lhs, WEnumValue) and (lhs.enum_name == "Option" or lhs.enum_name.startswith("Option__")) and lhs.variant == "None"):
                 return self.eval_expr(expr.right, env)
+            if isinstance(lhs, WEnumValue) and (lhs.enum_name == "Option" or lhs.enum_name.startswith("Option__")) and lhs.variant == "Some":
+                return lhs.payload[0] if lhs.payload else WUnit()
             return lhs
 
         if isinstance(expr, RangeExpr):
@@ -362,22 +372,39 @@ class Interpreter:
             val = self.eval_expr(expr.operand, env)
             if isinstance(val, WNone):
                 raise PropagationSignal(WNone())
+            if isinstance(val, WEnumValue) and (val.enum_name == "Option" or val.enum_name.startswith("Option__")) and val.variant == "None":
+                raise PropagationSignal(WNone())
             if isinstance(val, WErr):
                 raise PropagationSignal(val, is_error=True)
+            if isinstance(val, WEnumValue) and (val.enum_name == "Result" or val.enum_name.startswith("Result__")) and val.variant == "Err":
+                err_val = val.payload[0] if val.payload else WNone()
+                raise PropagationSignal(WErr(err_val), is_error=True)
             if isinstance(val, WOk):
                 return val.value
+            if isinstance(val, WEnumValue) and (val.enum_name == "Result" or val.enum_name.startswith("Result__")) and val.variant == "Ok":
+                return val.payload[0] if val.payload else WUnit()
+            if isinstance(val, WEnumValue) and (val.enum_name == "Option" or val.enum_name.startswith("Option__")) and val.variant == "Some":
+                return val.payload[0] if val.payload else WUnit()
             return val
 
         if isinstance(expr, ElseErrExpr):
             val = self.eval_expr(expr.operand, env)
             if isinstance(val, WOk):
                 return val.value
+            if isinstance(val, WEnumValue) and (val.enum_name == "Result" or val.enum_name.startswith("Result__")) and val.variant == "Ok":
+                return val.payload[0] if val.payload else WUnit()
             if isinstance(val, WErr):
                 handler_env = Environment(parent=env)
                 if expr.err_name is not None:
                     handler_env.declare(expr.err_name, val.error, is_mut=False)
                 return self.eval_block(expr.handler, handler_env)
-            if isinstance(val, WNone):
+            if isinstance(val, WEnumValue) and (val.enum_name == "Result" or val.enum_name.startswith("Result__")) and val.variant == "Err":
+                handler_env = Environment(parent=env)
+                if expr.err_name is not None:
+                    err_val = val.payload[0] if val.payload else WNone()
+                    handler_env.declare(expr.err_name, err_val, is_mut=False)
+                return self.eval_block(expr.handler, handler_env)
+            if isinstance(val, WNone) or (isinstance(val, WEnumValue) and (val.enum_name == "Option" or val.enum_name.startswith("Option__")) and val.variant == "None"):
                 handler_env = Environment(parent=env)
                 return self.eval_block(expr.handler, handler_env)
             return val
@@ -475,6 +502,8 @@ class Interpreter:
             callee = self.eval_expr(expr.callee, env)
             args = [self.eval_expr(a, env) for a in expr.args]
 
+            if isinstance(callee, WEnumValue):
+                return WEnumValue(callee.enum_name, callee.variant, args)
             if isinstance(callee, WClassDef):
                 return self.instantiate_class(callee.name, args, env, expr.line, expr.col)
             if isinstance(callee, WNativeFunction):
@@ -758,15 +787,94 @@ class Interpreter:
             return True, {}
 
         if isinstance(pattern, LiteralPattern):
+            if isinstance(pattern.literal, NoneLiteral) and (
+                isinstance(value, WNone) or
+                (isinstance(value, WEnumValue) and (value.enum_name == "Option" or value.enum_name.startswith("Option__")) and value.variant == "None")
+            ):
+                return True, {}
             lit_val = self.eval_expr(pattern.literal, self.global_env)
             return lit_val == value, {}
 
         if isinstance(pattern, EnumPattern):
-            if isinstance(value, WEnumValue) and value.enum_name == pattern.enum_name and value.variant == pattern.variant:
-                return True, {}
+            # 1. Option cases: None and Some
+            if pattern.variant in ("None", "none"):
+                if isinstance(value, WNone) or (
+                    isinstance(value, WEnumValue) and
+                    (value.enum_name == "Option" or value.enum_name.startswith("Option__")) and
+                    value.variant == "None"
+                ):
+                    return True, {}
+                return False, {}
+            if pattern.variant == "Some":
+                if isinstance(value, WNone) or (
+                    isinstance(value, WEnumValue) and
+                    (value.enum_name == "Option" or value.enum_name.startswith("Option__")) and
+                    value.variant == "None"
+                ):
+                    return False, {}
+                inner = value.payload[0] if (
+                    isinstance(value, WEnumValue) and
+                    (value.enum_name == "Option" or value.enum_name.startswith("Option__")) and
+                    value.variant == "Some" and value.payload
+                ) else value
+                if not pattern.args:
+                    return True, {}
+                if len(pattern.args) == 1:
+                    return self.match_pattern(pattern.args[0], inner)
+                return False, {}
+
+            # 2. Result cases: Ok and Err
+            if pattern.variant == "Ok":
+                if isinstance(value, WOk):
+                    if not pattern.args:
+                        return True, {}
+                    return self.match_pattern(pattern.args[0], value.value)
+                if isinstance(value, WEnumValue) and (value.enum_name == "Result" or value.enum_name.startswith("Result__")) and value.variant == "Ok":
+                    if not pattern.args:
+                        return True, {}
+                    if value.payload:
+                        return self.match_pattern(pattern.args[0], value.payload[0])
+                    return True, {}
+                return False, {}
+            if pattern.variant == "Err":
+                if isinstance(value, WErr):
+                    if not pattern.args:
+                        return True, {}
+                    return self.match_pattern(pattern.args[0], value.error)
+                if isinstance(value, WEnumValue) and (value.enum_name == "Result" or value.enum_name.startswith("Result__")) and value.variant == "Err":
+                    if not pattern.args:
+                        return True, {}
+                    if value.payload:
+                        return self.match_pattern(pattern.args[0], value.payload[0])
+                    return True, {}
+                return False, {}
+
+            # 3. Custom / Generic Enums
+            if isinstance(value, WEnumValue):
+                if pattern.enum_name and value.enum_name != pattern.enum_name and not value.enum_name.startswith(f"{pattern.enum_name}__"):
+                    return False, {}
+                if value.variant != pattern.variant:
+                    return False, {}
+                if not pattern.args:
+                    return True, {}
+                if len(pattern.args) != len(value.payload):
+                    return False, {}
+                all_bindings: Dict[str, WValue] = {}
+                for p, arg_val in zip(pattern.args, value.payload):
+                    matched, sub_b = self.match_pattern(p, arg_val)
+                    if not matched:
+                        return False, {}
+                    all_bindings.update(sub_b)
+                return True, all_bindings
+
             return False, {}
 
         if isinstance(pattern, IdentifierPattern):
+            if pattern.name in ("None", "none") and (
+                isinstance(value, WNone) or
+                (isinstance(value, WEnumValue) and (value.enum_name == "Option" or value.enum_name.startswith("Option__")) and value.variant == "None")
+            ):
+                return True, {}
             return True, {pattern.name: value}
 
         if isinstance(pattern, TuplePattern):

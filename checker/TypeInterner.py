@@ -599,6 +599,10 @@ class TypeInterner:
     # Bidirectional Mapping: WType <-> TypeId
     # -------------------------------------------------------------
 
+    def intern(self, wtype: WType) -> int:
+        """Alias for from_wtype(wtype) to intern a WType to TypeId."""
+        return self.from_wtype(wtype)
+
     def from_wtype(self, wtype: WType) -> int:
         """Converts an existing WType instance to its canonical TypeId."""
         if wtype is None:
