@@ -200,7 +200,7 @@ class CCodeGen:
             generated_structs=struct_count,
             generated_enums=len(self.enum_names),
             generated_classes=len(self.classes),
-            generated_c_lines=len(lines),
+            generated_c_lines=len(c_code_str.splitlines()),
             generated_c_bytes=len(c_code_str.encode("utf-8")),
         )
         return c_code_str
