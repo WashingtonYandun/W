@@ -1,0 +1,74 @@
+class Node {
+    public id: int
+    public parent: Weak[Node]?
+    public child: Node?
+    public fn init(id: int) -> unit {
+        this.id = id
+        this.parent = none
+        this.child = none
+    }
+}
+
+class DefaultHandle {
+    public value: Weak[Node]
+}
+
+struct Handle {
+    value: Weak[Node],
+}
+
+fn expired(id: int) -> Weak[Node] {
+    let node = Node(id)
+    return weak(node)
+}
+
+fn promoted() -> Node? {
+    let node = Node(7)
+    let handle = weak(node)
+    return upgrade(handle)
+}
+
+fn weak_back_reference() -> Weak[Node] {
+    let parent = Node(10)
+    let child = Node(11)
+    parent.child = child
+    child.parent = weak(parent)
+    let upgraded = upgrade(child.parent ?? weak(child)) ?? Node(-1)
+    print(upgraded.id)
+    return weak(parent)
+}
+
+fn exercise() -> unit {
+    let temporary = weak(Node(99))
+    print(temporary, upgrade(temporary) == none)
+    let mut replaceable = Node(98)
+    let observer = weak(replaceable)
+    replaceable = Node(97)
+    print(observer, upgrade(observer) == none)
+
+    let empty = DefaultHandle()
+    let other_empty = DefaultHandle()
+    print(empty.value, upgrade(empty.value) == none, empty.value == other_empty.value)
+
+    let node = Node(1)
+    let handle: Weak[Node] = weak(node)
+    let copy = handle
+    let independent = weak(node)
+    print(handle, handle == copy, handle == independent)
+    let strong = upgrade(handle) ?? Node(-1)
+    print(strong.id, strong == node)
+    let held = [handle, copy]
+    let box = Handle { value: independent }
+    print(held[0] == box.value)
+    let dead = expired(2)
+    let dead_copy = dead
+    let other_dead = expired(3)
+    print(dead, upgrade(dead) == none)
+    print(dead == dead_copy, dead == other_dead)
+    let live = promoted() ?? Node(-1)
+    print(live.id)
+    let back = weak_back_reference()
+    print(back, upgrade(back) == none)
+}
+
+exercise()

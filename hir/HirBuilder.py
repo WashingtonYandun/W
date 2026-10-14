@@ -32,7 +32,7 @@ from hir.HirNodes import (
 
 
 BUILTIN_NAMES = {
-    "print", "eprint", "len", "range", "ord", "chr", "slice", "str", "int", "float", "bool",
+    "weak", "upgrade", "print", "eprint", "len", "range", "ord", "chr", "slice", "str", "int", "float", "bool",
     "bytes", "args", "exit", "enumerate", "dict_items", "read_file", "write_file",
     "w_read_file", "w_write_file"
 }

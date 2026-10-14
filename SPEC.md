@@ -511,3 +511,23 @@ Parenthesized types group constructors: `(T?) ! E` is Result[Option[T],E], `(T !
 Postfix `?` handles exactly the outer constructor. A second `?` on an optional payload is invalid inside a function whose outer return type is Result; use an explicit branch/recovery value instead. Error types must match exactly. Returning an inner Result as a success payload requires preserving its outer success layer; Result construction never silently flattens it. Bare values denote success, including when success and error types coincide.
 
 Optional/Option and fallible/Result spellings share canonical type identity. Optional display is payload-transparent; explicit Some values follow the same display policy as sugar. Some(None) differs from None. Implicit conversions do not add/remove nullable depth; use explicit Some for nested optionality. Guarded match arms do not contribute unconditional coverage. Nested variant payload cases must be exhaustive.
+
+## Weak class references (B03)
+
+`Weak[C]` is an invariant value handle for a concrete class `C`. `weak(object)`
+creates a non-owning reference; `upgrade(handle)` returns `C?` and acquires strong
+ownership on success. Expired handles return None. Weak values cannot access
+fields or methods directly and cannot be dictionary keys. Weak handles compare by
+stable identity, even after expiration; copies preserve identity, while handles
+for different objects remain distinct. Display is `weak(alive)` or `weak(expired)`.
+
+Default non-optional weak class fields are independent empty expired handles;
+optional weak fields default to None. Empty handles compare equal to their copies
+and never upgrade. There is no implicit Weak[Derived]-to-Weak[Base] conversion.
+
+Strong references still form unreclaimed cycles. Use weak back-references or
+explicitly clear strong edges. The native control block outlives object destruction
+until the last weak handle is released, and invalidates the object before field
+cleanup. This runtime is single-threaded. W0/HIR enforce weak argument/type rules;
+W1 supports the concrete operations with dynamic argument checks and its existing
+limited static-checking profile. This does not establish W1 generic parity.

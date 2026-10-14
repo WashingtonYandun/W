@@ -311,6 +311,8 @@ class HirCCodeGen:
         return fields
 
     def _default_c_expr_for_type_id(self, type_id: int) -> str:
+        if self.interner.get_entry(type_id).tag == "weak":
+            return "w_empty_weak()"
         if type_id == TYPE_INT:
             return "w_int(0LL)"
         if type_id == TYPE_FLOAT:
@@ -766,7 +768,10 @@ class HirCCodeGen:
                 out.append(f"WVal {arr_tmp}[{len(arg_vals)}] = {{ {', '.join(arg_vals)} }};")
                 return self._bind_call(f"w_builtin_eprint({len(arg_vals)}, {arr_tmp})", out)
 
+            if name == "weak" and len(arg_vals) == 1:
+                return self._bind_call(f"w_builtin_weak_owned({self._own_expr(arg_vals[0])})", out)
             builtin_1 = {
+                    "weak": "w_builtin_weak", "upgrade": "w_builtin_upgrade",
                 "len": "w_builtin_len", "str": "w_builtin_str", "int": "w_builtin_int",
                 "float": "w_builtin_float", "ord": "w_builtin_ord", "chr": "w_builtin_chr",
                 "bytes": "w_builtin_bytes", "enumerate": "w_builtin_enumerate",

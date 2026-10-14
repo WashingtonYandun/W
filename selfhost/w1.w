@@ -742,7 +742,9 @@ fn parse_type_ann() -> bool {
 fn parse_field_default() -> str {
     let tname = at_tok().val
     let mut def_c = "w_none()"
-    if tname == "int" {
+    if tname == "Weak" {
+        def_c = "w_empty_weak()"
+    } elif tname == "int" {
         def_c = "w_int(0LL)"
     } elif tname == "float" {
         def_c = "w_float(0.0)"
@@ -1011,6 +1013,13 @@ fn emit_call(callee: ExprRes, args_c: list[str]) -> ExprRes {
     }
     if len(callee.val) >= 2 and slice(callee.val, 0, 2) == "v_" {
         let fn_name = slice(callee.val, 2, len(callee.val))
+        if fn_name == "weak" or fn_name == "upgrade" {
+            if len(args_c) != 1 { report_error("W2005", at_tok().line, at_tok().col, "weak/upgrade expects one argument") }
+            if fn_name == "weak" {
+                return bind_call("w_builtin_weak_owned(" + own_expr(args_c[0]) + ")")
+            }
+            return bind_call("w_builtin_" + fn_name + "(" + args_c[0] + ")")
+        }
         if fn_name == "Ok" and len(args_c) == 1 {
             return bind_call("w_ok(" + own_expr(args_c[0]) + ")")
         }
