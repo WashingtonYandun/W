@@ -8,6 +8,8 @@
   <a href="https://github.com/WashingtonYandun/W"><img src="https://img.shields.io/badge/version-v0.2.0--alpha-informational?style=flat-square" alt="Version"></a>
   <a href="https://github.com/WashingtonYandun/W"><img src="https://img.shields.io/badge/backend-portable%20C99-orange?style=flat-square" alt="Backend"></a>
   <a href="https://github.com/WashingtonYandun/W/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue?style=flat-square" alt="License"></a>
+  <a href="CONTRIBUTING.md"><img src="https://img.shields.io/badge/contributions-welcome-brightgreen?style=flat-square" alt="Contributions Welcome"></a>
+  <a href="CODE_OF_CONDUCT.md"><img src="https://img.shields.io/badge/Contributor%20Covenant-2.1-4baaaa.svg?style=flat-square" alt="Code of Conduct"></a>
 </p>
 
 <p align="center">
@@ -288,6 +290,18 @@ Run `./w bench` to benchmark the reference interpreter against the native C99 ba
 - [ ] **v0.4.0** — **Closures & Higher-Order Functions**: Environment capture analysis, heap ARC fat pointers, `map`/`filter`/`reduce`.
 - [ ] **v0.5.0** — **Modules & Packages**: Hierarchical package namespace, explicit C FFI bindings.
 - [ ] **v0.6.0** — **Standard Library & Tooling**: Standard library (`std.io`, `std.fs`, `std.json`), Language Server Protocol (LSP).
+
+---
+
+## 🤝 Community & Contributing
+
+We welcome contributions from compiler enthusiasts, systems engineers, and language designers!
+
+- **[Contributing Guide](CONTRIBUTING.md)**: Development environment setup, test runner commands, and PR guidelines.
+- **[Code of Conduct](CODE_OF_CONDUCT.md)**: Community standards and pledge (Contributor Covenant v2.1).
+- **[Security Policy](SECURITY.md)**: Vulnerability disclosure guidelines and supported release lines.
+- **[Architecture Decision Records (ADRs)](docs/adr/)**: Formal records of major design choices.
+- **[Language Specifications](SPEC.md)**: Formal syntax, type system, and semantics specification.
 
 ---
 
