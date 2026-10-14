@@ -1112,6 +1112,15 @@ static inline WVal w_ge(WVal a, WVal b) {
 }
 
 /* Formatting & String Conversion (matching W0 Values.__str__ exactly) */
+/* Internal module identity is retained for equality/dispatch, not display. */
+static inline const char* w_nominal_display_name(const char* name) {
+    if (strncmp(name, "__wm_", 5) == 0) {
+        const char* boundary = strstr(name + 5, "__");
+        if (boundary) return boundary + 2;
+    }
+    return name;
+}
+
 static inline char* w_to_cstr(WVal v, bool quote_str) {
     char* buf;
     switch (v.tag) {
@@ -1168,10 +1177,10 @@ static inline char* w_to_cstr(WVal v, bool quote_str) {
                     size_t cap = 64;
                     size_t pos = 0;
                     buf = (char*)malloc(cap);
-                    size_t l1 = strlen(v.as.en.enum_name);
+                    size_t l1 = strlen(w_nominal_display_name(v.as.en.enum_name));
                     size_t l2 = strlen(v.as.en.variant);
                     while (pos + l1 + l2 + 2 >= cap) { cap *= 2; buf = (char*)realloc(buf, cap); }
-                    memcpy(buf + pos, v.as.en.enum_name, l1); pos += l1;
+                    memcpy(buf + pos, w_nominal_display_name(v.as.en.enum_name), l1); pos += l1;
                     buf[pos++] = '.';
                     memcpy(buf + pos, v.as.en.variant, l2); pos += l2;
                     buf[pos++] = '(';
@@ -1191,19 +1200,19 @@ static inline char* w_to_cstr(WVal v, bool quote_str) {
                     return buf;
                 } else {
                     char* sub = w_to_cstr(v.as.en.box->val, true);
-                    size_t l1 = strlen(v.as.en.enum_name);
+                    size_t l1 = strlen(w_nominal_display_name(v.as.en.enum_name));
                     size_t l2 = strlen(v.as.en.variant);
                     size_t lsub = strlen(sub);
                     buf = (char*)malloc(l1 + l2 + lsub + 4);
-                    snprintf(buf, l1 + l2 + lsub + 4, "%s.%s(%s)", v.as.en.enum_name, v.as.en.variant, sub);
+                    snprintf(buf, l1 + l2 + lsub + 4, "%s.%s(%s)", w_nominal_display_name(v.as.en.enum_name), v.as.en.variant, sub);
                     free(sub);
                     return buf;
                 }
             }
-            size_t l1 = strlen(v.as.en.enum_name);
+            size_t l1 = strlen(w_nominal_display_name(v.as.en.enum_name));
             size_t l2 = strlen(v.as.en.variant);
             buf = (char*)malloc(l1 + l2 + 2);
-            snprintf(buf, l1 + l2 + 2, "%s.%s", v.as.en.enum_name, v.as.en.variant);
+            snprintf(buf, l1 + l2 + 2, "%s.%s", w_nominal_display_name(v.as.en.enum_name), v.as.en.variant);
             return buf;
         }
         case W_LIST: {
@@ -1276,8 +1285,8 @@ static inline char* w_to_cstr(WVal v, bool quote_str) {
             size_t cap = 128;
             size_t pos = 0;
             buf = (char*)malloc(cap);
-            size_t nl = strlen(v.as.st->name);
-            memcpy(buf + pos, v.as.st->name, nl); pos += nl;
+            size_t nl = strlen(w_nominal_display_name(v.as.st->name));
+            memcpy(buf + pos, w_nominal_display_name(v.as.st->name), nl); pos += nl;
             buf[pos++] = ' '; buf[pos++] = '{'; buf[pos++] = ' ';
             for (int32_t i = 0; i < v.as.st->len; i++) {
                 if (i > 0) {

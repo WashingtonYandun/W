@@ -233,7 +233,7 @@ class HirCCodeGen:
             self.emit_stmt(stmt, main_stmts)
         self.is_top_level = False
 
-        if not module.top_level_stmts and "w_fn_main" in self.fallible_fns:
+        if getattr(module, "call_entrypoint", not module.top_level_stmts) and "w_fn_main" in self.fallible_fns:
             main_stmts.append("w_release(w_fn_main());")
 
         self._pop_scope(main_stmts)
