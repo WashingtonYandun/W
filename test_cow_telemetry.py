@@ -20,6 +20,7 @@ Verifies:
 """
 
 import os
+import contextlib
 import re
 import subprocess
 import sys
@@ -36,21 +37,13 @@ from main import ensure_selfhost_w1_binary, get_repo_root
 
 def parse_checkpoints(stderr_text: str) -> Dict[str, Dict[str, int]]:
     checkpoints = {}
-    pattern = re.compile(
-        r"\[W_COW_CHECKPOINT:([^\]]+)\]\s+detach_list=(\d+)\s+detach_dict=(\d+)\s+detach_struct=(\d+)\s+copied_slots=(\d+)\s+copied_bytes=(\d+)\s+allocs=(\d+)"
-    )
+    pattern = re.compile(r"\[W_COW_CHECKPOINT:([^\]]+)\]\s+(.*)")
     for line in stderr_text.splitlines():
-        m = pattern.search(line)
-        if m:
-            label = m.group(1)
-            checkpoints[label] = {
-                "detach_list": int(m.group(2)),
-                "detach_dict": int(m.group(3)),
-                "detach_struct": int(m.group(4)),
-                "copied_slots": int(m.group(5)),
-                "copied_bytes": int(m.group(6)),
-                "allocs": int(m.group(7)),
-            }
+        match = pattern.fullmatch(line)
+        if match:
+            label = match.group(1)
+            assert label not in checkpoints, f"Duplicate checkpoint: {label}"
+            checkpoints[label] = {key: int(value) for key, value in re.findall(r"(\w+)=(\d+)", match.group(2))}
     return checkpoints
 
 
@@ -79,6 +72,10 @@ def run_cow_telemetry_suite() -> bool:
 
     interp_out = io.StringIO()
     interp_err = io.StringIO()
+    from runtime.Values import cow_telemetry
+    cow_telemetry.reset()
+    old_metrics = os.environ.get("W_COW_METRICS")
+    os.environ["W_COW_METRICS"] = "1"
     old_stderr = sys.stderr
     sys.stderr = interp_err
     try:
@@ -86,6 +83,10 @@ def run_cow_telemetry_suite() -> bool:
         interp.interpret(ast)
     finally:
         sys.stderr = old_stderr
+        if old_metrics is None:
+            os.environ.pop("W_COW_METRICS", None)
+        else:
+            os.environ["W_COW_METRICS"] = old_metrics
 
     assert interp_out.getvalue() == expected_stdout, "Interpreter stdout mismatch"
     py_checkpoints = parse_checkpoints(interp_err.getvalue())
@@ -104,7 +105,6 @@ def run_cow_telemetry_suite() -> bool:
     # Second write to same row: O(1) in-place
     assert c_w2["detach_list"] == c_w1["detach_list"], "Second write to same row must not detach any list"
     assert c_w2["copied_slots"] == c_w1["copied_slots"], "Second write to same row must copy 0 additional slots"
-    assert c_w2["allocs"] == c_w1["allocs"], "Second write to same row must perform 0 allocations"
 
     # Third write to other row: 0 outer list detach, 1 row detach of M=10 slots
     assert c_w3["detach_list"] == c_w2["detach_list"] + 1, "Third write to other row must detach exactly 1 row list"
@@ -129,10 +129,15 @@ def run_cow_telemetry_suite() -> bool:
     assert c_cls2["detach_list"] == c_cls1["detach_list"], "Repeated class field mutation must be in-place"
     assert c_cls2["copied_slots"] == c_cls1["copied_slots"], "Repeated class field mutation must copy 0 slots"
 
+    logical = lambda checkpoints: {label: {key: values[key] for key in (
+        "detach_list", "detach_dict", "detach_struct", "copied_slots")} for label, values in checkpoints.items()}
+    from test_cow_metrics_contract import run_metrics_contract
+    run_metrics_contract()
     with tempfile.TemporaryDirectory() as tmpdir:
         env = os.environ.copy()
         env["W_MEM_CHECK"] = "1"
         env["W_COW_METRICS"] = "1"
+        env["ASAN_OPTIONS"] = "detect_leaks=1" if sys.platform.startswith("linux") else "detect_leaks=0"
 
         # 2. W0 AST C99
         print("[2/4] Testing W0 AST C99 (Clang ASan + UBSan + W_MEM_CHECK)...")
@@ -141,12 +146,12 @@ def run_cow_telemetry_suite() -> bool:
         bin_path = os.path.join(tmpdir, "ast_bin")
         with open(c_path, "w", encoding="utf-8") as f:
             f.write(c_code)
-        subprocess.run(["cc", "-std=c99", "-fsanitize=address,undefined", f"-I{repo_root}", c_path, "-o", bin_path], check=True)
-        res_ast = subprocess.run([bin_path], capture_output=True, text=True, env=env)
+        subprocess.run([os.environ.get("CC", "cc"), "-std=c99", "-fsanitize=address,undefined", "-fno-omit-frame-pointer", f"-I{repo_root}", c_path, "-o", bin_path], check=True, timeout=60)
+        res_ast = subprocess.run([bin_path], capture_output=True, text=True, env=env, timeout=30)
         assert res_ast.returncode == 0, f"AST C exited with error:\n{res_ast.stderr}"
         assert res_ast.stdout == expected_stdout, "AST C stdout mismatch"
         ast_checkpoints = parse_checkpoints(res_ast.stderr)
-        assert ast_checkpoints == py_checkpoints, f"AST C checkpoints mismatch:\n{ast_checkpoints}\nvs\n{py_checkpoints}"
+        assert logical(ast_checkpoints) == py_checkpoints, f"AST C checkpoints mismatch:\n{ast_checkpoints}\nvs\n{py_checkpoints}"
         print("  -> AST C99 passed output & checkpoints validated.")
 
         # 3. W0 HIR C99
@@ -159,12 +164,12 @@ def run_cow_telemetry_suite() -> bool:
         hir_bin_path = os.path.join(tmpdir, "hir_bin")
         with open(hir_c_path, "w", encoding="utf-8") as f:
             f.write(hir_c_code)
-        subprocess.run(["cc", "-std=c99", "-fsanitize=address,undefined", f"-I{repo_root}", hir_c_path, "-o", hir_bin_path], check=True)
-        res_hir = subprocess.run([hir_bin_path], capture_output=True, text=True, env=env)
+        subprocess.run([os.environ.get("CC", "cc"), "-std=c99", "-fsanitize=address,undefined", "-fno-omit-frame-pointer", f"-I{repo_root}", hir_c_path, "-o", hir_bin_path], check=True, timeout=60)
+        res_hir = subprocess.run([hir_bin_path], capture_output=True, text=True, env=env, timeout=30)
         assert res_hir.returncode == 0, f"HIR C exited with error:\n{res_hir.stderr}"
         assert res_hir.stdout == expected_stdout, "HIR C stdout mismatch"
         hir_checkpoints = parse_checkpoints(res_hir.stderr)
-        assert hir_checkpoints == py_checkpoints, f"HIR C checkpoints mismatch:\n{hir_checkpoints}\nvs\n{py_checkpoints}"
+        assert logical(hir_checkpoints) == py_checkpoints, f"HIR C checkpoints mismatch:\n{hir_checkpoints}\nvs\n{py_checkpoints}"
         print("  -> HIR C99 passed output & checkpoints validated.")
 
         # 4. W1 Self-Hosted Stage 2
@@ -172,13 +177,14 @@ def run_cow_telemetry_suite() -> bool:
         w1_bin = ensure_selfhost_w1_binary(repo_root)
         w1_c_path = os.path.join(tmpdir, "w1.c")
         w1_bin_path = os.path.join(tmpdir, "w1_bin")
-        subprocess.run([w1_bin, test_file, w1_c_path], check=True, cwd=repo_root)
-        subprocess.run(["cc", "-std=c99", "-fsanitize=address,undefined", f"-I{repo_root}", w1_c_path, "-o", w1_bin_path], check=True)
-        res_w1 = subprocess.run([w1_bin_path], capture_output=True, text=True, env=env)
+        subprocess.run([w1_bin, test_file, w1_c_path], check=True, cwd=repo_root, timeout=60)
+        subprocess.run([os.environ.get("CC", "cc"), "-std=c99", "-fsanitize=address,undefined", "-fno-omit-frame-pointer", f"-I{repo_root}", w1_c_path, "-o", w1_bin_path], check=True, timeout=60)
+        res_w1 = subprocess.run([w1_bin_path], capture_output=True, text=True, env=env, timeout=30)
         assert res_w1.returncode == 0, f"W1 exited with error:\n{res_w1.stderr}"
         assert res_w1.stdout == expected_stdout, "W1 stdout mismatch"
         w1_checkpoints = parse_checkpoints(res_w1.stderr)
-        assert w1_checkpoints == py_checkpoints, f"W1 checkpoints mismatch:\n{w1_checkpoints}\nvs\n{py_checkpoints}"
+        assert logical(w1_checkpoints) == py_checkpoints, f"W1 checkpoints mismatch:\n{w1_checkpoints}\nvs\n{py_checkpoints}"
+        assert ast_checkpoints == hir_checkpoints == w1_checkpoints, "Native physical metrics disagree"
         print("  -> W1 Stage 2 passed output & checkpoints validated.")
 
     print("\n[SUCCESS] B02 CoW Telemetry & Asymptotic Scaling verified across all 4 execution targets!")

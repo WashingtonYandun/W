@@ -107,6 +107,7 @@ static int64_t w_g_cow_detach_struct = 0;
 static int64_t w_g_cow_copied_slots = 0;
 static int64_t w_g_cow_copied_bytes = 0;
 static int64_t w_g_cow_alloc_count = 0;
+static int64_t w_g_cow_allocated_bytes = 0;
 
 static inline void w_cow_reset_stats(void) {
     w_g_cow_detach_list = 0;
@@ -115,6 +116,7 @@ static inline void w_cow_reset_stats(void) {
     w_g_cow_copied_slots = 0;
     w_g_cow_copied_bytes = 0;
     w_g_cow_alloc_count = 0;
+    w_g_cow_allocated_bytes = 0;
 }
 
 static inline void w_mem_on_alloc(void) {
@@ -146,8 +148,8 @@ static inline void w_runtime_cleanup(void) {
     }
     const char* cow_env = getenv("W_COW_METRICS");
     if (cow_env && strcmp(cow_env, "1") == 0) {
-        fprintf(stderr, "[W_COW_METRICS] detach_list=%" PRId64 " detach_dict=%" PRId64 " detach_struct=%" PRId64 " copied_slots=%" PRId64 " copied_bytes=%" PRId64 " allocs=%" PRId64 "\n",
-                w_g_cow_detach_list, w_g_cow_detach_dict, w_g_cow_detach_struct, w_g_cow_copied_slots, w_g_cow_copied_bytes, w_g_cow_alloc_count);
+        fprintf(stderr, "[W_COW_METRICS] detach_list=%" PRId64 " detach_dict=%" PRId64 " detach_struct=%" PRId64 " copied_slots=%" PRId64 " copied_bytes=%" PRId64 " allocated_bytes=%" PRId64 " allocs=%" PRId64 "\n",
+                w_g_cow_detach_list, w_g_cow_detach_dict, w_g_cow_detach_struct, w_g_cow_copied_slots, w_g_cow_copied_bytes, w_g_cow_allocated_bytes, w_g_cow_alloc_count);
     }
     const char* check_env = getenv("W_MEM_CHECK");
     if (check_env && strcmp(check_env, "1") == 0) {
@@ -483,7 +485,8 @@ static inline void w_list_detach(WVal* v) {
     /* B02: CoW detach telemetry */
     w_g_cow_detach_list++;
     w_g_cow_copied_slots += old_b->len;
-    w_g_cow_copied_bytes += (int64_t)(sizeof(WListBuf) + (sizeof(WVal) * new_b->cap));
+    w_g_cow_copied_bytes += (int64_t)(sizeof(WVal) * old_b->len);
+    w_g_cow_allocated_bytes += (int64_t)(sizeof(WListBuf) + (sizeof(WVal) * new_b->cap));
     w_g_cow_alloc_count += 2;
 
     for (int32_t i = 0; i < old_b->len; i++) {
@@ -510,7 +513,8 @@ static inline void w_dict_detach(WVal* v) {
     /* B02: CoW detach telemetry */
     w_g_cow_detach_dict++;
     w_g_cow_copied_slots += ((int64_t)old_b->len * 2);
-    w_g_cow_copied_bytes += (int64_t)(sizeof(WDictBuf) + (sizeof(WVal) * new_b->cap * 2));
+    w_g_cow_copied_bytes += (int64_t)(sizeof(WVal) * old_b->len * 2);
+    w_g_cow_allocated_bytes += (int64_t)(sizeof(WDictBuf) + (sizeof(WVal) * new_b->cap * 2));
     w_g_cow_alloc_count += 3;
 
     for (int32_t i = 0; i < old_b->len; i++) {
@@ -539,7 +543,8 @@ static inline void w_struct_detach(WVal* v) {
     /* B02: CoW detach telemetry */
     w_g_cow_detach_struct++;
     w_g_cow_copied_slots += old_b->len;
-    w_g_cow_copied_bytes += (int64_t)(sizeof(WStructBuf) + (sizeof(const char*) * cap) + (sizeof(WVal) * cap));
+    w_g_cow_copied_bytes += (int64_t)((sizeof(const char*) + sizeof(WVal)) * old_b->len);
+    w_g_cow_allocated_bytes += (int64_t)(sizeof(WStructBuf) + (sizeof(const char*) * cap) + (sizeof(WVal) * cap));
     w_g_cow_alloc_count += 3;
 
     for (int32_t i = 0; i < old_b->len; i++) {
@@ -1224,10 +1229,12 @@ static inline WVal w_builtin_eprint(int32_t argc, const WVal* argv) {
     for (int32_t i = 0; i < argc; i++) {
         if (i > 0) fputc(' ', stderr);
         char* s = w_to_cstr(argv[i], false);
-        if (strncmp(s, "__COW_CHECKPOINT__:", 19) == 0) {
+        const char* metrics = getenv("W_COW_METRICS");
+        if (metrics && strcmp(metrics, "1") == 0 && argc == 1 && argv[i].tag == W_STR &&
+            strncmp(s, "__COW_CHECKPOINT__:", 19) == 0) {
             const char* label = s + 19;
-            fprintf(stderr, "[W_COW_CHECKPOINT:%s] detach_list=%" PRId64 " detach_dict=%" PRId64 " detach_struct=%" PRId64 " copied_slots=%" PRId64 " copied_bytes=%" PRId64 " allocs=%" PRId64 "\n",
-                    label, w_g_cow_detach_list, w_g_cow_detach_dict, w_g_cow_detach_struct, w_g_cow_copied_slots, w_g_cow_copied_bytes, w_g_cow_alloc_count);
+            fprintf(stderr, "[W_COW_CHECKPOINT:%s] detach_list=%" PRId64 " detach_dict=%" PRId64 " detach_struct=%" PRId64 " copied_slots=%" PRId64 " copied_bytes=%" PRId64 " allocated_bytes=%" PRId64 " allocs=%" PRId64,
+                    label, w_g_cow_detach_list, w_g_cow_detach_dict, w_g_cow_detach_struct, w_g_cow_copied_slots, w_g_cow_copied_bytes, w_g_cow_allocated_bytes, w_g_cow_alloc_count);
         } else {
             fputs(s, stderr);
         }

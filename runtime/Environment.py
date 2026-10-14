@@ -112,13 +112,13 @@ def create_global_environment(stdout: Optional[TextIO] = None) -> Environment:
             else:
                 rendered.append(str(arg))
         msg = " ".join(rendered)
-        if msg.startswith("__COW_CHECKPOINT__:"):
+        if (os.environ.get("W_COW_METRICS") == "1" and len(args) == 1
+                and isinstance(args[0], WStr) and msg.startswith("__COW_CHECKPOINT__:")):
             label = msg[19:]
             sys.stderr.write(
                 f"[W_COW_CHECKPOINT:{label}] detach_list={cow_telemetry.detach_list} "
                 f"detach_dict={cow_telemetry.detach_dict} detach_struct={cow_telemetry.detach_struct} "
-                f"copied_slots={cow_telemetry.copied_slots} copied_bytes={cow_telemetry.copied_bytes} "
-                f"allocs={cow_telemetry.alloc_count}\n"
+                f"copied_slots={cow_telemetry.copied_slots}\n"
             )
         else:
             sys.stderr.write(msg + "\n")
@@ -310,8 +310,7 @@ def _dump_cow_metrics():
         sys.stderr.write(
             f"[W_COW_METRICS] detach_list={cow_telemetry.detach_list} "
             f"detach_dict={cow_telemetry.detach_dict} detach_struct={cow_telemetry.detach_struct} "
-            f"copied_slots={cow_telemetry.copied_slots} copied_bytes={cow_telemetry.copied_bytes} "
-            f"allocs={cow_telemetry.alloc_count}\n"
+            f"copied_slots={cow_telemetry.copied_slots}\n"
         )
         sys.stderr.flush()
 
