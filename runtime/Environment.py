@@ -1,10 +1,12 @@
+import atexit
+import os
 import sys
 from typing import Any, Dict, List, Optional, Set, TextIO
 from error.Error import WRuntimeError
 from runtime.Values import (
     WValue, WInt, WFloat, WBool, WStr, WUnit, WNone,
     WList, WDict, WTuple, WStructInstance, WEnumValue, WEnumNamespace,
-    WOk, WErr, WFunction, WNativeFunction
+    WOk, WErr, WFunction, WNativeFunction, cow_telemetry
 )
 
 # ==========================================
@@ -109,7 +111,17 @@ def create_global_environment(stdout: Optional[TextIO] = None) -> Environment:
                 rendered.append(arg.value)
             else:
                 rendered.append(str(arg))
-        sys.stderr.write(" ".join(rendered) + "\n")
+        msg = " ".join(rendered)
+        if msg.startswith("__COW_CHECKPOINT__:"):
+            label = msg[19:]
+            sys.stderr.write(
+                f"[W_COW_CHECKPOINT:{label}] detach_list={cow_telemetry.detach_list} "
+                f"detach_dict={cow_telemetry.detach_dict} detach_struct={cow_telemetry.detach_struct} "
+                f"copied_slots={cow_telemetry.copied_slots} copied_bytes={cow_telemetry.copied_bytes} "
+                f"allocs={cow_telemetry.alloc_count}\n"
+            )
+        else:
+            sys.stderr.write(msg + "\n")
         sys.stderr.flush()
         return WUnit()
 
@@ -291,4 +303,17 @@ def create_global_environment(stdout: Optional[TextIO] = None) -> Environment:
     env.declare("Result", WEnumNamespace("Result", ["Ok", "Err"]), is_mut=False)
 
     return env
+
+
+def _dump_cow_metrics():
+    if os.environ.get("W_COW_METRICS") == "1":
+        sys.stderr.write(
+            f"[W_COW_METRICS] detach_list={cow_telemetry.detach_list} "
+            f"detach_dict={cow_telemetry.detach_dict} detach_struct={cow_telemetry.detach_struct} "
+            f"copied_slots={cow_telemetry.copied_slots} copied_bytes={cow_telemetry.copied_bytes} "
+            f"allocs={cow_telemetry.alloc_count}\n"
+        )
+        sys.stderr.flush()
+
+atexit.register(_dump_cow_metrics)
 

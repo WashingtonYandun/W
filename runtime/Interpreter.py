@@ -19,7 +19,7 @@ from runtime.Values import (
     WList, WDict, WTuple, WRange, WStructInstance, WEnumValue,
     WResult, WOk, WErr, WFunction, WNativeFunction, WBoundMethod,
     WClassDef, WObjectInstance, WSuperProxy,
-    WEnumNamespace, WModule
+    WEnumNamespace, WModule, cow_telemetry
 )
 
 from runtime.Environment import (
@@ -37,6 +37,7 @@ class Interpreter:
         self.file = file
         self.stdout = stdout if stdout is not None else sys.stdout
         self.global_env = create_global_environment(stdout=self.stdout)
+        cow_telemetry.reset()
 
     def interpret(self, program: Program) -> WValue:
         # Pass 1: Register top-level enums, classes, structs, and functions

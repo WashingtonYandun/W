@@ -246,6 +246,27 @@ class WErr(WResult):
 # Copy-on-Write Backing Storage
 # ==========================================
 
+class CowTelemetry:
+    """Telemetry counters for Copy-on-Write detaches (B02)."""
+    def __init__(self):
+        self.detach_list: int = 0
+        self.detach_dict: int = 0
+        self.detach_struct: int = 0
+        self.copied_slots: int = 0
+        self.copied_bytes: int = 0
+        self.alloc_count: int = 0
+
+    def reset(self) -> None:
+        self.detach_list = 0
+        self.detach_dict = 0
+        self.detach_struct = 0
+        self.copied_slots = 0
+        self.copied_bytes = 0
+        self.alloc_count = 0
+
+cow_telemetry = CowTelemetry()
+
+
 class SharedBuffer:
     """Refcounted container to implement pure Value Semantics with Copy-on-Write."""
     def __init__(self, data: Any):
@@ -271,6 +292,12 @@ class WList(WValue):
     def ensure_unique(self) -> None:
         if self.storage.refcount > 1:
             self.storage.refcount -= 1
+            n = len(self.storage.data)
+            cap = n if n > 4 else 4
+            cow_telemetry.detach_list += 1
+            cow_telemetry.copied_slots += n
+            cow_telemetry.copied_bytes += 24 + (40 * cap)
+            cow_telemetry.alloc_count += 2
             # Perform CoW detachment
             self.storage = SharedBuffer([elem.clone_value() for elem in self.storage.data])
 
@@ -324,6 +351,12 @@ class WDict(WValue):
     def ensure_unique(self) -> None:
         if self.storage.refcount > 1:
             self.storage.refcount -= 1
+            n = len(self.storage.data)
+            cap = n if n > 4 else 4
+            cow_telemetry.detach_dict += 1
+            cow_telemetry.copied_slots += n * 2
+            cow_telemetry.copied_bytes += 32 + (80 * cap)
+            cow_telemetry.alloc_count += 3
             self.storage = SharedBuffer({k: v.clone_value() for k, v in self.storage.data.items()})
 
     def set(self, key: Any, val: WValue) -> None:
@@ -372,6 +405,12 @@ class WStructInstance(WValue):
     def ensure_unique(self) -> None:
         if self.storage.refcount > 1:
             self.storage.refcount -= 1
+            n = len(self.storage.data)
+            cap = n if n > 0 else 1
+            cow_telemetry.detach_struct += 1
+            cow_telemetry.copied_slots += n
+            cow_telemetry.copied_bytes += 40 + (48 * cap)
+            cow_telemetry.alloc_count += 3
             self.storage = SharedBuffer({k: v.clone_value() for k, v in self.storage.data.items()})
 
     def get_field(self, name: str) -> WValue:
