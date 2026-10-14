@@ -158,6 +158,8 @@ def run_differential_suite(repo_root: str, w1_bin: str, generated_count: int = 2
             if fname.endswith(".w"):
                 case_files.append(os.path.join(cases_dir, fname))
 
+    case_files += sorted(glob.glob(os.path.join(repo_root, 'tests', 'modules', '*', 'main.w')))
+
     invalid_files: List[str] = sorted(
         glob.glob(os.path.join(repo_root, "tests", "*", "invalid", "*.w"))
         + glob.glob(os.path.join(repo_root, "tests", "errors", "invalid_*.w"))
@@ -178,7 +180,7 @@ def run_differential_suite(repo_root: str, w1_bin: str, generated_count: int = 2
         ),
     ]
 
-    labels = [os.path.basename(path) for path in case_files]
+    labels = [os.path.relpath(path, repo_root) for path in case_files]
     labels += [label for label, _ in runtime_panic_cases]
     labels += [os.path.relpath(path, repo_root) for path in invalid_files]
     labels += [f'seed_{base_seed + offset}.w' for offset in range(generated_count)]
@@ -189,7 +191,7 @@ def run_differential_suite(repo_root: str, w1_bin: str, generated_count: int = 2
 
     with tempfile.TemporaryDirectory() as work_dir:
         for path in case_files:
-            label = os.path.basename(path)
+            label = os.path.relpath(path, repo_root)
             with open(path, "r", encoding="utf-8") as f:
                 code = f.read()
             ok, detail = verify_four_way_equivalence(code, label, w1_bin, repo_root, work_dir)

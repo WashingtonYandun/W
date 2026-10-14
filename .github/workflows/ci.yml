@@ -41,6 +41,7 @@ jobs:
         run: |
           python3 test_ci_harness.py
           python3 test_hir_return_paths.py
+          python3 test_compilation_session.py
       - name: Verify runtime, examples and direct W1 negatives across four engines
         run: python3 tools/ci_conformance.py --profile=${{ inputs.profile || 'integration' }}
       - name: Verify full conformance and SHA256 bootstrap
@@ -88,6 +89,7 @@ jobs:
         run: python3 tools/ci_conformance.py --sanitize
       - name: Verify targeted ownership, telemetry and isolated strong-cycle evidence
         run: |
+          W_SANITIZE=1 python3 test_compilation_session.py
           python3 test_phase_a.py
           python3 test_ownership_control_flow.py
           python3 test_cow_telemetry.py

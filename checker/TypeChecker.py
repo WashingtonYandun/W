@@ -1,5 +1,4 @@
 import copy
-import os
 from typing import Any, Dict, List, Optional, Set, Tuple, NamedTuple
 from node.NodeType import (
     Node, Program, Stmt, Expr, TypeNode, Pattern, Block,
@@ -71,8 +70,7 @@ class TypeChecker:
     def __init__(
         self,
         file: str = "<stdin>",
-        checked_modules: Optional[Dict[str, ModuleType]] = None,
-        active_imports: Optional[Set[str]] = None
+        session=None
     ) -> None:
         self.file = file
         self.global_scope = create_global_scope()
@@ -81,9 +79,9 @@ class TypeChecker:
         self.expected_type: Optional[WType] = None
         self.current_class: Optional[ClassType] = None
         self.loop_depth: int = 0
-        self.checked_modules: Dict[str, ModuleType] = checked_modules if checked_modules is not None else {}
-        self.active_imports: Set[str] = active_imports if active_imports is not None else set()
-        self.interner: TypeInterner = TypeInterner()
+        from compiler.CompilationSession import CompilationSession
+        self.session = session or CompilationSession()
+        self.interner: TypeInterner = self.session.interner
         self.generic_struct_templates: Dict[str, GenericStructTemplate] = {}
         self.generic_fn_templates: Dict[str, GenericFnTemplate] = {}
         self.generic_enum_templates: Dict[str, GenericEnumTemplate] = {}
@@ -120,6 +118,9 @@ class TypeChecker:
         self.generic_enum_templates["Result"] = GenericEnumTemplate("Result", [TypeParam(name="T"), TypeParam(name="E")], res_decl)
 
     def check(self, program: Program) -> None:
+        self.session.check_program(program, self)
+
+    def _check_program(self, program: Program) -> None:
         # Reserve builtin identities and their specialization namespaces.
         for declaration in program.body:
             if isinstance(declaration, (StructDecl, EnumDecl, ClassDecl, InterfaceDecl)):
@@ -164,48 +165,7 @@ class TypeChecker:
     # ==========================================
 
     def _resolve_import(self, stmt: ImportDecl) -> WType:
-        current_dir = os.path.dirname(os.path.abspath(self.file)) if self.file not in ("<stdin>", "<repl>") else os.getcwd()
-        candidate = os.path.abspath(os.path.join(current_dir, stmt.path))
-        if not os.path.exists(candidate):
-            candidate = os.path.abspath(stmt.path)
-
-        if not os.path.exists(candidate):
-            raise TypeError(
-                message=f"Module not found: '{stmt.path}'",
-                line=stmt.line,
-                col=stmt.col,
-                file=self.file,
-                code="W1003"
-            )
-
-        if candidate in self.active_imports:
-            raise TypeError(
-                message=f"Circular import detected for module '{stmt.path}'",
-                line=stmt.line,
-                col=stmt.col,
-                file=self.file,
-                code="W1003"
-            )
-
-        if candidate in self.checked_modules:
-            cached = self.checked_modules[candidate]
-            return ModuleType(stmt.namespace, cached.scope)
-
-        with open(candidate, "r", encoding="utf-8") as f:
-            source = f.read()
-
-        from parser.Parser import Parser
-        sub_ast = Parser(file=candidate).parse(source)
-        sub_checker = TypeChecker(
-            file=candidate,
-            checked_modules=self.checked_modules,
-            active_imports=self.active_imports | {candidate}
-        )
-        sub_checker.check(sub_ast)
-
-        mod_type = ModuleType(stmt.namespace, sub_checker.global_scope)
-        self.checked_modules[candidate] = mod_type
-        return mod_type
+        return self.session.import_module(stmt, self.file)
 
     def _pass1_collect_declarations(self, program: Program) -> None:
         # Step 1a: Pre-register nominal type shells (Enums, Interfaces, Classes, Imports)
@@ -884,8 +844,21 @@ class TypeChecker:
             return type_.type_args or []
         return []
 
-    def _check_expr(self, expr: Expr, is_statement_context: bool = False) -> WType:
+    def _module_receiver(self, expression):
+        if isinstance(expression, IdentExpr):
+            symbol = self.current_scope.lookup_symbol(expression.name)
+        elif isinstance(expression, MemberExpr):
+            parent = self._module_receiver(expression.object)
+            symbol = parent.scope.lookup_symbol(expression.property) if parent else None
+        else:
+            return None
+        return symbol.type if symbol and isinstance(symbol.type, ModuleType) else None
+
+    def _check_expr(self, expr: Expr, is_statement_context: bool = False, allow_module: bool = False) -> WType:
         wtype = self._check_expr_impl(expr, is_statement_context)
+        if isinstance(wtype, ModuleType) and not allow_module:
+            raise TypeError("Module namespaces cannot be used as runtime values", file=self.file,
+                            line=expr.line, col=expr.col, code="W2003")
         expr.inferred_type = wtype
         expr.inferred_type_id = self.interner.from_wtype(wtype)
         return wtype
@@ -1435,7 +1408,7 @@ class TypeChecker:
                     concrete_args = [AnyType() for _ in tmpl.type_params]
                     return self._monomorphize_enum(tmpl, concrete_args, expr.line, expr.col)
 
-            obj_t = self._check_expr(expr.object)
+            obj_t = self._check_expr(expr.object, allow_module=True)
             if isinstance(obj_t, ClassType):
                 if expr.property == "init" and isinstance(expr.object, SuperExpr):
                     curr_s: Optional[ClassType] = obj_t
@@ -1518,6 +1491,7 @@ class TypeChecker:
             if isinstance(obj_t, ModuleType):
                 sym = obj_t.scope.lookup_symbol(expr.property)
                 if sym is not None:
+                    expr.resolved_module_member = sym.name
                     return sym.type
                 t_def = obj_t.scope.lookup_type(expr.property)
                 if t_def is not None:
@@ -1587,6 +1561,32 @@ class TypeChecker:
         if isinstance(expr, CallExpr):
             # Support generic function calls and generic struct constructors
             callee_t: Optional[WType] = None
+            if isinstance(expr.callee, MemberExpr):
+                module_type = self._module_receiver(expr.callee.object)
+                if isinstance(module_type, ModuleType):
+                    symbol = module_type.scope.lookup_symbol(expr.callee.property)
+                    if symbol and isinstance(symbol.type, GenericFnTemplate):
+                        template = symbol.type
+                        if expr.type_args:
+                            concrete_args = [self._resolve_type_node(argument) for argument in expr.type_args]
+                        else:
+                            if len(expr.args) != len(template.ast_decl.params):
+                                raise TypeError("Generic module function argument count mismatch", file=self.file,
+                                                line=expr.line, col=expr.col, code="W2005")
+                            bindings = {}
+                            parameters = {parameter.name for parameter in template.type_params}
+                            for parameter, argument in zip(template.ast_decl.params, expr.args):
+                                self._unify_type(parameter.type_ann, self._check_expr(argument), parameters, bindings)
+                            if any(parameter.name not in bindings for parameter in template.type_params):
+                                raise TypeError("Cannot infer imported generic function arguments", file=self.file,
+                                                line=expr.line, col=expr.col, code="W2003")
+                            concrete_args = [bindings[parameter.name] for parameter in template.type_params]
+                        unit = module_type.checked_module
+                        specialized = unit.checker._monomorphize_fn(template, concrete_args, expr.line, expr.col)
+                        self.session.refresh_specializations(unit)
+                        expr.callee = IdentExpr(specialized.name, line=expr.callee.line, col=expr.callee.col)
+                        expr.type_args = []
+                        callee_t = specialized.type
             if isinstance(expr.callee, IdentExpr):
                 callee_name = expr.callee.name
                 symbol = self.current_scope.lookup_symbol(callee_name)
@@ -1942,6 +1942,9 @@ class TypeChecker:
                         raise TypeError(message=f"dict_items() expects dict, found '{a_t}'", line=expr.line, col=expr.col, file=self.file, code="T003")
                     return ListType(TupleType([a_t.key, a_t.value]))
 
+            if expr.type_args:
+                raise TypeError("Type arguments require a generic function", file=self.file,
+                                line=expr.line, col=expr.col, code="W2003")
             # Standard function argument checking
             if callee_t.params == [AnyType()]:
                 # Variadic (like print)
@@ -2483,6 +2486,13 @@ class TypeChecker:
         return str(t).replace("[", "__").replace("]", "").replace(", ", "__").replace(" ", "_")
 
     def _wtype_to_type_node(self, t: WType) -> TypeNode:
+        node = self._wtype_to_type_node_impl(t)
+        if isinstance(t, (StructType, EnumType, ClassType, InterfaceType)) and self.current_scope.lookup_type(t.name) is not t:
+            node.session_resolved_type = t
+            node.session_arena_id = self.interner.arena_id
+        return node
+
+    def _wtype_to_type_node_impl(self, t: WType) -> TypeNode:
         if isinstance(t, AnyType):
             return NamedType("any")
         if t == IntType:
@@ -3014,7 +3024,13 @@ class TypeChecker:
         return False
 
     def _resolve_type_node(self, node: TypeNode) -> WType:
-        resolved = self._resolve_type_node_impl(node)
+        if hasattr(node, 'session_resolved_type'):
+            if node.session_arena_id != self.interner.arena_id:
+                raise TypeError("Synthesized type belongs to another arena", file=self.file,
+                                line=node.line, col=node.col, code="W9999")
+            resolved = node.session_resolved_type
+        else:
+            resolved = self._resolve_type_node_impl(node)
         if node is not None:
             node.resolved_type_id = self.interner.from_wtype(resolved)
         return resolved

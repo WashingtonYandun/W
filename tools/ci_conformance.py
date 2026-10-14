@@ -39,6 +39,7 @@ def main():
         return 1
     w1 = ROOT / '.w_cache/w1_stage2'
     positives = sorted((ROOT / 'tests/runtime').glob('*.w')) + sorted((ROOT / 'examples').glob('*.w'))
+    positives += sorted((ROOT / 'tests/modules').glob('*/main.w'))
     support_files = PROFILES['support_files']
     positives = [path for path in positives if str(path.relative_to(ROOT)) not in support_files]
     negatives = sorted((ROOT / 'tests').glob('*/invalid/*.w')) + sorted((ROOT / 'tests/errors').glob('invalid_*.w'))

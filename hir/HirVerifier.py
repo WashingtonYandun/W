@@ -17,13 +17,15 @@ class HirVerifier:
         self.checked_types.clear()
         if not isinstance(module, H.HirModule):
             self._fail(module, 'Expected HirModule')
+        if hasattr(module, 'arena_id') and module.arena_id != self.interner.arena_id:
+            self._fail(module, 'HIR module belongs to another type arena')
         self._visit(module, 0, False)
         from hir.HirBindings import HirBindings
         HirBindings(self).check(module)
 
     def _fail(self, owner, message):
         span = getattr(owner, 'span', H.Span(getattr(owner, 'line', 1), getattr(owner, 'col', 1)))
-        raise WError(message, line=span.line, col=span.col, file=self.file_path,
+        raise WError(message, line=span.line, col=span.col, file=getattr(span, "file_path", None) or self.file_path,
                      code='W9999', stage='hir-verification')
 
     def _type(self, type_id, owner, field):

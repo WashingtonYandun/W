@@ -1,6 +1,13 @@
 import weakref
 from typing import Any, Dict, List, Optional
 
+def nominal_display_name(name):
+    if name.startswith('__wm_'):
+        boundary = name.find('__', 5)
+        if boundary >= 0:
+            return name[boundary + 2:]
+    return name
+
 def display_value(value, quote_string=False):
     while isinstance(value, WEnumValue) and value.enum_name == "Option" and value.variant == "Some" and value.payload:
         value = value.payload[0]
@@ -193,8 +200,8 @@ class WEnumValue(WValue):
             return str(self.payload[0])
         if self.payload:
             args_str = ", ".join(display_value(p, True) for p in self.payload)
-            return f"{self.enum_name}.{self.variant}({args_str})"
-        return f"{self.enum_name}.{self.variant}"
+            return f"{nominal_display_name(self.enum_name)}.{self.variant}({args_str})"
+        return f"{nominal_display_name(self.enum_name)}.{self.variant}"
 
 
 # ==========================================
@@ -423,7 +430,7 @@ class WStructInstance(CowOwner):
 
     def __str__(self) -> str:
         fields_str = ", ".join(f"{k}: {display_value(v, True)}" for k, v in self.storage.data.items())
-        return f"{self.struct_name} {{ {fields_str} }}"
+        return f"{nominal_display_name(self.struct_name)} {{ {fields_str} }}"
 
 
 # ==========================================
@@ -493,7 +500,7 @@ class WObjectInstance(WValue):
 
     def __str__(self) -> str:
         fields_str = ", ".join(f"{k}: {display_value(v, True)}" for k, v in self.fields.items())
-        return f"{self.class_name} {{ {fields_str} }}"
+        return f"{nominal_display_name(self.class_name)} {{ {fields_str} }}"
 
 
 class WWeak(WValue):

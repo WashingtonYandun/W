@@ -1,3 +1,4 @@
+from itertools import count
 from typing import Any, Dict, List, Optional, Set, Tuple, Union
 from checker.WType import (
     WType, PrimitiveType, IntType, FloatType, BoolType, StrType, UnitType, NoneType,
@@ -5,6 +6,8 @@ from checker.WType import (
     InterfaceType, ClassFieldInfo, ClassMethodInfo, ClassType,
     ResultType, FunctionType, ModuleType, AnyType
 )
+
+_ARENA_IDS = count(1)
 
 # Canonical Reserved TypeId Constants (docs/TYPE_SYSTEM_DESIGN.md)
 TYPE_ERROR: int = 0
@@ -115,6 +118,7 @@ class TypeInterner:
     - Bidirectional mapping with legacy WType hierarchy.
     """
     def __init__(self) -> None:
+        self.arena_id = next(_ARENA_IDS)
         self._entries: List[TypeEntry] = []
         self._capabilities: List[TypeCapabilities] = []
         self._key_to_id: Dict[Tuple[Any, ...], int] = {}
