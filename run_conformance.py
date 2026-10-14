@@ -294,6 +294,9 @@ def _run_suite_in_repo(repo_root: str) -> None:
             except Exception as e:
                 print(f"  [C99 FAIL] {f}: {e}")
 
+        w1_targets = [f for f in c99_targets if not f.startswith("generic_")]
+        w1_runtime_passed = 0
+
         # 8. Self-Hosting Bootstrap Fixed-Point (W0 -> W1 Stage 1 -> W1 Stage 2)
         w1_src_path = os.path.join(repo_root, "selfhost", "w1.w")
         try:

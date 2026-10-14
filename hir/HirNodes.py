@@ -289,11 +289,12 @@ class HirConstructStruct(HirExpr):
 
 
 class HirConstructEnum(HirExpr):
-    def __init__(self, enum_name: str, variant_name: str, variant_idx: int, type_id: int, span: Span):
+    def __init__(self, enum_name: str, variant_name: str, variant_idx: int, type_id: int, span: Span, payload: Optional[HirExpr] = None):
         super().__init__(type_id, span)
         self.enum_name = enum_name
         self.variant_name = variant_name
         self.variant_idx = variant_idx
+        self.payload = payload
 
 
 class HirConstructObject(HirExpr):

@@ -1,0 +1,29 @@
+fn try_opt(opt: Option[int]) -> Option[int] {
+    let val = opt?
+    return Some(val * 2)
+}
+
+fn describe(opt: Option[int]) {
+    match opt {
+        Some(x) => print("Some:", x),
+        None => print("None")
+    }
+}
+
+let o1: Option[int] = Some(42)
+let o2: Option[int] = None
+let o3 = Option.Some("unified")
+let o4: Option[str] = Option.None
+
+describe(o1)
+describe(o2)
+
+print(try_opt(Some(21)))
+print(try_opt(None))
+
+let n: int? = None
+let s: int? = 5
+print("coalesce:", n ?? 99, s ?? 99)
+
+print("eq none:", None == none)
+print("eq some:", Some(10) == Some(10))

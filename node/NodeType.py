@@ -163,19 +163,24 @@ class TuplePattern(Pattern):
         }
 
 class EnumPattern(Pattern):
-    def __init__(self, enum_name: str, variant: str, line: int = 1, col: int = 1):
+    def __init__(self, enum_name: Optional[str], variant: str, args: Optional[List[Pattern]] = None, line: int = 1, col: int = 1):
         super().__init__(line, col)
         self.enum_name = enum_name
         self.variant = variant
+        self.args = args or []
 
     def to_dict(self) -> dict:
-        return {
+        d = {
             "kind": "EnumPattern",
-            "enum_name": self.enum_name,
             "variant": self.variant,
             "line": self.line,
             "col": self.col
         }
+        if self.enum_name is not None:
+            d["enum_name"] = self.enum_name
+        if self.args:
+            d["args"] = [a.to_dict() for a in self.args]
+        return d
 
 class LiteralPattern(Pattern):
     def __init__(self, literal: 'Expr', line: int = 1, col: int = 1):
@@ -301,20 +306,52 @@ class StructDecl(Stmt):
             d["type_params"] = [p.to_dict() if hasattr(p, "to_dict") else p for p in self.type_params]
         return d
 
-class EnumDecl(Stmt):
-    def __init__(self, name: str, variants: List[str], line: int = 1, col: int = 1):
+class VariantDecl(Node):
+    def __init__(self, name: str, payload_types: Optional[List[TypeNode]] = None, line: int = 1, col: int = 1):
         super().__init__(line, col)
         self.name = name
-        self.variants = variants
+        self.payload_types = payload_types or []
 
     def to_dict(self) -> dict:
-        return {
+        d = {"kind": "VariantDecl", "name": self.name, "line": self.line, "col": self.col}
+        if self.payload_types:
+            d["payload_types"] = [t.to_dict() for t in self.payload_types]
+        return d
+
+    def __str__(self) -> str:
+        if self.payload_types:
+            types_str = ", ".join(str(p) for p in self.payload_types)
+            return f"{self.name}({types_str})"
+        return self.name
+
+class EnumDecl(Stmt):
+    def __init__(
+        self,
+        name: str,
+        variants: List[Any],
+        type_params: Optional[List[Any]] = None,
+        line: int = 1,
+        col: int = 1
+    ):
+        super().__init__(line, col)
+        self.name = name
+        self.variants: List[VariantDecl] = [
+            VariantDecl(v, line=line, col=col) if isinstance(v, str) else v
+            for v in variants
+        ]
+        self.type_params = type_params or []
+
+    def to_dict(self) -> dict:
+        d = {
             "kind": "EnumDecl",
             "name": self.name,
-            "variants": self.variants,
+            "variants": [v.to_dict() if hasattr(v, "to_dict") else v for v in self.variants],
             "line": self.line,
             "col": self.col
         }
+        if self.type_params:
+            d["type_params"] = [p.to_dict() if hasattr(p, "to_dict") else p for p in self.type_params]
+        return d
 
 class InterfaceMethod(Node):
     def __init__(self, name: str, params: List[Param], return_type: TypeNode, line: int = 1, col: int = 1):
@@ -848,15 +885,17 @@ class IfExpr(Expr):
         }
 
 class MatchArm(Node):
-    def __init__(self, pattern: Pattern, body: Block, line: int = 1, col: int = 1):
+    def __init__(self, pattern: Pattern, body: Block, guard: Optional[Expr] = None, line: int = 1, col: int = 1):
         super().__init__(line, col)
         self.pattern = pattern
         self.body = body
+        self.guard = guard
 
     def to_dict(self) -> dict:
         return {
             "kind": "MatchArm",
             "pattern": self.pattern.to_dict(),
+            "guard": self.guard.to_dict() if self.guard else None,
             "body": self.body.to_dict(),
             "line": self.line,
             "col": self.col
