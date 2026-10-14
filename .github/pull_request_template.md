@@ -15,7 +15,7 @@ Fixes #(issue)
 
 ## Quality & Conformance Checklist
 
-- [ ] **Conformance Suite:** All 347 conformance tests pass (`./w test`).
+- [ ] **Conformance Suite:** All conformance tests pass (`./w test`).
 - [ ] **Memory Safety:** Sanitizers report zero errors or leaks (`./w test --sanitize`).
 - [ ] **Bootstrap Parity:** Fixed-point bootstrap SHA256 is verified (if compiler was modified).
 - [ ] **Code Formatting:** Code is formatted with `./w fmt`.

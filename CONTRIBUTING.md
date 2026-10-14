@@ -83,7 +83,7 @@ cd W
 
 ## Testing & Quality Verification
 
-W adheres to strict conformance and correctness invariants. **All 347 conformance tests must pass before submitting code.**
+W adheres to strict conformance and correctness invariants. **All conformance tests must pass before submitting code.**
 
 ### 1. Conformance Test Suite
 Runs all 13 stages of verification including lexer, parser, static type checker, formatter, Typed HIR lowering, C99 backend, runtime execution, and modular self-hosting:
@@ -99,11 +99,21 @@ Compile and test with AddressSanitizer and UndefinedBehaviorSanitizer enabled:
 W_SANITIZE=1 ./w test
 ```
 
-### 3. Three-Engine Differential Oracle
-Validates that W0 Interpreter, W0 C99 native backend, and W1 self-hosted compiler produce identical outputs across 72 differential test cases:
+### 3. Four-Engine Differential Oracle
+Validates interpreter, AST C99, HIR C99 and standalone W1 outputs and diagnostics.
+Feature support is declared in `tests/engine_profiles.json`; unsupported rows are reported separately:
 ```bash
-python3 tests/differential/differential_test.py
+./w test --differential 20
 ```
+
+The CI corpus also verifies every runtime/example output and standalone negative fixture:
+```bash
+python3 tools/ci_conformance.py
+CC=clang python3 tools/ci_conformance.py --sanitize
+python3 tools/ci_conformance.py --profile=release
+```
+
+Integration permits explicitly declared unsupported W1 generic rows while running the other three engines. The release profile fails on every unsupported row until D02 is complete. Linux runs Clang ASan/UBSan/LSan and a separate GCC C99 gate; macOS runs Clang ASan/UBSan. Reports count coverage by engine and feature. Failure artifacts retain source, generated C, commands, diagnostics, signals/timeouts and toolchain versions. See [B04 completion](docs/B04_COMPLETION.md).
 
 ### 4. Modular Split Verification
 Ensures the 9 modular compiler files in `selfhost/src/` combine loss-lessly to exactly match `selfhost/w1.w`:
