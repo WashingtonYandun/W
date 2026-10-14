@@ -49,6 +49,17 @@ class OptionalType(WType):
         return f"{self.inner}?"
 
 
+class WeakType(WType):
+    def __init__(self, target: WType):
+        self.target = target
+
+    def __eq__(self, other: Any) -> bool:
+        return isinstance(other, WeakType) and self.target == other.target
+
+    def __str__(self) -> str:
+        return f"Weak[{self.target}]"
+
+
 class ListType(WType):
     def __init__(self, element: WType):
         self.element = element

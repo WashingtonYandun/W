@@ -1,6 +1,4 @@
 from error.Error import WError
-import os
-from parser.Parser import Parser
 from typing import Any, Dict, List, Optional, Tuple, Set
 from node.NodeType import (
     Program, Stmt, Expr, TypeNode, ResultType as AstResultType,
@@ -32,7 +30,7 @@ from hir.HirNodes import (
 
 
 BUILTIN_NAMES = {
-    "print", "eprint", "len", "range", "ord", "chr", "slice", "str", "int", "float", "bool",
+    "weak", "upgrade", "print", "eprint", "len", "range", "ord", "chr", "slice", "str", "int", "float", "bool",
     "bytes", "args", "exit", "enumerate", "dict_items", "read_file", "write_file",
     "w_read_file", "w_write_file"
 }
@@ -62,7 +60,16 @@ class HirBuilder:
         self.modules: Set[str] = set()
         self.imported_files: Set[str] = set()
 
+    def _span(self, node):
+        return Span(node.line, node.col, file_path=getattr(node, 'source_file', self.file_path),
+                    file_id=getattr(node, 'module_id', None))
+
     def lower(self, program: Program) -> HirModule:
+        if hasattr(program, "session"):
+            if self.interner is not program.session.interner:
+                raise WError("HIR builder must use the checked module arena", file=self.file_path,
+                             code="W9999", stage="hir-lowering")
+            program = program.session.link(program)
         # Pre-scan top-level nominal types to distinguish constructors from calls
         for stmt in program.body:
             if isinstance(stmt, ClassDecl):
@@ -107,34 +114,15 @@ class HirBuilder:
             functions=fn_decls,
             top_level_stmts=top_stmts
         )
+        module.arena_id = self.interner.arena_id
+        module.call_entrypoint = getattr(program, "call_entrypoint", not top_stmts)
         from hir.HirVerifier import HirVerifier
         HirVerifier(self.interner, self.file_path).verify(module)
         return module
 
     def _handle_import(self, stmt: ImportDecl, fn_decls: List[HirFnDecl]) -> None:
-        current_dir = os.path.dirname(os.path.abspath(self.file_path)) if self.file_path != "<stdin>" else os.getcwd()
-        resolved_path = os.path.join(current_dir, stmt.path)
-        if not os.path.exists(resolved_path):
-            resolved_path = stmt.path
-        abs_path = os.path.abspath(resolved_path)
-        if abs_path in self.imported_files or not os.path.exists(abs_path):
-            return
-        self.imported_files.add(abs_path)
-        self.modules.add(stmt.namespace)
-
-        with open(abs_path, "r", encoding="utf-8") as f:
-            code = f.read()
-
-        sub_ast = Parser(file=abs_path).parse(code)
-        from checker.TypeChecker import TypeChecker
-        checker = TypeChecker(file=abs_path)
-        checker.interner = self.interner
-        checker.check(sub_ast)
-        for s in sub_ast.body:
-            if isinstance(s, FnDecl):
-                fn_hir = self._lower_fn_decl(s)
-                fn_hir.name = f"{stmt.namespace}__{s.name}"
-                fn_decls.append(fn_hir)
+        raise WError("HIR imports require a checked compilation session", file=self.file_path,
+                     line=stmt.line, col=stmt.col, code="W9999", stage="hir-lowering")
 
     # -------------------------------------------------------------
     # Nominal Declarations
@@ -143,17 +131,17 @@ class HirBuilder:
     def _lower_struct_decl(self, decl: StructDecl) -> HirStructDecl:
         tid = self.interner.mk_struct(decl.name)
         fields = [
-            HirFieldDef(f.name, self._get_type_id_from_node(getattr(f, "type_ann", getattr(f, "type_annotation", None))), is_public=True, span=Span(f.line, f.col))
+            HirFieldDef(f.name, self._get_type_id_from_node(getattr(f, "type_ann", getattr(f, "type_annotation", None))), is_public=True, span=self._span(f))
             for f in decl.fields
         ]
-        return HirStructDecl(decl.name, tid, fields, Span(decl.line, decl.col))
+        return HirStructDecl(decl.name, tid, fields, self._span(decl))
 
     def _lower_enum_decl(self, decl: EnumDecl) -> HirEnumDecl:
         variants = [variant.name if hasattr(variant, "name") else variant for variant in decl.variants]
         tid = self.interner.mk_enum(decl.name, variants)
         payloads = {variant.name: [self._get_type_id_from_node(type_) for type_ in variant.payload_types]
                     for variant in decl.variants if hasattr(variant, "payload_types")}
-        return HirEnumDecl(decl.name, tid, variants, Span(decl.line, decl.col), payloads)
+        return HirEnumDecl(decl.name, tid, variants, self._span(decl), payloads)
 
     def _lower_interface_decl(self, decl: InterfaceDecl) -> HirInterfaceDecl:
         methods: List[Tuple[str, int]] = []
@@ -163,12 +151,12 @@ class HirBuilder:
             fn_tid = self.interner.mk_function(params, ret)
             methods.append((m.name, fn_tid))
         tid = self.interner.mk_interface(decl.name, dict(methods))
-        return HirInterfaceDecl(decl.name, tid, methods, Span(decl.line, decl.col))
+        return HirInterfaceDecl(decl.name, tid, methods, self._span(decl))
 
     def _lower_class_decl(self, decl: ClassDecl) -> HirClassDecl:
         tid = self.interner.mk_class(decl.name)
         fields = [
-            HirFieldDef(f.name, self._get_type_id_from_node(getattr(f, "type_ann", getattr(f, "type_annotation", None))), is_public=f.is_public, span=Span(f.line, f.col))
+            HirFieldDef(f.name, self._get_type_id_from_node(getattr(f, "type_ann", getattr(f, "type_annotation", None))), is_public=f.is_public, span=self._span(f))
             for f in decl.fields
         ]
         methods: List[HirFnDecl] = []
@@ -187,12 +175,12 @@ class HirBuilder:
             fields=fields,
             methods=methods,
             init_method=init_method,
-            span=Span(decl.line, decl.col)
+            span=self._span(decl)
         )
 
     def _lower_fn_decl(self, decl: FnDecl) -> HirFnDecl:
         params = [
-            HirParam(p.name, self._get_type_id_from_node(getattr(p, "type_ann", getattr(p, "type_annotation", None))), Span(p.line, p.col))
+            HirParam(p.name, self._get_type_id_from_node(getattr(p, "type_ann", getattr(p, "type_annotation", None))), self._span(p))
             for p in decl.params
         ]
         ret_tid = self._get_type_id_from_node(decl.return_type) if decl.return_type else TYPE_UNIT
@@ -212,12 +200,12 @@ class HirBuilder:
             err_type_name=err_type_name,
             is_method=False,
             is_public=True,
-            span=Span(decl.line, decl.col)
+            span=self._span(decl)
         )
 
     def _lower_method_decl(self, decl: MethodDecl) -> HirFnDecl:
         params = [
-            HirParam(p.name, self._get_type_id_from_node(getattr(p, "type_ann", getattr(p, "type_annotation", None))), Span(p.line, p.col))
+            HirParam(p.name, self._get_type_id_from_node(getattr(p, "type_ann", getattr(p, "type_annotation", None))), self._span(p))
             for p in decl.params
         ]
         ret_tid = self._get_type_id_from_node(decl.return_type) if decl.return_type else TYPE_UNIT
@@ -237,7 +225,7 @@ class HirBuilder:
             err_type_name=err_type_name,
             is_method=True,
             is_public=decl.is_public,
-            span=Span(decl.line, decl.col)
+            span=self._span(decl)
         )
 
     # -------------------------------------------------------------
@@ -255,10 +243,10 @@ class HirBuilder:
                 tail_hir = HirConstUnit(TYPE_UNIT, Span(block.tail_expr.line, block.tail_expr.col))
             else:
                 tail_hir = self._lower_expr(block.tail_expr)
-        return HirBlock(stmts, Span(block.line, block.col), tail_expr=tail_hir)
+        return HirBlock(stmts, self._span(block), tail_expr=tail_hir)
 
     def _lower_stmt(self, stmt: Stmt) -> HirStmt:
-        span = Span(stmt.line, stmt.col)
+        span = self._span(stmt)
         if isinstance(stmt, LetDecl):
             ann_node = getattr(stmt, "type_ann", getattr(stmt, "type_annotation", None))
             tid = self._get_type_id_from_node(ann_node) if ann_node else self._get_expr_type_id(stmt.initializer)
@@ -317,11 +305,11 @@ class HirBuilder:
         value = self._lower_expr_impl(expr)
         if hasattr(expr, "force_result_wrap_id"):
             return self._construct_enum("Result", "Ok", 0, expr.force_result_wrap_id,
-                                    Span(expr.line, expr.col), value)
+                                    self._span(expr), value)
         return value
 
     def _lower_expr_impl(self, expr: Expr) -> HirExpr:
-        span = Span(expr.line, expr.col)
+        span = self._span(expr)
         tid = self._get_expr_type_id(expr)
 
         if isinstance(expr, IntLiteral):
@@ -474,7 +462,7 @@ class HirBuilder:
             return HirIf(cond_hir, then_hir, elifs_hir, else_hir, tid, span)
         elif isinstance(expr, MatchExpr):
             sub_hir = self._lower_expr(expr.subject)
-            arms_hir = [HirMatchArm(arm.pattern, self._lower_block(arm.body), Span(arm.line, arm.col), self._lower_expr(arm.guard) if arm.guard is not None else None) for arm in expr.arms]
+            arms_hir = [HirMatchArm(arm.pattern, self._lower_block(arm.body), self._span(arm), self._lower_expr(arm.guard) if arm.guard is not None else None) for arm in expr.arms]
             return HirMatch(sub_hir, arms_hir, tid, span)
         elif isinstance(expr, RangeExpr):
             s_hir = self._lower_expr(expr.start)

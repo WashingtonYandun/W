@@ -2,9 +2,11 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 
 
 class Span:
-    def __init__(self, line: int = 1, col: int = 1):
+    def __init__(self, line: int = 1, col: int = 1, file_path=None, file_id=None):
         self.line = line
         self.col = col
+        self.file_path = file_path
+        self.file_id = file_id
 
     def __repr__(self) -> str:
         return f"Span({self.line}:{self.col})"

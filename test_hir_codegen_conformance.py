@@ -61,8 +61,8 @@ def run_hir_codegen_suite() -> bool:
 
                 # Compile with cc
                 cc_res = subprocess.run(
-                    ["cc", "-std=c99", "-O2", f"-I{repo_root}", c_path, "-o", bin_path],
-                    capture_output=True,
+                    [os.environ.get("CC", "cc"), "-std=c99", "-O2", f"-I{repo_root}", c_path, "-o", bin_path],
+                    timeout=120, capture_output=True,
                     text=True
                 )
                 if cc_res.returncode != 0:
@@ -73,9 +73,9 @@ def run_hir_codegen_suite() -> bool:
                 # Execute
                 exec_env = os.environ.copy()
                 exec_env["W_MEM_CHECK"] = "1"
-                run_res = subprocess.run([bin_path], capture_output=True, text=True, env=exec_env)
+                run_res = subprocess.run([bin_path], timeout=30, capture_output=True, text=True, env=exec_env)
 
-                if run_res.returncode != 0 and not expected_out.strip():
+                if run_res.returncode != 0:
                     failures.append((f, f"Execution failed with code {run_res.returncode}:\n{run_res.stderr}"))
                     print(f"  [FAIL] {f} (Runtime error)")
                     continue

@@ -59,7 +59,9 @@ class Parser:
         if show_tokens:
             print("Tokens:", self.tokens)
         try:
-            return self.produce_ast()
+            program = self.produce_ast()
+            program.source_text = source
+            return program
         except RecursionError:
             raise ParserError(
                 message="Maximum syntax nesting depth exceeded",
@@ -616,6 +618,21 @@ class Parser:
                     left = MemberExpr(object=left, property=prop_tok.value, line=dot.line, col=dot.col)
 
                 elif self.check(TokenType.LBRACKET):
+                    if isinstance(left, MemberExpr):
+                        saved = self.pos
+                        type_args = self._try_parse_generic_type_args()
+                        if type_args and self.match(TokenType.LPAREN):
+                            args = []
+                            if not self.check(TokenType.RPAREN):
+                                args.append(self.parse_expr())
+                                while self.match(TokenType.COMMA):
+                                    if self.check(TokenType.RPAREN):
+                                        break
+                                    args.append(self.parse_expr())
+                            self.expect(TokenType.RPAREN, code="P002", msg="Expected ')' after generic module call")
+                            left = CallExpr(left, args, type_args, line=left.line, col=left.col)
+                            continue
+                        self.pos = saved
                     # Indexing
                     bracket = self.advance()
                     index_expr = self.parse_expr()

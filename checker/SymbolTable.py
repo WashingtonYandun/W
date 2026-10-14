@@ -105,5 +105,7 @@ def create_global_scope() -> Scope:
     scope.define_symbol(Symbol("enumerate", FunctionType([AnyType()], AnyType()), kind="builtin"))
     scope.define_symbol(Symbol("dict_items", FunctionType([AnyType()], AnyType()), kind="builtin"))
 
+    scope.define_symbol(Symbol("weak", FunctionType([AnyType()], AnyType()), kind="builtin"))
+    scope.define_symbol(Symbol("upgrade", FunctionType([AnyType()], AnyType()), kind="builtin"))
     return scope
 

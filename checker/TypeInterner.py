@@ -1,10 +1,13 @@
+from itertools import count
 from typing import Any, Dict, List, Optional, Set, Tuple, Union
 from checker.WType import (
     WType, PrimitiveType, IntType, FloatType, BoolType, StrType, UnitType, NoneType,
-    OptionalType, ListType, DictType, TupleType, StructType, EnumType,
+    OptionalType, WeakType, ListType, DictType, TupleType, StructType, EnumType,
     InterfaceType, ClassFieldInfo, ClassMethodInfo, ClassType,
     ResultType, FunctionType, ModuleType, AnyType
 )
+
+_ARENA_IDS = count(1)
 
 # Canonical Reserved TypeId Constants (docs/TYPE_SYSTEM_DESIGN.md)
 TYPE_ERROR: int = 0
@@ -115,6 +118,7 @@ class TypeInterner:
     - Bidirectional mapping with legacy WType hierarchy.
     """
     def __init__(self) -> None:
+        self.arena_id = next(_ARENA_IDS)
         self._entries: List[TypeEntry] = []
         self._capabilities: List[TypeCapabilities] = []
         self._key_to_id: Dict[Tuple[Any, ...], int] = {}
@@ -213,6 +217,17 @@ class TypeInterner:
     # -------------------------------------------------------------
     # Constructors for Composite Types
     # -------------------------------------------------------------
+
+    def mk_weak(self, target_id: int) -> int:
+        if self.get_entry(target_id).tag != "class":
+            return TYPE_ERROR
+        tid = self._intern(("weak", target_id), TypeEntry("weak", target_id),
+                           TypeCapabilities(needs_retain=True, needs_release=True,
+                                            is_value=True, has_identity=True,
+                                            is_comparable=True, is_valid_dict_key=False))
+        if tid not in self._id_to_wtype:
+            self._id_to_wtype[tid] = WeakType(self.to_wtype(target_id))
+        return tid
 
     def mk_optional(self, inner_id: int) -> int:
         if inner_id == TYPE_ERROR:
@@ -575,6 +590,8 @@ class TypeInterner:
         elif entry.tag == "result":
             ok_id, err_id = entry.data
             return f"{self.to_string(ok_id)} ! {self.to_string(err_id)}"
+        elif entry.tag == "weak":
+            return f"Weak[{self.to_string(entry.data)}]"
         elif entry.tag == "list":
             return f"list[{self.to_string(entry.data)}]"
         elif entry.tag == "dict":
@@ -621,6 +638,8 @@ class TypeInterner:
             elif wtype.name == "none":
                 return TYPE_NONE
             return TYPE_ERROR
+        elif isinstance(wtype, WeakType):
+            return self.mk_weak(self.from_wtype(wtype.target))
         elif isinstance(wtype, OptionalType):
             return self.mk_optional(self.from_wtype(wtype.inner))
         elif isinstance(wtype, ResultType):
@@ -705,6 +724,8 @@ class TypeInterner:
                 res = UnitType
             elif pname == "none":
                 res = NoneType
+        elif entry.tag == "weak":
+            res = WeakType(self.to_wtype(entry.data))
         elif entry.tag == "optional":
             res = OptionalType(self.to_wtype(entry.data))
         elif entry.tag == "result":

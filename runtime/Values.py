@@ -1,4 +1,12 @@
+import weakref
 from typing import Any, Dict, List, Optional
+
+def nominal_display_name(name):
+    if name.startswith('__wm_'):
+        boundary = name.find('__', 5)
+        if boundary >= 0:
+            return name[boundary + 2:]
+    return name
 
 def display_value(value, quote_string=False):
     while isinstance(value, WEnumValue) and value.enum_name == "Option" and value.variant == "Some" and value.payload:
@@ -192,8 +200,8 @@ class WEnumValue(WValue):
             return str(self.payload[0])
         if self.payload:
             args_str = ", ".join(display_value(p, True) for p in self.payload)
-            return f"{self.enum_name}.{self.variant}({args_str})"
-        return f"{self.enum_name}.{self.variant}"
+            return f"{nominal_display_name(self.enum_name)}.{self.variant}({args_str})"
+        return f"{nominal_display_name(self.enum_name)}.{self.variant}"
 
 
 # ==========================================
@@ -422,7 +430,7 @@ class WStructInstance(CowOwner):
 
     def __str__(self) -> str:
         fields_str = ", ".join(f"{k}: {display_value(v, True)}" for k, v in self.storage.data.items())
-        return f"{self.struct_name} {{ {fields_str} }}"
+        return f"{nominal_display_name(self.struct_name)} {{ {fields_str} }}"
 
 
 # ==========================================
@@ -492,7 +500,27 @@ class WObjectInstance(WValue):
 
     def __str__(self) -> str:
         fields_str = ", ".join(f"{k}: {display_value(v, True)}" for k, v in self.fields.items())
-        return f"{self.class_name} {{ {fields_str} }}"
+        return f"{nominal_display_name(self.class_name)} {{ {fields_str} }}"
+
+
+class WWeak(WValue):
+    def __init__(self, target: Optional[WObjectInstance] = None):
+        if target is None:
+            self.identity = object()
+            self.reference = lambda: None
+            return
+        if not hasattr(target, "weak_identity"):
+            target.weak_identity = object()
+        self.identity = target.weak_identity
+        self.reference = weakref.ref(target)
+
+    def __eq__(self, other: Any) -> bool:
+        if isinstance(other, WEnumValue) and other.enum_name == "Option" and other.variant == "Some":
+            return other == self
+        return isinstance(other, WWeak) and self.identity is other.identity
+
+    def __str__(self) -> str:
+        return "weak(alive)" if self.reference() is not None else "weak(expired)"
 
 
 class WSuperProxy(WValue):

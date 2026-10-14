@@ -1,4 +1,3 @@
-import os
 import sys
 from typing import Any, Dict, List, Optional, TextIO, Tuple
 from error.Error import WRuntimeError
@@ -12,14 +11,14 @@ from node.NodeType import (
     MemberExpr, IndexExpr, AssignmentExpr, StructInitExpr, ListExpr, DictExpr, TupleExpr,
     IfExpr, MatchExpr, Pattern, IdentifierPattern, TuplePattern, EnumPattern,
     LiteralPattern, WildcardPattern,
-    NamedType, OptionalType as AstOptionalType, ListType as AstListType, DictType as AstDictType
+    GenericType, NamedType, OptionalType as AstOptionalType, ListType as AstListType, DictType as AstDictType
 )
 from runtime.Values import (
     WValue, WInt, WFloat, WBool, WStr, WUnit, WNone,
     WList, WDict, WTuple, WRange, WStructInstance, WEnumValue,
     WResult, WOk, WErr, WFunction, WNativeFunction, WBoundMethod,
     WClassDef, WObjectInstance, WSuperProxy,
-    WEnumNamespace, WModule
+    WEnumNamespace, WModule, WWeak
 )
 
 from runtime.Environment import (
@@ -39,6 +38,11 @@ class Interpreter:
         self.global_env = create_global_environment(stdout=self.stdout)
 
     def interpret(self, program: Program) -> WValue:
+        if not hasattr(program, "session") and any(isinstance(node, ImportDecl) for node in program.body):
+            from checker.TypeChecker import TypeChecker
+            TypeChecker(file=self.file).check(program)
+        if hasattr(program, "session"):
+            program = program.session.link(program)
         # Pass 1: Register top-level enums, classes, structs, and functions
         for stmt in program.body:
             if isinstance(stmt, EnumDecl):
@@ -85,7 +89,7 @@ class Interpreter:
             for stmt in program.body:
                 if not isinstance(stmt, (FnDecl, StructDecl, EnumDecl, InterfaceDecl, ClassDecl)):
                     last_val = self.eval_stmt(stmt, self.global_env)
-        elif self.global_env.exists("main"):
+        if getattr(program, "call_entrypoint", not non_decls) and self.global_env.exists("main"):
             main_fn = self.global_env.lookup("main")
             if isinstance(main_fn, WFunction):
                 last_val = self.call_function(main_fn, [])
@@ -168,35 +172,8 @@ class Interpreter:
         return WUnit()
 
     def eval_import_decl(self, stmt: ImportDecl, env: Environment) -> WValue:
-        # Resolve path relative to source file directory or cwd
-        current_dir = os.path.dirname(os.path.abspath(self.file)) if self.file != "<stdin>" else os.getcwd()
-        resolved_path = os.path.join(current_dir, stmt.path)
-        if not os.path.exists(resolved_path):
-            # Fallback to direct path
-            resolved_path = stmt.path
-
-        if not os.path.exists(resolved_path):
-            raise WRuntimeError(
-                message=f"Module not found: '{stmt.path}'",
-                line=stmt.line,
-                col=stmt.col,
-                file=self.file
-            )
-
-        with open(resolved_path, "r", encoding="utf-8") as f:
-            code = f.read()
-
-        from parser.Parser import Parser
-
-        ast = Parser(file=resolved_path).parse(code)
-
-
-        sub_interpreter = Interpreter(stdout=self.stdout, file=resolved_path)
-        sub_interpreter.interpret(ast)
-
-        mod = WModule(name=stmt.namespace, env=sub_interpreter.global_env)
-        env.declare(stmt.namespace, mod, is_mut=False)
-        return mod
+        raise WRuntimeError("Imports require a checked compilation session", file=self.file,
+                            line=stmt.line, col=stmt.col)
 
     def bind_pattern(self, pattern: Pattern, value: WValue, env: Environment) -> None:
         if isinstance(pattern, IdentifierPattern):
@@ -635,6 +612,8 @@ class Interpreter:
                 return WBool(False)
             if type_ann.name == "str":
                 return WStr("")
+        elif isinstance(type_ann, GenericType) and type_ann.name == "Weak":
+            return WWeak()
         elif isinstance(type_ann, AstOptionalType):
             return WNone()
         elif isinstance(type_ann, AstListType):

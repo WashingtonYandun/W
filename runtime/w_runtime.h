@@ -22,7 +22,8 @@ typedef enum {
     W_OBJECT,
     W_ENUM,
     W_OK,
-    W_ERR
+    W_ERR,
+    W_WEAK
 } WTag;
 
 struct WVal;
@@ -49,13 +50,22 @@ typedef struct {
     WVal* items;
 } WTupleBuf;
 
+typedef struct WWeakControl WWeakControl;
+
 typedef struct {
     int32_t refcount;
+    WWeakControl* control;
     const char* name;
     int32_t len;
     const char** keys;
     WVal* vals;
 } WStructBuf;
+
+struct WWeakControl {
+    int32_t strong;
+    int32_t weak; /* Includes one implicit reference while the object is alive. */
+    WStructBuf* object;
+};
 
 typedef struct WBoxBuf WBoxBuf;
 
@@ -85,6 +95,7 @@ struct WVal {
         WStructBuf* st;
         WEnumVal en;
         WBoxBuf* box;
+        WWeakControl* weak;
     } as;
 };
 
@@ -283,7 +294,15 @@ static inline WVal w_clone(WVal v) {
         w_check_refcount(v.as.dict->refcount, "retain/dict");
         v.as.dict->refcount++;
         w_g_retain_count++;
-    } else if ((v.tag == W_STRUCT || v.tag == W_OBJECT) && v.as.st) {
+    } else if (v.tag == W_WEAK && v.as.weak) {
+        w_check_refcount(v.as.weak->weak, "retain/weak");
+        v.as.weak->weak++;
+        w_g_retain_count++;
+    } else if (v.tag == W_OBJECT && v.as.st) {
+        w_check_refcount(v.as.st->control->strong, "retain/object");
+        v.as.st->control->strong++;
+        w_g_retain_count++;
+    } else if (v.tag == W_STRUCT && v.as.st) {
         w_check_refcount(v.as.st->refcount, "retain/struct_or_object");
         v.as.st->refcount++;
         w_g_retain_count++;
@@ -343,7 +362,32 @@ static inline void w_release(WVal v) {
             free(d);
             w_mem_on_free();
         }
-    } else if ((v.tag == W_STRUCT || v.tag == W_OBJECT) && v.as.st) {
+    } else if (v.tag == W_WEAK && v.as.weak) {
+        WWeakControl* control = v.as.weak;
+        w_check_refcount(control->weak, "release/weak");
+        w_g_release_count++;
+        if (--control->weak == 0) {
+            free(control);
+            w_mem_on_free();
+        }
+    } else if (v.tag == W_OBJECT && v.as.st) {
+        WStructBuf* object = v.as.st;
+        WWeakControl* control = object->control;
+        w_check_refcount(control->strong, "release/object");
+        w_g_release_count++;
+        if (--control->strong == 0) {
+            control->object = NULL;
+            for (int32_t i = 0; i < object->len; i++) w_release(object->vals[i]);
+            free(object->keys);
+            free(object->vals);
+            free(object);
+            w_mem_on_free();
+            if (--control->weak == 0) {
+                free(control);
+                w_mem_on_free();
+            }
+        }
+    } else if (v.tag == W_STRUCT && v.as.st) {
         WStructBuf* st = v.as.st;
         w_check_refcount(st->refcount, "release/struct_or_object");
         w_g_release_count++;
@@ -533,6 +577,7 @@ static inline void w_struct_detach(WVal* v) {
     w_g_release_count++;
     WStructBuf* new_b = (WStructBuf*)malloc(sizeof(WStructBuf));
     new_b->refcount = 1;
+    new_b->control = NULL;
     new_b->name = old_b->name;
     new_b->len = old_b->len;
     int32_t cap = old_b->len > 0 ? old_b->len : 1;
@@ -632,6 +677,8 @@ static inline bool w_eq(WVal a, WVal b) {
                 if (!w_eq(a.as.st->vals[i], b.as.st->vals[i])) return false;
             }
             return true;
+        case W_WEAK:
+            return a.as.weak == b.as.weak;
         case W_OBJECT:
             return a.as.st == b.as.st;
         case W_OK:
@@ -714,6 +761,7 @@ static inline WVal w_make_dict(int32_t count, const WVal* keys, const WVal* vals
 static inline WVal w_make_struct(const char* name, int32_t count, const char** keys, const WVal* vals) {
     WStructBuf* st = (WStructBuf*)malloc(sizeof(WStructBuf));
     st->refcount = 1;
+    st->control = NULL;
     st->name = name;
     st->len = count;
     st->keys = (const char**)malloc(sizeof(const char*) * (count > 0 ? count : 1));
@@ -729,6 +777,11 @@ static inline WVal w_make_struct(const char* name, int32_t count, const char** k
 static inline WVal w_make_object(const char* name, int32_t count, const char** keys, const WVal* vals) {
     WStructBuf* st = (WStructBuf*)malloc(sizeof(WStructBuf));
     st->refcount = 1;
+    st->control = (WWeakControl*)malloc(sizeof(WWeakControl));
+    st->control->strong = 1;
+    st->control->weak = 1;
+    st->control->object = st;
+    w_mem_on_alloc();
     st->name = name;
     st->len = count;
     st->keys = (const char**)malloc(sizeof(const char*) * (count > 0 ? count : 1));
@@ -739,6 +792,53 @@ static inline WVal w_make_object(const char* name, int32_t count, const char** k
         st->vals[i] = w_clone(vals[i]);
     }
     WVal v; v.tag = W_OBJECT; v.as.st = st; return v;
+}
+
+/* Default non-optional weak fields are independent expired handles. */
+static inline WVal w_empty_weak(void) {
+    WWeakControl* control = (WWeakControl*)malloc(sizeof(WWeakControl));
+    control->strong = 0;
+    control->weak = 1;
+    control->object = NULL;
+    w_mem_on_alloc();
+    WVal value = w_unit();
+    value.tag = W_WEAK;
+    value.as.weak = control;
+    return value;
+}
+
+/* Both helpers borrow their input and return one owned reference. */
+static inline WVal w_builtin_weak(WVal object) {
+    if (object.tag != W_OBJECT) {
+        fprintf(stderr, "[W4003] RuntimeError: weak expects a class object\n");
+        exit(1);
+    }
+    WVal value = w_unit();
+    value.tag = W_WEAK;
+    value.as.weak = object.as.st->control;
+    value.as.weak->weak++;
+    w_g_retain_count++;
+    return value;
+}
+
+/* Language weak calls consume their evaluated argument snapshot immediately. */
+static inline WVal w_builtin_weak_owned(WVal object) {
+    WVal handle = w_builtin_weak(object);
+    w_release(object);
+    return handle;
+}
+
+static inline WVal w_builtin_upgrade(WVal weak) {
+    if (weak.tag != W_WEAK) {
+        fprintf(stderr, "[W4003] RuntimeError: upgrade expects a weak reference\n");
+        exit(1);
+    }
+    WWeakControl* control = weak.as.weak;
+    if (control->strong == 0 || control->object == NULL) return w_none();
+    WVal object = w_unit();
+    object.tag = W_OBJECT;
+    object.as.st = control->object;
+    return w_clone(object);
 }
 
 /* UTF-8 Code-Point Helpers (SPEC Section 3.3) */
@@ -1012,9 +1112,25 @@ static inline WVal w_ge(WVal a, WVal b) {
 }
 
 /* Formatting & String Conversion (matching W0 Values.__str__ exactly) */
+/* Internal module identity is retained for equality/dispatch, not display. */
+static inline const char* w_nominal_display_name(const char* name) {
+    if (strncmp(name, "__wm_", 5) == 0) {
+        const char* boundary = strstr(name + 5, "__");
+        if (boundary) return boundary + 2;
+    }
+    return name;
+}
+
 static inline char* w_to_cstr(WVal v, bool quote_str) {
     char* buf;
     switch (v.tag) {
+        case W_WEAK: {
+            const char* text = v.as.weak->object ? "weak(alive)" : "weak(expired)";
+            char* result = (char*)malloc(strlen(text) + 1);
+            strcpy(result, text);
+            return result;
+        }
+
         case W_UNIT:
             buf = (char*)malloc(5);
             strcpy(buf, "unit");
@@ -1061,10 +1177,10 @@ static inline char* w_to_cstr(WVal v, bool quote_str) {
                     size_t cap = 64;
                     size_t pos = 0;
                     buf = (char*)malloc(cap);
-                    size_t l1 = strlen(v.as.en.enum_name);
+                    size_t l1 = strlen(w_nominal_display_name(v.as.en.enum_name));
                     size_t l2 = strlen(v.as.en.variant);
                     while (pos + l1 + l2 + 2 >= cap) { cap *= 2; buf = (char*)realloc(buf, cap); }
-                    memcpy(buf + pos, v.as.en.enum_name, l1); pos += l1;
+                    memcpy(buf + pos, w_nominal_display_name(v.as.en.enum_name), l1); pos += l1;
                     buf[pos++] = '.';
                     memcpy(buf + pos, v.as.en.variant, l2); pos += l2;
                     buf[pos++] = '(';
@@ -1084,19 +1200,19 @@ static inline char* w_to_cstr(WVal v, bool quote_str) {
                     return buf;
                 } else {
                     char* sub = w_to_cstr(v.as.en.box->val, true);
-                    size_t l1 = strlen(v.as.en.enum_name);
+                    size_t l1 = strlen(w_nominal_display_name(v.as.en.enum_name));
                     size_t l2 = strlen(v.as.en.variant);
                     size_t lsub = strlen(sub);
                     buf = (char*)malloc(l1 + l2 + lsub + 4);
-                    snprintf(buf, l1 + l2 + lsub + 4, "%s.%s(%s)", v.as.en.enum_name, v.as.en.variant, sub);
+                    snprintf(buf, l1 + l2 + lsub + 4, "%s.%s(%s)", w_nominal_display_name(v.as.en.enum_name), v.as.en.variant, sub);
                     free(sub);
                     return buf;
                 }
             }
-            size_t l1 = strlen(v.as.en.enum_name);
+            size_t l1 = strlen(w_nominal_display_name(v.as.en.enum_name));
             size_t l2 = strlen(v.as.en.variant);
             buf = (char*)malloc(l1 + l2 + 2);
-            snprintf(buf, l1 + l2 + 2, "%s.%s", v.as.en.enum_name, v.as.en.variant);
+            snprintf(buf, l1 + l2 + 2, "%s.%s", w_nominal_display_name(v.as.en.enum_name), v.as.en.variant);
             return buf;
         }
         case W_LIST: {
@@ -1169,8 +1285,8 @@ static inline char* w_to_cstr(WVal v, bool quote_str) {
             size_t cap = 128;
             size_t pos = 0;
             buf = (char*)malloc(cap);
-            size_t nl = strlen(v.as.st->name);
-            memcpy(buf + pos, v.as.st->name, nl); pos += nl;
+            size_t nl = strlen(w_nominal_display_name(v.as.st->name));
+            memcpy(buf + pos, w_nominal_display_name(v.as.st->name), nl); pos += nl;
             buf[pos++] = ' '; buf[pos++] = '{'; buf[pos++] = ' ';
             for (int32_t i = 0; i < v.as.st->len; i++) {
                 if (i > 0) {

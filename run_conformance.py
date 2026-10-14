@@ -14,9 +14,11 @@ from codegen.CCodeGen import CCodeGen
 from hir.HirBuilder import HirBuilder
 from hir.HirNodes import HirModule
 from hir.HirCCodeGen import HirCCodeGen
+from tests.engine_harness import unsupported_reason
 from test_w1_split_conformance import test_split_conformance
 from test_generic_hardening import run_generic_hardening_tests
 from test_cow_telemetry import run_cow_telemetry_suite
+from test_compilation_session import run_session_tests
 from error.Error import DIAGNOSTIC_CODES, LexerError, ParserError, TypeError, WError
 from token.TokenType import TokenType
 from node.NodeType import Program
@@ -288,15 +290,17 @@ def _run_suite_in_repo(repo_root: str) -> None:
                 bin_path = os.path.join(tmpdir, f[:-2])
                 with open(c_path, "w", encoding="utf-8") as cf:
                     cf.write(c_code)
-                comp = subprocess.run(["cc", "-std=c99", f"-I{repo_root}"] + extra_cc_flags + [c_path, "-o", bin_path], capture_output=True, text=True)
+                comp = subprocess.run([os.environ.get("CC", "cc"), "-std=c99", f"-I{repo_root}"] + extra_cc_flags + [c_path, "-o", bin_path], timeout=120, capture_output=True, text=True)
                 assert comp.returncode == 0, comp.stderr
-                run_res = subprocess.run([bin_path], capture_output=True, text=True)
+                run_res = subprocess.run([bin_path], timeout=30, capture_output=True, text=True)
+                assert run_res.returncode == 0, run_res.stderr
                 assert run_res.stdout == expected, f"Expected {expected!r}, got {run_res.stdout!r}"
                 c99_passed += 1
             except Exception as e:
                 print(f"  [C99 FAIL] {f}: {e}")
 
-        w1_targets = [f for f in c99_targets if not f.startswith("generic_")]
+        w1_targets = [f for f in c99_targets if not unsupported_reason("tests/runtime/" + f, "w1")]
+        print(f"W1 profile: {len(w1_targets)} supported, {len(c99_targets) - len(w1_targets)} unsupported (see tests/engine_profiles.json)")
         w1_runtime_passed = 0
 
         # 8. Self-Hosting Bootstrap Fixed-Point (W0 -> W1 Stage 1 -> W1 Stage 2)
@@ -317,10 +321,10 @@ def _run_suite_in_repo(repo_root: str) -> None:
             with open(c0_path, "w", encoding="utf-8") as cf:
                 cf.write(c0_code)
 
-            subprocess.run(["cc", "-std=c99", "-O2", f"-I{repo_root}", c0_path, "-o", s1_bin], check=True, capture_output=True)
-            subprocess.run([s1_bin, w1_src_path, c1_path], check=True, capture_output=True)
-            subprocess.run(["cc", "-std=c99", "-O2", f"-I{repo_root}", c1_path, "-o", s2_bin], check=True, capture_output=True)
-            subprocess.run([s2_bin, w1_src_path, c2_path], check=True, capture_output=True)
+            subprocess.run([os.environ.get("CC", "cc"), "-std=c99", "-O2", f"-I{repo_root}", c0_path, "-o", s1_bin], check=True, timeout=120, capture_output=True)
+            subprocess.run([s1_bin, w1_src_path, c1_path], check=True, timeout=120, capture_output=True)
+            subprocess.run([os.environ.get("CC", "cc"), "-std=c99", "-O2", f"-I{repo_root}", c1_path, "-o", s2_bin], check=True, timeout=120, capture_output=True)
+            subprocess.run([s2_bin, w1_src_path, c2_path], check=True, timeout=120, capture_output=True)
 
             h0 = sha256_file(c0_path)
             h1 = sha256_file(c1_path)
@@ -329,7 +333,7 @@ def _run_suite_in_repo(repo_root: str) -> None:
             bootstrap_ok = True
 
             # 9. Verify W1 Stage 2 Native Compiler on Core Runtime Conformance Programs
-            w1_targets = [f for f in c99_targets if not f.startswith("generic_")]
+            w1_targets = [f for f in c99_targets if not unsupported_reason("tests/runtime/" + f, "w1")]
             for f in w1_targets:
                 path = os.path.join(runtime_dir, f)
                 expected_path = os.path.join(runtime_dir, f[:-2] + ".expected")
@@ -337,9 +341,10 @@ def _run_suite_in_repo(repo_root: str) -> None:
                     expected = exp_stream.read()
                 w1_c_path = os.path.join(tmpdir, "w1_" + f[:-2] + ".c")
                 w1_bin_path = os.path.join(tmpdir, "w1_" + f[:-2])
-                subprocess.run([s2_bin, path, w1_c_path], check=True, capture_output=True, cwd=repo_root)
-                subprocess.run(["cc", "-std=c99", f"-I{repo_root}"] + extra_cc_flags + [w1_c_path, "-o", w1_bin_path], check=True, capture_output=True)
-                run_res = subprocess.run([w1_bin_path], capture_output=True, text=True, cwd=repo_root)
+                subprocess.run([s2_bin, path, w1_c_path], check=True, timeout=120, capture_output=True, cwd=repo_root)
+                subprocess.run([os.environ.get("CC", "cc"), "-std=c99", f"-I{repo_root}"] + extra_cc_flags + [w1_c_path, "-o", w1_bin_path], check=True, timeout=120, capture_output=True)
+                run_res = subprocess.run([w1_bin_path], timeout=30, capture_output=True, text=True, cwd=repo_root)
+                assert run_res.returncode == 0, run_res.stderr
                 assert run_res.stdout == expected
                 w1_runtime_passed += 1
 
@@ -363,9 +368,10 @@ def _run_suite_in_repo(repo_root: str) -> None:
 
                 ex_c_path = os.path.join(tmpdir, "ex_" + f[:-2] + ".c")
                 ex_bin_path = os.path.join(tmpdir, "ex_" + f[:-2])
-                subprocess.run([s2_bin, ex_path, ex_c_path], check=True, capture_output=True, cwd=repo_root)
-                subprocess.run(["cc", "-std=c99", f"-I{repo_root}", ex_c_path, "-o", ex_bin_path], check=True, capture_output=True)
-                ex_res = subprocess.run([ex_bin_path], capture_output=True, text=True, cwd=repo_root)
+                subprocess.run([s2_bin, ex_path, ex_c_path], check=True, timeout=120, capture_output=True, cwd=repo_root)
+                subprocess.run([os.environ.get("CC", "cc"), "-std=c99", f"-I{repo_root}", ex_c_path, "-o", ex_bin_path], check=True, timeout=120, capture_output=True)
+                ex_res = subprocess.run([ex_bin_path], timeout=30, capture_output=True, text=True, cwd=repo_root)
+                assert ex_res.returncode == 0, ex_res.stderr
                 assert ex_res.stdout == ex_expected, f"W1 native mismatch on {f}"
                 examples_passed += 1
         except Exception as e:
@@ -397,9 +403,10 @@ def _run_suite_in_repo(repo_root: str) -> None:
                 bin_path = os.path.join(tmpdir, "hir_" + f[:-2])
                 with open(c_path, "w", encoding="utf-8") as cf:
                     cf.write(c_code)
-                comp = subprocess.run(["cc", "-std=c99", f"-I{repo_root}"] + extra_cc_flags + [c_path, "-o", bin_path], capture_output=True, text=True)
+                comp = subprocess.run([os.environ.get("CC", "cc"), "-std=c99", f"-I{repo_root}"] + extra_cc_flags + [c_path, "-o", bin_path], timeout=120, capture_output=True, text=True)
                 assert comp.returncode == 0, comp.stderr
-                run_res = subprocess.run([bin_path], capture_output=True, text=True, cwd=repo_root)
+                run_res = subprocess.run([bin_path], timeout=30, capture_output=True, text=True, cwd=repo_root)
+                assert run_res.returncode == 0, run_res.stderr
                 assert run_res.stdout == expected, f"HIR C99 mismatch on {f}: expected {expected!r}, got {run_res.stdout!r}"
                 hir_c99_passed += 1
             except Exception as e:
@@ -415,6 +422,7 @@ def _run_suite_in_repo(repo_root: str) -> None:
     temp_file = os.path.join(runtime_dir, "temp_file.txt")
     # 11. Copy-on-Write Telemetry & Path-Copying Asymptotics (B02)
     cow_telemetry_ok = run_cow_telemetry_suite()
+    session_ok = run_session_tests()
 
     if os.path.exists(temp_file):
         try:
@@ -428,6 +436,7 @@ def _run_suite_in_repo(repo_root: str) -> None:
     print(f"W1 Modular Split:    {'1/1 (Loss-less verified)' if split_ok else '0/1'}")
     print(f"Generic Hardening:   {'1/1 (Canonical cache verified)' if hardening_ok else '0/1'}")
     print(f"CoW Telemetry (B02): {'1/1 (Asymptotics verified)' if cow_telemetry_ok else '0/1'}")
+    print(f"Compilation Session: {'1/1' if session_ok else '0/1'}")
     print(f"Examples E2E Suite:  {examples_passed}/{len(example_files)}")
     print(f"Bootstrap FixedPoint:{'1/1 (SHA256 verified)' if bootstrap_ok else '0/1'}")
 
@@ -449,6 +458,7 @@ def _run_suite_in_repo(repo_root: str) -> None:
         and split_ok
         and hardening_ok
         and cow_telemetry_ok
+        and session_ok
         and examples_passed == len(example_files)
         and bootstrap_ok
     )
@@ -458,7 +468,7 @@ def _run_suite_in_repo(repo_root: str) -> None:
             v_lex_passed + i_lex_passed + v_parse_passed + i_parse_passed +
             v_type_passed + i_type_passed + err_passed + fmt_passed + hir_passed +
             runtime_passed + c99_passed + hir_c99_passed + w1_runtime_passed +
-            examples_passed + 1 + 1 + 1 + 1
+            examples_passed + 1 + 1 + 1 + 1 + 1
         )
         print(f"ALL {total}/{total} CONFORMANCE, EXAMPLES & SELF-HOSTING TESTS PASSED (100%).")
         sys.exit(0)

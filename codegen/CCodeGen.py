@@ -1,8 +1,7 @@
-import os
 from typing import Dict, List, Optional, Set, Tuple
 from node.NodeType import (
     Program, Stmt, Expr, TypeNode, ResultType,
-    NamedType, OptionalType as AstOptionalType, ListType as AstListType, DictType as AstDictType,
+    GenericType, NamedType, OptionalType as AstOptionalType, ListType as AstListType, DictType as AstDictType,
     Pattern, IdentifierPattern, TuplePattern, EnumPattern, LiteralPattern, WildcardPattern,
     Block, ExprStmt, Param, FnDecl, StructDecl, EnumDecl, ImportDecl,
     InterfaceDecl, ClassDecl, ClassField, MethodDecl,
@@ -160,6 +159,8 @@ class CCodeGen:
         return "".join(out)
 
     def generate(self, program: Program) -> str:
+        if hasattr(program, "session"):
+            program = program.session.link(program)
         self.interner = getattr(program, "interner", None)
         self._collect_declarations(program, ns="")
         self._prepare_oop_prototypes()
@@ -171,7 +172,7 @@ class CCodeGen:
 
         # If there are no top-level executable statements and main() exists in W, call it
         non_decls = [s for s in program.body if not isinstance(s, (FnDecl, StructDecl, EnumDecl, InterfaceDecl, ClassDecl, ImportDecl))]
-        if not non_decls and "w_fn_main" in self.fallible_fns:
+        if getattr(program, "call_entrypoint", not non_decls) and "w_fn_main" in self.fallible_fns:
             main_stmts.append("w_release(w_fn_main());")
 
         self._pop_scope(main_stmts)
@@ -284,6 +285,8 @@ class CCodeGen:
                 return "w_bool(false)"
             if type_ann.name == "str":
                 return 'w_str("")'
+        elif isinstance(type_ann, GenericType) and type_ann.name == "Weak":
+            return "w_empty_weak()"
         elif isinstance(type_ann, AstOptionalType):
             return "w_none()"
         elif isinstance(type_ann, AstListType):
@@ -421,24 +424,9 @@ class CCodeGen:
         self.current_ns = prev_ns
 
     def _handle_import(self, stmt: ImportDecl, out_main_stmts: List[str]) -> None:
-        current_dir = os.path.dirname(os.path.abspath(self.file)) if self.file != "<stdin>" else os.getcwd()
-        resolved_path = os.path.join(current_dir, stmt.path)
-        if not os.path.exists(resolved_path):
-            resolved_path = stmt.path
-        abs_path = os.path.abspath(resolved_path)
-        if abs_path in self.imported_modules:
-            return
-        self.imported_modules.add(abs_path)
-
-        with open(abs_path, "r", encoding="utf-8") as f:
-            code = f.read()
-
-        sub_ast = Parser(file=abs_path).parse(code)
-        prev_file = self.file
-        self.file = abs_path
-        self._collect_declarations(sub_ast, ns=stmt.namespace)
-        self._emit_module_body(sub_ast, ns=stmt.namespace, out_main_stmts=out_main_stmts)
-        self.file = prev_file
+        from error.Error import WError
+        raise WError("AST emission imports require a checked compilation session", file=self.file,
+                     line=stmt.line, col=stmt.col, code="W9999", stage="module-linking")
 
     def _emit_fn_decl(self, stmt: FnDecl, ns: str) -> None:
         c_name = self.c_fn(stmt.name, ns=ns)
@@ -958,7 +946,10 @@ class CCodeGen:
                     out.append(f"WVal {arr_tmp}[{len(arg_vals)}] = {{ {elems_c} }};")
                     return self._bind_call(f"w_builtin_eprint({len(arg_vals)}, {arr_tmp})", out)
 
+                if fn_name == "weak" and len(arg_vals) == 1:
+                    return self._bind_call(f"w_builtin_weak_owned({self._own_expr(arg_vals[0])})", out)
                 builtin_1 = {
+                    "weak": "w_builtin_weak", "upgrade": "w_builtin_upgrade",
                     "len": "w_builtin_len",
                     "str": "w_builtin_str",
                     "int": "w_builtin_int",
