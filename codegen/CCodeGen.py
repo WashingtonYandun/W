@@ -100,6 +100,17 @@ class CCodeGen:
             if scope.kind == "loop":
                 break
 
+    def _snapshot(self, value: str, out: List[str]) -> str:
+        """Protect an evaluated value before later operands can mutate its owner."""
+        if value.startswith("_t"):
+            return value
+        if value.startswith(("w_make_", "w_new_")):
+            return self._bind_call(value, out)
+        return self._bind_call(f"w_clone({value})", out)
+
+    def emit_value(self, expr, out: List[str]) -> str:
+        return self._snapshot(self.emit_expr(expr, out), out)
+
     def _own_expr(self, val_expr: str) -> str:
         if val_expr.startswith("_t"):
             return f"w_move(&{val_expr})"
@@ -398,7 +409,11 @@ class CCodeGen:
             if not isinstance(stmt, (FnDecl, StructDecl, EnumDecl, InterfaceDecl, ClassDecl, ImportDecl)):
                 if isinstance(stmt, LetDecl):
                     gv_name = f"v_{ns}_{stmt.name}" if ns else f"v_{stmt.name}"
-                    val_expr = self.emit_expr(stmt.initializer, out_main_stmts)
+                    if isinstance(stmt.initializer, ListExpr) and not stmt.initializer.elements:
+                        # A direct global store consumes the fresh constructor immediately.
+                        val_expr = "w_make_list(0, NULL)"
+                    else:
+                        val_expr = self.emit_expr(stmt.initializer, out_main_stmts)
                     out_main_stmts.append(f"w_assign(&{gv_name}, {self._own_expr(val_expr)});")
                 else:
                     self.emit_stmt(stmt, out_main_stmts)
@@ -678,7 +693,7 @@ class CCodeGen:
             return f"&{self.c_var(target.name)}"
         if isinstance(target, IndexExpr):
             obj_ref = self.emit_lvalue_ref(target.object, out)
-            idx_val = self.emit_expr(target.index, out)
+            idx_val = self.emit_value(target.index, out)
             return f"w_index_ref({obj_ref}, {idx_val})"
         if isinstance(target, MemberExpr):
             obj_ref = self.emit_lvalue_ref(target.object, out)
@@ -730,7 +745,7 @@ class CCodeGen:
             return "v_self"
 
         if isinstance(expr, NewExpr):
-            arg_vals = [self.emit_expr(a, out) for a in expr.args]
+            arg_vals = [self.emit_value(a, out) for a in expr.args]
             return self._bind_call(f"w_new_{expr.class_name}({', '.join(arg_vals)})", out)
 
         if isinstance(expr, IdentExpr):
@@ -779,7 +794,7 @@ class CCodeGen:
                 out.append("}")
                 return res
 
-            lhs = self.emit_expr(expr.left, out)
+            lhs = self.emit_value(expr.left, out)
             rhs = self.emit_expr(expr.right, out)
             op_map = {
                 "+": "w_add",
@@ -818,10 +833,10 @@ class CCodeGen:
             return res
 
         if isinstance(expr, RangeExpr):
-            s_val = self.emit_expr(expr.start, out)
+            s_val = self.emit_value(expr.start, out)
             e_val = self.emit_expr(expr.end, out)
             inc = "true" if expr.inclusive else "false"
-            return f"w_make_range({s_val}, {e_val}, {inc})"
+            return self._bind_call(f"w_make_range({s_val}, {e_val}, {inc})", out)
 
         if isinstance(expr, PostfixTryExpr):
             op_val = self.emit_expr(expr.operand, out)
@@ -876,13 +891,13 @@ class CCodeGen:
         if isinstance(expr, AssignmentExpr):
             val = self.emit_expr(expr.value, out)
             rhs_hold = self.new_aux("_rhs")
-            out.append(f"WVal {rhs_hold} = {self._own_expr(val)};")
+            self._declare_owned_var(rhs_hold, self._own_expr(val), out)
             if isinstance(expr.target, IdentExpr):
                 c_target = self.c_var(expr.target.name)
-                out.append(f"w_assign(&{c_target}, {rhs_hold});")
+                out.append(f"w_assign(&{c_target}, w_move(&{rhs_hold}));")
                 return c_target
             lref = self.emit_lvalue_ref(expr.target, out)
-            out.append(f"w_assign({lref}, {rhs_hold});")
+            out.append(f"w_assign({lref}, w_move(&{rhs_hold}));")
             return "w_unit()"
 
         if isinstance(expr, MemberExpr):
@@ -894,10 +909,10 @@ class CCodeGen:
                 if f"v_{expr.object.name}_{expr.property}" in self.global_vars:
                     return f"v_{expr.object.name}_{expr.property}"
             obj_val = self.emit_expr(expr.object, out)
-            return f'w_member_get({obj_val}, "{expr.property}")'
+            return self._bind_call(f'w_clone(w_member_get({obj_val}, "{expr.property}"))', out)
 
         if isinstance(expr, IndexExpr):
-            obj_val = self.emit_expr(expr.object, out)
+            obj_val = self.emit_value(expr.object, out)
             idx_val = self.emit_expr(expr.index, out)
             return self._bind_call(f"w_index_get_owned({obj_val}, {idx_val})", out)
 
@@ -905,7 +920,7 @@ class CCodeGen:
             # 1. Built-in or top-level function call
             if isinstance(expr.callee, IdentExpr):
                 fn_name = expr.callee.name
-                arg_vals = [self.emit_expr(a, out) for a in expr.args]
+                arg_vals = [self.emit_value(a, out) for a in expr.args]
 
                 if fn_name == "Some" and len(arg_vals) == 1:
                     return self._bind_call(f"w_enum_payload(\"Option\", \"Some\", {self._own_expr(arg_vals[0])})", out)
@@ -983,7 +998,7 @@ class CCodeGen:
 
                 if isinstance(obj_expr, IdentExpr) and obj_expr.name in self.enum_names:
                     en_name = obj_expr.name
-                    arg_vals = [self.emit_expr(a, out) for a in expr.args]
+                    arg_vals = [self.emit_value(a, out) for a in expr.args]
                     if (en_name == "Result" or en_name.startswith("Result__")) and method == "Ok" and len(arg_vals) == 1:
                         return self._bind_call(f"w_ok({self._own_expr(arg_vals[0])})", out)
                     if (en_name == "Result" or en_name.startswith("Result__")) and method == "Err" and len(arg_vals) == 1:
@@ -1003,7 +1018,7 @@ class CCodeGen:
 
                 # super.init(...) or super.method(...)
                 if isinstance(obj_expr, SuperExpr):
-                    arg_vals = [self.emit_expr(a, out) for a in expr.args]
+                    arg_vals = [self.emit_value(a, out) for a in expr.args]
                     call_args = ["v_self"] + arg_vals
                     if self.current_class is not None and self.current_class.superclass is not None:
                         resolved = self._find_class_method(self.current_class.superclass, method)
@@ -1016,13 +1031,13 @@ class CCodeGen:
                 if isinstance(obj_expr, IdentExpr):
                     mod_fn = self.c_fn(method, ns=obj_expr.name)
                     if mod_fn in self.fallible_fns:
-                        arg_vals = [self.emit_expr(a, out) for a in expr.args]
+                        arg_vals = [self.emit_value(a, out) for a in expr.args]
                         return self._bind_call(f"{mod_fn}({', '.join(arg_vals)})", out)
 
                 # Collection methods
                 if method == "append":
                     lref = self.emit_lvalue_ref(obj_expr, out)
-                    arg_v = self.emit_expr(expr.args[0], out)
+                    arg_v = self.emit_value(expr.args[0], out)
                     return self._bind_call(f"w_list_append({lref}, {arg_v})", out)
                 if method == "pop":
                     lref = self.emit_lvalue_ref(obj_expr, out)
@@ -1031,43 +1046,44 @@ class CCodeGen:
                     lref = self.emit_lvalue_ref(obj_expr, out)
                     return self._bind_call(f"w_list_clear({lref})", out)
                 if method == "get":
-                    obj_v = self.emit_expr(obj_expr, out)
-                    arg_v = self.emit_expr(expr.args[0], out)
+                    obj_v = self.emit_value(obj_expr, out)
+                    arg_v = self.emit_value(expr.args[0], out)
                     return self._bind_call(f"w_dict_get({obj_v}, {arg_v})", out)
                 if method == "keys":
-                    obj_v = self.emit_expr(obj_expr, out)
+                    obj_v = self.emit_value(obj_expr, out)
                     return self._bind_call(f"w_dict_keys({obj_v})", out)
                 if method == "values":
-                    obj_v = self.emit_expr(obj_expr, out)
+                    obj_v = self.emit_value(obj_expr, out)
                     return self._bind_call(f"w_dict_values({obj_v})", out)
 
                 # OOP dynamic method dispatch
-                obj_v = self.emit_expr(obj_expr, out)
-                arg_vals = [self.emit_expr(a, out) for a in expr.args]
+                obj_v = self.emit_value(obj_expr, out)
+                arg_vals = [self.emit_value(a, out) for a in expr.args]
                 call_args = [obj_v] + arg_vals
                 return self._bind_call(f"w_dispatch__{method}__{len(arg_vals)}({', '.join(call_args)})", out)
 
         if isinstance(expr, ListExpr):
             if not expr.elements:
-                return "w_make_list(0, NULL)"
-            elem_vals = [self.emit_expr(e, out) for e in expr.elements]
+                return self._bind_call("w_make_list(0, NULL)", out)
+            elem_vals = [self.emit_value(e, out) for e in expr.elements]
             arr_tmp = self.new_aux("_arr")
             out.append(f"WVal {arr_tmp}[{len(elem_vals)}] = {{ {', '.join(elem_vals)} }};")
             return self._bind_call(f"w_make_list({len(elem_vals)}, {arr_tmp})", out)
 
         if isinstance(expr, TupleExpr):
             if not expr.elements:
-                return "w_make_tuple(0, NULL)"
-            elem_vals = [self.emit_expr(e, out) for e in expr.elements]
+                return self._bind_call("w_make_tuple(0, NULL)", out)
+            elem_vals = [self.emit_value(e, out) for e in expr.elements]
             arr_tmp = self.new_aux("_arr")
             out.append(f"WVal {arr_tmp}[{len(elem_vals)}] = {{ {', '.join(elem_vals)} }};")
             return self._bind_call(f"w_make_tuple({len(elem_vals)}, {arr_tmp})", out)
 
         if isinstance(expr, DictExpr):
             if not expr.entries:
-                return "w_make_dict(0, NULL, NULL)"
-            k_vals = [self.emit_expr(e.key, out) for e in expr.entries]
-            v_vals = [self.emit_expr(e.value, out) for e in expr.entries]
+                return self._bind_call("w_make_dict(0, NULL, NULL)", out)
+            pairs = [(self.emit_value(e.key, out), self.emit_value(e.value, out)) for e in expr.entries]
+            k_vals = [key for key, _ in pairs]
+            v_vals = [value for _, value in pairs]
             k_tmp = self.new_aux("_k")
             v_tmp = self.new_aux("_v")
             out.append(f"WVal {k_tmp}[{len(k_vals)}] = {{ {', '.join(k_vals)} }};")
@@ -1076,9 +1092,9 @@ class CCodeGen:
 
         if isinstance(expr, StructInitExpr):
             if not expr.fields:
-                return f'w_make_struct("{expr.struct_name}", 0, NULL, NULL)'
+                return self._bind_call(f'w_make_struct("{expr.struct_name}", 0, NULL, NULL)', out)
             f_names = [f'"{f.name}"' for f in expr.fields]
-            f_vals = [self.emit_expr(f.value, out) for f in expr.fields]
+            f_vals = [self.emit_value(f.value, out) for f in expr.fields]
             k_tmp = self.new_aux("_k")
             v_tmp = self.new_aux("_v")
             out.append(f"const char* {k_tmp}[{len(f_names)}] = {{ {', '.join(f_names)} }};")

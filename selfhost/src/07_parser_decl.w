@@ -7,7 +7,14 @@ fn parse_let_stmt(is_global: bool) -> unit {
         parse_type_ann()
     }
     expect_kind("ASSIGN")
-    let val_r = parse_expr(0, true)
+    let mut val_r = ExprRes { val: "", lref: "" }
+    if is_global and check_kind("LBRACKET") and peek_tok(1).kind == "RBRACKET" {
+        advance_tok()
+        advance_tok()
+        val_r = ExprRes { val: "w_make_list(0, NULL)", lref: "" }
+    } else {
+        val_r = parse_expr(0, true)
+    }
     let mut vname = "v_" + name_tok.val
     if is_global and g_ns != "" {
         vname = "v_" + g_ns + "_" + name_tok.val

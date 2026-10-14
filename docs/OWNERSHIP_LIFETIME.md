@@ -117,3 +117,104 @@ The `CleanupScope` abstraction in `v0.1.3` is directly isomorphic to the explici
 See ADR-006 for the current ownership extension. `w_str` borrows static storage; `w_owned_str` consumes a heap buffer and creates its RC owner; `w_copy_str` copies borrowed input such as argv. Dynamic strings participate in clone/release and allocation counters. `w_add` and `w_index_get_owned` results are registered owned temporaries in both native backends and W1. The borrowed `w_index_get` remains restricted to internal projection paths; dictionary value queries use the owned optional path.
 
 `w_ok`, `w_err` and `w_enum_payload` consume their payload. Generated constructor calls move registered temporaries or clone borrowed arguments. `w_unwrap_optional`, `w_unwrap_ok`, `w_unwrap_err` and `w_unwrap_success` return owned values; peek helpers borrow. Class fields and collection slots own their stored values. Leak counters include string owners; LSan remains necessary to find allocations outside the instrumented ownership model.
+
+## B01: runtime helper inventory and evaluation contract
+
+The following contracts supersede older blanket claims in this document. Ownership
+is an emitter convention, not a dedicated HIR ownership type or a formal proof.
+A borrowed argument stays valid for the whole helper call. An owned result carries
+one release obligation, including when it happens to be an immediate scalar.
+
+### Helpers that consume ownership
+
+- `w_release` and `w_release_array` consume one reference per value/array element.
+- `w_move` transfers the slot's ownership and resets it to unit.
+- `w_assign` consumes its owned source, releases the old destination, stores the
+  source, and returns a **borrowed** view of that destination. The caller must
+  protect a self-aliasing source before calling it.
+- `w_ok`, `w_err`, `w_enum_payload` consume their payload; `w_wrap_result` consumes
+  its input and returns it or a new success wrapper. They do not clone payloads.
+- `w_owned_str` consumes a malloc buffer; `w_copy_str` borrows bytes and copies them.
+
+### Borrowed input, owned output
+
+- `w_clone` retains managed storage. Immediate values and borrowed static strings
+  require no retain, and release is a no-op for them.
+- `w_unwrap_optional`, `w_unwrap_ok`, `w_unwrap_err`, `w_unwrap_success` retain their
+  returned payload; the source wrapper may be released independently.
+- `w_index_get_owned` and `w_dict_get` retain their result. Present dictionary
+  values are wrapped, including present None. String indexing allocates a string.
+- `w_make_list`, `w_make_tuple`, `w_make_dict`, `w_make_struct`, `w_make_object`
+  borrow their initializer arrays and clone the stored values. `w_make_range`
+  creates an owned list. Field/variant/type names come from static generated C.
+- `w_dict_keys`, `w_dict_values`, `w_builtin_bytes`, `w_builtin_enumerate`,
+  `w_builtin_dict_items` create owned containers and retain contained values.
+- `w_add` borrows operands; string addition returns owned storage. Numeric results
+  from add/sub/mul/div/mod/neg/lt/le/gt/ge are immediate values.
+- `w_builtin_str`, `w_builtin_chr`, `w_builtin_slice` return owned strings.
+  `str(existing_string)` retains its buffer. `w_builtin_read_file` and
+  `w_builtin_write_file` return owned results, including owned error payloads.
+- `w_builtin_args` returns an owned list of copied strings; `w_init_args` only
+  borrows process argv until copying. `w_to_cstr` returns malloc storage requiring
+  `free`, not `w_release`; print/eprint and string conversion consume that buffer.
+
+### Short-lived borrows and mutable slots
+
+- `w_peek_optional`, `w_peek_ok`, `w_peek_err`, `w_member_get` return borrowed
+  payloads. Keep the owner alive and unchanged until cloning/consuming the borrow.
+- Legacy `w_index_get` borrows list/dict elements but owns a string-index result.
+  Generated value reads use `w_index_get_owned`; W1 retains the legacy expression
+  only as lvalue metadata, without executing a discarded value read.
+- `w_index_ref` and `w_member_ref` borrow the root slot, may detach value storage,
+  and return a mutable slot pointer. Indices are evaluated once into stable values.
+  Slot pointers cannot be cached across unrelated mutations of their container.
+- `w_list_append` borrows the item and clones it into the destination, detaching
+  as needed. `w_list_pop` transfers the removed element's ownership to its caller.
+  `w_list_clear` releases removed elements. All three borrow the destination slot.
+- `w_list_detach`, `w_dict_detach`, `w_struct_detach` replace the borrowed slot's
+  buffer and clone shared children; callers retain ownership of the root slot.
+- `w_unit`, `w_none`, `w_int`, `w_float`, `w_bool`, `w_enum` produce immediate or
+  payload-free values. `w_str` borrows static bytes. `w_eq`, `w_is_none`,
+  `w_builtin_name`, UTF-8 helpers, len/int/float/ord borrow inputs and return
+  scalars. Print/eprint borrow arguments and return unit.
+
+### Generated calls, evaluation and exits
+
+Function/method arguments and `this` are borrowed from the caller, which retains
+snapshots through the call. Parameters are immutable bindings; class identity
+remains shared. Callees return owned values. Dispatchers forward that contract;
+constructors return owned objects and clone stored fields.
+
+Before evaluating later operands, emitters materialize earlier borrowed or lazy
+values into registered temporaries. This covers arguments, binary left operands,
+read receivers, collection entries and struct fields. Field reads retain their
+value immediately. Collection initialization evaluates key then value per entry.
+Already-owned temporaries are reused. These snapshots can increase RC/CoW traffic;
+B02 must measure that cost before optimizing lifetimes.
+
+Assignments evaluate and protect the RHS before evaluating the target, following
+the interpreter contract. The RHS hold is registered before any target computation
+that can propagate; successful assignment moves it into the slot. W1 replays target
+emission after RHS evaluation rather than emitting target effects prematurely.
+
+Return and propagation protect the escaping value before LIFO cleanup. Break and
+continue clean through the nearest loop; the for iterable belongs to its outer
+scope. Lazy and/or/?? branches allocate and release only when executed. Empty
+constructors and discarded ranges are registered just like nonempty constructors;
+a fresh empty list stored directly into a global can transfer without a temporary.
+
+### Reproducible acceptance
+
+`python3 test_ownership_control_flow.py` compares the interpreter with AST C, HIR C
+and standalone W1 emission. All three native binaries run under ASan/UBSan and
+W_MEM_CHECK; Linux additionally enables LSan. The fixture covers retained fields
+across later mutation, argument/collection order, local field/index returns,
+temporary receivers, self-assignment, append of an existing element, nested loop
+exits, optional/result propagation in match, failing assignment targets, handler
+payloads, short-circuit effects, coalesce and discarded constructors.
+
+Strong RC cycles remain unsupported (B03). Explicit process exit and runtime
+panics terminate the process rather than unwinding lexical scopes; they are not
+zero-leak acyclic success cases. Allocation failure and concurrent RC are outside
+this contract. W1 generic-language exclusions remain unchanged; this fixture uses
+its supported non-generic profile and unqualified Ok/Err constructors.

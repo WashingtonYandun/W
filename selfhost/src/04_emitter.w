@@ -161,3 +161,13 @@ fn emit_line(line: str) -> unit {
     g_cur_stmts.append(line)
 }
 
+
+fn snapshot_value(value: str) -> str {
+    if len(value) >= 2 and slice(value, 0, 2) == "_t" {
+        return value
+    }
+    if len(value) >= 7 and slice(value, 0, 7) == "w_make_" {
+        return bind_call(value).val
+    }
+    return bind_call("w_clone(" + value + ")").val
+}
