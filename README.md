@@ -284,7 +284,7 @@ Run `./w bench` to benchmark the reference interpreter against the native C99 ba
 - [x] **v0.2.0** — **Generics, ADTs & Monomorphization**:
   - [x] Phase 1: Parametric polymorphism for `struct Box[T]` and `fn id[T]`, nominal constraints, invariance enforcement.
   - [x] Phase 2: Generic Enums & Algebraic Data Types (ADTs), `Option[T]` $\equiv$ `T?` and `Result[T, E]` $\equiv$ `T ! E` canonical unification, `T025` infinite recursive layout detection.
-- [ ] **v0.2.1** — **Generic Hardening & Code Bloat Metrics**: Canonical monomorphization cache, specialization telemetry.
+- [x] **v0.2.1** — **Generic Hardening & Code Bloat Metrics**: Canonical monomorphization cache, specialization telemetry.
 - [ ] **v0.3.0** — **Function Types**: First-class function types `fn(A) -> B` and indirect calls without closures.
 - [ ] **v0.3.1** — **Weak References & Memory Hardening**: Control block separation for cycle prevention.
 - [ ] **v0.4.0** — **Closures & Higher-Order Functions**: Environment capture analysis, heap ARC fat pointers, `map`/`filter`/`reduce`.

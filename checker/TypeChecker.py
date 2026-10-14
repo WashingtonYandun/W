@@ -2574,7 +2574,6 @@ class TypeChecker:
         type_ids = tuple(self.interner.intern(a) for a in concrete_args)
         key = GenericInstanceKey(template.name, type_ids)
         self.telemetry.specialization_requests += 1
-
         if key in self.monomorphized_structs:
             self.telemetry.deduplicated_hits += 1
             return self.monomorphized_structs[key]
@@ -2677,7 +2676,6 @@ class TypeChecker:
         type_ids = tuple(self.interner.intern(a) for a in concrete_args)
         key = GenericInstanceKey(template.name, type_ids)
         self.telemetry.specialization_requests += 1
-
         if key in self.monomorphized_fns:
             self.telemetry.deduplicated_hits += 1
             return self.monomorphized_fns[key]
@@ -2824,7 +2822,6 @@ class TypeChecker:
         finally:
             self._monomorphize_depth -= 1
             self._instantiation_stack.pop()
-
     # ==========================================
     # Type Node Resolution
     # ==========================================
