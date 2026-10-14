@@ -1,7 +1,3 @@
-<p align="center">
-  <img src="assets/wawi.jpg" alt="Wawi — Official Mascot of the W Programming Language" width="260" style="border-radius: 20px;">
-</p>
-
 # The W Programming Language
 
 <p align="center">
@@ -29,22 +25,15 @@
 
 ---
 
-## 🪲 Meet Wawi: The Official Mascot
+## 🪲 Official Mascot: Wawi
 
 <p align="center">
-  <img src="assets/wawi.jpg" alt="Wawi — Official Mascot of W Language" width="320" style="border-radius: 22px; box-shadow: 0 12px 32px rgba(0,0,0,0.35);">
+  <img src="assets/wawi.jpg" alt="Wawi — Official Mascot of the W Language" width="280">
 </p>
 
-**W** is personified by its official mascot: **Wawi**, inspired by a living biological marvel of Ecuador: the *Ninacuro* (*Pyrophorus noctilucus*, family Elateridae). In Kichwa, *Nina* means fire/light, *Kuru* means bug/insect, and *Wawa* represents the newborn sprout.
+W is personified by its official mascot: Wawi, inspired by a living biological marvel of Ecuador: the Ninacuro (Pyrophorus noctilucus, family Elateridae). In Kichwa, Nina means fire/light, Kuru means bug/insect, and Wawa represents the newborn sprout.
 
-Just as classic systems and languages are anchored by living totems (Linux's Tux, Rust's Ferris, Go's Gopher), Wawi embodies the foundational engineering principles of the W language:
-
-1. **Cold Light & Zero Memory Waste:** *Pyrophorus noctilucus* emits cold bioluminescence with 100% luminous efficiency and zero thermal dissipation. Similarly, W operates with **zero garbage collection pauses or runtime bloat**: every byte is deterministically owned and reclaimed at scope exit (`CleanupScope`).
-2. **Cephalic Luminous Headlights:** Unlike common fireflies with abdominal lanterns, Wawi features two circular headlights directly on its head, represented by expressive cyan eyes (`#00bed2`), symbolizing rigorous pre-emission semantic analysis and strict static typing (`TypeInterner`).
-3. **The 'W' Antennae & Crown:** The antennae and head crest organically form a sharp **'W'** silhouette, celebrating W1's 3-stage cryptographic bootstrap fixed-point ($\text{SHA256}(c_0) == \text{SHA256}(c_1) == \text{SHA256}(c_2)$).
-4. **Biomechanical Click Mechanism:** The click beetle's frictionless thoracic spine snaps it upright instantly, embodying zero-overhead C99 native dispatch and compact ~34 KB binaries.
-
-> Complete specifications, color tokens, and design guidelines are documented in [docs/BRAND_IDENTITY.md](docs/BRAND_IDENTITY.md).
+Just as classic systems and languages are anchored by living totems (Linux's Tux, Rust's Ferris, Go's Gopher), Wawi embodies the foundational engineering principles of the W language.
 
 ---
 

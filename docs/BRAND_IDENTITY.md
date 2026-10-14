@@ -55,10 +55,6 @@ To guarantee strict visual consistency across repositories, documentation, and w
 | File | Format | Usage Policy | Description |
 | :--- | :--- | :--- | :--- |
 | `assets/wawi.jpg` | JPEG | **Canonical / Mandatory** | High-resolution 2D die-cut artwork of Wawi. Used everywhere across READMEs, docs, and publications. |
-| `assets/wawi.svg` | SVG | Source Vector | Scalable master vector illustration for print and high-DPI scaling. |
-| `assets/wawi-icon.svg` | SVG | Favicon / App Icon | Compact face and W-crown framed on a dark squircle tile (`#111c38`). |
-| `assets/favicon.svg` | SVG | Browser Tabs | Ultra-crisp, high-contrast favicon. |
-| `assets/w-logo-header.svg` | SVG | Banner | Horizontal banner for navigation bars. |
 
 ---
 
