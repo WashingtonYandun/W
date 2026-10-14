@@ -4,6 +4,7 @@ import os
 from pathlib import Path
 import sys
 import tempfile
+import time
 from tests import engine_harness as harness
 
 
@@ -19,6 +20,11 @@ def run_ci_harness_tests():
         directory = Path(temporary)
         timed = harness.execute([sys.executable, '-c', 'while True: pass'], directory, 'timeout', 0.1)
         assert timed['returncode'] == 124 and timed['timeout'] == 0.1
+        started = time.monotonic()
+        parent = 'import subprocess, sys; subprocess.Popen([sys.executable, "-c", "import time; time.sleep(5)"]); print("child started", flush=True); exec("while True: pass")'
+        tree = harness.execute([sys.executable, '-c', parent], directory, 'process-tree', 0.2)
+        assert tree['returncode'] == 124 and tree['termination_returncode'] < 0
+        assert time.monotonic() - started < 3, 'Compiler descendant survived the timeout'
         signaled = harness.execute([sys.executable, '-c', 'import os, signal; os.kill(os.getpid(), signal.SIGTERM)'], directory, 'signal', 10)
         assert signaled['returncode'] == -15
         assert json.loads((directory / 'signal.json').read_text())['command']

@@ -5,6 +5,7 @@ import os
 from pathlib import Path
 import re
 import shlex
+import signal
 import subprocess
 import sys
 
@@ -46,14 +47,27 @@ def diagnostic(stderr):
 def execute(command, directory, phase, timeout, env=None):
     """Persist commands and output, including timeout and signal failures."""
     try:
-        result = subprocess.run(command, cwd=ROOT, capture_output=True, text=True,
-                                timeout=timeout, env=env)
-        record = {'command': command, 'returncode': result.returncode,
-                  'stdout': result.stdout, 'stderr': result.stderr}
-    except subprocess.TimeoutExpired as error:
-        record = {'command': command, 'returncode': 124, 'timeout': timeout,
-                  'stdout': (error.stdout or b'').decode(errors='replace'),
-                  'stderr': (error.stderr or b'').decode(errors='replace')}
+        process = subprocess.Popen(command, cwd=ROOT, stdout=subprocess.PIPE,
+                                   stderr=subprocess.PIPE, text=True, env=env,
+                                   start_new_session=(os.name == 'posix'))
+        try:
+            stdout, stderr = process.communicate(timeout=timeout)
+            record = {'command': command, 'returncode': process.returncode,
+                      'stdout': stdout, 'stderr': stderr}
+        except subprocess.TimeoutExpired:
+            # Compiler drivers and bootstrap helpers can spawn descendants.
+            # Kill the whole group so inherited pipes cannot outlive the timeout.
+            try:
+                if os.name == 'posix':
+                    os.killpg(process.pid, signal.SIGKILL)
+                else:
+                    process.kill()
+            except ProcessLookupError:
+                pass
+            stdout, stderr = process.communicate()
+            record = {'command': command, 'returncode': 124, 'timeout': timeout,
+                      'termination_returncode': process.returncode,
+                      'stdout': stdout, 'stderr': stderr}
     except OSError as error:
         record = {'command': command, 'returncode': 127, 'stdout': '', 'stderr': str(error),
                   'launch_error': True}
