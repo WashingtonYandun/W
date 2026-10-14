@@ -1,3 +1,4 @@
+from error.Error import WError
 """
 hir/HirCCodeGen.py - Direct C99 Code Generator from Typed HIR.
 
@@ -156,6 +157,11 @@ class HirCCodeGen:
     # -------------------------------------------------------------
 
     def generate(self, module: HirModule) -> str:
+        from hir.HirVerifier import HirVerifier
+        if self.interner is None:
+            raise WError("HIR emission requires a type interner", file=self.file_path,
+                         code="W9999", stage="hir-verification")
+        HirVerifier(self.interner, self.file_path).verify(module)
         # 1. Collect declarations
         for en in module.enums:
             self.enum_names.add(en.name)
@@ -549,6 +555,10 @@ class HirCCodeGen:
             out.append("}")
             return
 
+        raise WError(f"Unsupported HIR statement: {type(stmt).__name__}",
+                     line=stmt.span.line, col=stmt.span.col, file=self.file_path,
+                     code="W9999", stage="codegen")
+
     # -------------------------------------------------------------
     # Expression Emission
     # -------------------------------------------------------------
@@ -642,7 +652,8 @@ class HirCCodeGen:
                 "<": "w_lt", "<=": "w_le", ">": "w_gt", ">=": "w_ge",
             }
             if expr.op in op_map:
-                return f"{op_map[expr.op]}({lhs}, {rhs})"
+                call = f"{op_map[expr.op]}({lhs}, {rhs})"
+                return self._bind_call(call, out) if expr.op == "+" else call
             if expr.op == "==":
                 return f"w_bool(w_eq({lhs}, {rhs}))"
             if expr.op == "!=":
@@ -662,15 +673,15 @@ class HirCCodeGen:
         if isinstance(expr, HirConstructEnum):
             if (expr.enum_name == "Result" or expr.enum_name.startswith("Result__")) and expr.variant_name == "Ok":
                 p_val = self.emit_expr(expr.payload, out) if getattr(expr, "payload", None) is not None else "w_unit()"
-                return self._bind_call(f"w_ok({p_val})", out)
+                return self._bind_call(f"w_ok({self._own_expr(p_val)})", out)
             if (expr.enum_name == "Result" or expr.enum_name.startswith("Result__")) and expr.variant_name == "Err":
                 p_val = self.emit_expr(expr.payload, out) if getattr(expr, "payload", None) is not None else "w_unit()"
-                return self._bind_call(f"w_err({p_val})", out)
+                return self._bind_call(f"w_err({self._own_expr(p_val)})", out)
             if (expr.enum_name == "Option" or expr.enum_name.startswith("Option__")) and expr.variant_name in ("None", "none"):
                 return "w_none()"
             if getattr(expr, "payload", None) is not None:
                 p_val = self.emit_expr(expr.payload, out)
-                return self._bind_call(f'w_enum_payload("{expr.enum_name}", "{expr.variant_name}", {p_val})', out)
+                return self._bind_call(f'w_enum_payload("{expr.enum_name}", "{expr.variant_name}", {self._own_expr(p_val)})', out)
             return f'w_enum("{expr.enum_name}", "{expr.variant_name}")'
 
         if isinstance(expr, HirConstructObject):
@@ -719,7 +730,7 @@ class HirCCodeGen:
         if isinstance(expr, HirIndexRead):
             obj_val = self.emit_expr(expr.object, out)
             idx_val = self.emit_expr(expr.index, out)
-            return f"w_index_get({obj_val}, {idx_val})"
+            return self._bind_call(f"w_index_get_owned({obj_val}, {idx_val})", out)
 
         if isinstance(expr, HirDirectCall):
             arg_vals = [self.emit_expr(a, out) for a in expr.args]
@@ -812,7 +823,8 @@ class HirCCodeGen:
 
             none_cleanup: List[str] = []
             self._emit_cleanup_until_fn(none_cleanup)
-            out.append(f"if ({tmp}.tag == W_NONE || ({tmp}.tag == W_ENUM && strcmp({tmp}.as.en.enum_name, \"Option\") == 0 && strcmp({tmp}.as.en.variant, \"None\") == 0)) {{")
+            channel_enabled = expr.kind == "optional"
+            out.append(f"if ({str(channel_enabled).lower()} && ({tmp}.tag == W_NONE || ({tmp}.tag == W_ENUM && strcmp({tmp}.as.en.enum_name, \"Option\") == 0 && strcmp({tmp}.as.en.variant, \"None\") == 0))) {{")
             for cl in none_cleanup:
                 out.append(f"    {cl}")
             out.append("    return w_none();")
@@ -821,7 +833,8 @@ class HirCCodeGen:
             err_hold = self.new_aux("_err")
             err_cleanup: List[str] = []
             self._emit_cleanup_until_fn(err_cleanup)
-            out.append(f"if ({tmp}.tag == W_ERR || ({tmp}.tag == W_ENUM && strcmp({tmp}.as.en.enum_name, \"Result\") == 0 && strcmp({tmp}.as.en.variant, \"Err\") == 0)) {{")
+            channel_enabled = expr.kind == "result"
+            out.append(f"if ({str(channel_enabled).lower()} && ({tmp}.tag == W_ERR || ({tmp}.tag == W_ENUM && strcmp({tmp}.as.en.enum_name, \"Result\") == 0 && strcmp({tmp}.as.en.variant, \"Err\") == 0))) {{")
             out.append(f"    WVal {err_hold} = w_clone({tmp});")
             for cl in err_cleanup:
                 out.append(f"    {cl}")
@@ -829,9 +842,9 @@ class HirCCodeGen:
             out.append("}")
 
             unwrapped = self.new_temp()
-            self._declare_owned_var(unwrapped, f"w_unwrap_ok({tmp})", out)
+            helper = "w_unwrap_optional" if expr.kind == "optional" else "w_unwrap_ok"
+            self._declare_owned_var(unwrapped, f"{helper}({tmp})", out)
             return unwrapped
-
         if isinstance(expr, HirCoalesce):
             lhs = self.emit_expr(expr.opt_expr, out)
             res = self.new_temp()
@@ -845,7 +858,7 @@ class HirCCodeGen:
             for s in rhs_stmts:
                 out.append(f"    {s}")
             out.append("} else {")
-            out.append(f"    w_assign(&{res}, w_unwrap_ok({res}));")
+            out.append(f"    w_assign(&{res}, w_unwrap_optional({res}));")
             out.append("}")
             return res
 
@@ -866,7 +879,7 @@ class HirCCodeGen:
             for s in handler_stmts:
                 out.append(f"    {s}")
             out.append("} else {")
-            out.append(f"    w_assign(&{res}, w_unwrap_ok({tmp}));")
+            out.append(f"    w_assign(&{res}, w_unwrap_success({tmp}));")
             out.append("}")
             return res
 
@@ -895,7 +908,9 @@ class HirCCodeGen:
             self._emit_match_arms(expr.arms, 0, subj_tmp, res, out)
             return res
 
-        return "w_unit()"
+        raise WError(f"Unsupported HIR expression: {type(expr).__name__}",
+                     line=expr.span.line, col=expr.span.col, file=self.file_path,
+                     code="W9999", stage="codegen")
 
     def _emit_elifs(
         self,
@@ -941,6 +956,35 @@ class HirCCodeGen:
             return
         arm = arms[idx]
         cond_str = self._emit_pattern_cond(arm.pattern, subj_tmp, out)
+
+        if arm.guard is not None:
+            matched = self.new_aux("_matched")
+            out.append(f"bool {matched} = false;")
+            out.append(f"if ({cond_str}) {{")
+            self._push_scope("block")
+            inner = []
+            self._emit_pattern_bindings(arm.pattern, subj_tmp, inner)
+            guard = self.emit_expr(arm.guard, inner)
+            inner.append(f"if (({guard}).as.b) {{")
+            self._push_scope("block")
+            body = []
+            result = self.emit_block_value(arm.body, body)
+            body.append(f"w_assign(&{res_var}, {self._own_expr(result)});")
+            body.append(f"{matched} = true;")
+            self._pop_scope(body)
+            inner.extend("    " + line for line in body)
+            inner.append("}")
+            self._pop_scope(inner)
+            out.extend("    " + line for line in inner)
+            out.append("}")
+            out.append(f"if (!{matched}) {{")
+            self._push_scope("block")
+            fallback = []
+            self._emit_match_arms(arms, idx + 1, subj_tmp, res_var, fallback)
+            self._pop_scope(fallback)
+            out.extend("    " + line for line in fallback)
+            out.append("}")
+            return
         if cond_str == "true":
             out.append("{")
             self._push_scope("block")
@@ -981,21 +1025,21 @@ class HirCCodeGen:
                 sub_expr = f"({val_expr}).as.tuple->items[{idx}]"
                 self._emit_pattern_bindings(elem_pat, sub_expr, out)
         elif isinstance(pattern, EnumPattern):
-            if pattern.variant in ("None", "none"):
+            if pattern.variant in ("None", "none") and (pattern.enum_name is None or pattern.enum_name.split("__", 1)[0] == "Option"):
                 pass
-            elif pattern.variant == "Some":
+            elif pattern.variant == "Some" and (pattern.enum_name is None or pattern.enum_name.split("__", 1)[0] == "Option"):
                 if pattern.args:
-                    sub_val = f"w_unwrap_ok({val_expr})"
+                    sub_val = f"w_unwrap_optional({val_expr})"
                     sub_tmp = self.new_aux("_some_val")
                     self._declare_owned_var(sub_tmp, sub_val, out)
                     self._emit_pattern_bindings(pattern.args[0], sub_tmp, out)
-            elif pattern.variant == "Ok":
+            elif pattern.variant == "Ok" and (pattern.enum_name is None or pattern.enum_name.split("__", 1)[0] == "Result"):
                 if pattern.args:
                     sub_val = f"w_unwrap_ok({val_expr})"
                     sub_tmp = self.new_aux("_ok_val")
                     self._declare_owned_var(sub_tmp, sub_val, out)
                     self._emit_pattern_bindings(pattern.args[0], sub_tmp, out)
-            elif pattern.variant == "Err":
+            elif pattern.variant == "Err" and (pattern.enum_name is None or pattern.enum_name.split("__", 1)[0] == "Result"):
                 if pattern.args:
                     sub_val = f"w_unwrap_err({val_expr})"
                     sub_tmp = self.new_aux("_err_val")
@@ -1021,17 +1065,17 @@ class HirCCodeGen:
             lit_v = self.emit_expr(self._literal_to_hir(pattern.literal), out)
             return f"w_eq({val_expr}, {lit_v})"
         if isinstance(pattern, EnumPattern):
-            if pattern.variant in ("None", "none"):
+            if pattern.variant in ("None", "none") and (pattern.enum_name is None or pattern.enum_name.split("__", 1)[0] == "Option"):
                 return f"(({val_expr}).tag == W_NONE || (({val_expr}).tag == W_ENUM && strcmp(({val_expr}).as.en.enum_name, \"Option\") == 0 && strcmp(({val_expr}).as.en.variant, \"None\") == 0))"
-            if pattern.variant == "Some":
+            if pattern.variant == "Some" and (pattern.enum_name is None or pattern.enum_name.split("__", 1)[0] == "Option"):
                 base_cond = f"(!(({val_expr}).tag == W_NONE || (({val_expr}).tag == W_ENUM && strcmp(({val_expr}).as.en.enum_name, \"Option\") == 0 && strcmp(({val_expr}).as.en.variant, \"None\") == 0)))"
                 if not pattern.args:
                     return base_cond
-                sub_cond = self._emit_pattern_cond(pattern.args[0], f"w_peek_ok({val_expr})", out)
+                sub_cond = self._emit_pattern_cond(pattern.args[0], f"w_peek_optional({val_expr})", out)
                 if sub_cond == "true":
                     return base_cond
                 return f"({base_cond} && {sub_cond})"
-            if pattern.variant == "Ok":
+            if pattern.variant == "Ok" and (pattern.enum_name is None or pattern.enum_name.split("__", 1)[0] == "Result"):
                 base_cond = f"(({val_expr}).tag == W_OK || (({val_expr}).tag == W_ENUM && strcmp(({val_expr}).as.en.enum_name, \"Result\") == 0 && strcmp(({val_expr}).as.en.variant, \"Ok\") == 0))"
                 if not pattern.args:
                     return base_cond
@@ -1039,7 +1083,7 @@ class HirCCodeGen:
                 if sub_cond == "true":
                     return base_cond
                 return f"({base_cond} && {sub_cond})"
-            if pattern.variant == "Err":
+            if pattern.variant == "Err" and (pattern.enum_name is None or pattern.enum_name.split("__", 1)[0] == "Result"):
                 base_cond = f"(({val_expr}).tag == W_ERR || (({val_expr}).tag == W_ENUM && strcmp(({val_expr}).as.en.enum_name, \"Result\") == 0 && strcmp(({val_expr}).as.en.variant, \"Err\") == 0))"
                 if not pattern.args:
                     return base_cond

@@ -1,6 +1,6 @@
 Some: 42
 None
-Option.Some(42)
+42
 none
 coalesce: 99 5
 eq none: true

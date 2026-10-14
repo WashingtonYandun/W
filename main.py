@@ -193,7 +193,7 @@ def run_pipeline(
                     tmp_c_path = tmp_c.name
                 try:
                     san_flags = ["-fsanitize=address,undefined", "-fno-omit-frame-pointer"] if sanitize else []
-                    cmd = ["cc", "-std=c99", "-O2", f"-I{repo_root}"] + san_flags + [tmp_c_path, "-o", build_bin_path]
+                    cmd = [os.environ.get("CC", "cc"), "-std=c99", "-O2", f"-I{repo_root}"] + san_flags + [tmp_c_path, "-o", build_bin_path]
                     proc = subprocess.run(cmd, capture_output=True, text=True)
                     if proc.returncode != 0:
                         print(f"[C Compiler Error]\n{proc.stderr}", file=sys.stderr)

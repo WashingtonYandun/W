@@ -503,3 +503,11 @@ W evolves in disciplined, semantically verified increments while keeping the can
 
 
 
+
+## Phase A error composition clarification
+
+Parenthesized types group constructors: `(T?) ! E` is Result[Option[T],E], `(T ! E)?` is Option[Result[T,E]], and `(T ! E1) ! E2` is Result[Result[T,E1],E2]. Ungrouped `T ! E1 ! E2` associates to the right. Formatting preserves these distinctions.
+
+Postfix `?` handles exactly the outer constructor. A second `?` on an optional payload is invalid inside a function whose outer return type is Result; use an explicit branch/recovery value instead. Error types must match exactly. Returning an inner Result as a success payload requires preserving its outer success layer; Result construction never silently flattens it. Bare values denote success, including when success and error types coincide.
+
+Optional/Option and fallible/Result spellings share canonical type identity. Optional display is payload-transparent; explicit Some values follow the same display policy as sugar. Some(None) differs from None. Implicit conversions do not add/remove nullable depth; use explicit Some for nested optionality. Guarded match arms do not contribute unconditional coverage. Nested variant payload cases must be exhaustive.

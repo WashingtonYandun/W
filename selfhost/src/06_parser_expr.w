@@ -1,3 +1,27 @@
+fn projection_is_mutated() -> bool {
+    let mut offset = 0
+    while true {
+        let kind = peek_tok(offset).kind
+        if kind == "ASSIGN" { return true }
+        if kind == "DOT" {
+            let method = peek_tok(offset + 1).val
+            if peek_tok(offset + 2).kind == "LPAREN" {
+                return method == "append" or method == "pop" or method == "clear"
+            }
+            offset = offset + 2
+        } elif kind == "LBRACKET" {
+            let mut depth = 1
+            offset = offset + 1
+            while depth > 0 and peek_tok(offset).kind != "EOF" {
+                if peek_tok(offset).kind == "LBRACKET" { depth = depth + 1 }
+                if peek_tok(offset).kind == "RBRACKET" { depth = depth - 1 }
+                offset = offset + 1
+            }
+        } else { return false }
+    }
+    return false
+}
+
 
 fn emit_call(callee: ExprRes, args_c: list[str]) -> ExprRes {
     let raw = callee.lref
@@ -632,23 +656,30 @@ fn parse_expr(min_prec: int, allow_struct: bool) -> ExprRes {
                 advance_tok()
                 let idx_r = parse_expr(0, true)
                 expect_kind("RBRACKET")
-                left = ExprRes { val: "w_index_get(" + left.val + ", " + idx_r.val + ")", lref: "w_index_ref(" + clean_lref(left.lref) + ", " + idx_r.val + ")" }
+                let index_lref = "w_index_ref(" + clean_lref(left.lref) + ", " + idx_r.val + ")"
+                if projection_is_mutated() {
+                    left = ExprRes { val: "w_index_get(" + left.val + ", " + idx_r.val + ")", lref: index_lref }
+                } else {
+                    left = ExprRes { val: bind_call("w_index_get_owned(" + left.val + ", " + idx_r.val + ")").val, lref: index_lref }
+                }
             } elif check_kind("QUESTION") {
                 advance_tok()
                 let tmp = new_temp()
                 declare_owned_var(tmp, own_expr(left.val))
-                emit_line("if (" + tmp + ".tag == W_NONE) {")
+                emit_line("if (" + str(not g_fn_fallible) + " && (" + tmp + ".tag == W_NONE)) {")
                 emit_cleanup_until_fn_indented()
                 emit_line("    return w_none();")
                 emit_line("}")
                 let err_hold = new_aux("_err")
-                emit_line("if (" + tmp + ".tag == W_ERR) {")
+                emit_line("if (" + str(g_fn_fallible) + " && (" + tmp + ".tag == W_ERR)) {")
                 emit_line("    WVal " + err_hold + " = w_clone(" + tmp + ");")
                 emit_cleanup_until_fn_indented()
                 emit_line("    return " + err_hold + ";")
                 emit_line("}")
                 let unw = new_temp()
-                declare_owned_var(unw, "w_unwrap_ok(" + tmp + ")")
+                let mut unwrap_helper = "w_unwrap_optional"
+                if g_fn_fallible { unwrap_helper = "w_unwrap_ok" }
+                declare_owned_var(unw, unwrap_helper + "(" + tmp + ")")
                 left = ExprRes { val: unw, lref: "" }
             } elif check_kind("ELSE") {
                 advance_tok()
@@ -678,7 +709,7 @@ fn parse_expr(min_prec: int, allow_struct: bool) -> ExprRes {
                     emit_line("    " + l)
                 }
                 emit_line("} else {")
-                emit_line("    w_assign(&" + res + ", w_unwrap_ok(" + tmp + "));")
+                emit_line("    w_assign(&" + res + ", w_unwrap_success(" + tmp + "));")
                 emit_line("}")
                 left = ExprRes { val: res, lref: "" }
             } else {
@@ -747,6 +778,8 @@ fn parse_expr(min_prec: int, allow_struct: bool) -> ExprRes {
             for l in r_lines {
                 emit_line("    " + l)
             }
+            emit_line("} else {")
+            emit_line("    w_assign(&" + res + ", w_unwrap_optional(" + res + "));")
             emit_line("}")
             left = ExprRes { val: res, lref: "" }
         } else {
@@ -770,7 +803,7 @@ fn parse_expr(min_prec: int, allow_struct: bool) -> ExprRes {
             } elif op_tok.kind == "DOT_DOT_EQ" {
                 left = ExprRes { val: "w_make_range(" + left.val + ", " + right.val + ", true)", lref: "" }
             } elif op_tok.kind == "PLUS" {
-                left = ExprRes { val: "w_add(" + left.val + ", " + right.val + ")", lref: "" }
+                left = ExprRes { val: bind_call("w_add(" + left.val + ", " + right.val + ")").val, lref: "" }
             } elif op_tok.kind == "MINUS" {
                 left = ExprRes { val: "w_sub(" + left.val + ", " + right.val + ")", lref: "" }
             } elif op_tok.kind == "STAR" {

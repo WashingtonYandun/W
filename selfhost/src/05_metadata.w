@@ -51,7 +51,12 @@ fn escape_c_str(s: str) -> str {
 
 fn parse_type_ann() -> bool {
     let mut is_fallible = false
-    advance_tok()
+    if match_kind("LPAREN") {
+        is_fallible = parse_type_ann()
+        expect_kind("RPAREN")
+    } else {
+        advance_tok()
+    }
     if match_kind("LBRACKET") {
         while not check_kind("RBRACKET") and not is_eof() {
             parse_type_ann()

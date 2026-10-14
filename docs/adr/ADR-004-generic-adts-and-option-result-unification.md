@@ -42,9 +42,11 @@ Furthermore, supporting recursive ADTs (e.g. `Tree[T]`) requires formalizing lay
     }
     ```
   - Operator `?` unwraps `Ok(data)` or performs early-return of `Err(err)` if the enclosing function returns `Result[U, E]` or `U ! E`.
-  - Non-ambiguity on nested types: `(int?) ! IoError` is `Result[Option[int], IoError]`. The outer `?` propagates `IoError`, yielding `Option[int]`. A second `?` propagates `None`.
+  - Non-ambiguity on nested types: `(int?) ! IoError` is `Result[Option[int], IoError]`. The outer `?` propagates `IoError`, yielding `Option[int]`. A second `?` is rejected if the enclosing return still has an outer Result; absence must be handled explicitly. See ADR-006 for the corrected composition contract.
 
 ### 3. C99 & Typed HIR Representation
+
+The inline tagged-union sketch below is historical design intent. The implemented WVal representation and canonical builtin operations are specified in ADR-006; this sketch is not the current emitted ABI.
 - Monomorphized generic ADTs are lowered as standard C99 tagged unions:
   ```c
   typedef enum {

@@ -120,8 +120,25 @@ class TypeChecker:
         self.generic_enum_templates["Result"] = GenericEnumTemplate("Result", [TypeParam(name="T"), TypeParam(name="E")], res_decl)
 
     def check(self, program: Program) -> None:
+        # Reserve builtin identities and their specialization namespaces.
+        for declaration in program.body:
+            if isinstance(declaration, (StructDecl, EnumDecl, ClassDecl, InterfaceDecl)):
+                if declaration.name in ("Option", "Result") or declaration.name.startswith(("Option__", "Result__")):
+                    raise TypeError("Builtin Option/Result identities are reserved", line=declaration.line,
+                                    col=declaration.col, file=self.file, code="W1002")
+
         # Pass 1: Collect declarations
         self._pass1_collect_declarations(program)
+
+        # Validate constraints even when the template is never instantiated.
+        templates = list(self.generic_struct_templates.values())
+        templates.extend(self.generic_fn_templates.values())
+        templates.extend(self.generic_enum_templates.values())
+        for template in templates:
+            for parameter in template.type_params:
+                constraint = getattr(parameter, "constraint", None)
+                if constraint is not None:
+                    self._resolve_constraint_interface(constraint, parameter.line, parameter.col)
 
         # Pass 2: Typecheck bodies & statements
         self._pass2_check_program(program)
@@ -500,6 +517,8 @@ class TypeChecker:
                     code="T006"
                 )
 
+            self._mark_result_lift(stmt.value, self.current_fn_ret_type)
+
         elif isinstance(stmt, BreakStmt):
             if self.loop_depth == 0:
                 raise TypeError(
@@ -552,6 +571,7 @@ class TypeChecker:
                         )
                     is_unit_ret = (fn_type.ret == UnitType) or (isinstance(fn_type.ret, ResultType) and fn_type.ret.ok == UnitType)
                     body_ret = self._check_block(m.body, is_statement_context=is_unit_ret)
+                    self._mark_result_lift(m.body.tail_expr, fn_type.ret)
                     if not is_unit_ret and not self._block_has_return(m.body):
                         if body_ret is not None and is_assignable(body_ret, fn_type.ret):
                             pass
@@ -594,6 +614,7 @@ class TypeChecker:
 
             is_unit_ret = (fn_type.ret == UnitType) or (isinstance(fn_type.ret, ResultType) and fn_type.ret.ok == UnitType)
             body_ret = self._check_block(stmt.body, is_statement_context=is_unit_ret)
+            self._mark_result_lift(stmt.body.tail_expr, fn_type.ret)
 
             # If function expects a return value other than unit, verify return presence
             if not is_unit_ret and not self._block_has_return(stmt.body):
@@ -763,6 +784,7 @@ class TypeChecker:
         else:
             var_type = init_type
 
+        self._mark_result_lift(stmt.initializer, var_type, force=True)
         self.current_scope.define_symbol(
             Symbol(stmt.name, var_type, is_mut=stmt.is_mut, kind="var", line=stmt.line, col=stmt.col),
             file=self.file
@@ -784,6 +806,7 @@ class TypeChecker:
                 code="T003"
             )
 
+        self._bind_pattern_type(stmt.pattern, elem_t, {}, stmt.line, stmt.col)
         loop_scope = Scope(parent=self.current_scope)
         old_scope = self.current_scope
         self.current_scope = loop_scope
@@ -823,13 +846,48 @@ class TypeChecker:
     # Expression Type Checking
     # ==========================================
 
+    def _mark_result_lift(self, expr: Optional[Expr], target: WType, force: bool = False) -> None:
+        if expr is None:
+            return
+        target_id = self.interner.intern(target)
+        source_entry = self.interner.get_entry(expr.inferred_type_id)
+        target_entry = self.interner.get_entry(target_id)
+        if source_entry.tag == target_entry.tag == "result":
+            source_ok, source_error = source_entry.data
+            target_ok, target_error = target_entry.data
+            same_ok = source_ok == target_ok or self.interner.get_entry(source_ok).tag == "any" or self.interner.get_entry(target_ok).tag == "any"
+            same_error = source_error == target_error or self.interner.get_entry(source_error).tag == "any" or self.interner.get_entry(target_error).tag == "any"
+            if same_ok and same_error:
+                return
+        if self.interner.get_entry(target_id).tag == "result" and expr.inferred_type_id != target_id:
+            if force or source_entry.tag == "result" or isinstance(target, EnumType):
+                expr.force_result_wrap_id = target_id
+
+    def _check_payload(self, expr: Expr, expected: Optional[WType]) -> WType:
+        previous = self.expected_type
+        self.expected_type = expected
+        try:
+            actual = self._check_expr(expr)
+        finally:
+            self.expected_type = previous
+        if expected is not None and is_assignable(actual, expected):
+            self._mark_result_lift(expr, expected, force=True)
+            return expected
+        return actual
+
+    def _builtin_arguments(self, type_: Optional[WType], name: str) -> List[WType]:
+        if name == "Option" and isinstance(type_, OptionalType):
+            return [type_.inner]
+        if name == "Result" and isinstance(type_, ResultType):
+            return [type_.ok, type_.err]
+        if isinstance(type_, EnumType) and getattr(type_, "template_name", None) == name:
+            return type_.type_args or []
+        return []
+
     def _check_expr(self, expr: Expr, is_statement_context: bool = False) -> WType:
         wtype = self._check_expr_impl(expr, is_statement_context)
-        try:
-            expr.inferred_type = wtype
-            expr.inferred_type_id = self.interner.from_wtype(wtype)
-        except Exception:
-            pass
+        expr.inferred_type = wtype
+        expr.inferred_type_id = self.interner.from_wtype(wtype)
         return wtype
 
     def _check_expr_impl(self, expr: Expr, is_statement_context: bool = False) -> WType:
@@ -1030,6 +1088,7 @@ class TypeChecker:
                         file=self.file,
                         code="T010"
                     )
+                expr.propagation_kind = "optional"
                 return opt_inner
 
             if isinstance(operand_t, ResultType) or (isinstance(operand_t, EnumType) and getattr(operand_t, "template_name", None) == "Result" and getattr(operand_t, "type_args", None) and len(operand_t.type_args) == 2):
@@ -1053,6 +1112,7 @@ class TypeChecker:
                         file=self.file,
                         code="T010"
                     )
+                expr.propagation_kind = "result"
                 return res_ok
 
             raise TypeError(
@@ -1192,6 +1252,9 @@ class TypeChecker:
                         file=self.file,
                         code="T003"
                     )
+                self._mark_result_lift(expr.value, sym.type, force=True)
+                expr.target.inferred_type = sym.type
+                expr.target.inferred_type_id = self.interner.from_wtype(sym.type)
                 return sym.type
 
             if isinstance(expr.target, IndexExpr):
@@ -1224,6 +1287,9 @@ class TypeChecker:
                             file=self.file,
                             code="T003"
                         )
+                    self._mark_result_lift(expr.value, obj_t.element, force=True)
+                    expr.target.inferred_type = obj_t.element
+                    expr.target.inferred_type_id = self.interner.from_wtype(obj_t.element)
                     return obj_t.element
 
                 if isinstance(obj_t, DictType):
@@ -1243,6 +1309,9 @@ class TypeChecker:
                             file=self.file,
                             code="T003"
                         )
+                    self._mark_result_lift(expr.value, obj_t.value, force=True)
+                    expr.target.inferred_type = obj_t.value
+                    expr.target.inferred_type_id = self.interner.from_wtype(obj_t.value)
                     return obj_t.value
 
                 raise TypeError(
@@ -1282,6 +1351,9 @@ class TypeChecker:
                             file=self.file,
                             code="T003"
                         )
+                    self._mark_result_lift(expr.value, f_info.type, force=True)
+                    expr.target.inferred_type = f_info.type
+                    expr.target.inferred_type_id = self.interner.from_wtype(f_info.type)
                     return f_info.type
 
                 sym = self._find_value_root_symbol(expr.target.object)
@@ -1318,6 +1390,9 @@ class TypeChecker:
                         file=self.file,
                         code="T003"
                     )
+                self._mark_result_lift(expr.value, field_t, force=True)
+                expr.target.inferred_type = field_t
+                expr.target.inferred_type_id = self.interner.from_wtype(field_t)
                 return field_t
 
             raise TypeError(
@@ -1594,7 +1669,8 @@ class TypeChecker:
                             file=self.file,
                             code="T015"
                         )
-                    arg_t = self._check_expr(expr.args[0])
+                    context = self._builtin_arguments(self.expected_type or self.current_fn_ret_type, "Option")
+                    arg_t = self._check_payload(expr.args[0], context[0] if context else None)
                     template = self.generic_enum_templates["Option"]
                     opt_t = self._monomorphize_enum(template, [arg_t], expr.line, expr.col)
                     return opt_t
@@ -1608,9 +1684,10 @@ class TypeChecker:
                             file=self.file,
                             code="T015"
                         )
-                    arg_t = self._check_expr(expr.args[0])
-                    err_t = AnyType()
                     ctx_t = self.expected_type or self.current_fn_ret_type
+                    context = self._builtin_arguments(ctx_t, "Result")
+                    arg_t = self._check_payload(expr.args[0], context[0] if context else None)
+                    err_t = AnyType()
                     if isinstance(ctx_t, ResultType):
                         err_t = ctx_t.err
                     elif isinstance(ctx_t, EnumType) and getattr(ctx_t, "template_name", None) == "Result" and ctx_t.type_args and len(ctx_t.type_args) == 2:
@@ -1628,9 +1705,10 @@ class TypeChecker:
                             file=self.file,
                             code="T015"
                         )
-                    err_t = self._check_expr(expr.args[0])
-                    ok_t = AnyType()
                     ctx_t = self.expected_type or self.current_fn_ret_type
+                    context = self._builtin_arguments(ctx_t, "Result")
+                    err_t = self._check_payload(expr.args[0], context[1] if context else None)
+                    ok_t = AnyType()
                     if isinstance(ctx_t, ResultType):
                         ok_t = ctx_t.ok
                     elif isinstance(ctx_t, EnumType) and getattr(ctx_t, "template_name", None) == "Result" and ctx_t.type_args and len(ctx_t.type_args) == 2:
@@ -1722,10 +1800,13 @@ class TypeChecker:
                 else:
                     type_params_set = {p.name if hasattr(p, "name") else str(p) for p in template.type_params}
                     bindings = {}
-                    for pt, a_expr in zip(payload_types, expr.args):
-                        a_type = self._check_expr(a_expr)
-                        self._unify_type(pt, a_type, type_params_set, bindings)
                     ctx_t = self.expected_type or self.current_fn_ret_type
+                    context_args = self._builtin_arguments(ctx_t, template.name)
+                    context_types = dict(zip([p.name for p in template.type_params], context_args))
+                    for pt, a_expr in zip(payload_types, expr.args):
+                        expected = context_types.get(pt.name) if isinstance(pt, NamedType) else None
+                        a_type = self._check_payload(a_expr, expected)
+                        self._unify_type(pt, a_type, type_params_set, bindings)
                     if template.name == "Result":
                         if "E" not in bindings:
                             if isinstance(ctx_t, ResultType):
@@ -1876,6 +1957,7 @@ class TypeChecker:
                         file=self.file,
                         code="T003"
                     )
+                self._mark_result_lift(a_expr, p_type, force=True)
             return callee_t.ret
 
         if isinstance(expr, StructInitExpr):
@@ -1966,12 +2048,14 @@ class TypeChecker:
                         file=self.file,
                         code="T003"
                     )
+                self._mark_result_lift(f.value, expected_f_type, force=True)
             return struct_t
 
         if isinstance(expr, ListExpr):
+            context = self.expected_type if isinstance(self.expected_type, ListType) else None
             if len(expr.elements) == 0:
-                return ListType(AnyType())
-            elem_types = [self._check_expr(e) for e in expr.elements]
+                return context or ListType(AnyType())
+            elem_types = [self._check_payload(e, context.element if context else None) for e in expr.elements]
             common_t = elem_types[0]
             for t in elem_types[1:]:
                 if is_assignable(t, common_t):
@@ -2004,9 +2088,10 @@ class TypeChecker:
             return TupleType(elem_types)
 
         if isinstance(expr, DictExpr):
+            context = self.expected_type if isinstance(self.expected_type, DictType) else None
             if len(expr.entries) == 0:
-                return DictType(AnyType(), AnyType())
-            first_key_t = self._check_expr(expr.entries[0].key)
+                return context or DictType(AnyType(), AnyType())
+            first_key_t = self._check_payload(expr.entries[0].key, context.key if context else None)
             if not self._is_valid_dict_key_type(first_key_t):
                 raise TypeError(
                     message=f"Invalid dictionary key type '{first_key_t}'; allowed key types are int, str, bool, or enum",
@@ -2015,10 +2100,10 @@ class TypeChecker:
                     file=self.file,
                     code="W2010"
                 )
-            first_val_t = self._check_expr(expr.entries[0].value)
+            first_val_t = self._check_payload(expr.entries[0].value, context.value if context else None)
             for entry in expr.entries[1:]:
-                kt = self._check_expr(entry.key)
-                vt = self._check_expr(entry.value)
+                kt = self._check_payload(entry.key, context.key if context else None)
+                vt = self._check_payload(entry.value, context.value if context else None)
                 if not self._is_valid_dict_key_type(kt):
                     raise TypeError(
                         message=f"Invalid dictionary key type '{kt}'; allowed key types are int, str, bool, or enum",
@@ -2122,6 +2207,9 @@ class TypeChecker:
                     payload_types_map = subject_t.variant_payloads
 
             for arm in expr.arms:
+                previous_coverage = set(covered_variants)
+                previous_wildcard = has_wildcard
+                arm.pattern.inferred_type_id = self.interner.intern(subject_t)
                 arm_bindings: Dict[str, WType] = {}
 
                 if isinstance(arm.pattern, WildcardPattern):
@@ -2133,6 +2221,9 @@ class TypeChecker:
                     else:
                         has_wildcard = True
                         arm_bindings[arm.pattern.name] = subject_t
+
+                elif isinstance(arm.pattern, TuplePattern):
+                    self._bind_pattern_type(arm.pattern, subject_t, arm_bindings, arm.line, arm.col)
 
                 elif isinstance(arm.pattern, LiteralPattern):
                     if isinstance(arm.pattern.literal, NoneLiteral) and expected_variants and "None" in expected_variants:
@@ -2185,6 +2276,8 @@ class TypeChecker:
                             file=self.file,
                             code="T003"
                         )
+                    if isinstance(subject_t, EnumType) and getattr(subject_t, "template_name", None) not in ("Option", "Result"):
+                        arm.pattern.enum_name = subject_t.name
                     covered_variants.add(v_name)
                     expected_payloads = payload_types_map.get(v_name, [])
                     if len(arm.pattern.args) != len(expected_payloads):
@@ -2217,20 +2310,19 @@ class TypeChecker:
                     finally:
                         self.current_scope = old_s
 
+                if arm.guard is not None:
+                    covered_variants = previous_coverage
+                    has_wildcard = previous_wildcard
                 arm_t = self._check_block(arm.body, initial_bindings=arm_bindings) or UnitType
                 arm_types.append(arm_t)
 
-            # Exhaustiveness check
-            if expected_variants is not None and not has_wildcard:
-                missing = [v for v in expected_variants if v not in covered_variants]
-                if missing:
-                    raise TypeError(
-                        message=f"Non-exhaustive match on '{subject_t}'. Missing: {', '.join(missing)}",
-                        line=expr.line,
-                        col=expr.col,
-                        file=self.file,
-                        code="T007"
-                    )
+            # Guards do not contribute unconditional coverage. Specialize the
+            # pattern matrix to account for nested variants and payload products.
+            if expected_variants is not None or subject_t == BoolType or isinstance(subject_t, TupleType):
+                rows = [[arm.pattern] for arm in expr.arms if arm.guard is None]
+                if not self._pattern_matrix_exhaustive([subject_t], rows):
+                    raise TypeError("Non-exhaustive match: missing variant or payload cases",
+                                    line=expr.line, col=expr.col, file=self.file, code="W2003")
 
             if arm_types:
                 first_t = arm_types[0]
@@ -2248,7 +2340,51 @@ class TypeChecker:
 
         return UnitType
 
+    def _pattern_matrix_exhaustive(self, types: List[WType], rows: List[List[Pattern]]) -> bool:
+        if not types:
+            return bool(rows)
+        if not rows:
+            return False
+        def wildcard(pattern):
+            return isinstance(pattern, WildcardPattern) or (isinstance(pattern, IdentifierPattern) and pattern.name not in ("None", "none"))
+        defaults = [row[1:] for row in rows if wildcard(row[0])]
+        if defaults and self._pattern_matrix_exhaustive(types[1:], defaults):
+            return True
+        first = types[0]
+        optional = self._builtin_arguments(first, "Option")
+        result = self._builtin_arguments(first, "Result")
+        if optional:
+            constructors = {"Some": optional, "None": []}
+        elif result:
+            constructors = {"Ok": [result[0]], "Err": [result[1]]}
+        elif isinstance(first, EnumType):
+            constructors = {name: first.variant_payloads.get(name, []) for name in first.variants}
+        elif isinstance(first, TupleType):
+            constructors = {"tuple": first.elements}
+        elif first == BoolType:
+            constructors = {"true": [], "false": []}
+        else:
+            return False
+        for name, payload in constructors.items():
+            specialized = []
+            for row in rows:
+                pattern = row[0]
+                if wildcard(pattern):
+                    specialized.append([WildcardPattern() for _ in payload] + row[1:])
+                elif isinstance(pattern, EnumPattern) and pattern.variant == name:
+                    specialized.append(pattern.args + row[1:])
+                elif isinstance(pattern, TuplePattern) and name == "tuple":
+                    specialized.append(pattern.elements + row[1:])
+                elif name == "None" and ((isinstance(pattern, IdentifierPattern) and pattern.name in ("None", "none")) or (isinstance(pattern, LiteralPattern) and isinstance(pattern.literal, NoneLiteral))):
+                    specialized.append(row[1:])
+                elif isinstance(pattern, LiteralPattern) and isinstance(pattern.literal, BoolLiteral) and name == ("true" if pattern.literal.value else "false"):
+                    specialized.append(row[1:])
+            if not self._pattern_matrix_exhaustive(payload + types[1:], specialized):
+                return False
+        return True
+
     def _bind_pattern_type(self, pattern: Pattern, expected_type: WType, bindings: Dict[str, WType], line: int, col: int) -> None:
+        pattern.inferred_type_id = self.interner.intern(expected_type)
         if isinstance(pattern, IdentifierPattern):
             bindings[pattern.name] = expected_type
         elif isinstance(pattern, WildcardPattern):
@@ -2264,6 +2400,23 @@ class TypeChecker:
                 )
             for sub_p, sub_t in zip(pattern.elements, expected_type.elements):
                 self._bind_pattern_type(sub_p, sub_t, bindings, line, col)
+        elif isinstance(pattern, EnumPattern):
+            optional = self._builtin_arguments(expected_type, "Option")
+            result = self._builtin_arguments(expected_type, "Result")
+            if optional:
+                payloads = {"Some": optional, "None": []}
+            elif result:
+                payloads = {"Ok": [result[0]], "Err": [result[1]]}
+            elif isinstance(expected_type, EnumType):
+                payloads = expected_type.variant_payloads
+                pattern.enum_name = expected_type.name
+            else:
+                raise TypeError("Enum pattern requires enum type", line=line, col=col, file=self.file, code="W2001")
+            types = payloads.get(pattern.variant)
+            if types is None or len(types) != len(pattern.args):
+                raise TypeError("Enum pattern payload does not match variant", line=line, col=col, file=self.file, code="W2001")
+            for child, child_type in zip(pattern.args, types):
+                self._bind_pattern_type(child, child_type, bindings, line, col)
         elif isinstance(pattern, LiteralPattern):
             lit_t = self._check_expr(pattern.literal)
             if not is_assignable(lit_t, expected_type):
@@ -2514,11 +2667,21 @@ class TypeChecker:
 
         return True
 
+    def _resolve_constraint_interface(self, constraint: TypeNode, line: int, col: int) -> InterfaceType:
+        if not isinstance(constraint, NamedType):
+            raise TypeError("Generic constraints must name an interface", line=line,
+                            col=col, file=self.file, code="W2012")
+        resolved = self.global_scope.lookup_type(constraint.name)
+        if not isinstance(resolved, InterfaceType):
+            raise TypeError(f"Generic constraint '{constraint.name}' is not a declared interface",
+                            line=line, col=col, file=self.file, code="W2012")
+        return resolved
+
     def _check_type_constraint(self, type_arg: WType, constraint: Optional[TypeNode], line: int, col: int) -> None:
         if constraint is None:
             return
         c_name = constraint.name if isinstance(constraint, NamedType) else str(constraint)
-        c_type = self.global_scope.lookup_type(c_name)
+        c_type = self._resolve_constraint_interface(constraint, line, col)
         if isinstance(c_type, InterfaceType):
             if isinstance(type_arg, ClassType):
                 if not type_arg.implements_interface(c_name):
@@ -2649,6 +2812,7 @@ class TypeChecker:
             ctor_type = FunctionType(params=ctor_p_types, ret=struct_t)
             ctor_sym = Symbol(mangled, ctor_type, is_mut=False, kind="fn", line=template.ast_decl.line, col=template.ast_decl.col)
             self.global_scope.define_symbol(ctor_sym, file=self.file)
+            self._check_fn_decl(ctor_fn)
             self.monomorphized_fn_decls.append(ctor_fn)
             self.telemetry.specialized_structs += 1
 
@@ -2836,6 +3000,12 @@ class TypeChecker:
         return False
 
     def _resolve_type_node(self, node: TypeNode) -> WType:
+        resolved = self._resolve_type_node_impl(node)
+        if node is not None:
+            node.resolved_type_id = self.interner.from_wtype(resolved)
+        return resolved
+
+    def _resolve_type_node_impl(self, node: TypeNode) -> WType:
         if isinstance(node, NamedType):
             if node.name == "any":
                 return AnyType()
