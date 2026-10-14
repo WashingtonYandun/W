@@ -227,6 +227,8 @@ def run_generic_hardening_tests() -> bool:
         test_compiler_boundaries()
         from test_phase_a import run_phase_a_tests
         run_phase_a_tests()
+        from test_ownership_control_flow import run_ownership_tests
+        run_ownership_tests()
         return True
     except Exception as e:
         print(f"  [FAIL] Generic Hardening Test Failed: {e}")
