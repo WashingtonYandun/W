@@ -137,7 +137,29 @@ def test_compiler_boundaries():
         assert error.line == 7 and error.col == 8
     else:
         raise AssertionError('Unknown statements must not be silently ignored')
-    print('  [PASS] Required types, cyclic HIR, control flow, tuples and statement boundaries')
+    from checker.TypeInterner import TYPE_STR
+    integer = H.HirConstInt(1, TYPE_INT, Span())
+    boolean = H.HirConstBool(True, TYPE_BOOL, Span())
+    for expression, message in [
+        (H.HirConstInt(1, TYPE_BOOL, Span()), 'Literal type'),
+        (H.HirUnaryOp('-', boolean, TYPE_BOOL, Span()), 'unary'),
+        (H.HirBinaryOp('+', integer, boolean, TYPE_INT, Span()), 'binary'),
+        (H.HirBinaryOp('+', integer, integer, TYPE_BOOL, Span()), 'binary'),
+        (H.HirBinaryOp('==', integer, integer, TYPE_INT, Span()), 'binary'),
+        (H.HirRange(boolean, integer, False, checker.interner.mk_list(TYPE_INT), Span()), 'Range'),
+        (H.HirConstructTuple([TYPE_INT], [boolean], tuple_id, Span()), 'Tuple operand'),
+        (H.HirConstructList(TYPE_STR, [], checker.interner.mk_list(TYPE_INT), Span()), 'List metadata'),
+        (H.HirConstructDict(TYPE_INT, TYPE_INT, [], checker.interner.mk_dict(TYPE_STR, TYPE_INT), Span()), 'Dictionary metadata'),
+    ]:
+        broken = deepcopy(module)
+        broken.top_level_stmts.append(H.HirExprStmt(expression, Span()))
+        rejected(broken, message)
+    source = 'let xs: list[str] = []\nlet data: dict[int, str] = {1: "value"}'
+    checked_ast = Parser().parse(source)
+    typed_checker = TypeChecker()
+    typed_checker.check(checked_ast)
+    HirBuilder(typed_checker.interner).lower(checked_ast)
+    print('  [PASS] Structural, control-flow, operand/result and collection metadata invariants')
 
 
 if __name__ == '__main__':

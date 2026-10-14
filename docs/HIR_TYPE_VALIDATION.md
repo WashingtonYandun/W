@@ -20,3 +20,11 @@ This is a type-decoration verifier. It does not yet prove operand/result compati
 Negative regression tests mutate checked HIR and assert rejection at the backend boundary. Positive tests preserve shared nodes and valid loop transfers. These checks do not yet establish lexical binding, value coercions, ownership, complete node schemas or operand/result compatibility for every expression.
 
 The tuple check exposed an existing multi-payload enum lowering defect: the synthetic payload tuple carried the enum TypeId. Both qualified and unqualified variant construction now intern the actual payload tuple type. generic_tree_recursive.w covers the qualified multi-payload path in the conformance corpus.
+
+## Operand and result relations
+
+The verifier now checks literal kind/type agreement, numeric/string arithmetic, integer modulo, boolean logic, numeric comparisons, unary negation/not, range bounds/result and tuple operand metadata. Equality operators must return bool; alias-aware equality operand compatibility remains a frontend obligation until canonical Optional/Result identity is implemented.
+
+List/dictionary element metadata must match the interned result type. Lowering now derives that metadata from the checked collection type instead of the first element or an arbitrary empty-container default. This fixes typed empty lists such as list[str] carrying int metadata. Contextual typing of an empty dictionary is a separate frontend limitation and is not introduced here.
+
+Regression mutations cover wrong literal/operand/result types, bad range bounds, tuple element mismatch and collection metadata mismatch. Positive coverage includes typed empty lists and dictionaries with concrete key/value types. Collection element assignability, call/return contracts and all expression forms remain future verification work.

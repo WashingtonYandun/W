@@ -342,7 +342,8 @@ class HirBuilder:
             return HirConstructStruct(s_name, fields_hir, tid, span)
         elif isinstance(expr, ListExpr):
             elems_hir = [self._lower_expr(e) for e in expr.elements]
-            elem_tid = elems_hir[0].type_id if elems_hir else TYPE_INT
+            entry = self.interner.get_entry(tid)
+            elem_tid = entry.data if entry.tag == "list" else (elems_hir[0].type_id if elems_hir else TYPE_INT)
             return HirConstructList(elem_tid, elems_hir, tid or self.interner.mk_list(elem_tid), span)
         elif isinstance(expr, DictExpr):
             entries_hir = [
@@ -350,8 +351,8 @@ class HirBuilder:
                 else (self._lower_expr(e[0]), self._lower_expr(e[1]))
                 for e in expr.entries
             ]
-            k_tid = entries_hir[0][0].type_id if entries_hir else TYPE_STR
-            v_tid = entries_hir[0][1].type_id if entries_hir else TYPE_INT
+            entry = self.interner.get_entry(tid)
+            k_tid, v_tid = entry.data if entry.tag == "dict" else (TYPE_STR, TYPE_INT)
             return HirConstructDict(k_tid, v_tid, entries_hir, tid or self.interner.mk_dict(k_tid, v_tid), span)
         elif isinstance(expr, TupleExpr):
             elems_hir = [self._lower_expr(e) for e in expr.elements]

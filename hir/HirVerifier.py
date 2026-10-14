@@ -1,6 +1,6 @@
 """Validate HIR structure, type decorations and control-flow invariants."""
 from error.Error import WError
-from checker.TypeInterner import TYPE_BOOL
+from checker.TypeInterner import TYPE_BOOL, TYPE_INT, TYPE_FLOAT, TYPE_STR, TYPE_UNIT, TYPE_NONE
 from hir import HirNodes as H
 
 
@@ -24,6 +24,51 @@ class HirVerifier:
     def _type(self, type_id, owner, field):
         if type(type_id) is not int or self.interner.get_entry(type_id).tag == 'error':
             self._fail(owner, f'Invalid HIR type in {type(owner).__name__}.{field}: {type_id!r}')
+
+    def _relations(self, value):
+        literals = {H.HirConstInt: TYPE_INT, H.HirConstFloat: TYPE_FLOAT,
+                    H.HirConstBool: TYPE_BOOL, H.HirConstStr: TYPE_STR,
+                    H.HirConstUnit: TYPE_UNIT, H.HirConstNone: TYPE_NONE}
+        if type(value) in literals and value.type_id != literals[type(value)]:
+            self._fail(value, 'Literal type does not match its value kind')
+        if isinstance(value, H.HirUnaryOp):
+            operand = value.operand.type_id
+            valid = ((value.op == '-' and operand in (TYPE_INT, TYPE_FLOAT)) or
+                     (value.op == 'not' and operand == TYPE_BOOL))
+            if not valid or value.type_id != operand:
+                self._fail(value, 'Invalid unary operand/result types')
+        if isinstance(value, H.HirBinaryOp):
+            left, right = value.left.type_id, value.right.type_id
+            expected = None
+            if value.op in ('+', '-', '*', '/') and left == right:
+                if left in (TYPE_INT, TYPE_FLOAT) or (value.op == '+' and left == TYPE_STR):
+                    expected = left
+            elif value.op == '%' and left == right == TYPE_INT:
+                expected = TYPE_INT
+            elif value.op in ('and', 'or') and left == right == TYPE_BOOL:
+                expected = TYPE_BOOL
+            elif value.op in ('<', '<=', '>', '>=') and left == right and left in (TYPE_INT, TYPE_FLOAT):
+                expected = TYPE_BOOL
+            elif value.op in ('==', '!='):
+                # Alias-aware equality compatibility remains a frontend contract.
+                expected = TYPE_BOOL
+            if expected is None or value.type_id != expected:
+                self._fail(value, 'Invalid binary operand/result types')
+        if isinstance(value, H.HirRange):
+            entry = self.interner.get_entry(value.type_id)
+            if value.start.type_id != TYPE_INT or value.end.type_id != TYPE_INT or entry.tag != 'list' or entry.data != TYPE_INT:
+                self._fail(value, 'Range requires int bounds and list[int] result')
+        if isinstance(value, H.HirConstructTuple):
+            if any(element.type_id != type_id for element, type_id in zip(value.elems, value.elem_type_ids)):
+                self._fail(value, 'Tuple operand types do not match element metadata')
+        if isinstance(value, H.HirConstructList):
+            entry = self.interner.get_entry(value.type_id)
+            if entry.tag != 'list' or entry.data != value.elem_type_id:
+                self._fail(value, 'List metadata does not match result type')
+        if isinstance(value, H.HirConstructDict):
+            entry = self.interner.get_entry(value.type_id)
+            if entry.tag != 'dict' or entry.data != (value.key_type_id, value.val_type_id):
+                self._fail(value, 'Dictionary metadata does not match result type')
 
     def _visit(self, value, loop_depth, in_function):
         if isinstance(value, (list, tuple)):
@@ -93,5 +138,6 @@ class HirVerifier:
             if isinstance(value, H.HirInterfaceDecl):
                 for _, type_id in value.methods:
                     self._type(type_id, value, 'methods')
+            self._relations(value)
         finally:
             self.active.remove(id(value))
