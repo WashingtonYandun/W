@@ -98,7 +98,7 @@ class HirBuilder:
             else:
                 top_stmts.append(self._lower_stmt(stmt))
 
-        return HirModule(
+        module = HirModule(
             file_path=self.file_path,
             structs=struct_decls,
             enums=enum_decls,
@@ -107,6 +107,9 @@ class HirBuilder:
             functions=fn_decls,
             top_level_stmts=top_stmts
         )
+        from hir.HirVerifier import HirVerifier
+        HirVerifier(self.interner, self.file_path).verify(module)
+        return module
 
     def _handle_import(self, stmt: ImportDecl, fn_decls: List[HirFnDecl]) -> None:
         current_dir = os.path.dirname(os.path.abspath(self.file_path)) if self.file_path != "<stdin>" else os.getcwd()
@@ -123,6 +126,10 @@ class HirBuilder:
             code = f.read()
 
         sub_ast = Parser(file=abs_path).parse(code)
+        from checker.TypeChecker import TypeChecker
+        checker = TypeChecker(file=abs_path)
+        checker.interner = self.interner
+        checker.check(sub_ast)
         for s in sub_ast.body:
             if isinstance(s, FnDecl):
                 fn_hir = self._lower_fn_decl(s)
@@ -471,6 +478,8 @@ class HirBuilder:
     def _get_type_id_from_node(self, node: Optional[TypeNode]) -> int:
         if node is None:
             return TYPE_UNIT
+        if hasattr(node, "resolved_type_id"):
+            return node.resolved_type_id
         if isinstance(node, NamedType):
             name = node.name
             if name == "int":

@@ -55,7 +55,30 @@ def test_compiler_boundaries():
             assert error.to_dict()['stage'] in ('hir', 'codegen')
         else:
             raise AssertionError('Unsupported nodes must not silently become unit')
-    print('  [PASS] Constraint validation, synthesized constructor types, and lowering boundaries')
+    from copy import deepcopy
+    from hir.HirVerifier import HirVerifier
+    for invalid in [0, -1, 100000, None, True]:
+        broken = deepcopy(module)
+        broken.functions[0].params[0].type_id = invalid
+        for action in [lambda: HirVerifier(checker.interner, path).verify(broken),
+                       lambda: HirCCodeGen(checker.interner, file_path=path).generate(broken)]:
+            try:
+                action()
+            except WError as error:
+                assert error.code == 'W9999'
+                assert error.stage == 'hir-verification'
+                assert 'HirParam.type_id' in error.message
+            else:
+                raise AssertionError('Invalid parameter types must block emission')
+    broken = deepcopy(module)
+    broken.functions[0].return_type_id = 0
+    try:
+        HirVerifier(checker.interner, path).verify(broken)
+    except WError as error:
+        assert 'return_type_id' in error.message
+    else:
+        raise AssertionError('Invalid function return types must be rejected')
+    print('  [PASS] Constraint validation, constructor types, lowering and HIR verification boundaries')
 
 
 if __name__ == '__main__':

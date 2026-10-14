@@ -1,0 +1,9 @@
+# HIR type validation boundary
+
+HIR is verified after lowering and again before C emission. The verifier traverses HIR declarations, parameters, fields, blocks, tail expressions, methods, match arms and nested list/tuple children. It checks scalar type_id fields, type_id lists, function return types and interface method signature IDs against the current interner. TYPE_ERROR, negative/out-of-range IDs, None and booleans used as IDs produce W9999 at stage hir-verification.
+
+The checker now records types on assignment targets and resolved type annotations. HirBuilder consumes those annotation IDs rather than reconstructing generic or builtin types from mangled strings. Imported functions are checked using the same interner before lowering; this repairs missing annotations without pretending to implement the planned CompilationSession/module cache.
+
+Regression coverage verifies malformed parameter IDs and return types, including direct backend entry. The existing 48-file HIR corpus is exercised through the active verification boundary.
+
+This is a type-decoration verifier. It does not yet prove operand/result compatibility, lexical binding correctness, ownership, arena provenance for an in-range ID from another arena, or the semantic validity of AST patterns retained in HIR. Canonical type identity, typed patterns, resolved symbols and module sessions remain separate roadmap tasks. Passing this boundary is not a claim of complete semantic HIR verification.

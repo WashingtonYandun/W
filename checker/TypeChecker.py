@@ -1202,6 +1202,8 @@ class TypeChecker:
                         file=self.file,
                         code="T003"
                     )
+                expr.target.inferred_type = sym.type
+                expr.target.inferred_type_id = self.interner.from_wtype(sym.type)
                 return sym.type
 
             if isinstance(expr.target, IndexExpr):
@@ -1234,6 +1236,8 @@ class TypeChecker:
                             file=self.file,
                             code="T003"
                         )
+                    expr.target.inferred_type = obj_t.element
+                    expr.target.inferred_type_id = self.interner.from_wtype(obj_t.element)
                     return obj_t.element
 
                 if isinstance(obj_t, DictType):
@@ -1253,6 +1257,8 @@ class TypeChecker:
                             file=self.file,
                             code="T003"
                         )
+                    expr.target.inferred_type = obj_t.value
+                    expr.target.inferred_type_id = self.interner.from_wtype(obj_t.value)
                     return obj_t.value
 
                 raise TypeError(
@@ -1292,6 +1298,8 @@ class TypeChecker:
                             file=self.file,
                             code="T003"
                         )
+                    expr.target.inferred_type = f_info.type
+                    expr.target.inferred_type_id = self.interner.from_wtype(f_info.type)
                     return f_info.type
 
                 sym = self._find_value_root_symbol(expr.target.object)
@@ -1328,6 +1336,8 @@ class TypeChecker:
                         file=self.file,
                         code="T003"
                     )
+                expr.target.inferred_type = field_t
+                expr.target.inferred_type_id = self.interner.from_wtype(field_t)
                 return field_t
 
             raise TypeError(
@@ -2857,6 +2867,12 @@ class TypeChecker:
         return False
 
     def _resolve_type_node(self, node: TypeNode) -> WType:
+        resolved = self._resolve_type_node_impl(node)
+        if node is not None:
+            node.resolved_type_id = self.interner.from_wtype(resolved)
+        return resolved
+
+    def _resolve_type_node_impl(self, node: TypeNode) -> WType:
         if isinstance(node, NamedType):
             if node.name == "any":
                 return AnyType()

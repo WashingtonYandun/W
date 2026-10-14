@@ -157,6 +157,11 @@ class HirCCodeGen:
     # -------------------------------------------------------------
 
     def generate(self, module: HirModule) -> str:
+        from hir.HirVerifier import HirVerifier
+        if self.interner is None:
+            raise WError("HIR emission requires a type interner", file=self.file_path,
+                         code="W9999", stage="hir-verification")
+        HirVerifier(self.interner, self.file_path).verify(module)
         # 1. Collect declarations
         for en in module.enums:
             self.enum_names.add(en.name)
