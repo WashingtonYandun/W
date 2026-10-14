@@ -1,0 +1,53 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 200" width="100%" height="100%">
+  <defs>
+    <linearGradient id="hdr-bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0a1228"/>
+      <stop offset="100%" stop-color="#040711"/>
+    </linearGradient>
+    <linearGradient id="cyan-txt" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#00bed2"/>
+      <stop offset="100%" stop-color="#38bdf8"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Banner Background -->
+  <rect width="800" height="200" rx="24" fill="url(#hdr-bg)" stroke="#1e2d5a" stroke-width="2"/>
+
+  <!-- Embedded Ninacuro Icon at x=30, y=20 (160x160) -->
+  <g transform="translate(35, 10) scale(0.7)">
+    <!-- Antennae -->
+    <path d="M 74,48 C 58,50 50,68 60,82 C 66,90 76,104 86,116 L 96,108 C 86,96 78,82 72,74 C 68,68 70,60 76,60 C 82,60 90,64 96,74 L 106,66 C 96,54 86,48 74,48 Z" fill="#001e3d"/>
+    <circle cx="70" cy="66" r="9" fill="#00bed2"/>
+    <circle cx="70" cy="66" r="5" fill="#67e8f9"/>
+    <path d="M 182,48 C 198,48 206,68 196,82 C 190,90 180,104 170,116 L 160,108 C 170,96 178,82 184,74 C 188,68 186,60 180,60 C 174,60 166,64 160,74 L 150,66 C 160,54 170,48 182,48 Z" fill="#001e3d"/>
+    <circle cx="186" cy="66" r="9" fill="#00bed2"/>
+    <circle cx="186" cy="66" r="5" fill="#67e8f9"/>
+
+    <!-- W Crest on Crown -->
+    <polygon points="128,52 144,80 158,66 144,110 112,110 98,66 112,80" fill="#001e3d" stroke="#FFFFFF" stroke-width="2"/>
+    <polygon points="128,58 142,80 154,68 140,106 116,106 102,68 114,80" fill="#00bed2"/>
+    <polygon points="128,58 135,80 128,86 121,80" fill="#FFFFFF" opacity="0.8"/>
+
+    <!-- Head Face -->
+    <circle cx="128" cy="150" r="62" fill="#001e3d" stroke="#FFFFFF" stroke-width="4"/>
+    <circle cx="128" cy="150" r="58" fill="#00bed2"/>
+
+    <!-- Eyes -->
+    <circle cx="98" cy="146" r="24" fill="#001529"/>
+    <circle cx="98" cy="146" r="22" fill="#FFFFFF"/>
+    <circle cx="98" cy="146" r="17" fill="#00bed2"/>
+    <circle cx="98" cy="146" r="10" fill="#001529"/>
+    <circle cx="92" cy="140" r="4.5" fill="#FFFFFF"/>
+
+    <circle cx="158" cy="146" r="24" fill="#001529"/>
+    <circle cx="158" cy="146" r="22" fill="#FFFFFF"/>
+    <circle cx="158" cy="146" r="17" fill="#00bed2"/>
+    <circle cx="158" cy="146" r="10" fill="#001529"/>
+    <circle cx="152" cy="140" r="4.5" fill="#FFFFFF"/>
+    <path d="M 120,176 C 124,183 132,183 136,176" fill="none" stroke="#002855" stroke-width="3" stroke-linecap="round"/>
+  </g>
+
+  <!-- Typography: W Programming Language -->
+  <text x="240" y="105" font-family="system-ui, -apple-system, 'SF Pro Display', Inter, sans-serif" font-size="68" font-weight="900" fill="url(#cyan-txt)" letter-spacing="-1.5">W LANGUAGE</text>
+  <text x="245" y="145" font-family="system-ui, -apple-system, 'SF Pro Text', Inter, sans-serif" font-size="18" font-weight="500" fill="#94a3b8" letter-spacing="1.2">DETERMINISTIC SYSTEMS • VALUE SEMANTICS • C99 NATIVE</text>
+</svg>

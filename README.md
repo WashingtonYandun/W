@@ -1,11 +1,15 @@
+<p align="center">
+  <img src="assets/wawi.jpg" alt="Wawi — Official Mascot of the W Programming Language" width="260" style="border-radius: 20px;">
+</p>
+
 # The W Programming Language
 
 <p align="center">
   <a href="https://github.com/WashingtonYandun/W/actions"><img src="https://img.shields.io/badge/build-passing-brightgreen?style=flat-square" alt="Build Status"></a>
-  <a href="https://github.com/WashingtonYandun/W"><img src="https://img.shields.io/badge/conformance-347%2F347%20(100%25)-success?style=flat-square" alt="Conformance Tests"></a>
-  <a href="https://github.com/WashingtonYandun/W"><img src="https://img.shields.io/badge/sanitizers-ASan%20%7C%20UBSan%20clean-blue?style=flat-square" alt="Sanitizers"></a>
+  <a href="https://github.com/WashingtonYandun/W"><img src="https://img.shields.io/badge/conformance-391%2F391%20(100%25)-success?style=flat-square" alt="Conformance Tests"></a>
+  <a href="https://github.com/WashingtonYandun/W"><img src="https://img.shields.io/badge/sanitizers-ASan%20%7C%20UBSan%20%7C%20LSan%20clean-blue?style=flat-square" alt="Sanitizers"></a>
   <a href="https://github.com/WashingtonYandun/W"><img src="https://img.shields.io/badge/self--hosting-3--stage%20fixed--point-purple?style=flat-square" alt="Self-Hosting"></a>
-  <a href="https://github.com/WashingtonYandun/W"><img src="https://img.shields.io/badge/version-v0.2.0--alpha-informational?style=flat-square" alt="Version"></a>
+  <a href="https://github.com/WashingtonYandun/W"><img src="https://img.shields.io/badge/version-v0.2.4-informational?style=flat-square" alt="Version"></a>
   <a href="https://github.com/WashingtonYandun/W"><img src="https://img.shields.io/badge/backend-portable%20C99-orange?style=flat-square" alt="Backend"></a>
   <a href="https://github.com/WashingtonYandun/W/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue?style=flat-square" alt="License"></a>
   <a href="CONTRIBUTING.md"><img src="https://img.shields.io/badge/contributions-welcome-brightgreen?style=flat-square" alt="Contributions Welcome"></a>
@@ -14,25 +18,47 @@
 
 <p align="center">
   <strong>Compact &bull; Deterministic &bull; Statically Typed &bull; Self-Hostable Systems Language</strong><br>
-  <em>Engineered with pure Value Semantics, Copy-on-Write (CoW), Deterministic ARC, Monomorphized Generics, Algebraic Data Types, and portable C99 compilation without Garbage Collection pauses.</em>
+  <em>Engineered with pure Value Semantics, Copy-on-Write (CoW), Deterministic ARC, Weak References, Monomorphized Generics, Algebraic Data Types, and portable C99 compilation without Garbage Collection pauses.</em>
 </p>
 
 ---
 
 ## ⚡ What is W?
 
-**W** is a modern systems and application programming language combining the expressive safety of modern functional languages with the raw speed, minimal footprint, and portability of C99. W features a self-hosting compiler, deterministic memory management without a tracing garbage collector, monomorphized generics, first-class Algebraic Data Types (ADTs), and seamless nominal object-oriented programming.
+**W** is a modern systems and application programming language combining the expressive safety of modern functional languages with the raw speed, minimal footprint, and portability of C99. W features a self-hosting compiler, deterministic memory management without a tracing garbage collector, monomorphized generics, first-class Algebraic Data Types (ADTs), whole-program compilation sessions, and seamless nominal object-oriented programming.
+
+---
+
+## 🪲 Meet Wawi: The Official Mascot
+
+<p align="center">
+  <img src="assets/wawi.jpg" alt="Wawi — Official Mascot of W Language" width="320" style="border-radius: 22px; box-shadow: 0 12px 32px rgba(0,0,0,0.35);">
+</p>
+
+**W** is personified by its official mascot: **Wawi**, inspired by a living biological marvel of Ecuador: the *Ninacuro* (*Pyrophorus noctilucus*, family Elateridae). In Kichwa, *Nina* means fire/light, *Kuru* means bug/insect, and *Wawa* represents the newborn sprout.
+
+Just as classic systems and languages are anchored by living totems (Linux's Tux, Rust's Ferris, Go's Gopher), Wawi embodies the foundational engineering principles of the W language:
+
+1. **Cold Light & Zero Memory Waste:** *Pyrophorus noctilucus* emits cold bioluminescence with 100% luminous efficiency and zero thermal dissipation. Similarly, W operates with **zero garbage collection pauses or runtime bloat**: every byte is deterministically owned and reclaimed at scope exit (`CleanupScope`).
+2. **Cephalic Luminous Headlights:** Unlike common fireflies with abdominal lanterns, Wawi features two circular headlights directly on its head, represented by expressive cyan eyes (`#00bed2`), symbolizing rigorous pre-emission semantic analysis and strict static typing (`TypeInterner`).
+3. **The 'W' Antennae & Crown:** The antennae and head crest organically form a sharp **'W'** silhouette, celebrating W1's 3-stage cryptographic bootstrap fixed-point ($\text{SHA256}(c_0) == \text{SHA256}(c_1) == \text{SHA256}(c_2)$).
+4. **Biomechanical Click Mechanism:** The click beetle's frictionless thoracic spine snaps it upright instantly, embodying zero-overhead C99 native dispatch and compact ~34 KB binaries.
+
+> Complete specifications, color tokens, and design guidelines are documented in [docs/BRAND_IDENTITY.md](docs/BRAND_IDENTITY.md).
+
+---
 
 ### Key Architectural Pillars
 
 | Pillar | How W Solves It | Technical & Operational Benefit |
 | :--- | :--- | :--- |
-| **Hybrid Memory Architecture** | Pure Value Semantics + Copy-on-Write (CoW) for data structures (`list`, `dict`, `struct`); Single-threaded ARC for OOP `class` objects | Zero garbage collector pauses; deterministic `CleanupScope` releases memory immediately at scope exit; ASan/UBSan clean. |
+| **Hybrid Memory Architecture & Weak References** | Pure Value Semantics + Copy-on-Write (CoW) with $O(N+M)$ path detach; Single-threaded ARC with `WWeakControl` blocks for OOP `class` objects | Zero garbage collector pauses; deterministic `CleanupScope` releases memory immediately at scope exit; built-in `weak(obj)` and safe `upgrade(w)` eliminate cyclic leaks. ASan/UBSan/LSan clean. |
+| **Whole-Program Compilation Sessions** | Single `CompilationSession` and `SourceManager` with shared `TypeInterner`, canonical `ModuleId`, and `DeclId` | Zero type ID collisions across imports; diamond dependencies and symlinks are parsed, checked, and initialized once; runtime module values rejected before lowering (`[W2003]`). |
 | **Semantic Unification (`Option` & `Result`)** | Formal equivalence: `T?` $\equiv$ `Option[T]` (`Some(T)`, `None`) and `T ! E` $\equiv$ `Result[T, E]` (`Ok(T)`, `Err(E)`) | Single mental model: use `?` and `??` for concise control flow or `match` for structural destructuring interchangeably. |
-| **Monomorphized Generics & ADTs** | Compile-time specialization of generic `struct[T]`, `enum[T]`, and `fn[T]` with deterministic `TypeId` tuple mangling | Zero runtime dispatch overhead for generics; static detection of infinite recursive layouts (`T025`); nominal constraints (`[T: Printable]`). |
+| **Monomorphized Generics & ADTs** | Compile-time specialization of generic `struct[T]`, `enum[T]`, and `fn[T]` with deterministic `TypeId` tuple mangling | Zero runtime dispatch overhead for generics; static detection of infinite recursive layouts (`W2011`); nominal constraints (`[T: Printable]`). |
 | **Nominal OOP & Polymorphism** | Single-inheritance `class` hierarchies, nominal `interface`, explicit `implements`, `super`, and field encapsulation (`public`/`private`) | Reliable enterprise software modeling with static vtable layout and dynamic method dispatch. |
 | **Self-Hosting Fixed-Point** | 3-stage bootstrap fixed-point: $\text{SHA256}(c_0) == \text{SHA256}(c_1) == \text{SHA256}(c_2)$ | Proof of linguistic maturity, deterministic code generation, and complete compiler autonomy. |
-| **Typed HIR Multi-Pass Pipeline** | `Lexer` $\to$ `Parser` $\to$ `TypeInterner` $\to$ `Typed HIR` $\to$ `HirCCodeGen` $\to$ `C99` | Clean separation between semantic validation, generic monomorphization, intermediate representation, and target code generation. |
+| **Verified Typed HIR Multi-Pass Pipeline** | `Lexer` $\to$ `Parser` $\to$ `TypeInterner` $\to$ `Typed HIR` $\to$ `HirVerifier` $\to$ `HirCCodeGen` $\to$ `C99` | Clean separation between semantic validation, arena provenance verification, generic monomorphization, and target code generation. |
 | **Ultra-Lightweight Footprint** | Standalone single-header runtime (`runtime/w_runtime.h`), zero external runtime dependencies | Generated binaries are $\approx 34\text{ KB}$, portable across Linux, macOS, BSD, and embedded targets. |
 
 ---
@@ -53,7 +79,7 @@ cd W
 # Compile Stage-2 native W1 compiler and install globally to ~/.local/bin/w
 ./install.sh
 
-# Verify installation & run the 347-test conformance matrix
+# Verify installation & run the 391-test conformance matrix
 w version
 w test
 ```
@@ -168,6 +194,57 @@ let user = new User("Washo", 28)
 print_item(user)
 ```
 
+### 5. Weak References & Cyclic Memory Safety (OOP)
+
+To avoid memory leaks in cyclic object graphs without a tracing garbage collector, W provides deterministic weak handles via `WWeakControl` blocks:
+
+```w
+class Node {
+    public name: str
+    public next: Node?
+    public parent: weak[Node]?
+
+    fn init(name: str) {
+        this.name = name
+        this.next = None
+        this.parent = None
+    }
+}
+
+let parent_node = new Node("Parent")
+let child_node = new Node("Child")
+
+parent_node.next = Some(child_node)
+# weak(obj) creates a non-owning handle with an independent weak refcount
+child_node.parent = Some(weak(parent_node))
+
+# upgrade(w) returns Some(T) if alive, or None if expired
+match child_node.parent? {
+    Some(w) => match upgrade(w) {
+        Some(p) => print("Upgraded parent:", p.name),
+        None    => print("Parent already deallocated")
+    },
+    None => print("No parent link")
+}
+```
+
+### 6. Whole-Program Compilation Sessions (`CompilationSession`)
+
+Multi-file projects share a unified `TypeInterner` arena and canonical module identities, ensuring zero type-ID collisions and single-initialization diamond graphs:
+
+```w
+# utils.w
+fn format_greeting(name: str) -> str {
+    return "Hello, " + name + "!"
+}
+
+# main.w
+import "utils.w" as utils
+
+let msg = utils.format_greeting("Wawi")
+print(msg) # "Hello, Wawi!"
+```
+
 ---
 
 ## 🛠️ CLI Toolchain (`w`)
@@ -193,15 +270,15 @@ w emit-c --selfhost examples/05_utf8_and_algorithms.w -o out_w1.c
 w build --hir examples/05_utf8_and_algorithms.w -o app
 w build --selfhost examples/05_utf8_and_algorithms.w -o app_w1
 
-# 6. Run full 347-test conformance suite (100% pass)
+# 6. Run full 391-test conformance suite (100% pass)
 w test
 
-# 7. Run AddressSanitizer & UndefinedBehaviorSanitizer checks
+# 7. Run AddressSanitizer, UndefinedBehaviorSanitizer & LeakSanitizer checks (101-case corpus)
 w test --sanitize
 
 # 8. Run differential testing oracle & compiler fuzzer
-w test --differential 50 --seed 20260416
-w test --fuzz 2000 --seed 20260416
+w test --differential 20 --seed 20260416
+w test --fuzz 100 --seed 20260416
 
 # 9. Performance benchmark harness
 w bench
@@ -283,13 +360,18 @@ Run `./w bench` to benchmark the reference interpreter against the native C99 ba
 - [x] **v0.1.4** — Compiler Architecture: `TypeId`, `TypeInterner`, Typed HIR, modular W1 split (`selfhost/src/`), Clang ASan/UBSan integration.
 - [x] **v0.2.0** — **Generics, ADTs & Monomorphization**:
   - [x] Phase 1: Parametric polymorphism for `struct Box[T]` and `fn id[T]`, nominal constraints, invariance enforcement.
-  - [x] Phase 2: Generic Enums & Algebraic Data Types (ADTs), `Option[T]` $\equiv$ `T?` and `Result[T, E]` $\equiv$ `T ! E` canonical unification, `T025` infinite recursive layout detection.
+  - [x] Phase 2: Generic Enums & Algebraic Data Types (ADTs), `Option[T]` $\equiv$ `T?` and `Result[T, E]` $\equiv$ `T ! E` canonical unification, `W2011` infinite recursive layout detection.
 - [x] **v0.2.1** — **Generic Hardening & Code Bloat Metrics**: Canonical monomorphization cache, specialization telemetry.
-- [ ] **v0.3.0** — **Function Types**: First-class function types `fn(A) -> B` and indirect calls without closures.
-- [ ] **v0.3.1** — **Weak References & Memory Hardening**: Control block separation for cycle prevention.
-- [ ] **v0.4.0** — **Closures & Higher-Order Functions**: Environment capture analysis, heap ARC fat pointers, `map`/`filter`/`reduce`.
-- [ ] **v0.5.0** — **Modules & Packages**: Hierarchical package namespace, explicit C FFI bindings.
-- [ ] **v0.6.0** — **Standard Library & Tooling**: Standard library (`std.io`, `std.fs`, `std.json`), Language Server Protocol (LSP).
+- [x] **v0.2.2** — **Phase A: Owned Strings, Canonical Errors & Verified HIR**: RC string buffers, error boundaries, strict `HirVerifier` arena verification, composition grammar (`?` over `!`).
+- [x] **v0.2.3** — **B01: Ownership Across Control Flow**: Evaluated operand cleanup, deterministic releases across `return`, `break`, `continue`, `?`, `match`, and short-circuit operators. Cero leaks under Linux LSan.
+- [x] **v0.2.4** — **B02: Copy-on-Write Telemetry & Scalable Detach**: Asymptotic $O(N+M)$ path copying, native byte accounting, detached container benchmarks.
+- [x] **develop** — **B03: Weak References & Cycle Safety**: Class control blocks (`WWeakControl`), `weak(obj)` and `upgrade(w)`, zero leaks under ASan/LSan.
+- [x] **develop** — **B04: Compiler Engine Profiles & Sanitizer Matrix**: 4 execution targets, 101-case sanitizer corpus, Clang ASan/UBSan, GCC C99, Linux LSan memory gates.
+- [x] **develop** — **C01: Whole-Program Compilation Sessions**: Single `CompilationSession` and `SourceManager`, shared `TypeInterner` arena, canonical `ModuleId`/`DeclId`, single-initialization diamond graphs.
+- [ ] **In Progress** — **C02: Resolved HIR & Explicit Lowering**: `SymbolId`, `FieldId`/`VariantId`, static/slot call targets, elimination of string-based AST lookup in code generation.
+- [ ] **Fase C** — **C03–C06: Monomorphization, Layout & Default HIR**: Worklist specialization, recursive layout graphs, centralized constraints, full HIR default backend.
+- [ ] **Fase D** — **D01–D06: Self-Hosted W1 Parity & Tooling**: 100% feature parity for W1 compiler, extended fuzzing, and telemetry budgets.
+- [ ] **Fase E** — **E01–E04: First-Class Functions, Closures & Ecosystem**: First-class function types, closure capture, C FFI, and Language Server Protocol (LSP).
 
 ---
 
