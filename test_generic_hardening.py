@@ -229,6 +229,8 @@ def run_generic_hardening_tests() -> bool:
         run_phase_a_tests()
         from test_ownership_control_flow import run_ownership_tests
         run_ownership_tests()
+        from test_weak_references import run_weak_tests
+        run_weak_tests()
         return True
     except Exception as e:
         print(f"  [FAIL] Generic Hardening Test Failed: {e}")

@@ -218,3 +218,29 @@ panics terminate the process rather than unwinding lexical scopes; they are not
 zero-leak acyclic success cases. Allocation failure and concurrent RC are outside
 this contract. W1 generic-language exclusions remain unchanged; this fixture uses
 its supported non-generic profile and unqualified Ok/Err constructors.
+
+## B03: class control blocks and weak handles
+
+Class ownership is recorded in a control block with strong and weak counts and a
+nullable object pointer. One implicit weak reference protects the block while the
+object is alive. `w_clone`/`w_release` update strong counts for objects and weak
+counts for handles. At strong zero, invalidate the object pointer, release fields,
+destroy object storage and drop the implicit weak reference. A self-stored weak
+handle therefore cannot free its control block during object teardown.
+
+`w_builtin_weak` borrows a class reference and returns one owned weak handle.
+`w_builtin_upgrade` borrows a weak handle and returns a retained strong object or
+None. `w_empty_weak` owns a new expired control block for a default weak field;
+constructor initializer arrays release their temporary defaults after storing
+clones. Weak identity remains stable until the final handle is released.
+
+Memory instrumentation counts control blocks as managed allocations. Class
+objects therefore have separate object/body and control-block obligations. CoW
+byte accounting uses the current ABI and includes the changed struct header size.
+
+`test_weak_references.py` isolates the unbroken strong cycle in `tests/memory/`:
+its leak is expected only for that subprocess. Broken cycles and weak back-reference
+cases must have zero leaks. Linux keeps LSan enabled and additionally requires its
+leak report for the negative case; no suite-wide leak suppression is introduced.
+The interpreter uses Python weak references and identity sentinels. Python GC may
+collect strong cycles; native RC behavior is the authority for the cycle test.
