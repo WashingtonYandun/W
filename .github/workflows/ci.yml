@@ -104,4 +104,6 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: memory-failures-${{ matrix.os }}
-          path: .w_cache/ci-artifacts/
+          path: |
+            .w_cache/ci-artifacts/
+            .w_cache/compiler*.c
