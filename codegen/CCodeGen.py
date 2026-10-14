@@ -14,6 +14,7 @@ from node.NodeType import (
     ListExpr, DictExpr, TupleExpr, IfExpr, MatchExpr
 )
 from parser.Parser import Parser
+from common.Telemetry import CodegenTelemetry
 
 
 class CleanupScope:
@@ -54,6 +55,7 @@ class CCodeGen:
         self.fn_Prototypes: List[str] = []
         self.fn_Definitions: List[str] = []
         self.scope_stack: List[CleanupScope] = []
+        self.telemetry: CodegenTelemetry = CodegenTelemetry()
 
     def new_temp(self) -> str:
         name = f"_t{self.temp_counter}"
@@ -191,7 +193,17 @@ class CCodeGen:
         lines.append("    w_runtime_cleanup();")
         lines.append("    return 0;")
         lines.append("}")
-        return "\n".join(lines) + "\n"
+        c_code_str = "\n".join(lines) + "\n"
+        struct_count = sum(1 for s in program.body if isinstance(s, StructDecl))
+        self.telemetry = CodegenTelemetry(
+            generated_functions=len(self.fn_Definitions),
+            generated_structs=struct_count,
+            generated_enums=len(self.enum_names),
+            generated_classes=len(self.classes),
+            generated_c_lines=len(lines),
+            generated_c_bytes=len(c_code_str.encode("utf-8")),
+        )
+        return c_code_str
 
     def _collect_declarations(self, program: Program, ns: str) -> None:
         for stmt in program.body:
