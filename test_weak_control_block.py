@@ -9,6 +9,11 @@ CONTRACT = r'''
 #include "runtime/w_runtime.h"
 #include <assert.h>
 int main(void) {
+    WVal empty_weak = w_empty_weak();
+    assert(w_builtin_upgrade(empty_weak).tag == W_NONE);
+    WVal empty_copy = w_clone(empty_weak);
+    w_release(empty_weak); w_release(empty_copy);
+    assert(w_g_live_objects == 0);
     WVal object = w_make_object("Node", 0, NULL, NULL);
     WVal weak = w_builtin_weak(object);
     WVal copy = w_clone(weak);

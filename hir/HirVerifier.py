@@ -34,7 +34,9 @@ class HirVerifier:
         self.checked_types.add(type_id)
         entry = self.interner.get_entry(type_id)
         children = []
-        if entry.tag in ("optional", "list"):
+        if entry.tag == "weak" and self.interner.get_entry(entry.data).tag != "class":
+            self._fail(owner, "Weak target must be a class TypeId")
+        if entry.tag in ("optional", "list", "weak"):
             children = [entry.data]
         elif entry.tag in ("dict", "result", "tuple"):
             children = list(entry.data)

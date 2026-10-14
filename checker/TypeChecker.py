@@ -20,7 +20,7 @@ from node.NodeType import (
 )
 from checker.WType import (
     WType, IntType, FloatType, BoolType, StrType, UnitType, NoneType,
-    OptionalType, ListType, DictType, TupleType, StructType, EnumType,
+    OptionalType, WeakType, ListType, DictType, TupleType, StructType, EnumType,
     InterfaceType, ClassFieldInfo, ClassMethodInfo, ClassType,
     ResultType, FunctionType, ModuleType, AnyType,
     TypeParamType, GenericStructTemplate, GenericFnTemplate, GenericEnumTemplate, is_assignable
@@ -123,8 +123,8 @@ class TypeChecker:
         # Reserve builtin identities and their specialization namespaces.
         for declaration in program.body:
             if isinstance(declaration, (StructDecl, EnumDecl, ClassDecl, InterfaceDecl)):
-                if declaration.name in ("Option", "Result") or declaration.name.startswith(("Option__", "Result__")):
-                    raise TypeError("Builtin Option/Result identities are reserved", line=declaration.line,
+                if declaration.name in ("Option", "Result", "Weak") or declaration.name.startswith(("Option__", "Result__")):
+                    raise TypeError("Builtin Option/Result/Weak identities are reserved", line=declaration.line,
                                     col=declaration.col, file=self.file, code="W1002")
 
         # Pass 1: Collect declarations
@@ -1589,6 +1589,18 @@ class TypeChecker:
             callee_t: Optional[WType] = None
             if isinstance(expr.callee, IdentExpr):
                 callee_name = expr.callee.name
+                symbol = self.current_scope.lookup_symbol(callee_name)
+                if callee_name in ("weak", "upgrade") and symbol and symbol.kind == "builtin":
+                    if len(expr.args) != 1 or expr.type_args:
+                        raise TypeError(f"{callee_name} expects one argument and no type arguments",
+                                        line=expr.line, col=expr.col, file=self.file, code="W2005")
+                    argument = self._check_expr(expr.args[0])
+                    if callee_name == "weak" and isinstance(argument, ClassType):
+                        return WeakType(argument)
+                    if callee_name == "upgrade" and isinstance(argument, WeakType):
+                        return OptionalType(argument.target)
+                    raise TypeError(f"Invalid argument type '{argument}' for {callee_name}",
+                                    line=expr.line, col=expr.col, file=self.file, code="W2003")
                 if callee_name in self.generic_fn_templates:
                     template = self.generic_fn_templates[callee_name]
                     if expr.type_args:
@@ -2493,6 +2505,8 @@ class TypeChecker:
             return NamedType(t.name)
         if isinstance(t, InterfaceType):
             return NamedType(t.name)
+        if isinstance(t, WeakType):
+            return GenericType("Weak", [self._wtype_to_type_node(t.target)])
         if isinstance(t, OptionalType):
             return AstOptionalType(self._wtype_to_type_node(t.inner))
         if isinstance(t, ListType):
@@ -3037,6 +3051,15 @@ class TypeChecker:
             return resolved
 
         if isinstance(node, GenericType):
+            if node.name == "Weak":
+                if len(node.type_args) != 1:
+                    raise TypeError("Weak requires exactly one class type", line=node.line,
+                                    col=node.col, file=self.file, code="W2003")
+                target = self._resolve_type_node(node.type_args[0])
+                if not isinstance(target, ClassType):
+                    raise TypeError("Weak target must be a concrete class", line=node.line,
+                                    col=node.col, file=self.file, code="W2003")
+                return WeakType(target)
             lookup = self.current_scope.lookup_type(node.name)
             if lookup is None:
                 lookup = self.generic_struct_templates.get(node.name)

@@ -104,6 +104,17 @@ class HirBindings:
                 self.verifier._fail(node, "Propagation channel does not match function return type")
         if isinstance(node, H.HirBuiltinCall):
             from hir.HirBuilder import BUILTIN_NAMES
+            if node.builtin_name in ("weak", "upgrade"):
+                if len(node.args) != 1:
+                    self.verifier._fail(node, "Weak builtin arity mismatch")
+                argument = self.interner.get_entry(node.args[0].type_id)
+                expected_tag = "class" if node.builtin_name == "weak" else "weak"
+                if argument.tag != expected_tag:
+                    self.verifier._fail(node, "Weak builtin argument type mismatch")
+                expected = (self.interner.mk_weak(node.args[0].type_id) if node.builtin_name == "weak"
+                            else self.interner.mk_optional(argument.data))
+                if node.type_id != expected:
+                    self.verifier._fail(node, "Weak builtin result type mismatch")
             if node.builtin_name not in BUILTIN_NAMES:
                 self.verifier._fail(node, 'Unresolved HIR builtin')
         if isinstance(node, H.HirConstructEnum):

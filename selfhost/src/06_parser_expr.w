@@ -120,6 +120,10 @@ fn emit_call(callee: ExprRes, args_c: list[str]) -> ExprRes {
     }
     if len(callee.val) >= 2 and slice(callee.val, 0, 2) == "v_" {
         let fn_name = slice(callee.val, 2, len(callee.val))
+        if fn_name == "weak" or fn_name == "upgrade" {
+            if len(args_c) != 1 { report_error("W2005", at_tok().line, at_tok().col, "weak/upgrade expects one argument") }
+            return bind_call("w_builtin_" + fn_name + "(" + args_c[0] + ")")
+        }
         if fn_name == "Ok" and len(args_c) == 1 {
             return bind_call("w_ok(" + own_expr(args_c[0]) + ")")
         }

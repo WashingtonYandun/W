@@ -6,7 +6,7 @@ from error.Error import WRuntimeError
 from runtime.Values import (
     WValue, WInt, WFloat, WBool, WStr, WUnit, WNone,
     WList, WDict, WTuple, WStructInstance, WEnumValue, WEnumNamespace,
-    WOk, WErr, WFunction, WNativeFunction, cow_telemetry
+    WOk, WErr, WWeak, WObjectInstance, WFunction, WNativeFunction, cow_telemetry
 )
 
 # ==========================================
@@ -279,6 +279,17 @@ def create_global_environment(stdout: Optional[TextIO] = None) -> Environment:
             raise WRuntimeError("Err() takes exactly 1 argument")
         return WErr(args[0])
 
+    def weak_fn(args: List[WValue]) -> WValue:
+        if len(args) != 1 or not isinstance(args[0], WObjectInstance):
+            raise WRuntimeError("weak expects one class object")
+        return WWeak(args[0])
+
+    def upgrade_fn(args: List[WValue]) -> WValue:
+        if len(args) != 1 or not isinstance(args[0], WWeak):
+            raise WRuntimeError("upgrade expects one weak reference")
+        value = args[0].reference()
+        return value if value is not None else WNone()
+
     # Register builtins
     env.declare("print", WNativeFunction("print", print_fn), is_mut=False)
     env.declare("len", WNativeFunction("len", len_fn), is_mut=False)
@@ -295,6 +306,8 @@ def create_global_environment(stdout: Optional[TextIO] = None) -> Environment:
     env.declare("write_file", WNativeFunction("write_file", write_file_fn), is_mut=False)
     env.declare("args", WNativeFunction("args", args_fn), is_mut=False)
 
+    env.declare("weak", WNativeFunction("weak", weak_fn), is_mut=False)
+    env.declare("upgrade", WNativeFunction("upgrade", upgrade_fn), is_mut=False)
     env.declare("Some", WNativeFunction("Some", some_fn), is_mut=False)
     env.declare("Ok", WNativeFunction("Ok", ok_fn), is_mut=False)
     env.declare("Err", WNativeFunction("Err", err_fn), is_mut=False)

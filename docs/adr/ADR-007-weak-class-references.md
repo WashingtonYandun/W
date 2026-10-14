@@ -13,7 +13,9 @@ Add the invariant builtin type `Weak[Class]`, `weak(object) -> Weak[Class]` and
 interfaces, lists, scalars and optional class values require different operations
 and cannot be weakened implicitly. Weak is a value handle with target identity,
 including after expiration. Copies preserve identity and add weak ownership.
-Expired references to distinct targets remain distinct. Display is `weak(alive)`
+Expired references to distinct targets remain distinct. Default non-optional
+weak class fields receive independent empty expired handles; optional weak fields
+default to None. Empty handles have their own identity and never had a live target. Display is `weak(alive)`
 or `weak(expired)`; fields/methods require an explicit upgrade first.
 
 Each native class object has a control block with strong/weak counts and a nullable

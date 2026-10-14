@@ -12,14 +12,14 @@ from node.NodeType import (
     MemberExpr, IndexExpr, AssignmentExpr, StructInitExpr, ListExpr, DictExpr, TupleExpr,
     IfExpr, MatchExpr, Pattern, IdentifierPattern, TuplePattern, EnumPattern,
     LiteralPattern, WildcardPattern,
-    NamedType, OptionalType as AstOptionalType, ListType as AstListType, DictType as AstDictType
+    GenericType, NamedType, OptionalType as AstOptionalType, ListType as AstListType, DictType as AstDictType
 )
 from runtime.Values import (
     WValue, WInt, WFloat, WBool, WStr, WUnit, WNone,
     WList, WDict, WTuple, WRange, WStructInstance, WEnumValue,
     WResult, WOk, WErr, WFunction, WNativeFunction, WBoundMethod,
     WClassDef, WObjectInstance, WSuperProxy,
-    WEnumNamespace, WModule
+    WEnumNamespace, WModule, WWeak
 )
 
 from runtime.Environment import (
@@ -635,6 +635,8 @@ class Interpreter:
                 return WBool(False)
             if type_ann.name == "str":
                 return WStr("")
+        elif isinstance(type_ann, GenericType) and type_ann.name == "Weak":
+            return WWeak()
         elif isinstance(type_ann, AstOptionalType):
             return WNone()
         elif isinstance(type_ann, AstListType):

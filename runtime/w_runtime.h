@@ -794,6 +794,19 @@ static inline WVal w_make_object(const char* name, int32_t count, const char** k
     WVal v; v.tag = W_OBJECT; v.as.st = st; return v;
 }
 
+/* Default non-optional weak fields are independent expired handles. */
+static inline WVal w_empty_weak(void) {
+    WWeakControl* control = (WWeakControl*)malloc(sizeof(WWeakControl));
+    control->strong = 0;
+    control->weak = 1;
+    control->object = NULL;
+    w_mem_on_alloc();
+    WVal value = w_unit();
+    value.tag = W_WEAK;
+    value.as.weak = control;
+    return value;
+}
+
 /* Both helpers borrow their input and return one owned reference. */
 static inline WVal w_builtin_weak(WVal object) {
     if (object.tag != W_OBJECT) {

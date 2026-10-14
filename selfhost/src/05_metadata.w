@@ -79,7 +79,9 @@ fn parse_type_ann() -> bool {
 fn parse_field_default() -> str {
     let tname = at_tok().val
     let mut def_c = "w_none()"
-    if tname == "int" {
+    if tname == "Weak" {
+        def_c = "w_empty_weak()"
+    } elif tname == "int" {
         def_c = "w_int(0LL)"
     } elif tname == "float" {
         def_c = "w_float(0.0)"

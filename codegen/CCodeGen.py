@@ -2,7 +2,7 @@ import os
 from typing import Dict, List, Optional, Set, Tuple
 from node.NodeType import (
     Program, Stmt, Expr, TypeNode, ResultType,
-    NamedType, OptionalType as AstOptionalType, ListType as AstListType, DictType as AstDictType,
+    GenericType, NamedType, OptionalType as AstOptionalType, ListType as AstListType, DictType as AstDictType,
     Pattern, IdentifierPattern, TuplePattern, EnumPattern, LiteralPattern, WildcardPattern,
     Block, ExprStmt, Param, FnDecl, StructDecl, EnumDecl, ImportDecl,
     InterfaceDecl, ClassDecl, ClassField, MethodDecl,
@@ -284,6 +284,8 @@ class CCodeGen:
                 return "w_bool(false)"
             if type_ann.name == "str":
                 return 'w_str("")'
+        elif isinstance(type_ann, GenericType) and type_ann.name == "Weak":
+            return "w_empty_weak()"
         elif isinstance(type_ann, AstOptionalType):
             return "w_none()"
         elif isinstance(type_ann, AstListType):
@@ -959,6 +961,7 @@ class CCodeGen:
                     return self._bind_call(f"w_builtin_eprint({len(arg_vals)}, {arr_tmp})", out)
 
                 builtin_1 = {
+                    "weak": "w_builtin_weak", "upgrade": "w_builtin_upgrade",
                     "len": "w_builtin_len",
                     "str": "w_builtin_str",
                     "int": "w_builtin_int",

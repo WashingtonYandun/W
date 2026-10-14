@@ -1,0 +1,9 @@
+weak(expired) true false
+weak(alive) true true
+1 true
+true
+weak(expired) true
+true false
+7
+10
+weak(expired) true
