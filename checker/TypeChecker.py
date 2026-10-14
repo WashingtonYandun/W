@@ -123,6 +123,16 @@ class TypeChecker:
         # Pass 1: Collect declarations
         self._pass1_collect_declarations(program)
 
+        # Validate constraints even when the template is never instantiated.
+        templates = list(self.generic_struct_templates.values())
+        templates.extend(self.generic_fn_templates.values())
+        templates.extend(self.generic_enum_templates.values())
+        for template in templates:
+            for parameter in template.type_params:
+                constraint = getattr(parameter, "constraint", None)
+                if constraint is not None:
+                    self._resolve_constraint_interface(constraint, parameter.line, parameter.col)
+
         # Pass 2: Typecheck bodies & statements
         self._pass2_check_program(program)
 
@@ -2514,11 +2524,21 @@ class TypeChecker:
 
         return True
 
+    def _resolve_constraint_interface(self, constraint: TypeNode, line: int, col: int) -> InterfaceType:
+        if not isinstance(constraint, NamedType):
+            raise TypeError("Generic constraints must name an interface", line=line,
+                            col=col, file=self.file, code="W2012")
+        resolved = self.global_scope.lookup_type(constraint.name)
+        if not isinstance(resolved, InterfaceType):
+            raise TypeError(f"Generic constraint '{constraint.name}' is not a declared interface",
+                            line=line, col=col, file=self.file, code="W2012")
+        return resolved
+
     def _check_type_constraint(self, type_arg: WType, constraint: Optional[TypeNode], line: int, col: int) -> None:
         if constraint is None:
             return
         c_name = constraint.name if isinstance(constraint, NamedType) else str(constraint)
-        c_type = self.global_scope.lookup_type(c_name)
+        c_type = self._resolve_constraint_interface(constraint, line, col)
         if isinstance(c_type, InterfaceType):
             if isinstance(type_arg, ClassType):
                 if not type_arg.implements_interface(c_name):
@@ -2649,6 +2669,7 @@ class TypeChecker:
             ctor_type = FunctionType(params=ctor_p_types, ret=struct_t)
             ctor_sym = Symbol(mangled, ctor_type, is_mut=False, kind="fn", line=template.ast_decl.line, col=template.ast_decl.col)
             self.global_scope.define_symbol(ctor_sym, file=self.file)
+            self._check_fn_decl(ctor_fn)
             self.monomorphized_fn_decls.append(ctor_fn)
             self.telemetry.specialized_structs += 1
 

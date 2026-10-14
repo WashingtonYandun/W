@@ -223,6 +223,8 @@ def run_generic_hardening_tests() -> bool:
         test_cli_stats_output()
         test_hardening_regressions()
         test_run_stats_preserves_execution()
+        from test_compiler_boundaries import test_compiler_boundaries
+        test_compiler_boundaries()
         return True
     except Exception as e:
         print(f"  [FAIL] Generic Hardening Test Failed: {e}")

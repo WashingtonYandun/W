@@ -7,6 +7,7 @@ from typing import Dict
 # W3xxx: Mutability, Ownership & OOP Encapsulation Diagnostics
 # W4xxx: Runtime Execution Diagnostics
 DIAGNOSTIC_CODES: Dict[str, str] = {
+    "W9999": "Internal compiler invariant violation",
     # W0xxx — Lexical & Syntax
     "W0001": "Unexpected token or invalid character",
     "W0002": "Malformed numeric literal",
