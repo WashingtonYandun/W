@@ -246,3 +246,8 @@ cases must have zero leaks. Linux keeps LSan enabled and additionally requires i
 leak report for the negative case; no suite-wide leak suppression is introduced.
 The interpreter uses Python weak references and identity sentinels. Python GC may
 collect strong cycles; native RC behavior is the authority for the cycle test.
+
+The isolated Linux cycle negative sets LSAN_OPTIONS=use_stacks=0:use_registers=0
+to ignore stale machine roots after create_cycle returns. Success cases retain
+normal root scanning and leak detection. This changes conservative reachability
+for the expected-leak process only; it does not suppress leaked allocations.

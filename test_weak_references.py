@@ -84,7 +84,12 @@ def run_weak_tests():
                                         '-I' + str(root), str(c_path), '-o', str(binary)],
                                        capture_output=True, text=True, timeout=60)
                 assert built.returncode == 0, (name, backend, built.stderr)
-                result = subprocess.run([str(binary)], cwd=root, env=env,
+                process_env = dict(env)
+                if expected_leak and sys.platform.startswith('linux'):
+                    # The cycle is unreachable after create_cycle returns. Exclude stale
+                    # machine roots so conservative LSan scanning is deterministic.
+                    process_env['LSAN_OPTIONS'] = 'use_stacks=0:use_registers=0'
+                result = subprocess.run([str(binary)], cwd=root, env=process_env,
                                         capture_output=True, text=True, timeout=30)
                 if expected_leak:
                     assert result.returncode != 0 and 'Memory leak detected at exit' in result.stderr, result.stderr

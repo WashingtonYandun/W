@@ -41,3 +41,8 @@ Strong-only cycles still leak; there is no collector or concurrent RC. Python GC
 behavior is not used to certify native strong-cycle collection. No stable public
 C ABI is promised. Weak control blocks require additional allocation per class
 object; performance optimization is separate from these lifetime guarantees.
+
+The isolated Linux cycle negative sets LSAN_OPTIONS=use_stacks=0:use_registers=0
+to ignore stale machine roots after create_cycle returns. Success cases retain
+normal root scanning and leak detection. This changes conservative reachability
+for the expected-leak process only; it does not suppress leaked allocations.
