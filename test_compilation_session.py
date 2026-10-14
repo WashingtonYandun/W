@@ -152,6 +152,13 @@ def run_session_tests():
             assert '__wm_' not in str(error) and 'left.w::Item' in str(error), str(error)
         else:
             raise AssertionError('Nominal argument mismatch was accepted')
+        for suffix in ('let alias = shared', 'print(shared)', 'print(left.shared)'):
+            try:
+                session.check_source('import "shared.w"\nimport "left.w"\n' + suffix, str(entry))
+            except WError as error:
+                assert error.code == 'W2003' and 'runtime values' in error.message, str(error)
+            else:
+                raise AssertionError('Runtime module value reached lowering')
         # Prefix collisions are rejected even in local scopes.
         for source in ('fn main(__wm_local: int) {}', 'enum Option[T] { Mine(T) }'):
             try:

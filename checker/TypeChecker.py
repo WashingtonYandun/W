@@ -854,8 +854,11 @@ class TypeChecker:
             return None
         return symbol.type if symbol and isinstance(symbol.type, ModuleType) else None
 
-    def _check_expr(self, expr: Expr, is_statement_context: bool = False) -> WType:
+    def _check_expr(self, expr: Expr, is_statement_context: bool = False, allow_module: bool = False) -> WType:
         wtype = self._check_expr_impl(expr, is_statement_context)
+        if isinstance(wtype, ModuleType) and not allow_module:
+            raise TypeError("Module namespaces cannot be used as runtime values", file=self.file,
+                            line=expr.line, col=expr.col, code="W2003")
         expr.inferred_type = wtype
         expr.inferred_type_id = self.interner.from_wtype(wtype)
         return wtype
@@ -1405,7 +1408,7 @@ class TypeChecker:
                     concrete_args = [AnyType() for _ in tmpl.type_params]
                     return self._monomorphize_enum(tmpl, concrete_args, expr.line, expr.col)
 
-            obj_t = self._check_expr(expr.object)
+            obj_t = self._check_expr(expr.object, allow_module=True)
             if isinstance(obj_t, ClassType):
                 if expr.property == "init" and isinstance(expr.object, SuperExpr):
                     curr_s: Optional[ClassType] = obj_t
