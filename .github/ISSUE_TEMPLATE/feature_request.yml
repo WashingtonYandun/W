@@ -1,0 +1,41 @@
+name: Feature Request
+description: Propose a new language feature, syntax extension, compiler flag, or standard library capability.
+title: "[Feature]: "
+labels: ["enhancement", "design"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for helping shape the future of W! Before proposing new syntax or features, please check our [Language Specification](SPEC.md) and existing [ADRs](docs/adr/).
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem or Motivation
+      description: Is your feature request related to a problem? What cannot currently be done easily or cleanly in W?
+      placeholder: "I'm always frustrated when..."
+    validations:
+      required: true
+  - type: textarea
+    id: solution
+    attributes:
+      label: Proposed Solution or Syntax
+      description: Describe your proposed syntax, semantics, and how it should look in W code.
+      render: w
+      placeholder: |
+        // Proposed W code example
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives Considered
+      description: What other designs or existing workarounds have you considered?
+    validations:
+      false
+  - type: textarea
+    id: impact
+    attributes:
+      label: Impact on Self-Hosting & Runtime
+      description: How does this affect the C99 runtime, ARC/CoW invariants, or the W1 self-hosted compiler?
+    validations:
+      false

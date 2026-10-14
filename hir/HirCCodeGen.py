@@ -26,6 +26,7 @@ from hir.HirNodes import (
 from node.NodeType import (
     Pattern, IdentifierPattern, TuplePattern, EnumPattern, LiteralPattern, WildcardPattern
 )
+from common.Telemetry import CodegenTelemetry
 
 
 class CleanupScope:
@@ -54,6 +55,7 @@ class HirCCodeGen:
         self.fn_prototypes: List[str] = []
         self.fn_definitions: List[str] = []
         self.scope_stack: List[CleanupScope] = []
+        self.telemetry: CodegenTelemetry = CodegenTelemetry()
 
     def new_temp(self) -> str:
         name = f"_t{self.temp_counter}"
@@ -250,7 +252,16 @@ class HirCCodeGen:
         lines.append("    return 0;")
         lines.append("}")
 
-        return "\n".join(lines) + "\n"
+        c_code_str = "\n".join(lines) + "\n"
+        self.telemetry = CodegenTelemetry(
+            generated_functions=len(self.fn_definitions),
+            generated_structs=len(module.structs),
+            generated_enums=len(self.enum_names),
+            generated_classes=len(self.classes),
+            generated_c_lines=len(c_code_str.splitlines()),
+            generated_c_bytes=len(c_code_str.encode("utf-8")),
+        )
+        return c_code_str
 
     # -------------------------------------------------------------
     # Class & OOP Emission

@@ -1,0 +1,55 @@
+name: Compiler Crash / Internal Compiler Error (ICE)
+description: Report an unexpected panic, crash, unhandled Python exception, or sanitizer violation in the compiler.
+title: "[ICE]: "
+labels: ["ice", "crash", "priority-high"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        An **Internal Compiler Error (ICE)** indicates a bug in the compiler itself where it panicked, crashed, or encountered an unhandled exception rather than emitting a clean diagnostic.
+  - type: textarea
+    id: summary
+    attributes:
+      label: Crash Summary
+      description: Brief description of when and how the compiler crashed.
+    validations:
+      required: true
+  - type: textarea
+    id: code
+    attributes:
+      label: Code Snippet (.w)
+      description: Minimal code snippet triggering the crash.
+      render: w
+      placeholder: |
+        fn main() {
+            // Code triggering crash
+        }
+    validations:
+      required: true
+  - type: textarea
+    id: stacktrace
+    attributes:
+      label: Full Stack Trace / Crash Log
+      description: Paste the complete Python stack trace, assertion failure, or ASan/UBSan report.
+      render: text
+    validations:
+      required: true
+  - type: input
+    id: command
+    attributes:
+      label: Command Executed
+      placeholder: "./w run main.w --sanitize"
+      description: The exact command line invoked.
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: System Information
+      placeholder: |
+        - Compiler: ./w version
+        - Python: python3 --version
+        - C Toolchain: clang --version
+        - OS: uname -a
+    validations:
+      required: true

@@ -1,6 +1,6 @@
 import copy
 import os
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple, NamedTuple
 from node.NodeType import (
     Node, Program, Stmt, Expr, TypeNode, Pattern, Block,
     NamedType, OptionalType as AstOptionalType, ListType as AstListType,
@@ -29,9 +29,42 @@ from checker.SymbolTable import Scope, Symbol, create_global_scope
 from checker.TypeInterner import TypeInterner
 from error.Error import TypeError
 
+
+class GenericInstanceKey(NamedTuple):
+    """Session-local specialization identity; not a persistent hash or ABI name."""
+    template_name: str
+    type_ids: Tuple[int, ...]
+
+
+class MonomorphizationTelemetry:
+    """Telemetry tracking generic specialization, cache hits, and code bloat."""
+    def __init__(
+        self,
+        specialization_requests: int = 0,
+        deduplicated_hits: int = 0,
+        specialized_structs: int = 0,
+        specialized_enums: int = 0,
+        specialized_functions: int = 0
+    ) -> None:
+        self.specialization_requests = specialization_requests
+        self.deduplicated_hits = deduplicated_hits
+        self.specialized_structs = specialized_structs
+        self.specialized_enums = specialized_enums
+        self.specialized_functions = specialized_functions
+
+    def to_dict(self) -> Dict[str, int]:
+        return {
+            "specialization_requests": self.specialization_requests,
+            "deduplicated_hits": self.deduplicated_hits,
+            "specialized_structs": self.specialized_structs,
+            "specialized_enums": self.specialized_enums,
+            "specialized_functions": self.specialized_functions,
+        }
+
+
 class TypeChecker:
     """
-    Two-pass Semantic Analyzer and Type Checker for W Language v0.1.
+    Two-pass Semantic Analyzer and Type Checker for W Language v0.2.
     Pass 1: Collect & register all top-level declarations (Enums, Structs, Interfaces, Classes, Functions, Imports).
     Pass 2: Check function/method bodies, local bindings, assignments, and expressions.
     """
@@ -54,14 +87,15 @@ class TypeChecker:
         self.generic_struct_templates: Dict[str, GenericStructTemplate] = {}
         self.generic_fn_templates: Dict[str, GenericFnTemplate] = {}
         self.generic_enum_templates: Dict[str, GenericEnumTemplate] = {}
-        self.monomorphized_structs: Dict[Tuple[str, Tuple[int, ...]], StructType] = {}
-        self.monomorphized_fns: Dict[Tuple[str, Tuple[int, ...]], Symbol] = {}
-        self.monomorphized_enums: Dict[Tuple[str, Tuple[int, ...]], EnumType] = {}
+        self.monomorphized_structs: Dict[GenericInstanceKey, StructType] = {}
+        self.monomorphized_fns: Dict[GenericInstanceKey, Symbol] = {}
+        self.monomorphized_enums: Dict[GenericInstanceKey, EnumType] = {}
         self.monomorphized_struct_decls: List[StructDecl] = []
         self.monomorphized_fn_decls: List[FnDecl] = []
         self.monomorphized_enum_decls: List[EnumDecl] = []
         self._monomorphize_depth: int = 0
-        self._instantiation_stack: List[Tuple[str, Tuple[int, ...]]] = []
+        self._instantiation_stack: List[Tuple[str, Tuple[int, ...], int]] = []
+        self.telemetry: MonomorphizationTelemetry = MonomorphizationTelemetry()
 
         # Canonical built-in Option[T] template
         opt_decl = EnumDecl(
@@ -2504,6 +2538,23 @@ class TypeChecker:
                     code="T024"
                 )
 
+    def _type_complexity(self, t: WType) -> int:
+        if isinstance(t, ListType):
+            return 1 + self._type_complexity(t.element)
+        if isinstance(t, DictType):
+            return 1 + self._type_complexity(t.key) + self._type_complexity(t.value)
+        if isinstance(t, OptionalType):
+            return 1 + self._type_complexity(t.inner)
+        if isinstance(t, ResultType):
+            return 1 + self._type_complexity(t.ok) + self._type_complexity(t.err)
+        if isinstance(t, (StructType, EnumType)) and getattr(t, "type_args", None):
+            return 1 + sum(self._type_complexity(a) for a in t.type_args)
+        if isinstance(t, TupleType):
+            return 1 + sum(self._type_complexity(a) for a in t.elements)
+        if isinstance(t, FunctionType):
+            return 1 + sum(self._type_complexity(p) for p in t.params) + self._type_complexity(t.ret)
+        return 1
+
     def _monomorphize_struct(
         self,
         template: GenericStructTemplate,
@@ -2511,14 +2562,6 @@ class TypeChecker:
         line: int,
         col: int
     ) -> StructType:
-        if self._monomorphize_depth > 64:
-            raise TypeError(
-                message=f"Monomorphization recursion depth limit exceeded for struct '{template.name}'",
-                line=line,
-                col=col,
-                file=self.file,
-                code="W2011"
-            )
         if len(concrete_args) != len(template.type_params):
             raise TypeError(
                 message=f"Generic struct '{template.name}' expects {len(template.type_params)} type arguments, found {len(concrete_args)}",
@@ -2529,9 +2572,33 @@ class TypeChecker:
             )
 
         type_ids = tuple(self.interner.intern(a) for a in concrete_args)
-        key = (template.name, type_ids)
+        key = GenericInstanceKey(template.name, type_ids)
+        self.telemetry.specialization_requests += 1
         if key in self.monomorphized_structs:
+            self.telemetry.deduplicated_hits += 1
             return self.monomorphized_structs[key]
+
+        if self._monomorphize_depth >= 64:
+            raise TypeError(
+                message=f"Monomorphization recursion depth limit exceeded for struct '{template.name}'",
+                line=line,
+                col=col,
+                file=self.file,
+                code="W2011"
+            )
+
+        curr_complexity = sum(self._type_complexity(a) for a in concrete_args)
+
+        # Direct layout recursion detection
+        for f in template.ast_decl.fields:
+            if isinstance(f.type_ann, (NamedType, GenericType)) and f.type_ann.name == template.name:
+                raise TypeError(
+                    message=f"Recursive generic struct cycle detected for '{template.name}' without indirection",
+                    line=f.line,
+                    col=f.col,
+                    file=self.file,
+                    code="W2011"
+                )
 
         subst: Dict[str, WType] = {}
         for p, arg in zip(template.type_params, concrete_args):
@@ -2549,6 +2616,7 @@ class TypeChecker:
         self.monomorphized_structs[key] = struct_t
         self.global_scope.define_type(mangled, struct_t, line=line, col=col, file=self.file)
 
+        self._instantiation_stack.append((template.name, type_ids, curr_complexity))
         self._monomorphize_depth += 1
         try:
             new_fields: List[StructField] = []
@@ -2582,10 +2650,12 @@ class TypeChecker:
             ctor_sym = Symbol(mangled, ctor_type, is_mut=False, kind="fn", line=template.ast_decl.line, col=template.ast_decl.col)
             self.global_scope.define_symbol(ctor_sym, file=self.file)
             self.monomorphized_fn_decls.append(ctor_fn)
+            self.telemetry.specialized_structs += 1
 
             return struct_t
         finally:
             self._monomorphize_depth -= 1
+            self._instantiation_stack.pop()
 
     def _monomorphize_fn(
         self,
@@ -2594,14 +2664,6 @@ class TypeChecker:
         line: int,
         col: int
     ) -> Symbol:
-        if self._monomorphize_depth > 64:
-            raise TypeError(
-                message=f"Monomorphization recursion depth limit exceeded for function '{template.name}'",
-                line=line,
-                col=col,
-                file=self.file,
-                code="W2011"
-            )
         if len(concrete_args) != len(template.type_params):
             raise TypeError(
                 message=f"Generic function '{template.name}' expects {len(template.type_params)} type arguments, found {len(concrete_args)}",
@@ -2612,9 +2674,22 @@ class TypeChecker:
             )
 
         type_ids = tuple(self.interner.intern(a) for a in concrete_args)
-        key = (template.name, type_ids)
+        key = GenericInstanceKey(template.name, type_ids)
+        self.telemetry.specialization_requests += 1
         if key in self.monomorphized_fns:
+            self.telemetry.deduplicated_hits += 1
             return self.monomorphized_fns[key]
+
+        if self._monomorphize_depth >= 64:
+            raise TypeError(
+                message=f"Monomorphization recursion depth limit exceeded for function '{template.name}'",
+                line=line,
+                col=col,
+                file=self.file,
+                code="W2011"
+            )
+
+        curr_complexity = sum(self._type_complexity(a) for a in concrete_args)
 
         subst: Dict[str, WType] = {}
         for p, arg in zip(template.type_params, concrete_args):
@@ -2643,13 +2718,16 @@ class TypeChecker:
         self.monomorphized_fns[key] = fn_sym
         self.global_scope.define_symbol(fn_sym, file=self.file)
         self.monomorphized_fn_decls.append(cloned_fn)
+        self.telemetry.specialized_functions += 1
 
+        self._instantiation_stack.append((template.name, type_ids, curr_complexity))
         self._monomorphize_depth += 1
         try:
             self._check_fn_decl(cloned_fn)
             return fn_sym
         finally:
             self._monomorphize_depth -= 1
+            self._instantiation_stack.pop()
 
     def _monomorphize_enum(
         self,
@@ -2658,14 +2736,6 @@ class TypeChecker:
         line: int,
         col: int
     ) -> EnumType:
-        if self._monomorphize_depth > 64:
-            raise TypeError(
-                message=f"Monomorphization recursion depth limit exceeded for enum '{template.name}'",
-                line=line,
-                col=col,
-                file=self.file,
-                code="W2011"
-            )
         if len(concrete_args) != len(template.type_params):
             raise TypeError(
                 message=f"Generic enum '{template.name}' expects {len(template.type_params)} type arguments, found {len(concrete_args)}",
@@ -2676,22 +2746,25 @@ class TypeChecker:
             )
 
         type_ids = tuple(self.interner.intern(a) for a in concrete_args)
-        key = (template.name, type_ids)
+        key = GenericInstanceKey(template.name, type_ids)
+        self.telemetry.specialization_requests += 1
+
         if key in self.monomorphized_enums:
+            self.telemetry.deduplicated_hits += 1
             return self.monomorphized_enums[key]
 
-        # Structural recursion cycle check
-        same_tmpl_count = sum(1 for (n, _) in self._instantiation_stack if n == template.name)
-        if same_tmpl_count > 10:
+        if self._monomorphize_depth >= 64:
             raise TypeError(
-                message=f"Recursive generic instantiation cycle detected for '{template.name}'",
+                message=f"Monomorphization recursion depth limit exceeded for enum '{template.name}'",
                 line=line,
                 col=col,
                 file=self.file,
                 code="W2011"
             )
 
-        self._instantiation_stack.append((template.name, type_ids))
+        curr_complexity = sum(self._type_complexity(a) for a in concrete_args)
+
+        self._instantiation_stack.append((template.name, type_ids, curr_complexity))
         self._monomorphize_depth += 1
         try:
             subst: Dict[str, WType] = {}
@@ -2743,12 +2816,12 @@ class TypeChecker:
 
             concrete_decl = EnumDecl(name=mangled, variants=new_variants, type_params=[], line=template.ast_decl.line, col=template.ast_decl.col)
             self.monomorphized_enum_decls.append(concrete_decl)
+            self.telemetry.specialized_enums += 1
 
             return enum_t
         finally:
             self._monomorphize_depth -= 1
             self._instantiation_stack.pop()
-
     # ==========================================
     # Type Node Resolution
     # ==========================================
