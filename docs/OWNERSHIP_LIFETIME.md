@@ -111,3 +111,9 @@ The `CleanupScope` abstraction in `v0.1.3` is directly isomorphic to the explici
 - `_own_expr` (`w_move` / `w_clone`) $\leftrightarrow$ `HIRMove` / `HIRRetain`
 - `return` transfer + scope unwind $\leftrightarrow$ `HIRReturn`
 - Postfix `?` unwind $\leftrightarrow$ `HIRPropagate`
+
+## Phase A managed strings and constructor contracts
+
+See ADR-006 for the current ownership extension. `w_str` borrows static storage; `w_owned_str` consumes a heap buffer and creates its RC owner; `w_copy_str` copies borrowed input such as argv. Dynamic strings participate in clone/release and allocation counters. `w_add` and `w_index_get_owned` results are registered owned temporaries in both native backends and W1. The borrowed `w_index_get` remains restricted to internal projection paths; dictionary value queries use the owned optional path.
+
+`w_ok`, `w_err` and `w_enum_payload` consume their payload. Generated constructor calls move registered temporaries or clone borrowed arguments. `w_unwrap_optional`, `w_unwrap_ok`, `w_unwrap_err` and `w_unwrap_success` return owned values; peek helpers borrow. Class fields and collection slots own their stored values. Leak counters include string owners; LSan remains necessary to find allocations outside the instrumented ownership model.

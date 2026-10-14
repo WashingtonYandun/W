@@ -1,5 +1,6 @@
 """Validate HIR structure, type decorations and control-flow invariants."""
 from error.Error import WError
+from node.NodeType import (Pattern, IdentifierPattern, WildcardPattern, TuplePattern, EnumPattern, LiteralPattern, IntLiteral, FloatLiteral, BoolLiteral, StringLiteral, NoneLiteral)
 from checker.TypeInterner import TYPE_BOOL, TYPE_INT, TYPE_FLOAT, TYPE_STR, TYPE_UNIT, TYPE_NONE
 from hir import HirNodes as H
 
@@ -9,21 +10,54 @@ class HirVerifier:
         self.interner = interner
         self.file_path = file_path
         self.active = set()
+        self.checked_types = set()
 
     def verify(self, module):
         self.active.clear()
+        self.checked_types.clear()
         if not isinstance(module, H.HirModule):
             self._fail(module, 'Expected HirModule')
         self._visit(module, 0, False)
+        from hir.HirBindings import HirBindings
+        HirBindings(self).check(module)
 
     def _fail(self, owner, message):
-        span = getattr(owner, 'span', H.Span())
+        span = getattr(owner, 'span', H.Span(getattr(owner, 'line', 1), getattr(owner, 'col', 1)))
         raise WError(message, line=span.line, col=span.col, file=self.file_path,
                      code='W9999', stage='hir-verification')
 
     def _type(self, type_id, owner, field):
         if type(type_id) is not int or self.interner.get_entry(type_id).tag == 'error':
             self._fail(owner, f'Invalid HIR type in {type(owner).__name__}.{field}: {type_id!r}')
+        if type_id in self.checked_types:
+            return
+        self.checked_types.add(type_id)
+        entry = self.interner.get_entry(type_id)
+        children = []
+        if entry.tag in ("optional", "list"):
+            children = [entry.data]
+        elif entry.tag in ("dict", "result", "tuple"):
+            children = list(entry.data)
+        elif entry.tag == "function":
+            children = list(entry.data[0]) + [entry.data[1]]
+        elif entry.tag == "struct":
+            definition = self.interner.struct_defs.get(entry.data)
+            children = list(definition.fields.values()) if definition else []
+        elif entry.tag == "interface":
+            definition = self.interner.interface_defs.get(entry.data)
+            children = list(definition.methods.values()) if definition else []
+        elif entry.tag == "class":
+            definition = self.interner.class_defs.get(entry.data)
+            if definition:
+                children = [type_ for type_, _ in definition.fields.values()]
+                children.extend(type_ for type_, _ in definition.methods.values())
+                children.extend(definition.interfaces)
+                if definition.superclass is not None:
+                    children.append(definition.superclass)
+                if definition.init_sig is not None:
+                    children.append(definition.init_sig)
+        for child in children:
+            self._type(child, owner, field + ".component")
 
     def _relations(self, value):
         literals = {H.HirConstInt: TYPE_INT, H.HirConstFloat: TYPE_FLOAT,
@@ -58,6 +92,25 @@ class HirVerifier:
             entry = self.interner.get_entry(value.type_id)
             if value.start.type_id != TYPE_INT or value.end.type_id != TYPE_INT or entry.tag != 'list' or entry.data != TYPE_INT:
                 self._fail(value, 'Range requires int bounds and list[int] result')
+        if isinstance(value, H.HirTryPropagate):
+            entry = self.interner.get_entry(value.operand.type_id)
+            if value.kind != entry.tag or entry.tag not in ("optional", "result"):
+                self._fail(value, "Propagation kind does not match outer type")
+            expected = entry.data if entry.tag == "optional" else entry.data[0]
+            if value.type_id != expected:
+                self._fail(value, "Propagation result does not match outer payload")
+        if isinstance(value, H.HirCoalesce):
+            entry = self.interner.get_entry(value.opt_expr.type_id)
+            expected = entry.data if entry.tag == "optional" else value.fallback_expr.type_id
+            if (entry.tag != "optional" and value.opt_expr.type_id != TYPE_NONE) or value.type_id != expected:
+                self._fail(value, "Coalesce type does not match optional payload")
+        if isinstance(value, H.HirElseHandle):
+            entry = self.interner.get_entry(value.operand.type_id)
+            if entry.tag not in ("optional", "result"):
+                self._fail(value, "Error handler requires optional or result operand")
+            expected = entry.data if entry.tag == "optional" else entry.data[0]
+            if value.type_id != expected:
+                self._fail(value, "Error handler result does not match payload")
         if isinstance(value, H.HirConstructTuple):
             if any(element.type_id != type_id for element, type_id in zip(value.elems, value.elem_type_ids)):
                 self._fail(value, 'Tuple operand types do not match element metadata')
@@ -78,6 +131,23 @@ class HirVerifier:
             try:
                 for child in value:
                     self._visit(child, loop_depth, in_function)
+            finally:
+                self.active.remove(id(value))
+            return
+        if isinstance(value, Pattern):
+            if type(value) not in (IdentifierPattern, WildcardPattern, TuplePattern, EnumPattern, LiteralPattern):
+                self._fail(value, "Unsupported HIR pattern")
+            if isinstance(value, LiteralPattern):
+                if not isinstance(value.literal, (IntLiteral, FloatLiteral, BoolLiteral, StringLiteral, NoneLiteral)):
+                    self._fail(value, "Unsupported HIR pattern literal")
+                self._type(getattr(value.literal, "inferred_type_id", None), value, "literal type")
+            self._type(getattr(value, "inferred_type_id", None), value, "pattern type")
+            if id(value) in self.active:
+                self._fail(value, "Cyclic HIR pattern")
+            self.active.add(id(value))
+            try:
+                for field in ("args", "elements"):
+                    self._visit(getattr(value, field, []), loop_depth, in_function)
             finally:
                 self.active.remove(id(value))
             return
@@ -113,6 +183,9 @@ class HirVerifier:
             condition = value.cond if isinstance(value, H.HirIf) else value.cond_expr
             if not isinstance(condition, H.HirExpr) or getattr(condition, 'type_id', None) != TYPE_BOOL:
                 self._fail(value, 'HIR condition must have bool type')
+        if isinstance(value, H.HirMatchArm) and value.guard is not None:
+            if value.guard.type_id != TYPE_BOOL:
+                self._fail(value, "Match guard must have bool type")
         if isinstance(value, H.HirIf):
             for condition, _ in value.elifs:
                 if not isinstance(condition, H.HirExpr) or getattr(condition, 'type_id', None) != TYPE_BOOL:

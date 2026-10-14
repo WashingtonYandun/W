@@ -410,7 +410,8 @@ class HirIf(HirExpr):
 
 
 class HirMatchArm:
-    def __init__(self, pattern: Any, body: HirBlock, span: Span):
+    def __init__(self, pattern: Any, body: HirBlock, span: Span, guard: Optional[HirExpr] = None):
+        self.guard = guard
         self.pattern = pattern
         self.body = body
         self.span = span

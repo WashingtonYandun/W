@@ -219,6 +219,10 @@ class Interpreter:
     # ==========================================
 
     def eval_expr(self, expr: Expr, env: Environment) -> WValue:
+        value = self._eval_expr_impl(expr, env)
+        return WOk(value) if hasattr(expr, "force_result_wrap_id") else value
+
+    def _eval_expr_impl(self, expr: Expr, env: Environment) -> WValue:
         if isinstance(expr, IntLiteral):
             return WInt(expr.value)
 
@@ -370,6 +374,15 @@ class Interpreter:
 
         if isinstance(expr, PostfixTryExpr):
             val = self.eval_expr(expr.operand, env)
+            if expr.propagation_kind == "optional":
+                if isinstance(val, WNone):
+                    raise PropagationSignal(WNone())
+                if isinstance(val, WEnumValue) and val.enum_name.startswith("Option"):
+                    if val.variant == "None":
+                        raise PropagationSignal(WNone())
+                    if val.variant == "Some":
+                        return val.payload[0]
+                return val
             if isinstance(val, WNone):
                 raise PropagationSignal(WNone())
             if isinstance(val, WEnumValue) and (val.enum_name == "Option" or val.enum_name.startswith("Option__")) and val.variant == "None":
@@ -494,7 +507,7 @@ class Interpreter:
             if isinstance(obj, WDict):
                 key_raw = idx.value if hasattr(idx, 'value') else idx
                 res = obj.get(key_raw)
-                return res if res is not None else WNone()
+                return WEnumValue("Option", "Some", [res]) if res is not None else WNone()
 
             raise WRuntimeError(f"Cannot index type '{type(obj).__name__}'", line=expr.line, col=expr.col, file=self.file)
 
@@ -562,6 +575,8 @@ class Interpreter:
                     arm_env = Environment(parent=env)
                     for k, v in arm_bindings.items():
                         arm_env.declare(k, v, is_mut=False)
+                    if arm.guard is not None and not self.eval_expr(arm.guard, arm_env).value:
+                        continue
                     return self.eval_block(arm.body, arm_env)
             raise WRuntimeError("Non-exhaustive match at runtime", line=expr.line, col=expr.col, file=self.file)
 
@@ -702,21 +717,6 @@ class Interpreter:
         from node.NodeType import ResultType as AstResultType
         if not isinstance(ret_type, AstResultType) or isinstance(ret_val, WResult):
             return ret_val
-        err_ann = ret_type.err_type
-        if isinstance(err_ann, NamedType):
-            ename = err_ann.name
-            if isinstance(ret_val, WStructInstance) and ret_val.type_name == ename:
-                return WErr(ret_val)
-            if isinstance(ret_val, WObjectInstance) and ret_val.class_name == ename:
-                return WErr(ret_val)
-            if isinstance(ret_val, WEnumValue) and ret_val.enum_name == ename:
-                return WErr(ret_val)
-            if ename == "str" and isinstance(ret_val, WStr):
-                return WErr(ret_val)
-            if ename == "int" and isinstance(ret_val, WInt):
-                return WErr(ret_val)
-            if ename == "bool" and isinstance(ret_val, WBool):
-                return WErr(ret_val)
         return WOk(ret_val)
 
     def call_function(self, func: WFunction, args: List[WValue]) -> WValue:
@@ -774,7 +774,7 @@ class Interpreter:
                     raise WRuntimeError("get() takes 1 argument", file=self.file)
                 key_raw = args[0].value if hasattr(args[0], 'value') else args[0]
                 val = receiver.get(key_raw)
-                return val if val is not None else WNone()
+                return WEnumValue("Option", "Some", [val]) if val is not None else WNone()
             if method == "keys":
                 return WList(elements=receiver.keys())
             if method == "values":
@@ -797,7 +797,7 @@ class Interpreter:
 
         if isinstance(pattern, EnumPattern):
             # 1. Option cases: None and Some
-            if pattern.variant in ("None", "none"):
+            if pattern.variant in ("None", "none") and (pattern.enum_name is None or pattern.enum_name.split("__", 1)[0] == "Option"):
                 if isinstance(value, WNone) or (
                     isinstance(value, WEnumValue) and
                     (value.enum_name == "Option" or value.enum_name.startswith("Option__")) and
@@ -805,7 +805,7 @@ class Interpreter:
                 ):
                     return True, {}
                 return False, {}
-            if pattern.variant == "Some":
+            if pattern.variant == "Some" and (pattern.enum_name is None or pattern.enum_name.split("__", 1)[0] == "Option"):
                 if isinstance(value, WNone) or (
                     isinstance(value, WEnumValue) and
                     (value.enum_name == "Option" or value.enum_name.startswith("Option__")) and
@@ -824,7 +824,7 @@ class Interpreter:
                 return False, {}
 
             # 2. Result cases: Ok and Err
-            if pattern.variant == "Ok":
+            if pattern.variant == "Ok" and (pattern.enum_name is None or pattern.enum_name.split("__", 1)[0] == "Result"):
                 if isinstance(value, WOk):
                     if not pattern.args:
                         return True, {}
@@ -836,7 +836,7 @@ class Interpreter:
                         return self.match_pattern(pattern.args[0], value.payload[0])
                     return True, {}
                 return False, {}
-            if pattern.variant == "Err":
+            if pattern.variant == "Err" and (pattern.enum_name is None or pattern.enum_name.split("__", 1)[0] == "Result"):
                 if isinstance(value, WErr):
                     if not pattern.args:
                         return True, {}

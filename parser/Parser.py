@@ -130,6 +130,10 @@ class Parser:
 
     def parse_type(self) -> TypeNode:
         token = self.at()
+        if self.match(TokenType.LPAREN):
+            inner_type = self.parse_type()
+            self.expect(TokenType.RPAREN, code="P006", msg="Expected ')' after grouped type")
+            return self._parse_type_suffix(inner_type, token.line, token.col)
         if not self.check(TokenType.IDENTIFIER):
             raise ParserError(
                 message=f"Expected type name, found '{token.type.name}'",
@@ -178,6 +182,9 @@ class Parser:
         else:
             inner_type = NamedType(name=name, line=line, col=col)
 
+        return self._parse_type_suffix(inner_type, line, col)
+
+    def _parse_type_suffix(self, inner_type: TypeNode, line: int, col: int) -> TypeNode:
         # Check for optional postfix '?'
         if self.match(TokenType.QUESTION):
             inner_type = OptionalType(inner=inner_type, line=line, col=col)

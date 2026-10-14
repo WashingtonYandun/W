@@ -137,6 +137,23 @@ def test_compiler_boundaries():
         assert error.line == 7 and error.col == 8
     else:
         raise AssertionError('Unknown statements must not be silently ignored')
+    broken = deepcopy(module)
+    broken.top_level_stmts.append(H.HirExprStmt(H.HirLocalRef("missing", TYPE_INT, Span()), Span()))
+    rejected(broken, 'Unresolved HIR local')
+    broken = deepcopy(module)
+    broken.top_level_stmts.append(H.HirExprStmt(H.HirDirectCall("missing", [], TYPE_INT, Span()), Span()))
+    rejected(broken, 'Unresolved HIR function')
+    broken = deepcopy(module)
+    broken.top_level_stmts.append(H.HirExprStmt(H.HirDirectCall(broken.functions[0].name, [], TYPE_INT, Span()), Span()))
+    rejected(broken, 'Direct call arity/result')
+    broken = deepcopy(module)
+    broken.functions[0].body.statements.append(H.HirReturn(H.HirConstBool(True, TYPE_BOOL, Span()), Span()))
+    rejected(broken, 'Returned value type')
+    broken = deepcopy(module)
+    bad_signature = checker.interner.mk_function((0,), TYPE_INT)
+    broken.functions[0].params[0].type_id = bad_signature
+    rejected(broken, '.component')
+
     from checker.TypeInterner import TYPE_STR
     integer = H.HirConstInt(1, TYPE_INT, Span())
     boolean = H.HirConstBool(True, TYPE_BOOL, Span())

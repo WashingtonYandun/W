@@ -1,0 +1,52 @@
+fn outer(x: Option[Result[int, str]]) -> (int ! str)? {
+    return x?
+}
+let value = outer(Some(Err("inside")))
+print(value)
+fn nested() -> (int ! str) ! bool {
+    return Ok(Err("inner"))
+}
+print(nested())
+fn optional_success() -> (int?) ! str {
+    return Ok(none)
+}
+print(optional_success())
+let nested_option: (int?)? = Some(none)
+print(nested_option == none)
+print(nested_option ?? none)
+fn qualified_nested() -> (int ! str) ! bool {
+    return Result.Ok(Result.Err("qualified"))
+}
+print(qualified_nested())
+print(Some(1) == 1)
+print(1 == Some(1))
+fn lifted(x: int ! str) -> (int ! str) ! bool {
+    return x
+}
+print(lifted(Err("lifted")))
+fn same_channel() -> int ! int {
+    return 7
+}
+print(same_channel())
+fn alias_return() -> Result[int, str] {
+    return 8
+}
+print(alias_return())
+let sugar: int ! str = 9
+let alias: Result[int, str] = 10
+print(sugar)
+print(alias)
+fn consume(value: int ! str) -> int ! str {
+    return value
+}
+print(consume(11))
+let optional_sugar: int? = 12
+let optional_alias: Option[int] = Some(12)
+print(optional_sugar)
+print(optional_alias)
+print(optional_sugar == optional_alias)
+print(optional_alias == optional_sugar)
+let nullable_values: dict[str, int?] = {"present": none}
+print(nullable_values.get("present") == none)
+print(nullable_values.get("missing") == none)
+print(nullable_values.get("present") ?? none)

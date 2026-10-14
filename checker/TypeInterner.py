@@ -217,10 +217,6 @@ class TypeInterner:
     def mk_optional(self, inner_id: int) -> int:
         if inner_id == TYPE_ERROR:
             return TYPE_ERROR
-        # In W, T?? is normalized to T?
-        entry = self.get_entry(inner_id)
-        if entry.tag == "optional":
-            return inner_id
         key = ("optional", inner_id)
         caps = TypeCapabilities(
             needs_retain=True,
@@ -553,12 +549,16 @@ class TypeInterner:
                 return True
             inner_dst = dst_entry.data
             if src_entry.tag == "optional":
+                if (self.get_entry(src_entry.data).tag == "optional") != (self.get_entry(inner_dst).tag == "optional"):
+                    return False
                 return self.is_assignable(src_entry.data, inner_dst)
             return self.is_assignable(src_id, inner_dst)
 
         # Result target: (T ! E) accepts T
         if dst_entry.tag == "result":
             ok_id, err_id = dst_entry.data
+            if src_entry.tag == "result":
+                return self.is_assignable(src_entry.data[0], ok_id) and self.is_assignable(src_entry.data[1], err_id)
             return self.is_assignable(src_id, ok_id)
 
         return False
@@ -645,6 +645,16 @@ class TypeInterner:
             fields = {fname: self.from_wtype(ftype) for fname, ftype in wtype.fields.items()} if hasattr(wtype, "fields") and wtype.fields else {}
             return self.mk_struct(wtype.name, fields)
         elif isinstance(wtype, EnumType):
+            args = getattr(wtype, "type_args", None)
+            template = getattr(wtype, "template_name", None)
+            if template == "Option" and args and len(args) == 1:
+                tid = self.mk_optional(self.from_wtype(args[0]))
+                self._key_to_id[("enum", wtype.name)] = tid
+                return tid
+            if template == "Result" and args and len(args) == 2:
+                tid = self.mk_result(self.from_wtype(args[0]), self.from_wtype(args[1]))
+                self._key_to_id[("enum", wtype.name)] = tid
+                return tid
             variants = wtype.variants if hasattr(wtype, "variants") else []
             return self.mk_enum(wtype.name, variants)
         elif isinstance(wtype, InterfaceType):
