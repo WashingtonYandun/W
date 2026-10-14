@@ -91,3 +91,4 @@ jobs:
         run: |
           python3 test_phase_a.py
           python3 test_ownership_control_flow.py
+          python3 test_cow_telemetry.py

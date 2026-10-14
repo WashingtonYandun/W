@@ -133,6 +133,12 @@ def run_cow_telemetry_suite() -> bool:
         "detach_list", "detach_dict", "detach_struct", "copied_slots")} for label, values in checkpoints.items()}
     from test_cow_metrics_contract import run_metrics_contract
     run_metrics_contract()
+    nested_before = py_checkpoints["list_struct_aliased"]
+    nested_after = py_checkpoints["list_struct_write"]
+    assert nested_after["detach_list"] - nested_before["detach_list"] == 2
+    assert nested_after["detach_struct"] - nested_before["detach_struct"] == 1
+    assert nested_after["copied_slots"] - nested_before["copied_slots"] == 6
+    assert py_checkpoints["list_struct_repeat"] == nested_after
     with tempfile.TemporaryDirectory() as tmpdir:
         env = os.environ.copy()
         env["W_MEM_CHECK"] = "1"
@@ -187,6 +193,8 @@ def run_cow_telemetry_suite() -> bool:
         assert ast_checkpoints == hir_checkpoints == w1_checkpoints, "Native physical metrics disagree"
         print("  -> W1 Stage 2 passed output & checkpoints validated.")
 
+    from test_cow_scaling import run_scaling_tests
+    run_scaling_tests()
     print("\n[SUCCESS] B02 CoW Telemetry & Asymptotic Scaling verified across all 4 execution targets!")
     return True
 
