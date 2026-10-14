@@ -9,6 +9,8 @@ from tests import engine_harness as harness
 
 
 def run_ci_harness_tests():
+    assert harness.diagnostic('[W4001] runtime error') == 'W4001'
+    assert not harness.diagnostic('[W123456] invented error')
     reference = harness.EngineResult('interpreter', stdout='expected\n')
     assert harness.compare([reference, harness.EngineResult('hir', stdout='different\n')])[0] is False
     assert harness.compare([reference, harness.EngineResult('ast', stdout='expected\n', exit_code=1)], 'expected\n')[0] is False

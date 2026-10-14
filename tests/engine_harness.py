@@ -8,6 +8,7 @@ import shlex
 import signal
 import subprocess
 import sys
+from error.Error import DIAGNOSTIC_CODES
 
 ROOT = Path(__file__).resolve().parents[1]
 ENGINES = ('interpreter', 'ast', 'hir', 'w1')
@@ -41,7 +42,7 @@ def asdict(result):
 
 def diagnostic(stderr):
     match = re.search(r'^\[(W\d+)\]', stderr, re.MULTILINE)
-    return match.group(1) if match else ''
+    return match.group(1) if match and match.group(1) in DIAGNOSTIC_CODES else ''
 
 
 def execute(command, directory, phase, timeout, env=None):

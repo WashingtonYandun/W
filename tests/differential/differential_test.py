@@ -8,10 +8,9 @@ from typing import List, Optional, Tuple
 from lexer.Lexer import Lexer
 from parser.Parser import Parser
 from checker.TypeChecker import TypeChecker
-from runtime.Interpreter import Interpreter
 from formatter.Formatter import Formatter
 from codegen.CCodeGen import CCodeGen
-from error.Error import DIAGNOSTIC_CODES, WError, WRuntimeError
+from error.Error import WError
 
 
 from tests.engine_harness import ENGINES, unsupported_reason, verify
