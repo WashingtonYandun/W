@@ -2355,13 +2355,20 @@ class TypeChecker:
 
         return UnitType
 
-    def _pattern_matrix_exhaustive(self, types: List[WType], rows: List[List[Pattern]]) -> bool:
+    def _pattern_matrix_exhaustive(self, types: List[WType], rows: List[List[Any]]) -> bool:
         if not types:
             return bool(rows)
         if not rows:
             return False
+        from hir.HirNodes import (
+            HirWildcardPattern, HirBindingPattern, HirLiteralPattern, HirEnumPattern, HirTuplePattern
+        )
         def wildcard(pattern):
-            return isinstance(pattern, WildcardPattern) or (isinstance(pattern, IdentifierPattern) and pattern.name not in ("None", "none"))
+            if isinstance(pattern, (WildcardPattern, HirWildcardPattern)):
+                return True
+            if isinstance(pattern, (IdentifierPattern, HirBindingPattern)) and pattern.name not in ("None", "none"):
+                return True
+            return False
         defaults = [row[1:] for row in rows if wildcard(row[0])]
         if defaults and self._pattern_matrix_exhaustive(types[1:], defaults):
             return True
@@ -2388,11 +2395,22 @@ class TypeChecker:
                     specialized.append([WildcardPattern() for _ in payload] + row[1:])
                 elif isinstance(pattern, EnumPattern) and pattern.variant == name:
                     specialized.append(pattern.args + row[1:])
+                elif isinstance(pattern, HirEnumPattern) and pattern.variant_name == name:
+                    specialized.append(pattern.subpatterns + row[1:])
                 elif isinstance(pattern, TuplePattern) and name == "tuple":
                     specialized.append(pattern.elements + row[1:])
-                elif name == "None" and ((isinstance(pattern, IdentifierPattern) and pattern.name in ("None", "none")) or (isinstance(pattern, LiteralPattern) and isinstance(pattern.literal, NoneLiteral))):
+                elif isinstance(pattern, HirTuplePattern) and name == "tuple":
+                    specialized.append(pattern.elements + row[1:])
+                elif name == "None" and (
+                    (isinstance(pattern, (IdentifierPattern, HirBindingPattern)) and pattern.name in ("None", "none")) or
+                    (isinstance(pattern, LiteralPattern) and isinstance(pattern.literal, NoneLiteral)) or
+                    (isinstance(pattern, HirLiteralPattern) and pattern.literal_kind == "none")
+                ):
                     specialized.append(row[1:])
-                elif isinstance(pattern, LiteralPattern) and isinstance(pattern.literal, BoolLiteral) and name == ("true" if pattern.literal.value else "false"):
+                elif (
+                    (isinstance(pattern, LiteralPattern) and isinstance(pattern.literal, BoolLiteral) and name == ("true" if pattern.literal.value else "false")) or
+                    (isinstance(pattern, HirLiteralPattern) and pattern.literal_kind == "bool" and name == ("true" if pattern.value else "false"))
+                ):
                     specialized.append(row[1:])
             if not self._pattern_matrix_exhaustive(payload + types[1:], specialized):
                 return False

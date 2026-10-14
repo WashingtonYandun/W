@@ -9,7 +9,142 @@ class Span:
         self.file_id = file_id
 
     def __repr__(self) -> str:
+        if self.file_id is not None:
+            return f"Span({self.line}:{self.col}, file_id={self.file_id})"
         return f"Span({self.line}:{self.col})"
+
+
+# ==========================================
+# Semantic Identifiers & Targets
+# ==========================================
+
+class SymbolId:
+    """Unique semantic identifier for a variable or temporary in resolved HIR."""
+    def __init__(self, id: int, name: str = ""):
+        self.id = id
+        self.name = name
+
+    def __repr__(self) -> str:
+        return f"sym_{self.id}_{self.name}" if self.name else f"sym_{self.id}"
+
+    def __eq__(self, other) -> bool:
+        if isinstance(other, SymbolId):
+            return self.id == other.id
+        if isinstance(other, int):
+            return self.id == other
+        return False
+
+    def __hash__(self) -> int:
+        return hash(self.id)
+
+
+class FieldId:
+    """Offset index and semantic name for a struct or class field."""
+    def __init__(self, index: int, name: str):
+        self.index = index
+        self.name = name
+
+    def __repr__(self) -> str:
+        return f"field_{self.index}_{self.name}"
+
+    def __eq__(self, other) -> bool:
+        if isinstance(other, FieldId):
+            return self.index == other.index and self.name == other.name
+        return False
+
+    def __hash__(self) -> int:
+        return hash((self.index, self.name))
+
+
+class VariantId:
+    """Tag index and semantic name for an enum variant."""
+    def __init__(self, index: int, name: str):
+        self.index = index
+        self.name = name
+
+    def __repr__(self) -> str:
+        return f"var_{self.index}_{self.name}"
+
+    def __eq__(self, other) -> bool:
+        if isinstance(other, VariantId):
+            return self.index == other.index and self.name == other.name
+        return False
+
+    def __hash__(self) -> int:
+        return hash((self.index, self.name))
+
+
+class CallTarget:
+    """Abstract base for a resolved call target."""
+    pass
+
+
+class DirectCallTarget(CallTarget):
+    """Direct static call target pointing to a declaration."""
+    def __init__(self, fn_name: str, decl_id: Optional[Any] = None):
+        self.fn_name = fn_name
+        self.decl_id = decl_id
+
+    def __repr__(self) -> str:
+        return f"DirectTarget({self.fn_name}, decl={self.decl_id})"
+
+
+class BuiltinCallTarget(CallTarget):
+    """Call target pointing to a runtime compiler builtin."""
+    def __init__(self, builtin_name: str):
+        self.builtin_name = builtin_name
+
+    def __repr__(self) -> str:
+        return f"BuiltinTarget({self.builtin_name})"
+
+
+class VirtualCallTarget(CallTarget):
+    """Virtual call target dispatched dynamically or through a vtable slot."""
+    def __init__(self, method_name: str, slot: Optional[int] = None, target_class: Optional[str] = None):
+        self.method_name = method_name
+        self.slot = slot
+        self.target_class = target_class
+
+    def __repr__(self) -> str:
+        return f"VirtualTarget({self.method_name}, slot={self.slot})"
+
+
+# ==========================================
+# CoW Path Representation
+# ==========================================
+
+class CowProjection:
+    pass
+
+
+class CowFieldProjection(CowProjection):
+    def __init__(self, field_name: str, field_idx: int = -1, is_class: bool = False):
+        self.field_name = field_name
+        self.field_idx = field_idx
+        self.is_class = is_class
+
+    def __repr__(self) -> str:
+        cls_flag = ", class_boundary=True" if self.is_class else ""
+        return f".{self.field_name}[idx={self.field_idx}{cls_flag}]"
+
+
+class CowIndexProjection(CowProjection):
+    def __init__(self, index: Any):
+        self.index = index
+
+    def __repr__(self) -> str:
+        return f"[{self.index}]"
+
+
+class CowPath:
+    def __init__(self, root: Any, projections: List[CowProjection], is_class_boundary: bool = False):
+        self.root = root
+        self.projections = projections
+        self.is_class_boundary = is_class_boundary
+
+    def __repr__(self) -> str:
+        projs = "".join(str(p) for p in self.projections)
+        return f"CowPath({self.root}{projs})"
 
 
 # ==========================================
@@ -32,14 +167,110 @@ class HirStmt(HirNode):
 
 
 # ==========================================
+# HIR Patterns
+# ==========================================
+
+class HirPattern(HirNode):
+    def __init__(self, type_id: int, span: Span):
+        super().__init__(span)
+        self.type_id = type_id
+
+
+class HirWildcardPattern(HirPattern):
+    def __init__(self, type_id: int, span: Span):
+        super().__init__(type_id, span)
+
+    def __repr__(self) -> str:
+        return f"HirWildcard(type_id={self.type_id})"
+
+
+class HirBindingPattern(HirPattern):
+    def __init__(self, name: str, type_id: int, span: Span, symbol_id: Optional[SymbolId] = None, is_mut: bool = False):
+        super().__init__(type_id, span)
+        self.name = name
+        self.symbol_id = symbol_id or SymbolId(0, name)
+        self.is_mut = is_mut
+
+    def __repr__(self) -> str:
+        return f"HirBinding({self.name}, sym={self.symbol_id}, type_id={self.type_id})"
+
+
+class HirLiteralPattern(HirPattern):
+    def __init__(self, value: Any, literal_kind: str, type_id: int, span: Span):
+        super().__init__(type_id, span)
+        self.value = value
+        self.literal_kind = literal_kind  # "int", "float", "bool", "str", "none"
+
+    @property
+    def expr(self) -> Any:
+        from hir.HirNodes import HirConstInt, HirConstFloat, HirConstStr, HirConstBool, HirConstNone, HirConstUnit
+        if self.literal_kind == "int":
+            return HirConstInt(self.value, self.type_id, self.span)
+        elif self.literal_kind == "float":
+            return HirConstFloat(self.value, self.type_id, self.span)
+        elif self.literal_kind == "str":
+            return HirConstStr(self.value, self.type_id, self.span)
+        elif self.literal_kind == "bool":
+            return HirConstBool(self.value, self.type_id, self.span)
+        elif self.literal_kind == "none":
+            return HirConstNone(self.type_id, self.span)
+        return HirConstUnit(self.type_id, self.span)
+
+    def __repr__(self) -> str:
+        return f"HirLiteral({self.value!r}, kind={self.literal_kind}, type_id={self.type_id})"
+
+
+class HirEnumPattern(HirPattern):
+    def __init__(
+        self,
+        enum_name: Optional[str],
+        variant_name: str,
+        variant_idx: int,
+        subpatterns: List[HirPattern],
+        type_id: int,
+        span: Span,
+        variant_id: Optional[VariantId] = None
+    ):
+        super().__init__(type_id, span)
+        self.enum_name = enum_name
+        self.variant_name = variant_name
+        self.variant_idx = variant_idx
+        self.subpatterns = subpatterns
+        self.variant_id = variant_id or VariantId(variant_idx, variant_name)
+
+    @property
+    def variant(self) -> str:
+        return self.variant_name
+
+    @property
+    def args(self) -> List[HirPattern]:
+        return self.subpatterns
+
+    def __repr__(self) -> str:
+        return f"HirEnumPattern({self.enum_name}::{self.variant_name}, idx={self.variant_idx}, sub={self.subpatterns})"
+
+
+class HirTuplePattern(HirPattern):
+    def __init__(self, elements: List[HirPattern], type_id: int, span: Span):
+        super().__init__(type_id, span)
+        self.elements = elements
+
+    def __repr__(self) -> str:
+        return f"HirTuplePattern({self.elements}, type_id={self.type_id})"
+
+
+
+
+# ==========================================
 # HIR Top-Level Declarations
 # ==========================================
 
 class HirParam:
-    def __init__(self, name: str, type_id: int, span: Span):
+    def __init__(self, name: str, type_id: int, span: Span, symbol_id: Optional[SymbolId] = None):
         self.name = name
         self.type_id = type_id
         self.span = span
+        self.symbol_id = symbol_id or SymbolId(0, name)
 
 
 class HirBlock(HirNode):
@@ -153,27 +384,30 @@ class HirModule:
 # ==========================================
 
 class HirLet(HirStmt):
-    def __init__(self, name: str, type_id: int, is_mut: bool, init_expr: HirExpr, span: Span):
+    def __init__(self, name: str, type_id: int, is_mut: bool, init_expr: HirExpr, span: Span, symbol_id: Optional[SymbolId] = None):
         super().__init__(span)
         self.name = name
         self.type_id = type_id
         self.is_mut = is_mut
         self.init_expr = init_expr
+        self.symbol_id = symbol_id or SymbolId(0, name)
 
 
 class HirBindTemp(HirStmt):
-    def __init__(self, temp_name: str, type_id: int, init_expr: HirExpr, span: Span):
+    def __init__(self, temp_name: str, type_id: int, init_expr: HirExpr, span: Span, symbol_id: Optional[SymbolId] = None):
         super().__init__(span)
         self.temp_name = temp_name
         self.type_id = type_id
         self.init_expr = init_expr
+        self.symbol_id = symbol_id or SymbolId(0, temp_name)
 
 
 class HirAssign(HirStmt):
-    def __init__(self, target: HirExpr, value: HirExpr, span: Span):
+    def __init__(self, target: HirExpr, value: HirExpr, span: Span, path: Optional[CowPath] = None):
         super().__init__(span)
         self.target = target
         self.value = value
+        self.path = path
 
 
 class HirWhile(HirStmt):
@@ -254,9 +488,10 @@ class HirConstUnit(HirExpr):
 
 
 class HirLocalRef(HirExpr):
-    def __init__(self, name: str, type_id: int, span: Span):
+    def __init__(self, name: str, type_id: int, span: Span, symbol_id: Optional[SymbolId] = None):
         super().__init__(type_id, span)
         self.name = name
+        self.symbol_id = symbol_id or SymbolId(0, name)
 
 
 class HirThisRef(HirExpr):
@@ -292,12 +527,22 @@ class HirConstructStruct(HirExpr):
 
 
 class HirConstructEnum(HirExpr):
-    def __init__(self, enum_name: str, variant_name: str, variant_idx: int, type_id: int, span: Span, payload: Optional[HirExpr] = None):
+    def __init__(
+        self,
+        enum_name: str,
+        variant_name: str,
+        variant_idx: int,
+        type_id: int,
+        span: Span,
+        payload: Optional[HirExpr] = None,
+        variant_id: Optional[VariantId] = None
+    ):
         super().__init__(type_id, span)
         self.enum_name = enum_name
         self.variant_name = variant_name
         self.variant_idx = variant_idx
         self.payload = payload
+        self.variant_id = variant_id or VariantId(variant_idx, variant_name)
 
 
 class HirConstructObject(HirExpr):
@@ -330,32 +575,71 @@ class HirConstructTuple(HirExpr):
 
 
 class HirDirectCall(HirExpr):
-    def __init__(self, fn_name: str, args: List[HirExpr], type_id: int, span: Span):
+    def __init__(
+        self,
+        fn_name: str,
+        args: List[HirExpr],
+        type_id: int,
+        span: Span,
+        decl_id: Optional[Any] = None,
+        target: Optional[CallTarget] = None
+    ):
         super().__init__(type_id, span)
         self.fn_name = fn_name
         self.args = args
+        self.decl_id = decl_id
+        self.target = target or DirectCallTarget(fn_name, decl_id)
 
 
 class HirBuiltinCall(HirExpr):
-    def __init__(self, builtin_name: str, args: List[HirExpr], type_id: int, span: Span):
+    def __init__(
+        self,
+        builtin_name: str,
+        args: List[HirExpr],
+        type_id: int,
+        span: Span,
+        target: Optional[CallTarget] = None
+    ):
         super().__init__(type_id, span)
         self.builtin_name = builtin_name
         self.args = args
+        self.target = target or BuiltinCallTarget(builtin_name)
 
 
 class HirMethodCall(HirExpr):
-    def __init__(self, receiver: HirExpr, method_name: str, args: List[HirExpr], type_id: int, span: Span):
+    def __init__(
+        self,
+        receiver: HirExpr,
+        method_name: str,
+        args: List[HirExpr],
+        type_id: int,
+        span: Span,
+        slot: Optional[int] = None,
+        target: Optional[CallTarget] = None
+    ):
         super().__init__(type_id, span)
         self.receiver = receiver
         self.method_name = method_name
         self.args = args
+        self.slot = slot
+        self.target = target or VirtualCallTarget(method_name, slot)
 
 
 class HirFieldRead(HirExpr):
-    def __init__(self, object: HirExpr, field_name: str, type_id: int, span: Span):
+    def __init__(
+        self,
+        object: HirExpr,
+        field_name: str,
+        type_id: int,
+        span: Span,
+        field_idx: int = -1,
+        field_id: Optional[FieldId] = None
+    ):
         super().__init__(type_id, span)
         self.object = object
         self.field_name = field_name
+        self.field_idx = field_idx
+        self.field_id = field_id or (FieldId(field_idx, field_name) if field_idx >= 0 else None)
 
 
 class HirIndexRead(HirExpr):
@@ -363,6 +647,13 @@ class HirIndexRead(HirExpr):
         super().__init__(type_id, span)
         self.object = object
         self.index = index
+
+
+class HirCoerce(HirExpr):
+    def __init__(self, expr: HirExpr, target_type_id: int, kind: str, span: Span):
+        super().__init__(target_type_id, span)
+        self.expr = expr
+        self.kind = kind  # "wrap_ok", "wrap_some", "int_to_float", "upcast", "identity"
 
 
 class HirTryPropagate(HirExpr):

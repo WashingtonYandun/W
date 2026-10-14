@@ -25,7 +25,11 @@ from hir.HirNodes import (
     HirLocalRef, HirThisRef, HirSuperRef, HirUnaryOp, HirBinaryOp,
     HirConstructStruct, HirConstructEnum, HirConstructObject, HirConstructList, HirConstructDict, HirConstructTuple,
     HirDirectCall, HirBuiltinCall, HirMethodCall, HirFieldRead, HirIndexRead,
-    HirTryPropagate, HirCoalesce, HirElseHandle, HirIf, HirMatch, HirMatchArm, HirRange
+    HirTryPropagate, HirCoalesce, HirElseHandle, HirIf, HirMatch, HirMatchArm, HirRange,
+    SymbolId, FieldId, VariantId, CallTarget, DirectCallTarget, BuiltinCallTarget, VirtualCallTarget,
+    CowPath, CowProjection, CowFieldProjection, CowIndexProjection,
+    HirPattern, HirWildcardPattern, HirBindingPattern, HirLiteralPattern, HirEnumPattern, HirTuplePattern,
+    HirCoerce
 )
 
 
@@ -44,6 +48,8 @@ class HirBuilder:
     2. Constructors ClassName(...) and new ClassName(...) are normalized to HirConstructObject.
     3. Missing function return expressions are normalized to HirConstUnit.
     4. Method calls and member accesses are categorized.
+    5. Native HirPattern hierarchy replaces surface AST patterns.
+    6. Unique SymbolIds are resolved for all lexical variables.
     """
     def __init__(self, interner: TypeInterner, file_path: str = "<stdin>"):
         self.interner = interner
@@ -57,8 +63,117 @@ class HirBuilder:
             "Ok": "Result",
             "Err": "Result",
         }
+        self.enum_payloads: Dict[str, Dict[str, List[int]]] = {}
         self.modules: Set[str] = set()
         self.imported_files: Set[str] = set()
+        self.symbol_counter = 0
+        self.scopes: List[Dict[str, SymbolId]] = [{}]
+
+    def _push_scope(self) -> None:
+        self.scopes.append({})
+
+    def _pop_scope(self) -> None:
+        if len(self.scopes) > 1:
+            self.scopes.pop()
+
+    def _declare_symbol(self, name: str) -> SymbolId:
+        self.symbol_counter += 1
+        sym = SymbolId(self.symbol_counter, name)
+        self.scopes[-1][name] = sym
+        return sym
+
+    def _resolve_symbol(self, name: str) -> SymbolId:
+        for scope in reversed(self.scopes):
+            if name in scope:
+                return scope[name]
+        self.symbol_counter += 1
+        sym = SymbolId(self.symbol_counter, name)
+        self.scopes[0][name] = sym
+        return sym
+
+    def _build_cow_path(self, tgt_hir: HirExpr) -> Optional[CowPath]:
+        if isinstance(tgt_hir, HirLocalRef):
+            return CowPath(root=tgt_hir, projections=[])
+        if isinstance(tgt_hir, HirFieldRead):
+            parent_path = self._build_cow_path(tgt_hir.object)
+            if parent_path is not None:
+                is_class = False
+                entry = self.interner.get_entry(tgt_hir.object.type_id)
+                if entry and entry.tag == "class":
+                    is_class = True
+                proj = CowFieldProjection(tgt_hir.field_name, tgt_hir.field_idx, is_class=is_class)
+                parent_path.projections.append(proj)
+                if is_class:
+                    parent_path.is_class_boundary = True
+                return parent_path
+        if isinstance(tgt_hir, HirIndexRead):
+            parent_path = self._build_cow_path(tgt_hir.object)
+            if parent_path is not None:
+                proj = CowIndexProjection(tgt_hir.index)
+                parent_path.projections.append(proj)
+                return parent_path
+        return None
+
+    def _lower_pattern(self, pat: Any, expected_tid: int) -> HirPattern:
+        if isinstance(pat, HirPattern):
+            return pat
+        span = self._span(pat)
+        if isinstance(pat, WildcardPattern):
+            return HirWildcardPattern(expected_tid, span)
+        if isinstance(pat, IdentifierPattern):
+            if pat.name in ("None", "none"):
+                return HirLiteralPattern(None, "none", TYPE_NONE, span)
+            sym = self._declare_symbol(pat.name)
+            return HirBindingPattern(pat.name, expected_tid, span, symbol_id=sym)
+        if isinstance(pat, LiteralPattern):
+            lit = pat.literal
+            if isinstance(lit, IntLiteral):
+                return HirLiteralPattern(lit.value, "int", TYPE_INT, span)
+            if isinstance(lit, FloatLiteral):
+                return HirLiteralPattern(lit.value, "float", TYPE_FLOAT, span)
+            if isinstance(lit, BoolLiteral):
+                return HirLiteralPattern(lit.value, "bool", TYPE_BOOL, span)
+            if isinstance(lit, StringLiteral):
+                return HirLiteralPattern(lit.value, "str", TYPE_STR, span)
+            if isinstance(lit, NoneLiteral):
+                return HirLiteralPattern(None, "none", TYPE_NONE, span)
+            return HirLiteralPattern(getattr(lit, "value", None), "unknown", expected_tid, span)
+        if isinstance(pat, TuplePattern):
+            entry = self.interner.get_entry(expected_tid)
+            subtypes = list(entry.data) if entry and entry.tag == "tuple" else [TYPE_ERROR] * len(pat.elements)
+            elems = [self._lower_pattern(p, t) for p, t in zip(pat.elements, subtypes)]
+            return HirTuplePattern(elems, expected_tid, span)
+        if isinstance(pat, EnumPattern):
+            variant = pat.variant
+            enum_name = pat.enum_name
+            if variant in ("Some", "None") and (enum_name is None or enum_name.startswith("Option")):
+                enum_name = "Option"
+                variant_idx = 0 if variant == "Some" else 1
+            elif variant in ("Ok", "Err") and (enum_name is None or enum_name.startswith("Result")):
+                enum_name = "Result"
+                variant_idx = 0 if variant == "Ok" else 1
+            else:
+                if enum_name is None and variant in self.enum_variants:
+                    enum_name = self.enum_variants[variant]
+                edef = self.interner.enum_defs.get(enum_name) if enum_name else None
+                variant_idx = edef.variants.index(variant) if edef and variant in edef.variants else 0
+            subtypes = []
+            entry = self.interner.get_entry(expected_tid)
+            if enum_name == "Option" and entry.tag == "optional":
+                subtypes = [entry.data]
+            elif enum_name == "Result" and entry.tag == "result":
+                subtypes = [entry.data[0]] if variant == "Ok" else [entry.data[1]]
+            else:
+                if enum_name in self.enum_payloads and variant in self.enum_payloads[enum_name]:
+                    subtypes = self.enum_payloads[enum_name][variant]
+            args = getattr(pat, "args", getattr(pat, "payload", []))
+            lowered_subs = []
+            for idx, arg_p in enumerate(args):
+                sub_t = subtypes[idx] if idx < len(subtypes) else TYPE_ERROR
+                lowered_subs.append(self._lower_pattern(arg_p, sub_t))
+            return HirEnumPattern(enum_name, variant, variant_idx, lowered_subs, expected_tid, span,
+                                  variant_id=VariantId(variant_idx, variant))
+        return HirWildcardPattern(expected_tid, span)
 
     def _span(self, node):
         return Span(node.line, node.col, file_path=getattr(node, 'source_file', self.file_path),
@@ -78,6 +193,9 @@ class HirBuilder:
                 self.structs.add(stmt.name)
             elif isinstance(stmt, EnumDecl):
                 self.enums.add(stmt.name)
+                payloads = {variant.name: [self._get_type_id_from_node(type_) for type_ in variant.payload_types]
+                            for variant in stmt.variants if hasattr(variant, "payload_types")}
+                self.enum_payloads[stmt.name] = payloads
                 for v in stmt.variants:
                     v_name = v.name if hasattr(v, "name") else str(v)
                     self.enum_variants[v_name] = stmt.name
@@ -179,12 +297,19 @@ class HirBuilder:
         )
 
     def _lower_fn_decl(self, decl: FnDecl) -> HirFnDecl:
+        self._push_scope()
         params = [
-            HirParam(p.name, self._get_type_id_from_node(getattr(p, "type_ann", getattr(p, "type_annotation", None))), self._span(p))
+            HirParam(
+                p.name,
+                self._get_type_id_from_node(getattr(p, "type_ann", getattr(p, "type_annotation", None))),
+                self._span(p),
+                symbol_id=self._declare_symbol(p.name)
+            )
             for p in decl.params
         ]
         ret_tid = self._get_type_id_from_node(decl.return_type) if decl.return_type else TYPE_UNIT
         body_hir = self._lower_block(decl.body)
+        self._pop_scope()
         is_fallible = False
         err_type_name = ""
         if decl.return_type and isinstance(decl.return_type, AstResultType):
@@ -204,12 +329,19 @@ class HirBuilder:
         )
 
     def _lower_method_decl(self, decl: MethodDecl) -> HirFnDecl:
+        self._push_scope()
         params = [
-            HirParam(p.name, self._get_type_id_from_node(getattr(p, "type_ann", getattr(p, "type_annotation", None))), self._span(p))
+            HirParam(
+                p.name,
+                self._get_type_id_from_node(getattr(p, "type_ann", getattr(p, "type_annotation", None))),
+                self._span(p),
+                symbol_id=self._declare_symbol(p.name)
+            )
             for p in decl.params
         ]
         ret_tid = self._get_type_id_from_node(decl.return_type) if decl.return_type else TYPE_UNIT
         body_hir = self._lower_block(decl.body)
+        self._pop_scope()
         is_fallible = False
         err_type_name = ""
         if decl.return_type and isinstance(decl.return_type, AstResultType):
@@ -233,16 +365,19 @@ class HirBuilder:
     # -------------------------------------------------------------
 
     def _lower_block(self, block: Block) -> HirBlock:
+        self._push_scope()
         stmts = [self._lower_stmt(s) for s in block.statements]
         tail_hir = None
         if block.tail_expr is not None:
             if isinstance(block.tail_expr, AssignmentExpr):
                 tgt_hir = self._lower_expr(block.tail_expr.target)
                 val_hir = self._lower_expr(block.tail_expr.value)
-                stmts.append(HirAssign(tgt_hir, val_hir, Span(block.tail_expr.line, block.tail_expr.col)))
+                path = self._build_cow_path(tgt_hir)
+                stmts.append(HirAssign(tgt_hir, val_hir, Span(block.tail_expr.line, block.tail_expr.col), path=path))
                 tail_hir = HirConstUnit(TYPE_UNIT, Span(block.tail_expr.line, block.tail_expr.col))
             else:
                 tail_hir = self._lower_expr(block.tail_expr)
+        self._pop_scope()
         return HirBlock(stmts, self._span(block), tail_expr=tail_hir)
 
     def _lower_stmt(self, stmt: Stmt) -> HirStmt:
@@ -251,7 +386,8 @@ class HirBuilder:
             ann_node = getattr(stmt, "type_ann", getattr(stmt, "type_annotation", None))
             tid = self._get_type_id_from_node(ann_node) if ann_node else self._get_expr_type_id(stmt.initializer)
             init_hir = self._lower_expr(stmt.initializer)
-            return HirLet(stmt.name, tid, stmt.is_mut, init_hir, span)
+            sym = self._declare_symbol(stmt.name)
+            return HirLet(stmt.name, tid, stmt.is_mut, init_hir, span, symbol_id=sym)
         elif isinstance(stmt, WhileStmt):
             cond_hir = self._lower_expr(stmt.condition)
             body_hir = self._lower_block(stmt.body)
@@ -263,8 +399,11 @@ class HirBuilder:
             entry = self.interner.get_entry(list_tid)
             if entry.tag == "list":
                 elem_tid = entry.data
+            self._push_scope()
+            pat_hir = self._lower_pattern(stmt.pattern, elem_tid)
             body_hir = self._lower_block(stmt.body)
-            return HirForList(stmt.pattern, elem_tid, list_hir, body_hir, span)
+            self._pop_scope()
+            return HirForList(pat_hir, elem_tid, list_hir, body_hir, span)
         elif isinstance(stmt, ReturnStmt):
             if stmt.value is not None:
                 val_hir = self._lower_expr(stmt.value)
@@ -279,7 +418,8 @@ class HirBuilder:
             if isinstance(stmt.expr, AssignmentExpr):
                 tgt_hir = self._lower_expr(stmt.expr.target)
                 val_hir = self._lower_expr(stmt.expr.value)
-                return HirAssign(tgt_hir, val_hir, span)
+                path = self._build_cow_path(tgt_hir)
+                return HirAssign(tgt_hir, val_hir, span, path=path)
             return HirExprStmt(self._lower_expr(stmt.expr), span)
 
         # Fallback to expression statement
@@ -299,13 +439,12 @@ class HirBuilder:
             definition = self.interner.enum_defs.get(entry.data)
             if definition and variant in definition.variants:
                 index = definition.variants.index(variant)
-        return HirConstructEnum(name, variant, index, type_id, span, payload)
+        return HirConstructEnum(name, variant, index, type_id, span, payload, variant_id=VariantId(index, variant))
 
     def _lower_expr(self, expr: Expr) -> HirExpr:
         value = self._lower_expr_impl(expr)
         if hasattr(expr, "force_result_wrap_id"):
-            return self._construct_enum("Result", "Ok", 0, expr.force_result_wrap_id,
-                                    self._span(expr), value)
+            return HirCoerce(value, expr.force_result_wrap_id, kind="wrap_ok", span=self._span(expr))
         return value
 
     def _lower_expr_impl(self, expr: Expr) -> HirExpr:
@@ -328,7 +467,8 @@ class HirBuilder:
             if expr.name in self.enum_variants:
                 en_name = self.enum_variants[expr.name]
                 return self._construct_enum(en_name, expr.name, 0, tid or self.interner.mk_enum(en_name), span)
-            return HirLocalRef(expr.name, tid, span)
+            sym = self._resolve_symbol(expr.name)
+            return HirLocalRef(expr.name, tid, span, symbol_id=sym)
         elif isinstance(expr, ThisExpr):
             return HirThisRef(tid, span)
         elif isinstance(expr, SuperExpr):
@@ -368,6 +508,7 @@ class HirBuilder:
             return HirConstructTuple(elem_tids, elems_hir, tid or self.interner.mk_tuple(tuple(elem_tids)), span)
         elif isinstance(expr, CallExpr):
             raw_args = getattr(expr, "args", getattr(expr, "arguments", []))
+            decl_id = getattr(expr.callee, "decl_id", None)
             # Check if this call is an unqualified Enum variant constructor
             if isinstance(expr.callee, IdentExpr):
                 c_name = expr.callee.name
@@ -408,23 +549,41 @@ class HirBuilder:
             # Check if builtin call
             elif isinstance(expr.callee, IdentExpr) and expr.callee.name in BUILTIN_NAMES:
                 args_hir = [self._lower_expr(a) for a in raw_args]
-                return HirBuiltinCall(expr.callee.name, args_hir, tid, span)
+                target = BuiltinCallTarget(expr.callee.name)
+                return HirBuiltinCall(expr.callee.name, args_hir, tid, span, target=target)
             # Check if method call or module function call
             elif isinstance(expr.callee, MemberExpr):
                 if isinstance(expr.callee.object, IdentExpr) and expr.callee.object.name in self.modules:
                     args_hir = [self._lower_expr(a) for a in raw_args]
-                    return HirDirectCall(f"{expr.callee.object.name}__{expr.callee.property}", args_hir, tid, span)
+                    callee_name = f"{expr.callee.object.name}__{expr.callee.property}"
+                    target = DirectCallTarget(callee_name, decl_id)
+                    return HirDirectCall(callee_name, args_hir, tid, span, decl_id=decl_id, target=target)
                 rec_hir = self._lower_expr(expr.callee.object)
                 args_hir = [self._lower_expr(a) for a in raw_args]
-                return HirMethodCall(rec_hir, expr.callee.property, args_hir, tid, span)
+                slot = None
+                target_cls = None
+                rec_entry = self.interner.get_entry(rec_hir.type_id)
+                if rec_entry and rec_entry.tag == "class":
+                    target_cls = rec_entry.data
+                    cdef = self.interner.class_defs.get(rec_entry.data)
+                    if cdef and expr.callee.property in cdef.methods:
+                        slot = list(cdef.methods.keys()).index(expr.callee.property)
+                elif rec_entry and rec_entry.tag == "interface":
+                    idef = self.interner.interface_defs.get(rec_entry.data)
+                    if idef and expr.callee.property in idef.methods:
+                        slot = list(idef.methods.keys()).index(expr.callee.property)
+                target = VirtualCallTarget(expr.callee.property, slot=slot, target_class=target_cls)
+                return HirMethodCall(rec_hir, expr.callee.property, args_hir, tid, span, slot=slot, target=target)
             # Direct top-level function call
             elif isinstance(expr.callee, IdentExpr):
                 args_hir = [self._lower_expr(a) for a in raw_args]
-                return HirDirectCall(expr.callee.name, args_hir, tid, span)
+                target = DirectCallTarget(expr.callee.name, decl_id)
+                return HirDirectCall(expr.callee.name, args_hir, tid, span, decl_id=decl_id, target=target)
             else:
                 args_hir = [self._lower_expr(a) for a in raw_args]
                 callee_name = getattr(expr.callee, "name", "anon_fn")
-                return HirDirectCall(callee_name, args_hir, tid, span)
+                target = DirectCallTarget(callee_name, decl_id)
+                return HirDirectCall(callee_name, args_hir, tid, span, decl_id=decl_id, target=target)
         elif isinstance(expr, MemberExpr):
             # Check if this is an Enum variant: EnumName.Variant
             if isinstance(expr.object, IdentExpr) and expr.object.name in self.enums:
@@ -436,7 +595,18 @@ class HirBuilder:
                 v_idx = edef.variants.index(variant_name) if edef and variant_name in edef.variants else 0
                 return self._construct_enum(enum_name, variant_name, v_idx, tid or self.interner.mk_enum(enum_name), span)
             obj_hir = self._lower_expr(expr.object)
-            return HirFieldRead(obj_hir, expr.property, tid, span)
+            field_idx = -1
+            entry = self.interner.get_entry(obj_hir.type_id)
+            if entry and entry.tag == "struct":
+                sdef = self.interner.struct_defs.get(entry.data)
+                if sdef and expr.property in sdef.fields:
+                    field_idx = list(sdef.fields.keys()).index(expr.property)
+            elif entry and entry.tag == "class":
+                cdef = self.interner.class_defs.get(entry.data)
+                if cdef and expr.property in cdef.fields:
+                    field_idx = list(cdef.fields.keys()).index(expr.property)
+            field_id = FieldId(field_idx, expr.property) if field_idx >= 0 else None
+            return HirFieldRead(obj_hir, expr.property, tid, span, field_idx=field_idx, field_id=field_id)
         elif isinstance(expr, IndexExpr):
             obj_hir = self._lower_expr(expr.object)
             idx_hir = self._lower_expr(expr.index)
@@ -462,7 +632,14 @@ class HirBuilder:
             return HirIf(cond_hir, then_hir, elifs_hir, else_hir, tid, span)
         elif isinstance(expr, MatchExpr):
             sub_hir = self._lower_expr(expr.subject)
-            arms_hir = [HirMatchArm(arm.pattern, self._lower_block(arm.body), self._span(arm), self._lower_expr(arm.guard) if arm.guard is not None else None) for arm in expr.arms]
+            arms_hir = []
+            for arm in expr.arms:
+                self._push_scope()
+                pat_hir = self._lower_pattern(arm.pattern, sub_hir.type_id)
+                guard_hir = self._lower_expr(arm.guard) if arm.guard is not None else None
+                body_hir = self._lower_block(arm.body)
+                self._pop_scope()
+                arms_hir.append(HirMatchArm(pat_hir, body_hir, self._span(arm), guard=guard_hir))
             return HirMatch(sub_hir, arms_hir, tid, span)
         elif isinstance(expr, RangeExpr):
             s_hir = self._lower_expr(expr.start)

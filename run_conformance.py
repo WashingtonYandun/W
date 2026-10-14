@@ -19,6 +19,7 @@ from test_w1_split_conformance import test_split_conformance
 from test_generic_hardening import run_generic_hardening_tests
 from test_cow_telemetry import run_cow_telemetry_suite
 from test_compilation_session import run_session_tests
+from test_resolved_hir import run_all as run_resolved_hir_tests
 from error.Error import DIAGNOSTIC_CODES, LexerError, ParserError, TypeError, WError
 from token.TokenType import TokenType
 from node.NodeType import Program
@@ -423,6 +424,7 @@ def _run_suite_in_repo(repo_root: str) -> None:
     # 11. Copy-on-Write Telemetry & Path-Copying Asymptotics (B02)
     cow_telemetry_ok = run_cow_telemetry_suite()
     session_ok = run_session_tests()
+    resolved_hir_ok = run_resolved_hir_tests()
 
     if os.path.exists(temp_file):
         try:
@@ -437,6 +439,7 @@ def _run_suite_in_repo(repo_root: str) -> None:
     print(f"Generic Hardening:   {'1/1 (Canonical cache verified)' if hardening_ok else '0/1'}")
     print(f"CoW Telemetry (B02): {'1/1 (Asymptotics verified)' if cow_telemetry_ok else '0/1'}")
     print(f"Compilation Session: {'1/1' if session_ok else '0/1'}")
+    print(f"Resolved HIR (C02):  {'1/1' if resolved_hir_ok else '0/1'}")
     print(f"Examples E2E Suite:  {examples_passed}/{len(example_files)}")
     print(f"Bootstrap FixedPoint:{'1/1 (SHA256 verified)' if bootstrap_ok else '0/1'}")
 
@@ -459,6 +462,7 @@ def _run_suite_in_repo(repo_root: str) -> None:
         and hardening_ok
         and cow_telemetry_ok
         and session_ok
+        and resolved_hir_ok
         and examples_passed == len(example_files)
         and bootstrap_ok
     )
@@ -468,7 +472,7 @@ def _run_suite_in_repo(repo_root: str) -> None:
             v_lex_passed + i_lex_passed + v_parse_passed + i_parse_passed +
             v_type_passed + i_type_passed + err_passed + fmt_passed + hir_passed +
             runtime_passed + c99_passed + hir_c99_passed + w1_runtime_passed +
-            examples_passed + 1 + 1 + 1 + 1 + 1
+            examples_passed + 1 + 1 + 1 + 1 + 1 + 1
         )
         print(f"ALL {total}/{total} CONFORMANCE, EXAMPLES & SELF-HOSTING TESTS PASSED (100%).")
         sys.exit(0)
