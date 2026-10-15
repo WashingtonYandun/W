@@ -332,7 +332,7 @@ class TypeChecker:
                         code="W1002"
                     )
 
-        # Step 1a: Pre-register nominal type shells (Enums, Interfaces, Classes, Imports)
+        # Step 1a: Pre-register ALL nominal type shells (Enums, Interfaces, Classes, Structs, Imports)
         for stmt in program.body:
             if isinstance(stmt, EnumDecl):
                 if stmt.type_params:
@@ -343,10 +343,6 @@ class TypeChecker:
 
                 seen_variants: Set[str] = set()
                 variant_names: List[str] = []
-                variant_payloads: Dict[str, List[WType]] = {}
-                enum_type = EnumType(name=stmt.name, variants=[], variant_payloads={})
-                self.global_scope.define_type(stmt.name, enum_type, line=stmt.line, col=stmt.col, file=self.file)
-
                 for v in stmt.variants:
                     v_name = v.name if hasattr(v, "name") else str(v)
                     if v_name in seen_variants:
@@ -359,22 +355,37 @@ class TypeChecker:
                         )
                     seen_variants.add(v_name)
                     variant_names.append(v_name)
-                    payload_wtypes: List[WType] = []
-                    if hasattr(v, "payload_types") and v.payload_types:
-                        for pt in v.payload_types:
-                            payload_wtypes.append(self._resolve_type_node(pt))
-                    variant_payloads[v_name] = payload_wtypes
 
-                enum_type.variants = variant_names
-                enum_type.variant_payloads = variant_payloads
+                enum_type = EnumType(name=stmt.name, variants=variant_names, variant_payloads={})
+                self.global_scope.define_type(stmt.name, enum_type, line=stmt.line, col=stmt.col, file=self.file)
 
             elif isinstance(stmt, InterfaceDecl):
-                intf_type = InterfaceType(name=stmt.name)
+                intf_type = InterfaceType(name=stmt.name, methods={})
                 self.global_scope.define_type(stmt.name, intf_type, line=stmt.line, col=stmt.col, file=self.file)
 
             elif isinstance(stmt, ClassDecl):
                 cls_type = ClassType(name=stmt.name)
                 self.global_scope.define_type(stmt.name, cls_type, line=stmt.line, col=stmt.col, file=self.file)
+
+            elif isinstance(stmt, StructDecl):
+                if stmt.type_params:
+                    template = GenericStructTemplate(name=stmt.name, type_params=stmt.type_params, ast_decl=stmt)
+                    self.generic_struct_templates[stmt.name] = template
+                    self.global_scope.define_type(stmt.name, template, line=stmt.line, col=stmt.col, file=self.file)
+                else:
+                    seen_fields: Set[str] = set()
+                    for f in stmt.fields:
+                        if f.name in seen_fields:
+                            raise TypeError(
+                                message=f"Duplicate field '{f.name}' in struct '{stmt.name}'",
+                                line=f.line,
+                                col=f.col,
+                                file=self.file,
+                                code="T014"
+                            )
+                        seen_fields.add(f.name)
+                    struct_type = StructType(name=stmt.name, fields={})
+                    self.global_scope.define_type(stmt.name, struct_type, line=stmt.line, col=stmt.col, file=self.file)
 
             elif isinstance(stmt, ImportDecl):
                 mod_type = self._resolve_import(stmt)
@@ -383,28 +394,35 @@ class TypeChecker:
                     file=self.file
                 )
 
-        # Step 1b: Resolve Structs and Interface method signatures
+        # Step 1b: Resolve Members, Payloads, Signatures, and Top-Level Functions
+        class_decls: List[ClassDecl] = []
         for stmt in program.body:
-            if isinstance(stmt, StructDecl):
+            if isinstance(stmt, EnumDecl):
                 if stmt.type_params:
-                    template = GenericStructTemplate(name=stmt.name, type_params=stmt.type_params, ast_decl=stmt)
-                    self.generic_struct_templates[stmt.name] = template
-                    self.global_scope.define_type(stmt.name, template, line=stmt.line, col=stmt.col, file=self.file)
-                else:
-                    fields_dict: Dict[str, WType] = {}
-                    for f in stmt.fields:
-                        if f.name in fields_dict:
-                            raise TypeError(
-                                message=f"Duplicate field '{f.name}' in struct '{stmt.name}'",
-                                line=f.line,
-                                col=f.col,
-                                file=self.file,
-                                code="T014"
-                            )
-                        f_type = self._resolve_type_node(f.type_ann)
-                        fields_dict[f.name] = f_type
-                    struct_type = StructType(name=stmt.name, fields=fields_dict)
-                    self.global_scope.define_type(stmt.name, struct_type, line=stmt.line, col=stmt.col, file=self.file)
+                    continue
+                enum_type = self.global_scope.lookup_type(stmt.name)
+                assert isinstance(enum_type, EnumType)
+                variant_payloads: Dict[str, List[WType]] = {}
+                for v in stmt.variants:
+                    v_name = v.name if hasattr(v, "name") else str(v)
+                    payload_wtypes: List[WType] = []
+                    if hasattr(v, "payload_types") and v.payload_types:
+                        for pt in v.payload_types:
+                            payload_wtypes.append(self._resolve_type_node(pt))
+                    variant_payloads[v_name] = payload_wtypes
+                enum_type.variant_payloads = variant_payloads
+
+            elif isinstance(stmt, StructDecl):
+                if stmt.type_params:
+                    continue
+                struct_type = self.global_scope.lookup_type(stmt.name)
+                assert isinstance(struct_type, StructType)
+                fields_dict: Dict[str, WType] = {}
+                for f in stmt.fields:
+                    f_type = self._resolve_type_node(f.type_ann)
+                    fields_dict[f.name] = f_type
+                struct_type.fields = fields_dict
+                self.interner.from_wtype(struct_type)
 
             elif isinstance(stmt, InterfaceDecl):
                 intf_type = self.global_scope.lookup_type(stmt.name)
@@ -422,10 +440,7 @@ class TypeChecker:
                     r_type = self._resolve_type_node(m.return_type)
                     intf_type.methods[m.name] = FunctionType(params=p_types, ret=r_type)
 
-        # Step 1c: Resolve Class hierarchies, fields, methods, and top-level Functions
-        class_decls: List[ClassDecl] = []
-        for stmt in program.body:
-            if isinstance(stmt, ClassDecl):
+            elif isinstance(stmt, ClassDecl):
                 class_decls.append(stmt)
                 cls_type = self.global_scope.lookup_type(stmt.name)
                 assert isinstance(cls_type, ClassType)
@@ -462,7 +477,7 @@ class TypeChecker:
                         )
                     cls_type.interfaces.append(intf_t)
 
-                # Own fields & methods first
+                # Own fields & methods
                 seen_own_fields: Set[str] = set()
                 for f in stmt.fields:
                     if f.name in seen_own_fields:
@@ -512,6 +527,7 @@ class TypeChecker:
                         Symbol(stmt.name, fn_type, is_mut=False, kind="fn", line=stmt.line, col=stmt.col),
                         file=self.file
                     )
+
 
         # Step 1d: Propagate inherited members and verify interface contracts
         for stmt in class_decls:
@@ -895,6 +911,16 @@ class TypeChecker:
                 code="T011"
             )
 
+        if isinstance(stmt.initializer, DictExpr) and len(stmt.initializer.entries) == 0 and stmt.type_ann is None:
+            raise TypeError(
+                message="Cannot infer type of empty dictionary literal '{}'; explicit type annotation required",
+                line=stmt.line,
+                col=stmt.col,
+                file=self.file,
+                code="T011"
+            )
+
+
         expected_type: Optional[WType] = None
         if stmt.type_ann is not None:
             expected_type = self._resolve_type_node(stmt.type_ann)
@@ -1217,7 +1243,7 @@ class TypeChecker:
                     file=self.file,
                     code="T009"
                 )
-            rhs_t = self._check_expr(expr.right)
+            rhs_t = self._check_payload(expr.right, opt_inner)
             if not is_assignable(rhs_t, opt_inner):
                 raise TypeError(
                     message=f"Right operand of '??' type mismatch: expected '{opt_inner}', found '{rhs_t}'",
@@ -1226,6 +1252,7 @@ class TypeChecker:
                     file=self.file,
                     code="T003"
                 )
+
             return opt_inner
 
         if isinstance(expr, PostfixTryExpr):
@@ -1804,7 +1831,14 @@ class TypeChecker:
                         bindings: Dict[str, WType] = {}
                         for p_decl, a_expr in zip(template.ast_decl.params, expr.args):
                             a_type = self._check_expr(a_expr)
-                            self._unify_type(p_decl.type_ann, a_type, type_params_set, bindings)
+                            if not self._unify_type(p_decl.type_ann, a_type, type_params_set, bindings):
+                                raise TypeError(
+                                    message=f"Conflicting type inference for generic function '{callee_name}': cannot unify '{a_type}'",
+                                    line=a_expr.line,
+                                    col=a_expr.col,
+                                    file=self.file,
+                                    code="W2001"
+                                )
                         for p in template.type_params:
                             p_name = p.name if hasattr(p, "name") else str(p)
                             if p_name not in bindings:
@@ -1839,7 +1873,15 @@ class TypeChecker:
                         bindings = {}
                         for f_decl, a_expr in zip(template.ast_decl.fields, expr.args):
                             a_type = self._check_expr(a_expr)
-                            self._unify_type(f_decl.type_ann, a_type, type_params_set, bindings)
+                            if not self._unify_type(f_decl.type_ann, a_type, type_params_set, bindings):
+                                raise TypeError(
+                                    message=f"Conflicting type inference for struct constructor '{callee_name}': cannot unify '{a_type}'",
+                                    line=a_expr.line,
+                                    col=a_expr.col,
+                                    file=self.file,
+                                    code="W2001"
+                                )
+
                         for p in template.type_params:
                             p_name = p.name if hasattr(p, "name") else str(p)
                             if p_name not in bindings:
@@ -2214,7 +2256,15 @@ class TypeChecker:
                     for f in expr.fields:
                         if f.name in template_fields:
                             a_t = self._check_expr(f.value)
-                            self._unify_type(template_fields[f.name], a_t, type_params_set, bindings)
+                            if not self._unify_type(template_fields[f.name], a_t, type_params_set, bindings):
+                                raise TypeError(
+                                    message=f"Conflicting type inference for field '{f.name}' in struct '{template.name}': cannot unify '{a_t}'",
+                                    line=f.line,
+                                    col=f.col,
+                                    file=self.file,
+                                    code="W2001"
+                                )
+
                     for p in template.type_params:
                         p_name = p.name if hasattr(p, "name") else str(p)
                         if p_name not in bindings:
