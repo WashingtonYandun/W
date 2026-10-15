@@ -2,7 +2,7 @@
 
 <p align="center">
   <a href="https://github.com/WashingtonYandun/W/actions"><img src="https://img.shields.io/badge/build-passing-brightgreen?style=flat-square" alt="Build Status"></a>
-  <a href="https://github.com/WashingtonYandun/W"><img src="https://img.shields.io/badge/conformance-391%2F391%20(100%25)-success?style=flat-square" alt="Conformance Tests"></a>
+  <a href="https://github.com/WashingtonYandun/W"><img src="https://img.shields.io/badge/conformance-402%2F402%20(100%25)-success?style=flat-square" alt="Conformance Tests"></a>
   <a href="https://github.com/WashingtonYandun/W"><img src="https://img.shields.io/badge/sanitizers-ASan%20%7C%20UBSan%20%7C%20LSan%20clean-blue?style=flat-square" alt="Sanitizers"></a>
   <a href="https://github.com/WashingtonYandun/W"><img src="https://img.shields.io/badge/self--hosting-3--stage%20fixed--point-purple?style=flat-square" alt="Self-Hosting"></a>
   <a href="https://github.com/WashingtonYandun/W"><img src="https://img.shields.io/badge/version-v0.2.4-informational?style=flat-square" alt="Version"></a>
@@ -357,10 +357,30 @@ Run `./w bench` to benchmark the reference interpreter against the native C99 ba
 - [x] **develop** — **B03: Weak References & Cycle Safety**: Class control blocks (`WWeakControl`), `weak(obj)` and `upgrade(w)`, zero leaks under ASan/LSan.
 - [x] **develop** — **B04: Compiler Engine Profiles & Sanitizer Matrix**: 4 execution targets, 101-case sanitizer corpus, Clang ASan/UBSan, GCC C99, Linux LSan memory gates.
 - [x] **develop** — **C01: Whole-Program Compilation Sessions**: Single `CompilationSession` and `SourceManager`, shared `TypeInterner` arena, canonical `ModuleId`/`DeclId`, single-initialization diamond graphs.
-- [ ] **In Progress** — **C02: Resolved HIR & Explicit Lowering**: `SymbolId`, `FieldId`/`VariantId`, static/slot call targets, elimination of string-based AST lookup in code generation.
-- [ ] **Fase C** — **C03–C06: Monomorphization, Layout & Default HIR**: Worklist specialization, recursive layout graphs, centralized constraints, full HIR default backend.
-- [ ] **Fase D** — **D01–D06: Self-Hosted W1 Parity & Tooling**: 100% feature parity for W1 compiler, extended fuzzing, and telemetry budgets.
+- [x] **develop** — **C02: Resolved HIR & Explicit Lowering**: `SymbolId`, `FieldId`/`VariantId`, static/slot call targets, native pattern hierarchy.
+- [x] **develop** — **C03: Typed Monomorphization & Anti-Bloat**: Cache-first worklist specialization, deterministic mangling, finite recursion cycle detection (`W2011`).
+- [x] **develop** — **C04: Layout Graph, SCC & Recursive ADTs**: Tarjan SCC cycle detection on inline types, first-class recursive enums (`Tree[T]`, `List[T]`), pattern match guards.
+- [x] **develop** — **C05: Types, Invariance & Inference**: Declaration order independence (permutation invariance), container invariance (`list[T]`, `dict[K, V]`), contextless inference protection (`let d = {}` rejection).
+- [x] **develop** — **C06: Default Typed HIR Backend**: Typed HIR established as primary default native backend (`w build`, `w emit-c`); AST backend relegated to secondary differential oracle (`--backend=ast`).
+- [x] **develop** — **D01: Public Engine Parity Matrix**: Versioned feature support matrix across all 4 execution targets, explicit milestone tracking for limitations (`D02`), separate reporting of bootstrap fixed-point vs full parity.
+- [ ] **Fase D** — **D02–D06: Self-Hosted W1 Pipeline & Tooling**: Real AST/type checker in W1 replacing text pattern stubs, generics in W1, OOP audits, differential fuzzing, and telemetry budgets.
 - [ ] **Fase E** — **E01–E04: First-Class Functions, Closures & Ecosystem**: First-class function types, closure capture, C FFI, and Language Server Protocol (LSP).
+
+---
+
+## 🔍 Compiler Engine Parity & Implementation Boundaries
+
+W explicitly reports feature coverage across all 4 compiler targets (102 fixtures evaluated under CI). See the full [Engine Feature Parity Matrix](docs/ENGINE_PARITY_MATRIX.md) for detailed analysis:
+
+| Feature Category | Fixtures | W0 Interpreter | W0 AST C99 | W0 Typed HIR (Default) | W1 Self-Hosted C99 | Status / Milestone |
+| :--- | :---: | :---: | :---: | :---: | :---: | :--- |
+| **`core`** | 86 | ✅ 86/86 | ✅ 86/86 | ✅ 86/86 | ✅ 86/86 (Supported) | Stable (100% Parity) |
+| **`generics`** | 15 | ✅ 15/15 | ✅ 15/15 | ✅ 15/15 | ⏳ 0/15 (Unsupported) | Pending D02 |
+| **`checked_modules`** | 1 | ✅ 1/1 | ✅ 1/1 | ✅ 1/1 | ⏳ 0/1 (Unsupported) | Pending D02 |
+| **Total Verified** | **102** | **102/102 (100%)** | **102/102 (100%)** | **102/102 (100%)** | **86/102 (84.3%)** | **Full W0 Parity &bull; W1 Core Subset** |
+
+> [!NOTE]
+> **Bootstrap Fixed-Point vs. Feature Parity:** The 3-stage bootstrap fixed-point ($\text{SHA256}(c_0) == \text{SHA256}(c_1) == \text{SHA256}(c_2)$) proves that W1 generates bit-identical C code when self-compiling the core compiler subset. Full language parity (including generics and compilation sessions in W1) is the focus of Phase D (D02).
 
 ---
 

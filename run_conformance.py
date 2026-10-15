@@ -24,6 +24,7 @@ from test_c03_generic_specialization import run_all as run_c03_generic_tests
 from test_c04_adt_layout import run_all as run_c04_adt_tests
 from test_c05_types_inference import run_all as run_c05_types_tests
 from test_c06_default_backend import run_all as run_c06_backend_tests
+from test_d01_w1_parity_matrix import run_all as run_d01_parity_tests
 from error.Error import DIAGNOSTIC_CODES, LexerError, ParserError, TypeError, WError
 from token.TokenType import TokenType
 from node.NodeType import Program
@@ -433,6 +434,7 @@ def _run_suite_in_repo(repo_root: str) -> None:
     adt_c04_ok = run_c04_adt_tests()
     types_c05_ok = run_c05_types_tests()
     backend_c06_ok = run_c06_backend_tests()
+    parity_d01_ok = run_d01_parity_tests()
 
     if os.path.exists(temp_file):
         try:
@@ -452,6 +454,7 @@ def _run_suite_in_repo(repo_root: str) -> None:
     print(f"ADTs & Layout Graph (C04):    {'1/1' if adt_c04_ok else '0/1'}")
     print(f"Types & Inference (C05):      {'1/1' if types_c05_ok else '0/1'}")
     print(f"Default Backend (C06):        {'1/1 (HIR default verified)' if backend_c06_ok else '0/1'}")
+    print(f"Parity Matrix (D01):          {'1/1 (Matrix & limits verified)' if parity_d01_ok else '0/1'}")
     print(f"Examples E2E Suite:  {examples_passed}/{len(example_files)}")
     print(f"Bootstrap FixedPoint:{'1/1 (SHA256 verified)' if bootstrap_ok else '0/1'}")
 
@@ -479,6 +482,7 @@ def _run_suite_in_repo(repo_root: str) -> None:
         and adt_c04_ok
         and types_c05_ok
         and backend_c06_ok
+        and parity_d01_ok
         and examples_passed == len(example_files)
         and bootstrap_ok
     )
@@ -488,7 +492,7 @@ def _run_suite_in_repo(repo_root: str) -> None:
             v_lex_passed + i_lex_passed + v_parse_passed + i_parse_passed +
             v_type_passed + i_type_passed + err_passed + fmt_passed + hir_passed +
             runtime_passed + c99_passed + hir_c99_passed + w1_runtime_passed +
-            examples_passed + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1
+            examples_passed + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1
         )
         print(f"ALL {total}/{total} CONFORMANCE, EXAMPLES & SELF-HOSTING TESTS PASSED (100%).")
         sys.exit(0)
