@@ -808,6 +808,8 @@ class Parser:
         # Unary operations: '-' and 'not'
         if self.match(TokenType.MINUS, TokenType.NOT):
             operand = self.parse_expr(min_prec=8, allow_struct_init=allow_struct_init)
+            if token.value == "-" and isinstance(operand, IntLiteral) and operand.value == 9223372036854775808:
+                return IntLiteral(value=-9223372036854775808, line=token.line, col=token.col)
             return UnaryExpr(op=token.value, operand=operand, line=token.line, col=token.col)
 
         # Parenthesized expressions & Tuples

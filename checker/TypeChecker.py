@@ -1020,6 +1020,11 @@ class TypeChecker:
 
     def _check_expr_impl(self, expr: Expr, is_statement_context: bool = False) -> WType:
         if isinstance(expr, IntLiteral):
+            if expr.value > 9223372036854775807 or expr.value < -9223372036854775808:
+                raise TypeError(
+                    message=f"Integer literal {expr.value} exceeds 64-bit signed range [-9223372036854775808, 9223372036854775807]",
+                    line=expr.line, col=expr.col, file=self.file, code="W0002"
+                )
             return IntType
         if isinstance(expr, FloatLiteral):
             return FloatType

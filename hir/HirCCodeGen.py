@@ -648,6 +648,8 @@ class HirCCodeGen:
             return val
 
         if isinstance(expr, HirConstInt):
+            if expr.value == -9223372036854775808:
+                return "w_int((-9223372036854775807LL - 1LL))"
             return f"w_int({expr.value}LL)"
 
         if isinstance(expr, HirConstFloat):
