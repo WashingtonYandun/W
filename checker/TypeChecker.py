@@ -28,6 +28,7 @@ from checker.WType import (
 from checker.SymbolTable import Scope, Symbol, create_global_scope
 from checker.TypeInterner import TypeInterner
 from error.Error import TypeError
+from checker.LayoutGraph import LayoutGraph, build_layout_graph_from_declarations
 
 
 class GenericInstanceKey(NamedTuple):
@@ -227,6 +228,14 @@ class TypeChecker:
                     raise TypeError("Builtin Option/Result/Weak identities are reserved", line=declaration.line,
                                     col=declaration.col, file=self.file, code="W1002")
 
+        # Validate finite layouts via formal LayoutGraph (SCC on inline subgraph)
+        pre_graph = build_layout_graph_from_declarations(
+            struct_decls=[s for s in program.body if isinstance(s, StructDecl)],
+            enum_decls=[s for s in program.body if isinstance(s, EnumDecl)],
+            class_decls=[s for s in program.body if isinstance(s, ClassDecl)],
+        )
+        pre_graph.validate_finite_layouts(file_path=self.file)
+
         # Pass 1: Collect declarations
         self._pass1_collect_declarations(program)
 
@@ -257,6 +266,14 @@ class TypeChecker:
         final_body.extend(sorted_fns)
         final_body.extend(filtered_body)
         program.body = final_body
+
+        # Post-monomorphization layout verification
+        post_graph = build_layout_graph_from_declarations(
+            struct_decls=[s for s in program.body if isinstance(s, StructDecl)],
+            enum_decls=[s for s in program.body if isinstance(s, EnumDecl)],
+            class_decls=[s for s in program.body if isinstance(s, ClassDecl)],
+        )
+        post_graph.validate_finite_layouts(file_path=self.file)
 
         program.interner = self.interner
 
@@ -327,6 +344,9 @@ class TypeChecker:
                 seen_variants: Set[str] = set()
                 variant_names: List[str] = []
                 variant_payloads: Dict[str, List[WType]] = {}
+                enum_type = EnumType(name=stmt.name, variants=[], variant_payloads={})
+                self.global_scope.define_type(stmt.name, enum_type, line=stmt.line, col=stmt.col, file=self.file)
+
                 for v in stmt.variants:
                     v_name = v.name if hasattr(v, "name") else str(v)
                     if v_name in seen_variants:
@@ -345,8 +365,8 @@ class TypeChecker:
                             payload_wtypes.append(self._resolve_type_node(pt))
                     variant_payloads[v_name] = payload_wtypes
 
-                enum_type = EnumType(name=stmt.name, variants=variant_names, variant_payloads=variant_payloads)
-                self.global_scope.define_type(stmt.name, enum_type, line=stmt.line, col=stmt.col, file=self.file)
+                enum_type.variants = variant_names
+                enum_type.variant_payloads = variant_payloads
 
             elif isinstance(stmt, InterfaceDecl):
                 intf_type = InterfaceType(name=stmt.name)
@@ -1565,8 +1585,14 @@ class TypeChecker:
                         )
                     if tmpl.name == "Option" and expr.property in ("None", "none"):
                         return NoneType
-                    concrete_args = [AnyType() for _ in tmpl.type_params]
-                    return self._monomorphize_enum(tmpl, concrete_args, expr.line, expr.col)
+                    ctx_t = self.expected_type
+                    if isinstance(ctx_t, EnumType) and getattr(ctx_t, "template_name", None) == tmpl.name and ctx_t.type_args:
+                        concrete_args = list(ctx_t.type_args)
+                    else:
+                        concrete_args = [AnyType() for _ in tmpl.type_params]
+                    enum_t = self._monomorphize_enum(tmpl, concrete_args, expr.line, expr.col)
+                    expr.object.name = enum_t.name
+                    return enum_t
 
             obj_t = self._check_expr(expr.object, allow_module=True)
             if isinstance(obj_t, ClassType):
@@ -1976,7 +2002,15 @@ class TypeChecker:
                     context_args = self._builtin_arguments(ctx_t, template.name)
                     context_types = dict(zip([p.name for p in template.type_params], context_args))
                     for pt, a_expr in zip(payload_types, expr.args):
-                        expected = context_types.get(pt.name) if isinstance(pt, NamedType) else None
+                        expected = None
+                        if isinstance(pt, NamedType):
+                            expected = context_types.get(pt.name)
+                        elif isinstance(pt, GenericType):
+                            subst_pt = self._substitute_type_node(pt, context_types)
+                            try:
+                                expected = self._resolve_type_node(subst_pt)
+                            except Exception:
+                                expected = None
                         a_type = self._check_payload(a_expr, expected)
                         self._unify_type(pt, a_type, type_params_set, bindings)
                     if template.name == "Result":
@@ -2019,6 +2053,39 @@ class TypeChecker:
                 expr.callee.object.name = enum_t.name
                 expr.type_args = []
                 return enum_t
+
+            if isinstance(expr.callee, MemberExpr) and isinstance(expr.callee.object, IdentExpr):
+                enum_t = self.current_scope.lookup_type(expr.callee.object.name)
+                if isinstance(enum_t, EnumType):
+                    variant_name = expr.callee.property
+                    if variant_name not in enum_t.variants:
+                        raise TypeError(
+                            message=f"Enum '{enum_t.name}' has no variant '{variant_name}'",
+                            line=expr.line,
+                            col=expr.col,
+                            file=self.file,
+                            code="T001"
+                        )
+                    expected_payloads = enum_t.variant_payloads.get(variant_name, [])
+                    if len(expr.args) != len(expected_payloads):
+                        raise TypeError(
+                            message=f"Variant '{variant_name}' expects {len(expected_payloads)} arguments, found {len(expr.args)}",
+                            line=expr.line,
+                            col=expr.col,
+                            file=self.file,
+                            code="T015"
+                        )
+                    for i, (a_expr, p_type) in enumerate(zip(expr.args, expected_payloads)):
+                        a_type = self._check_expr(a_expr)
+                        if not is_assignable(a_type, p_type):
+                            raise TypeError(
+                                message=f"Argument {i + 1} type mismatch: expected '{p_type}', found '{a_type}'",
+                                line=a_expr.line,
+                                col=a_expr.col,
+                                file=self.file,
+                                code="T003"
+                            )
+                    return enum_t
 
             # Mutating method check on receiver (transitive across value-type paths)
             if callee_t is None:
@@ -3208,15 +3275,6 @@ class TypeChecker:
                 new_payload_types: List[TypeNode] = []
                 if hasattr(v, "payload_types") and v.payload_types:
                     for pt in v.payload_types:
-                        # Infinite recursive layout rule: T025
-                        if isinstance(pt, (NamedType, GenericType)) and pt.name == template.name:
-                            raise TypeError(
-                                message=f"Recursive ADT variant '{v_name}' contains '{template.name}' directly without indirection; use 'Box[...]'",
-                                line=v.line if hasattr(v, "line") else line,
-                                col=v.col if hasattr(v, "col") else col,
-                                file=self.file,
-                                code="T025"
-                            )
                         subst_pt = self._substitute_type_node(pt, subst)
                         resolved_pt = self._resolve_type_node(subst_pt)
                         payload_wtypes.append(resolved_pt)

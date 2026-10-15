@@ -75,10 +75,18 @@ class StructDef:
 
 
 class EnumDef:
-    def __init__(self, def_id: int, name: str, variants: List[str]):
+    def __init__(
+        self,
+        def_id: int,
+        name: str,
+        variants: List[str],
+        variant_payloads: Optional[Dict[str, List[int]]] = None,
+    ):
         self.def_id = def_id
         self.name = name
         self.variants = variants
+        self.variant_payloads = variant_payloads if variant_payloads is not None else {}
+
 
 
 class InterfaceDef:
@@ -355,12 +363,20 @@ class TypeInterner:
         self.struct_defs[name] = StructDef(tid, name, f_dict)
         return tid
 
-    def mk_enum(self, name: str, variants: Optional[List[str]] = None) -> int:
+    def mk_enum(
+        self,
+        name: str,
+        variants: Optional[List[str]] = None,
+        variant_payloads: Optional[Dict[str, List[int]]] = None,
+    ) -> int:
         key = ("enum", name)
         if key in self._key_to_id:
             tid = self._key_to_id[key]
-            if variants is not None and name in self.enum_defs:
-                self.enum_defs[name].variants = variants
+            if name in self.enum_defs:
+                if variants is not None:
+                    self.enum_defs[name].variants = variants
+                if variant_payloads is not None:
+                    self.enum_defs[name].variant_payloads = variant_payloads
             return tid
         caps = TypeCapabilities(
             needs_retain=False,
@@ -372,7 +388,8 @@ class TypeInterner:
         )
         tid = self._intern(key, TypeEntry("enum", name), caps)
         v_list = variants if variants is not None else []
-        self.enum_defs[name] = EnumDef(tid, name, v_list)
+        v_payloads = variant_payloads if variant_payloads is not None else {}
+        self.enum_defs[name] = EnumDef(tid, name, v_list, v_payloads)
         return tid
 
     def mk_interface(self, name: str, methods: Optional[Dict[str, int]] = None) -> int:
@@ -674,8 +691,18 @@ class TypeInterner:
                 tid = self.mk_result(self.from_wtype(args[0]), self.from_wtype(args[1]))
                 self._key_to_id[("enum", wtype.name)] = tid
                 return tid
+            key = ("enum", wtype.name)
+            if key in self._key_to_id:
+                return self._key_to_id[key]
             variants = wtype.variants if hasattr(wtype, "variants") else []
-            return self.mk_enum(wtype.name, variants)
+            tid = self.mk_enum(wtype.name, variants)
+            payloads: Dict[str, List[int]] = {}
+            if hasattr(wtype, "variant_payloads") and wtype.variant_payloads:
+                for vname, vtypes in wtype.variant_payloads.items():
+                    payloads[vname] = [self.from_wtype(vt) for vt in vtypes]
+            if wtype.name in self.enum_defs:
+                self.enum_defs[wtype.name].variant_payloads = payloads
+            return tid
         elif isinstance(wtype, InterfaceType):
             key = ("interface", wtype.name)
             if key in self._key_to_id:

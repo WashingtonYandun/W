@@ -251,9 +251,17 @@ static inline WVal w_ok(WVal inner);
 static inline WVal w_err(WVal inner);
 
 static inline bool w_builtin_name(const char* name, const char* base) {
-    size_t length = strlen(base);
-    return strcmp(name, base) == 0 || (strncmp(name, base, length) == 0 &&
-        name[length] == '_' && name[length + 1] == '_');
+    if (strcmp(name, base) == 0) return true;
+    const char* p1 = strstr(name, "__");
+    const char* p2 = strstr(base, "__");
+    size_t len1 = p1 ? (size_t)(p1 - name) : strlen(name);
+    size_t len2 = p2 ? (size_t)(p2 - base) : strlen(base);
+    if (len1 == len2 && strncmp(name, base, len1) == 0) return true;
+    size_t base_len = strlen(base);
+    if (strncmp(name, base, base_len) == 0 && name[base_len] == '_' && name[base_len + 1] == '_') return true;
+    size_t name_len = strlen(name);
+    if (strncmp(base, name, name_len) == 0 && base[name_len] == '_' && base[name_len + 1] == '_') return true;
+    return false;
 }
 
 static inline WVal w_enum(const char* enum_name, const char* variant) {
