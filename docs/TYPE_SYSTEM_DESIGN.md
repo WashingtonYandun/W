@@ -1,7 +1,7 @@
 # W Language Architecture: Structured `TypeId` & `TypeInterner` Design
 
-**Status:** Approved Design Specification (`v0.1.2` Architecture Track — Target Implementation: `v0.2`)  
-**Scope:** Static Type Representation, Interning, Subtyping, Variance, and Generic Substitution
+**Status:** Implemented & Canonical Specification (`C01-C05`, `D01-D06` / `ADR-009`)  
+**Scope:** Static Type Representation, Interning, Subtyping, Invariance, and Generic Substitution
 
 ---
 
@@ -173,4 +173,15 @@ Value semantics (`is_value`) and heap Reference Counting (`needs_retain` / `need
 | `Point` (`struct`) | `true` | `false` | `false` | `true` | `false` (`W2010`) | Refcounted CoW buffer (`WStructBuf*`) |
 | `User` (`class` / `interface`) | `false` | `true` | `true` | `true` | `false` (`W2010`) | Refcounted identity object (`WStructBuf*` with `W_OBJECT`) |
 | `T?` / `T ! E` | Inherits | Inherits | Inherits | `true` (`WBoxBuf*`) | `false` (`W2010`) | Tagged `WVal` or refcounted `WBoxBuf*` (`W_OK` / `W_ERR`) |
+
+---
+
+## 6. Whole-Program Compilation & Type Invariance (Phase C & D Consolidation)
+
+Per `ADR-008` (Compilation Sessions), `C05_COMPLETION.md`, and `ADR-009` (Consolidation & Parity Contracts):
+1. **Whole-Program TypeInterner Arena:** A single `CompilationSession` manages one shared `TypeInterner` across all imported source files and modules. Type comparison is strictly $O(1)$ by integer `TypeId`.
+2. **Container Invariance:** Generic containers (`list[T]`, `dict[K, V]`, and user `struct` / `enum` instances) are strictly invariant. A `list[Dog]` cannot be assigned to or passed where a `list[Animal]` is expected, preventing silent heap type corruption.
+3. **Inference Bounds:** Contextless empty collection inference (`let d = {}`) is statically rejected (`[W2001]`). Generic parameter inference enforces structural consistency across call arguments.
+4. **Order Independence:** Top-level declarations are collected in a multi-pass shell resolution before type checking, ensuring program validity is completely invariant to declaration ordering.
+
 

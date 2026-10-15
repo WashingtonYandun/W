@@ -1,7 +1,7 @@
 # W Language Architecture: Typed High-Level IR (`HIR`) Design
 
-**Status:** Approved Design Specification (`v0.1.2` Architecture Track — Target Implementation: `v0.2` / `v0.3`)  
-**Scope:** Compiler Middle-End (`AST → Name Resolution → Type Checking → Typed HIR → Backends`)
+**Status:** Implemented & Default Production Backend (`C06`, `D01-D06` / `ADR-009`)  
+**Scope:** Compiler Middle-End (`AST → Name Resolution → Type Checking → Typed HIR → HirVerifier → Backends`)
 
 ---
 
@@ -194,15 +194,17 @@ Both `gcc` and `clang` are forced by `;`-terminated C99 variable declarations to
 
 ---
 
-## 6. Migration Roadmap (`v0.2` – `v0.3`)
+## 6. Implementation & Consolidation Status
 
-To preserve the 100% conformance suite and 3-stage self-hosting fixed-point (`W0 -> W1 Stage 1 -> W1 Stage 2`), HIR adoption is staged incrementally:
+Typed HIR adoption and stabilization is complete:
 
-1. **Stage 1 (`v0.2` — Generics & Type Interner):**
-   - Introduce `TypeInterner` and `TypeId` (`docs/TYPE_SYSTEM_DESIGN.md`).
-   - Annotate AST/HIR nodes with resolved `TypeId`s during `TypeChecker`.
-   - Perform Generic Monomorphization (`docs/ADR-002-generics-monomorphization.md`) over typed declarations before C99 emission.
-2. **Stage 2 (`v0.3` — Full Typed HIR Pipeline):**
-   - Introduce the `hir/` package in `W0` (`hir/HirNodes.py`, `hir/HirBuilder.py`).
-   - Switch `Interpreter` and `CCodeGen` to consume `HirModule` instead of raw `Program` AST.
-   - Mirror the flattened HIR node tables in `selfhost/w1.w` so `W1` benefits from the same unified front-end/middle-end architecture.
+1. **Phase A / C02 (`docs/C02_COMPLETION.md`):**
+   - Introduced `hir/HirNodes.py`, `hir/HirBuilder.py`, and `hir/HirVerifier.py`.
+   - Full type decoration, SymbolId/FieldId resolution, desugared patterns and control flow.
+2. **Phase C06 (`docs/C06_COMPLETION.md`):**
+   - Established Typed HIR (`hir/HirCCodeGen.py`) as the primary default compiler backend for `w build` and `w emit-c`.
+   - Retained AST C codegen as secondary differential oracle (`--backend=ast`).
+3. **Phase D01–D06 / ADR-009 (`docs/adr/ADR-009-Consolidation-and-Parity-Contracts.md`):**
+   - Enforced byte-for-byte C99 code generation determinism across random hash seeds.
+   - Verified against AddressSanitizer and UndefinedBehaviorSanitizer across 107 fixtures.
+   - Integrated compiler phase telemetry and memory peak reporting.
