@@ -370,9 +370,26 @@ def is_assignable(source: WType, target: WType) -> bool:
     if isinstance(source, ClassType) and isinstance(target, InterfaceType):
         return source.implements_interface(target.name)
 
-    # Covariant List subtyping for polymorphic collections (e.g., list[Dog] -> list[Animal])
+    # Invariant List subtyping: list[S] -> list[T] iff S == T (SPEC 4.1 & ADR-002)
     if isinstance(source, ListType) and isinstance(target, ListType):
-        return is_assignable(source.element, target.element)
+        return source.element == target.element
+
+    # Invariant Dict subtyping: dict[K1, V1] -> dict[K2, V2] iff K1 == K2 and V1 == V2
+    if isinstance(source, DictType) and isinstance(target, DictType):
+        return source.key == target.key and source.value == target.value
+
+    # Invariant Struct subtyping: S1 -> S2 iff S1.name == S2.name and type_args match
+    if isinstance(source, StructType) and isinstance(target, StructType):
+        if source.name != target.name:
+            return False
+        return getattr(source, "type_args", ()) == getattr(target, "type_args", ())
+
+    # Invariant Enum subtyping for non-Option/Result enums:
+    if isinstance(source, EnumType) and isinstance(target, EnumType):
+        if source.name != target.name:
+            return False
+        return getattr(source, "type_args", ()) == getattr(target, "type_args", ())
+
 
     # An OptionalType(T) accepts T or none
     if isinstance(target, OptionalType):
