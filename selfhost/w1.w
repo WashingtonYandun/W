@@ -2949,6 +2949,23 @@ fn check_tokens_semantics(tokens: list[Token]) -> unit {
                             report_error("W2001", tokens[idx].line, tokens[idx].col, "type mismatch: expected str, found none")
                         }
                     }
+                    if type_ann == "int" {
+                        if idx < n and (tokens[idx].kind == "STR" or tokens[idx].kind == "TRUE" or tokens[idx].kind == "FALSE" or tokens[idx].kind == "NONE") {
+                            report_error("W2001", tokens[idx].line, tokens[idx].col, "type mismatch: expected int")
+                        }
+                    } elif type_ann == "str" {
+                        if idx < n and (tokens[idx].kind == "INT" or tokens[idx].kind == "FLOAT" or tokens[idx].kind == "TRUE" or tokens[idx].kind == "FALSE" or tokens[idx].kind == "NONE") {
+                            report_error("W2001", tokens[idx].line, tokens[idx].col, "type mismatch: expected str")
+                        }
+                    } elif type_ann == "bool" {
+                        if idx < n and (tokens[idx].kind == "INT" or tokens[idx].kind == "FLOAT" or tokens[idx].kind == "STR" or tokens[idx].kind == "NONE") {
+                            report_error("W2001", tokens[idx].line, tokens[idx].col, "type mismatch: expected bool")
+                        }
+                    } elif type_ann == "float" {
+                        if idx < n and (tokens[idx].kind == "STR" or tokens[idx].kind == "TRUE" or tokens[idx].kind == "FALSE" or tokens[idx].kind == "NONE") {
+                            report_error("W2001", tokens[idx].line, tokens[idx].col, "type mismatch: expected float")
+                        }
+                    }
                     if type_ann == "" {
                         if idx < n and tokens[idx].kind == "NEW" and idx + 1 < n {
                             type_ann = tokens[idx + 1].val
@@ -3161,8 +3178,13 @@ fn check_tokens_semantics(tokens: list[Token]) -> unit {
             if is_inst {
                 let mut j = i + 2
                 let mut inst_fields: list[str] = []
-                while j < n and tokens[j].kind != "RBRACE" {
-                    if tokens[j].kind == "IDENT" and j + 1 < n and tokens[j + 1].kind == "COLON" {
+                let mut s_depth = 1
+                while j < n and s_depth > 0 {
+                    if tokens[j].kind == "LBRACE" {
+                        s_depth = s_depth + 1
+                    } elif tokens[j].kind == "RBRACE" {
+                        s_depth = s_depth - 1
+                    } elif s_depth == 1 and tokens[j].kind == "IDENT" and j + 1 < n and tokens[j + 1].kind == "COLON" {
                         let fname = tokens[j].val
                         inst_fields.append(fname)
                         let mut is_field_ok = false

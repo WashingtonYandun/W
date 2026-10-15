@@ -1,7 +1,7 @@
 # W Language Architecture: Deterministic Ownership & Lifetime Model (`v0.1.3`)
 
-**Status:** Active Implementation Specification (`v0.1.3`)  
-**Scope:** `W0 C99` (`codegen/CCodeGen.py`), `W1 C99` (`selfhost/w1.w`), and C99 Runtime (`runtime/w_runtime.h`)
+**Status:** Implemented & Verified Specification (`B01-B04`, `D01-D06` / `ADR-009`)  
+**Scope:** `W0 Typed HIR` (default), `W0 AST C99` (oracle), `W1 C99` (`selfhost/w1.w`), and C99 Runtime (`runtime/w_runtime.h`)
 
 ---
 
@@ -251,3 +251,13 @@ The isolated Linux cycle negative sets LSAN_OPTIONS=use_stacks=0:use_registers=0
 to ignore stale machine roots after create_cycle returns. Success cases retain
 normal root scanning and leak detection. This changes conservative reachability
 for the expected-leak process only; it does not suppress leaked allocations.
+
+---
+
+## 11. Phase D Memory Safety & Sanitizer Gate (ADR-009)
+
+As formalized in `ADR-009-Consolidation-and-Parity-Contracts.md`:
+1. **Continuous Sanitizer Matrix:** The full test suite runs under Clang AddressSanitizer (ASan), UndefinedBehaviorSanitizer (UBSan), and Linux LeakSanitizer (LSan) across 107 test fixtures on every pull request.
+2. **Zero Unintended Leaks:** All acyclic data structures, CoW path-copying mutations, monomorphized generic containers, and weak-reference broken cycles must exhibit zero memory leaks.
+3. **Deterministic Scope Cleanup:** The `CleanupScope` LIFO unwinding guarantees that memory is released immediately at scope exits across all four execution engines.
+
