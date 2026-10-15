@@ -1,7 +1,12 @@
 # ERROR: W2011
-enum BadTree[T] {
-    Leaf(T),
-    Node(BadTree[T], BadTree[T])
+struct CycleA[T] {
+    val: T,
+    b: CycleB[T]
 }
 
-let t: BadTree[int] = BadTree.Leaf(1)
+struct CycleB[T] {
+    val: T,
+    a: CycleA[T]
+}
+
+let a: CycleA[int] = CycleA(1, CycleB(2, a))

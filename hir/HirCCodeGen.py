@@ -1166,7 +1166,7 @@ class HirCCodeGen:
 
             conds: List[str] = [f"(({val_expr}).tag == W_ENUM && strcmp(({val_expr}).as.en.variant, \"{pattern.variant}\") == 0)"]
             if pattern.enum_name:
-                conds.append(f"(strcmp(({val_expr}).as.en.enum_name, \"{pattern.enum_name}\") == 0)")
+                conds.append(f"(w_builtin_name(({val_expr}).as.en.enum_name, \"{pattern.enum_name}\"))")
             if not pattern.args:
                 return "(" + " && ".join(conds) + ")"
 

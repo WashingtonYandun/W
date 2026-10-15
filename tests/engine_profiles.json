@@ -18,6 +18,7 @@
     "tests/runtime/generic_pair.w": "generics",
     "tests/runtime/generic_struct.w": "generics",
     "tests/runtime/generic_tree_recursive.w": "generics",
+    "tests/runtime/recursive_tree_adt.w": "generics",
     "tests/types/invalid/generic_constraint_failure.w": "generics",
     "tests/types/invalid/generic_nominal_constraint_violation.w": "generics",
     "tests/types/invalid/generic_recursive_infinite_layout.w": "generics",
