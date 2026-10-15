@@ -874,90 +874,195 @@ static inline void w_struct_detach(WVal* v) {
 }
 
 /* Structural Equality */
-static inline bool w_eq(WVal a, WVal b) {
-    bool a_some = a.tag == W_ENUM && strcmp(a.as.en.enum_name, "Option") == 0 && strcmp(a.as.en.variant, "Some") == 0;
-    bool b_some = b.tag == W_ENUM && strcmp(b.as.en.enum_name, "Option") == 0 && strcmp(b.as.en.variant, "Some") == 0;
-    if (a_some && !b_some && b.tag != W_NONE) return w_eq(a.as.en.box->val, b);
-    if (b_some && !a_some && a.tag != W_NONE) return w_eq(a, b.as.en.box->val);
-    if (a.tag != b.tag) {
-        if ((a.tag == W_NONE && b.tag == W_ENUM && strcmp(b.as.en.enum_name, "Option") == 0 && strcmp(b.as.en.variant, "None") == 0) ||
-            (b.tag == W_NONE && a.tag == W_ENUM && strcmp(a.as.en.enum_name, "Option") == 0 && strcmp(a.as.en.variant, "None") == 0)) {
-            return true;
+typedef struct {
+    WVal left;
+    WVal right;
+} WEqualityPair;
+
+static inline void w_eq_push(WEqualityPair** items, int32_t* count, int32_t* capacity,
+                             bool* heap_items, WVal left, WVal right) {
+    if (*count == *capacity) {
+        if (*capacity > INT32_MAX / 2) {
+            fprintf(stderr, "[W4003] RuntimeError: Equality work list is too large\n");
+            exit(1);
         }
-        if (a.tag == W_OK && b.tag == W_ENUM && strcmp(b.as.en.enum_name, "Result") == 0 && strcmp(b.as.en.variant, "Ok") == 0) {
-            return b.as.en.box ? w_eq(a.as.box->val, b.as.en.box->val) : false;
-        }
-        if (b.tag == W_OK && a.tag == W_ENUM && strcmp(a.as.en.enum_name, "Result") == 0 && strcmp(a.as.en.variant, "Ok") == 0) {
-            return a.as.en.box ? w_eq(a.as.en.box->val, b.as.box->val) : false;
-        }
-        if (a.tag == W_ERR && b.tag == W_ENUM && strcmp(b.as.en.enum_name, "Result") == 0 && strcmp(b.as.en.variant, "Err") == 0) {
-            return b.as.en.box ? w_eq(a.as.box->val, b.as.en.box->val) : false;
-        }
-        if (b.tag == W_ERR && a.tag == W_ENUM && strcmp(a.as.en.enum_name, "Result") == 0 && strcmp(a.as.en.variant, "Err") == 0) {
-            return a.as.en.box ? w_eq(a.as.en.box->val, b.as.box->val) : false;
-        }
-        return false;
+        int32_t new_capacity = *capacity * 2;
+        WEqualityPair* grown = (WEqualityPair*)w_alloc_safe(
+            sizeof(WEqualityPair) * (size_t)new_capacity);
+        memcpy(grown, *items, sizeof(WEqualityPair) * (size_t)*count);
+        if (*heap_items) free(*items);
+        *items = grown;
+        *capacity = new_capacity;
+        *heap_items = true;
     }
-    switch (a.tag) {
-        case W_POINTER: return a.as.pointer == b.as.pointer;
-        case W_FUNCTION: return a.as.function == b.as.function;
-        case W_UNIT:
-        case W_NONE:
-            return true;
-        case W_INT:
-            return a.as.i == b.as.i;
-        case W_FLOAT:
-            return a.as.f == b.as.f;
-        case W_BOOL:
-            return a.as.b == b.as.b;
-        case W_STR:
-            return a.string_length == b.string_length && memcmp(a.as.s, b.as.s, a.string_length) == 0;
-        case W_ENUM:
-            if (strcmp(a.as.en.enum_name, b.as.en.enum_name) != 0 ||
-                strcmp(a.as.en.variant, b.as.en.variant) != 0) {
-                return false;
-            }
-            if (!a.as.en.box && !b.as.en.box) return true;
-            if (!a.as.en.box || !b.as.en.box) return false;
-            return w_eq(a.as.en.box->val, b.as.en.box->val);
-        case W_LIST:
-            if (a.as.list->len != b.as.list->len) return false;
-            for (int32_t i = 0; i < a.as.list->len; i++) {
-                if (!w_eq(a.as.list->data[i], b.as.list->data[i])) return false;
-            }
-            return true;
-        case W_TUPLE:
-            if (a.as.tuple->len != b.as.tuple->len) return false;
-            for (int32_t i = 0; i < a.as.tuple->len; i++) {
-                if (!w_eq(a.as.tuple->items[i], b.as.tuple->items[i])) return false;
-            }
-            return true;
-        case W_DICT:
-            if (a.as.dict->len != b.as.dict->len) return false;
-            for (int32_t i = 0; i < a.as.dict->len; i++) {
-                WVal k = a.as.dict->keys[i];
-                WVal v = a.as.dict->vals[i];
-                int32_t found = w_dict_find(b.as.dict, k);
-                if (found < 0 || !w_eq(v, b.as.dict->vals[found])) return false;
-            }
-            return true;
-        case W_STRUCT:
-            if (strcmp(a.as.st->name, b.as.st->name) != 0 || a.as.st->len != b.as.st->len) return false;
-            for (int32_t i = 0; i < a.as.st->len; i++) {
-                if (!w_eq(a.as.st->vals[i], b.as.st->vals[i])) return false;
-            }
-            return true;
-        case W_WEAK:
-            return a.as.weak == b.as.weak;
-        case W_OBJECT:
-            return a.as.st == b.as.st;
-        case W_OK:
-        case W_ERR:
-            return w_eq(a.as.box->val, b.as.box->val);
-    }
-    return false;
+    (*items)[(*count)++] = (WEqualityPair){left, right};
 }
 
+static inline bool w_eq(WVal a, WVal b) {
+    WEqualityPair local_items[64];
+    WEqualityPair* items = local_items;
+    int32_t count = 0;
+    int32_t capacity = 64;
+    bool heap_items = false;
+    bool equal = true;
+    w_eq_push(&items, &count, &capacity, &heap_items, a, b);
+
+    while (count > 0 && equal) {
+        WEqualityPair pair = items[--count];
+        WVal left = pair.left;
+        WVal right = pair.right;
+        bool left_some = left.tag == W_ENUM &&
+            strcmp(left.as.en.enum_name, "Option") == 0 &&
+            strcmp(left.as.en.variant, "Some") == 0;
+        bool right_some = right.tag == W_ENUM &&
+            strcmp(right.as.en.enum_name, "Option") == 0 &&
+            strcmp(right.as.en.variant, "Some") == 0;
+
+        if (left_some && !right_some && right.tag != W_NONE) {
+            if (!left.as.en.box) { equal = false; continue; }
+            w_eq_push(&items, &count, &capacity, &heap_items,
+                      left.as.en.box->val, right);
+            continue;
+        }
+        if (right_some && !left_some && left.tag != W_NONE) {
+            if (!right.as.en.box) { equal = false; continue; }
+            w_eq_push(&items, &count, &capacity, &heap_items,
+                      left, right.as.en.box->val);
+            continue;
+        }
+
+        if (left.tag != right.tag) {
+            if ((left.tag == W_NONE && right.tag == W_ENUM &&
+                 strcmp(right.as.en.enum_name, "Option") == 0 &&
+                 strcmp(right.as.en.variant, "None") == 0) ||
+                (right.tag == W_NONE && left.tag == W_ENUM &&
+                 strcmp(left.as.en.enum_name, "Option") == 0 &&
+                 strcmp(left.as.en.variant, "None") == 0)) {
+                continue;
+            }
+            bool left_result = left.tag == W_OK || left.tag == W_ERR;
+            bool right_result = right.tag == W_OK || right.tag == W_ERR;
+            const char* variant = (left.tag == W_OK || right.tag == W_OK) ? "Ok" : "Err";
+            if (left_result && right.tag == W_ENUM &&
+                strcmp(right.as.en.enum_name, "Result") == 0 &&
+                strcmp(right.as.en.variant, variant) == 0 &&
+                left.as.box && right.as.en.box) {
+                w_eq_push(&items, &count, &capacity, &heap_items,
+                          left.as.box->val, right.as.en.box->val);
+                continue;
+            }
+            if (right_result && left.tag == W_ENUM &&
+                strcmp(left.as.en.enum_name, "Result") == 0 &&
+                strcmp(left.as.en.variant, variant) == 0 &&
+                left.as.en.box && right.as.box) {
+                w_eq_push(&items, &count, &capacity, &heap_items,
+                          left.as.en.box->val, right.as.box->val);
+                continue;
+            }
+            equal = false;
+            continue;
+        }
+
+        switch (left.tag) {
+            case W_POINTER:
+                equal = left.as.pointer == right.as.pointer;
+                break;
+            case W_FUNCTION:
+                equal = left.as.function == right.as.function;
+                break;
+            case W_UNIT:
+            case W_NONE:
+                break;
+            case W_INT:
+                equal = left.as.i == right.as.i;
+                break;
+            case W_FLOAT:
+                equal = left.as.f == right.as.f;
+                break;
+            case W_BOOL:
+                equal = left.as.b == right.as.b;
+                break;
+            case W_STR:
+                equal = left.string_length == right.string_length &&
+                    memcmp(left.as.s, right.as.s, left.string_length) == 0;
+                break;
+            case W_ENUM:
+                if (strcmp(left.as.en.enum_name, right.as.en.enum_name) != 0 ||
+                    strcmp(left.as.en.variant, right.as.en.variant) != 0 ||
+                    (!!left.as.en.box != !!right.as.en.box)) {
+                    equal = false;
+                } else if (left.as.en.box) {
+                    w_eq_push(&items, &count, &capacity, &heap_items,
+                              left.as.en.box->val, right.as.en.box->val);
+                }
+                break;
+            case W_LIST:
+                if (left.as.list->len != right.as.list->len) {
+                    equal = false;
+                    break;
+                }
+                for (int32_t i = 0; i < left.as.list->len; i++) {
+                    w_eq_push(&items, &count, &capacity, &heap_items,
+                              left.as.list->data[i], right.as.list->data[i]);
+                }
+                break;
+            case W_TUPLE:
+                if (left.as.tuple->len != right.as.tuple->len) {
+                    equal = false;
+                    break;
+                }
+                for (int32_t i = 0; i < left.as.tuple->len; i++) {
+                    w_eq_push(&items, &count, &capacity, &heap_items,
+                              left.as.tuple->items[i], right.as.tuple->items[i]);
+                }
+                break;
+            case W_DICT:
+                if (left.as.dict->len != right.as.dict->len) {
+                    equal = false;
+                    break;
+                }
+                for (int32_t i = 0; i < left.as.dict->len && equal; i++) {
+                    int32_t found = w_dict_find(right.as.dict, left.as.dict->keys[i]);
+                    if (found < 0) {
+                        equal = false;
+                    } else {
+                        w_eq_push(&items, &count, &capacity, &heap_items,
+                                  left.as.dict->vals[i], right.as.dict->vals[found]);
+                    }
+                }
+                break;
+            case W_STRUCT:
+                if (strcmp(left.as.st->name, right.as.st->name) != 0 ||
+                    left.as.st->len != right.as.st->len) {
+                    equal = false;
+                    break;
+                }
+                for (int32_t i = 0; i < left.as.st->len; i++) {
+                    w_eq_push(&items, &count, &capacity, &heap_items,
+                              left.as.st->vals[i], right.as.st->vals[i]);
+                }
+                break;
+            case W_WEAK:
+                equal = left.as.weak == right.as.weak;
+                break;
+            case W_OBJECT:
+                equal = left.as.st == right.as.st;
+                break;
+            case W_OK:
+            case W_ERR:
+                if (!left.as.box || !right.as.box) {
+                    equal = left.as.box == right.as.box;
+                } else {
+                    w_eq_push(&items, &count, &capacity, &heap_items,
+                              left.as.box->val, right.as.box->val);
+                }
+                break;
+        }
+    }
+
+    if (heap_items) free(items);
+    return equal;
+}
 /* Containers: List, Dict, Tuple, Struct */
 static inline WVal w_make_list(int32_t count, const WVal* elems) {
     WListBuf* b = (WListBuf*)w_alloc_safe(sizeof(WListBuf));
@@ -1627,216 +1732,260 @@ static inline const char* w_nominal_display_name(const char* name) {
     return name;
 }
 
-static inline char* w_to_cstr(WVal v, bool quote_str) {
-    char* buf;
-    switch (v.tag) {
-        case W_POINTER:
-            buf = (char*)w_alloc_safe(9); memcpy(buf, "<opaque>", 9); return buf;
-        case W_FUNCTION:
-            buf = (char*)w_alloc_safe(11); memcpy(buf, "<function>", 11); return buf;
-        case W_WEAK: {
-            const char* text = v.as.weak->object ? "weak(alive)" : "weak(expired)";
-            char* result = (char*)w_alloc_safe(strlen(text) + 1);
-            strcpy(result, text);
-            return result;
-        }
+typedef struct {
+    WVal value;
+    const char* text;
+    bool is_text;
+    bool quote_str;
+} WFormatTask;
 
-        case W_UNIT:
-            buf = (char*)w_alloc_safe(5);
-            strcpy(buf, "unit");
-            return buf;
-        case W_NONE:
-            buf = (char*)w_alloc_safe(5);
-            strcpy(buf, "none");
-            return buf;
-        case W_INT:
-            buf = (char*)w_alloc_safe(32);
-            snprintf(buf, 32, "%" PRId64, v.as.i);
-            return buf;
-        case W_FLOAT:
-            return w_format_float(v.as.f);
-        case W_BOOL:
-            buf = (char*)w_alloc_safe(6);
-            strcpy(buf, v.as.b ? "true" : "false");
-            return buf;
-        case W_STR: {
-            size_t len = v.string_length;
-            if (!quote_str) {
-                buf = (char*)w_alloc_safe(len + 1);
-                memcpy(buf, v.as.s, len);
-                buf[len] = 0;
-                return buf;
-            }
-            buf = (char*)w_alloc_safe(len * 2 + 3);
-            size_t written = 0;
-            buf[written++] = '"';
-            for (size_t i = 0; i < len; i++) {
-                if (v.as.s[i] == 0) { buf[written++] = '\\'; buf[written++] = '0'; }
-                else buf[written++] = v.as.s[i];
-            }
-            buf[written++] = '"';
-            buf[written] = 0;
-            return buf;
-        }
-        case W_ENUM: {
-            if (strcmp(v.as.en.enum_name, "Option") == 0 && strcmp(v.as.en.variant, "Some") == 0 && v.as.en.box)
-                return w_to_cstr(v.as.en.box->val, quote_str);
-            if (v.as.en.box) {
-                if (v.as.en.box->val.tag == W_TUPLE) {
-                    size_t cap = 64;
-                    size_t pos = 0;
-                    buf = (char*)w_alloc_safe(cap);
-                    size_t l1 = strlen(w_nominal_display_name(v.as.en.enum_name));
-                    size_t l2 = strlen(v.as.en.variant);
-                    while (pos + l1 + l2 + 2 >= cap) { cap *= 2; buf = (char*)w_realloc_safe(buf, cap); }
-                    memcpy(buf + pos, w_nominal_display_name(v.as.en.enum_name), l1); pos += l1;
-                    buf[pos++] = '.';
-                    memcpy(buf + pos, v.as.en.variant, l2); pos += l2;
-                    buf[pos++] = '(';
-                    for (int32_t i = 0; i < v.as.en.box->val.as.tuple->len; i++) {
-                        if (i > 0) {
-                            if (pos + 3 >= cap) { cap *= 2; buf = (char*)w_realloc_safe(buf, cap); }
-                            buf[pos++] = ','; buf[pos++] = ' ';
-                        }
-                        char* sub = w_to_cstr(v.as.en.box->val.as.tuple->items[i], true);
-                        size_t lsub = strlen(sub);
-                        while (pos + lsub + 3 >= cap) { cap *= 2; buf = (char*)w_realloc_safe(buf, cap); }
-                        memcpy(buf + pos, sub, lsub); pos += lsub;
-                        free(sub);
-                    }
-                    buf[pos++] = ')';
-                    buf[pos] = '\0';
-                    return buf;
-                } else {
-                    char* sub = w_to_cstr(v.as.en.box->val, true);
-                    size_t l1 = strlen(w_nominal_display_name(v.as.en.enum_name));
-                    size_t l2 = strlen(v.as.en.variant);
-                    size_t lsub = strlen(sub);
-                    buf = (char*)w_alloc_safe(l1 + l2 + lsub + 4);
-                    snprintf(buf, l1 + l2 + lsub + 4, "%s.%s(%s)", w_nominal_display_name(v.as.en.enum_name), v.as.en.variant, sub);
-                    free(sub);
-                    return buf;
-                }
-            }
-            size_t l1 = strlen(w_nominal_display_name(v.as.en.enum_name));
-            size_t l2 = strlen(v.as.en.variant);
-            buf = (char*)w_alloc_safe(l1 + l2 + 2);
-            snprintf(buf, l1 + l2 + 2, "%s.%s", w_nominal_display_name(v.as.en.enum_name), v.as.en.variant);
-            return buf;
-        }
-        case W_LIST: {
-            size_t cap = 64;
-            size_t pos = 0;
-            buf = (char*)w_alloc_safe(cap);
-            buf[pos++] = '[';
-            for (int32_t i = 0; i < v.as.list->len; i++) {
-                if (i > 0) {
-                    if (pos + 3 >= cap) { cap *= 2; buf = (char*)w_realloc_safe(buf, cap); }
-                    buf[pos++] = ','; buf[pos++] = ' ';
-                }
-                char* sub = w_to_cstr(v.as.list->data[i], true);
-                size_t sl = strlen(sub);
-                while (pos + sl + 4 >= cap) { cap *= 2; buf = (char*)w_realloc_safe(buf, cap); }
-                memcpy(buf + pos, sub, sl);
-                pos += sl;
-                free(sub);
-            }
-            buf[pos++] = ']';
-            buf[pos] = '\0';
-            return buf;
-        }
-        case W_TUPLE: {
-            size_t cap = 64;
-            size_t pos = 0;
-            buf = (char*)w_alloc_safe(cap);
-            buf[pos++] = '(';
-            for (int32_t i = 0; i < v.as.tuple->len; i++) {
-                if (i > 0) {
-                    if (pos + 3 >= cap) { cap *= 2; buf = (char*)w_realloc_safe(buf, cap); }
-                    buf[pos++] = ','; buf[pos++] = ' ';
-                }
-                char* sub = w_to_cstr(v.as.tuple->items[i], true);
-                size_t sl = strlen(sub);
-                while (pos + sl + 4 >= cap) { cap *= 2; buf = (char*)w_realloc_safe(buf, cap); }
-                memcpy(buf + pos, sub, sl);
-                pos += sl;
-                free(sub);
-            }
-            buf[pos++] = ')';
-            buf[pos] = '\0';
-            return buf;
-        }
-        case W_DICT: {
-            size_t cap = 64;
-            size_t pos = 0;
-            buf = (char*)w_alloc_safe(cap);
-            buf[pos++] = '{';
-            for (int32_t i = 0; i < v.as.dict->len; i++) {
-                if (i > 0) {
-                    if (pos + 3 >= cap) { cap *= 2; buf = (char*)w_realloc_safe(buf, cap); }
-                    buf[pos++] = ','; buf[pos++] = ' ';
-                }
-                char* ks = w_to_cstr(v.as.dict->keys[i], true);
-                char* vs = w_to_cstr(v.as.dict->vals[i], true);
-                size_t kl = strlen(ks), vl = strlen(vs);
-                while (pos + kl + vl + 6 >= cap) { cap *= 2; buf = (char*)w_realloc_safe(buf, cap); }
-                memcpy(buf + pos, ks, kl); pos += kl;
-                buf[pos++] = ':'; buf[pos++] = ' ';
-                memcpy(buf + pos, vs, vl); pos += vl;
-                free(ks); free(vs);
-            }
-            buf[pos++] = '}';
-            buf[pos] = '\0';
-            return buf;
-        }
-        case W_STRUCT:
-        case W_OBJECT: {
-            size_t cap = 128;
-            size_t pos = 0;
-            buf = (char*)w_alloc_safe(cap);
-            size_t nl = strlen(w_nominal_display_name(v.as.st->name));
-            memcpy(buf + pos, w_nominal_display_name(v.as.st->name), nl); pos += nl;
-            buf[pos++] = ' '; buf[pos++] = '{'; buf[pos++] = ' ';
-            for (int32_t i = 0; i < v.as.st->len; i++) {
-                if (i > 0) {
-                    if (pos + 3 >= cap) { cap *= 2; buf = (char*)w_realloc_safe(buf, cap); }
-                    buf[pos++] = ','; buf[pos++] = ' ';
-                }
-                const char* fn = v.as.st->keys[i];
-                char* vs = w_to_cstr(v.as.st->vals[i], true);
-                size_t fl = strlen(fn), vl = strlen(vs);
-                while (pos + fl + vl + 8 >= cap) { cap *= 2; buf = (char*)w_realloc_safe(buf, cap); }
-                memcpy(buf + pos, fn, fl); pos += fl;
-                buf[pos++] = ':'; buf[pos++] = ' ';
-                memcpy(buf + pos, vs, vl); pos += vl;
-                free(vs);
-            }
-            buf[pos++] = ' '; buf[pos++] = '}';
-            buf[pos] = '\0';
-            return buf;
-        }
-        case W_OK: {
-            char* inner = w_to_cstr(v.as.box->val, false);
-            size_t il = strlen(inner);
-            buf = (char*)w_alloc_safe(il + 5);
-            snprintf(buf, il + 5, "Ok(%s)", inner);
-            free(inner);
-            return buf;
-        }
-        case W_ERR: {
-            char* inner = w_to_cstr(v.as.box->val, false);
-            size_t il = strlen(inner);
-            buf = (char*)w_alloc_safe(il + 6);
-            snprintf(buf, il + 6, "Err(%s)", inner);
-            free(inner);
-            return buf;
-        }
+static inline void w_format_push(WFormatTask** tasks, int32_t* count, int32_t* capacity,
+                                 bool* heap_tasks, WFormatTask task) {
+    if (*count == INT32_MAX) {
+        fprintf(stderr, "[W4003] RuntimeError: Formatting work list is too large\n");
+        exit(1);
     }
-    buf = (char*)w_alloc_safe(1);
-    buf[0] = '\0';
-    return buf;
+    if (*count == *capacity) {
+        if (*capacity > INT32_MAX / 2) {
+            fprintf(stderr, "[W4003] RuntimeError: Formatting work list is too large\n");
+            exit(1);
+        }
+        int32_t new_capacity = *capacity * 2;
+        WFormatTask* grown = (WFormatTask*)w_alloc_safe(
+            sizeof(WFormatTask) * (size_t)new_capacity);
+        memcpy(grown, *tasks, sizeof(WFormatTask) * (size_t)*count);
+        if (*heap_tasks) free(*tasks);
+        *tasks = grown;
+        *capacity = new_capacity;
+        *heap_tasks = true;
+    }
+    (*tasks)[(*count)++] = task;
 }
 
+static inline void w_format_push_text(WFormatTask** tasks, int32_t* count, int32_t* capacity,
+                                      bool* heap_tasks, const char* text) {
+    WVal empty = {0};
+    empty.tag = W_UNIT;
+    WFormatTask task = {empty, text, true, false};
+    w_format_push(tasks, count, capacity, heap_tasks, task);
+}
+
+static inline void w_format_push_value(WFormatTask** tasks, int32_t* count, int32_t* capacity,
+                                       bool* heap_tasks, WVal value, bool quote_str) {
+    WFormatTask task = {value, NULL, false, quote_str};
+    w_format_push(tasks, count, capacity, heap_tasks, task);
+}
+
+static inline void w_format_append(char** buffer, size_t* length, size_t* capacity,
+                                   const char* data, size_t data_length) {
+    if (data_length > SIZE_MAX - *length - 1) {
+        fprintf(stderr, "[W4003] RuntimeError: Formatted value is too large\n");
+        exit(1);
+    }
+    size_t needed = *length + data_length + 1;
+    if (needed > *capacity) {
+        size_t new_capacity = *capacity;
+        while (new_capacity < needed) {
+            if (new_capacity > SIZE_MAX / 2) {
+                new_capacity = needed;
+                break;
+            }
+            new_capacity *= 2;
+        }
+        *buffer = (char*)w_realloc_safe(*buffer, new_capacity);
+        *capacity = new_capacity;
+    }
+    if (data_length > 0) memcpy(*buffer + *length, data, data_length);
+    *length += data_length;
+    (*buffer)[*length] = '\0';
+}
+
+static inline void w_format_append_text(char** buffer, size_t* length, size_t* capacity,
+                                        const char* text) {
+    w_format_append(buffer, length, capacity, text, strlen(text));
+}
+
+static inline char* w_to_cstr(WVal v, bool quote_str) {
+    WFormatTask local_tasks[64];
+    WFormatTask* tasks = local_tasks;
+    int32_t task_count = 0;
+    int32_t task_capacity = 64;
+    bool heap_tasks = false;
+    size_t buffer_capacity = 64;
+    size_t buffer_length = 0;
+    char* buffer = (char*)w_alloc_safe(buffer_capacity);
+    buffer[0] = '\0';
+    w_format_push_value(&tasks, &task_count, &task_capacity, &heap_tasks, v, quote_str);
+
+    while (task_count > 0) {
+        WFormatTask task = tasks[--task_count];
+        if (task.is_text) {
+            w_format_append_text(&buffer, &buffer_length, &buffer_capacity, task.text);
+            continue;
+        }
+
+        WVal value = task.value;
+        switch (value.tag) {
+            case W_POINTER:
+                w_format_append_text(&buffer, &buffer_length, &buffer_capacity, "<opaque>");
+                break;
+            case W_FUNCTION:
+                w_format_append_text(&buffer, &buffer_length, &buffer_capacity, "<function>");
+                break;
+            case W_WEAK:
+                w_format_append_text(&buffer, &buffer_length, &buffer_capacity,
+                    value.as.weak->object ? "weak(alive)" : "weak(expired)");
+                break;
+            case W_UNIT:
+                w_format_append_text(&buffer, &buffer_length, &buffer_capacity, "unit");
+                break;
+            case W_NONE:
+                w_format_append_text(&buffer, &buffer_length, &buffer_capacity, "none");
+                break;
+            case W_INT: {
+                char number[32];
+                snprintf(number, sizeof(number), "%" PRId64, value.as.i);
+                w_format_append_text(&buffer, &buffer_length, &buffer_capacity, number);
+                break;
+            }
+            case W_FLOAT: {
+                char* number = w_format_float(value.as.f);
+                w_format_append_text(&buffer, &buffer_length, &buffer_capacity, number);
+                free(number);
+                break;
+            }
+            case W_BOOL:
+                w_format_append_text(&buffer, &buffer_length, &buffer_capacity,
+                                     value.as.b ? "true" : "false");
+                break;
+            case W_STR:
+                if (!task.quote_str) {
+                    w_format_append(&buffer, &buffer_length, &buffer_capacity,
+                                    value.as.s, value.string_length);
+                } else {
+                    w_format_append_text(&buffer, &buffer_length, &buffer_capacity, "\"");
+                    for (size_t i = 0; i < value.string_length; i++) {
+                        if (value.as.s[i] == 0) {
+                            w_format_append_text(&buffer, &buffer_length, &buffer_capacity, "\\0");
+                        } else {
+                            w_format_append(&buffer, &buffer_length, &buffer_capacity,
+                                            value.as.s + i, 1);
+                        }
+                    }
+                    w_format_append_text(&buffer, &buffer_length, &buffer_capacity, "\"");
+                }
+                break;
+            case W_ENUM:
+                if (strcmp(value.as.en.enum_name, "Option") == 0 &&
+                    strcmp(value.as.en.variant, "Some") == 0 && value.as.en.box) {
+                    w_format_push_value(&tasks, &task_count, &task_capacity, &heap_tasks,
+                                        value.as.en.box->val, task.quote_str);
+                } else if (value.as.en.box && value.as.en.box->val.tag == W_TUPLE) {
+                    WTupleBuf* payload = value.as.en.box->val.as.tuple;
+                    w_format_push_text(&tasks, &task_count, &task_capacity, &heap_tasks, ")");
+                    for (int32_t i = payload->len - 1; i >= 0; i--) {
+                        w_format_push_value(&tasks, &task_count, &task_capacity, &heap_tasks,
+                                            payload->items[i], true);
+                        if (i > 0) w_format_push_text(&tasks, &task_count, &task_capacity,
+                                                      &heap_tasks, ", ");
+                    }
+                    w_format_push_text(&tasks, &task_count, &task_capacity, &heap_tasks, "(");
+                    w_format_push_text(&tasks, &task_count, &task_capacity, &heap_tasks,
+                                       value.as.en.variant);
+                    w_format_push_text(&tasks, &task_count, &task_capacity, &heap_tasks, ".");
+                    w_format_push_text(&tasks, &task_count, &task_capacity, &heap_tasks,
+                                       w_nominal_display_name(value.as.en.enum_name));
+                } else if (value.as.en.box) {
+                    w_format_push_text(&tasks, &task_count, &task_capacity, &heap_tasks, ")");
+                    w_format_push_value(&tasks, &task_count, &task_capacity, &heap_tasks,
+                                        value.as.en.box->val, true);
+                    w_format_push_text(&tasks, &task_count, &task_capacity, &heap_tasks, "(");
+                    w_format_push_text(&tasks, &task_count, &task_capacity, &heap_tasks,
+                                       value.as.en.variant);
+                    w_format_push_text(&tasks, &task_count, &task_capacity, &heap_tasks, ".");
+                    w_format_push_text(&tasks, &task_count, &task_capacity, &heap_tasks,
+                                       w_nominal_display_name(value.as.en.enum_name));
+                } else {
+                    w_format_push_text(&tasks, &task_count, &task_capacity, &heap_tasks,
+                                       value.as.en.variant);
+                    w_format_push_text(&tasks, &task_count, &task_capacity, &heap_tasks, ".");
+                    w_format_push_text(&tasks, &task_count, &task_capacity, &heap_tasks,
+                                       w_nominal_display_name(value.as.en.enum_name));
+                }
+                break;
+            case W_LIST: {
+                WListBuf* list = value.as.list;
+                w_format_push_text(&tasks, &task_count, &task_capacity, &heap_tasks, "]");
+                for (int32_t i = list->len - 1; i >= 0; i--) {
+                    w_format_push_value(&tasks, &task_count, &task_capacity, &heap_tasks,
+                                        list->data[i], true);
+                    if (i > 0) w_format_push_text(&tasks, &task_count, &task_capacity,
+                                                  &heap_tasks, ", ");
+                }
+                w_format_push_text(&tasks, &task_count, &task_capacity, &heap_tasks, "[");
+                break;
+            }
+            case W_TUPLE: {
+                WTupleBuf* tuple = value.as.tuple;
+                w_format_push_text(&tasks, &task_count, &task_capacity, &heap_tasks, ")");
+                for (int32_t i = tuple->len - 1; i >= 0; i--) {
+                    w_format_push_value(&tasks, &task_count, &task_capacity, &heap_tasks,
+                                        tuple->items[i], true);
+                    if (i > 0) w_format_push_text(&tasks, &task_count, &task_capacity,
+                                                  &heap_tasks, ", ");
+                }
+                w_format_push_text(&tasks, &task_count, &task_capacity, &heap_tasks, "(");
+                break;
+            }
+            case W_DICT: {
+                WDictBuf* dict = value.as.dict;
+                w_format_push_text(&tasks, &task_count, &task_capacity, &heap_tasks, "}");
+                for (int32_t i = dict->len - 1; i >= 0; i--) {
+                    w_format_push_value(&tasks, &task_count, &task_capacity, &heap_tasks,
+                                        dict->vals[i], true);
+                    w_format_push_text(&tasks, &task_count, &task_capacity, &heap_tasks, ": ");
+                    w_format_push_value(&tasks, &task_count, &task_capacity, &heap_tasks,
+                                        dict->keys[i], true);
+                    if (i > 0) w_format_push_text(&tasks, &task_count, &task_capacity,
+                                                  &heap_tasks, ", ");
+                }
+                w_format_push_text(&tasks, &task_count, &task_capacity, &heap_tasks, "{");
+                break;
+            }
+            case W_STRUCT:
+            case W_OBJECT: {
+                WStructBuf* structure = value.as.st;
+                w_format_push_text(&tasks, &task_count, &task_capacity, &heap_tasks, " }");
+                for (int32_t i = structure->len - 1; i >= 0; i--) {
+                    w_format_push_value(&tasks, &task_count, &task_capacity, &heap_tasks,
+                                        structure->vals[i], true);
+                    w_format_push_text(&tasks, &task_count, &task_capacity, &heap_tasks, ": ");
+                    w_format_push_text(&tasks, &task_count, &task_capacity, &heap_tasks,
+                                       structure->keys[i]);
+                    if (i > 0) w_format_push_text(&tasks, &task_count, &task_capacity,
+                                                  &heap_tasks, ", ");
+                }
+                w_format_push_text(&tasks, &task_count, &task_capacity, &heap_tasks, " { ");
+                w_format_push_text(&tasks, &task_count, &task_capacity, &heap_tasks,
+                                   w_nominal_display_name(structure->name));
+                break;
+            }
+            case W_OK:
+            case W_ERR:
+                w_format_push_text(&tasks, &task_count, &task_capacity, &heap_tasks, ")");
+                if (value.as.box) {
+                    w_format_push_value(&tasks, &task_count, &task_capacity, &heap_tasks,
+                                        value.as.box->val, false);
+                }
+                w_format_push_text(&tasks, &task_count, &task_capacity, &heap_tasks,
+                                   value.tag == W_OK ? "Ok(" : "Err(");
+                break;
+        }
+    }
+
+    if (heap_tasks) free(tasks);
+    return buffer;
+}
 /* Standard Built-ins */
 static inline WVal w_builtin_print(int32_t argc, const WVal* argv) {
     for (int32_t i = 0; i < argc; i++) {
