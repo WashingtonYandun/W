@@ -703,9 +703,16 @@ class HirBuilder:
             )
         elif isinstance(node, GenericType):
             args_mangled = "__".join(self._get_type_name_from_node(a) for a in node.type_args)
-            mangled_name = f"{node.name}__{args_mangled}"
+            mangled_name = f"_W_G_{len(node.name)}_{node.name}__{args_mangled}"
             if mangled_name in self.structs:
                 return self.interner.mk_struct(mangled_name)
+            if mangled_name in self.enums:
+                return self.interner.mk_enum(mangled_name)
+            legacy_mangled = f"{node.name}__{args_mangled}"
+            if legacy_mangled in self.structs:
+                return self.interner.mk_struct(legacy_mangled)
+            if legacy_mangled in self.enums:
+                return self.interner.mk_enum(legacy_mangled)
             return TYPE_ERROR
         return TYPE_ERROR
 
@@ -714,7 +721,7 @@ class HirBuilder:
             return node.name
         if isinstance(node, GenericType):
             args = "__".join(self._get_type_name_from_node(a) for a in node.type_args)
-            return f"{node.name}__{args}"
+            return f"_W_G_{len(node.name)}_{node.name}__{args}"
         if isinstance(node, AstOptionalType):
             return f"opt__{self._get_type_name_from_node(node.inner)}"
         if isinstance(node, AstListType):
