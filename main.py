@@ -102,9 +102,16 @@ def run_pipeline(
         elif use_hir is True:
             backend = "hir"
 
+        import resource
+        import time
+
+        t_start = time.perf_counter()
+
         # 1. Lexing
+        t_lex0 = time.perf_counter()
         lexer = Lexer(source_code, file=file_name)
         tokens = lexer.tokenize()
+        lex_ms = (time.perf_counter() - t_lex0) * 1000.0
         if show_tokens:
             for t in tokens:
                 print(f"  {t}")
@@ -112,8 +119,10 @@ def run_pipeline(
                 return 0
 
         # 2. Parsing
+        t_parse0 = time.perf_counter()
         parser = Parser(file=file_name)
         ast = parser.parse(source_code)
+        parse_ms = (time.perf_counter() - t_parse0) * 1000.0
         if show_ast:
             print(json.dumps(ast.to_dict(), indent=2))
             if not check_only and emit_c_path is None and build_bin_path is None:
@@ -129,16 +138,27 @@ def run_pipeline(
             return 0
 
         # 3. Static Type Checking
+        t_check0 = time.perf_counter()
         checker = TypeChecker(file=file_name)
         checker.check(ast)
+        check_ms = (time.perf_counter() - t_check0) * 1000.0
 
         if check_only:
             if show_stats:
+                rusage = resource.getrusage(resource.RUSAGE_SELF)
+                peak_rss_kb = rusage.ru_maxrss if sys.platform != "darwin" else rusage.ru_maxrss // 1024
                 stat_obj = {
                     "status": "ok",
                     "file": file_name,
                     "telemetry": {
-                        "monomorphization": checker.telemetry.to_dict()
+                        "monomorphization": checker.telemetry.to_dict(),
+                        "timing_ms": {
+                            "lex": round(lex_ms, 2),
+                            "parse": round(parse_ms, 2),
+                            "check": round(check_ms, 2),
+                            "total": round((time.perf_counter() - t_start) * 1000.0, 2),
+                        },
+                        "peak_rss_kb": peak_rss_kb,
                     }
                 }
                 print(json.dumps(stat_obj, indent=2))
@@ -159,12 +179,14 @@ def run_pipeline(
                 with tempfile.NamedTemporaryFile(mode="w", suffix=".c", delete=False, encoding="utf-8") as tmp_w1_c:
                     tmp_w1_c_path = tmp_w1_c.name
                 try:
+                    t_w10 = time.perf_counter()
                     w1_proc = subprocess.run(
                         [w1_bin, abs_input, tmp_w1_c_path],
                         capture_output=True,
                         text=True,
                         cwd=input_dir,
                     )
+                    codegen_ms = (time.perf_counter() - t_w10) * 1000.0
                     if w1_proc.returncode != 0:
                         print(f"[W1 Self-Hosted Compiler Error]\n{w1_proc.stderr}", file=sys.stderr)
                         return 1
@@ -174,22 +196,40 @@ def run_pipeline(
                     if os.path.exists(tmp_w1_c_path):
                         os.remove(tmp_w1_c_path)
             elif backend == "ast":
+                t_ast0 = time.perf_counter()
                 codegen_inst = CCodeGen(file=file_name)
                 c_code = codegen_inst.generate(ast)
+                codegen_ms = (time.perf_counter() - t_ast0) * 1000.0
             else:
                 # Default C06 backend: Typed HIR -> HirCCodeGen -> C99
+                t_hir0 = time.perf_counter()
                 builder = HirBuilder(checker.interner, file_path=file_name)
                 hir_mod = builder.lower(ast)
+                hir_ms = (time.perf_counter() - t_hir0) * 1000.0
+
+                t_cg0 = time.perf_counter()
                 codegen_inst = HirCCodeGen(checker.interner, file_path=file_name)
                 c_code = codegen_inst.generate(hir_mod)
+                codegen_ms = (time.perf_counter() - t_cg0) * 1000.0
 
             if show_stats:
+                rusage = resource.getrusage(resource.RUSAGE_SELF)
+                peak_rss_kb = rusage.ru_maxrss if sys.platform != "darwin" else rusage.ru_maxrss // 1024
                 stat_obj = {
                     "status": "ok",
                     "file": file_name,
                     "telemetry": {
                         "monomorphization": checker.telemetry.to_dict(),
-                        "codegen": codegen_inst.telemetry.to_dict() if codegen_inst else None
+                        "codegen": codegen_inst.telemetry.to_dict() if codegen_inst else None,
+                        "timing_ms": {
+                            "lex": round(lex_ms, 2),
+                            "parse": round(parse_ms, 2),
+                            "check": round(check_ms, 2),
+                            "hir": round(hir_ms, 2) if "hir_ms" in locals() else None,
+                            "codegen": round(codegen_ms, 2) if "codegen_ms" in locals() else None,
+                            "total": round((time.perf_counter() - t_start) * 1000.0, 2),
+                        },
+                        "peak_rss_kb": peak_rss_kb,
                     }
                 }
                 print(json.dumps(stat_obj, indent=2), file=sys.stderr)
@@ -218,10 +258,21 @@ def run_pipeline(
 
         # 5. Runtime Interpretation
         if show_stats:
+            rusage = resource.getrusage(resource.RUSAGE_SELF)
+            peak_rss_kb = rusage.ru_maxrss if sys.platform != "darwin" else rusage.ru_maxrss // 1024
             print(json.dumps({
                 "status": "ok",
                 "file": file_name,
-                "telemetry": {"monomorphization": checker.telemetry.to_dict()}
+                "telemetry": {
+                    "monomorphization": checker.telemetry.to_dict(),
+                    "timing_ms": {
+                        "lex": round(lex_ms, 2),
+                        "parse": round(parse_ms, 2),
+                        "check": round(check_ms, 2),
+                        "total": round((time.perf_counter() - t_start) * 1000.0, 2),
+                    },
+                    "peak_rss_kb": peak_rss_kb,
+                }
             }, indent=2), file=sys.stderr)
         interp = Interpreter(file=file_name)
         res = interp.interpret(ast)

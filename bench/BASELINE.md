@@ -1,19 +1,21 @@
-# W Language Performance Baseline (`v0.1.2`)
+# W Language Performance Baseline (`v0.2.0`)
 
 - **Platform:** `Darwin 25.6.0 (arm64)`
 - **Python Runtime (W0):** `Python 3.14.7`
 - **C99 Optimization Flag:** `-std=c99 -O2`
-- **Equivalence Check:** `stdout(W0 Interpreter) == stdout(W0 C99) == stdout(W1 C99)` verified on all 10 benchmarks.
+- **W0 Backend:** Default Typed HIR C99 (`hir/HirCCodeGen.py`)
+- **Equivalence Check:** `stdout(W0 Interpreter) == stdout(W0 Typed HIR C99) == stdout(W1 C99)` verified on all 10 benchmarks.
+- **Timing Methodology:** Median of 3 iterations with separate warmup run to eliminate OS scheduling jitter.
 
-| Benchmark | W0 Interp (ms) | W0 Compile (ms) | W0 C99 Exec (ms) | W1 Compile (ms) | W1 C99 Exec (ms) | Native Binary (KB) | Native Speedup |
+| Benchmark | W0 Interp (ms) | W0 Compile (ms) | W0 HIR C99 Exec (ms) | W1 Compile (ms) | W1 C99 Exec (ms) | Native Binary (KB) | Native Speedup |
 | :--- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| `arithmetic.w` | 79.36 | 532.02 | 2.78 | 89.62 | 3.40 | 33.4 | **23.3x** |
-| `function_calls.w` | 122.25 | 127.74 | 2.80 | 92.81 | 3.08 | 33.4 | **39.7x** |
-| `list_iteration.w` | 47.30 | 115.20 | 2.68 | 90.09 | 2.55 | 33.4 | **18.5x** |
-| `list_copy.w` | 51.17 | 109.44 | 3.45 | 111.56 | 3.43 | 33.7 | **14.9x** |
-| `list_mutation.w` | 51.13 | 126.14 | 3.33 | 115.42 | 2.83 | 33.8 | **18.1x** |
-| `nested_cow.w` | 34.74 | 122.86 | 3.84 | 134.82 | 3.74 | 33.9 | **9.3x** |
-| `string_unicode.w` | 15.94 | 123.15 | 3.44 | 112.87 | 3.59 | 33.8 | **4.4x** |
-| `structs.w` | 74.74 | 97.33 | 5.71 | 110.55 | 3.18 | 33.6 | **23.5x** |
-| `objects.w` | 57.77 | 104.57 | 3.57 | 112.10 | 3.43 | 33.6 | **16.8x** |
-| `dynamic_dispatch.w` | 81.22 | 96.62 | 6.14 | 105.26 | 2.81 | 33.6 | **28.9x** |
+| `arithmetic.w` | 108.66 | 219.01 | 5.64 | 129.71 | 7.09 | 36.3 | **15.3x** |
+| `function_calls.w` | 155.35 | 106.56 | 6.07 | 126.63 | 6.87 | 36.3 | **22.6x** |
+| `list_iteration.w` | 63.30 | 126.56 | 5.98 | 139.86 | 6.44 | 36.6 | **9.8x** |
+| `list_copy.w` | 73.96 | 144.09 | 3.39 | 156.39 | 5.09 | 36.9 | **14.5x** |
+| `list_mutation.w` | 71.05 | 157.23 | 7.36 | 167.52 | 6.85 | 53.4 | **10.4x** |
+| `nested_cow.w` | 55.83 | 184.36 | 4.88 | 183.84 | 6.73 | 53.8 | **8.3x** |
+| `string_unicode.w` | 18.80 | 174.15 | 6.14 | 184.22 | 2.95 | 52.8 | **6.4x** |
+| `structs.w` | 93.43 | 131.68 | 6.57 | 159.28 | 6.44 | 36.9 | **14.5x** |
+| `objects.w` | 78.41 | 155.55 | 6.08 | 160.81 | 6.12 | 36.8 | **12.8x** |
+| `dynamic_dispatch.w` | 104.07 | 138.03 | 5.26 | 148.44 | 6.20 | 37.0 | **16.8x** |
