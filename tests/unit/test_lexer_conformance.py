@@ -1,7 +1,16 @@
 import os
 from lexer.Lexer import Lexer
 from error.Error import LexerError
+from wtokens.Token import Token
 from wtokens.TokenType import TokenType
+
+def test_token_equality_includes_source_position():
+    first = Token("item", TokenType.IDENTIFIER, line=1, col=1)
+    same_position = Token("item", TokenType.IDENTIFIER, line=1, col=1)
+    different_position = Token("item", TokenType.IDENTIFIER, line=1, col=2)
+
+    assert first == same_position
+    assert first != different_position
 
 def test_lexer_suite():
     valid_dir = "tests/lexer/valid"

@@ -34,7 +34,12 @@ class Token:
     def __eq__(self, other: Any) -> bool:
         if not isinstance(other, Token):
             return False
-        return self.value == other.value and self.type == other.type
+        return (
+            self.value == other.value
+            and self.type == other.type
+            and self.line == other.line
+            and self.col == other.col
+        )
 
     def __ne__(self, other: Any) -> bool:
         return not self.__eq__(other)

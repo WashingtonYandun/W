@@ -40,10 +40,10 @@ The following table summarizes compiler support across the fixtures of the Phase
 
 | Feature Category | Fixtures | W0 Interpreter | W0 AST C99 | W0 Typed HIR (Default) | W1 Self-Hosted C99 | Status / Milestone |
 | :--- | :---: | :---: | :---: | :---: | :---: | :--- |
-| **`core`** | 97 | ✅ 97/97 | ✅ 97/97 | ✅ 97/97 | ✅ 97/97 | Declared supported |
+| **`core`** | 98 | ✅ 98/98 | ✅ 98/98 | ✅ 98/98 | ✅ 98/98 | Declared supported |
 | **`generics`** | 15 | ✅ 15/15 | ✅ 15/15 | ✅ 15/15 | ⏳ 0/15 (15 declared unsupported) | Pending D02 |
 | **`checked_modules`** | 1 | ✅ 1/1 | ✅ 1/1 | ✅ 1/1 | ⏳ 0/1 (1 declared unsupported) | Pending D02 |
-| **Total Verified** | **113** | **113/113 (100.0%)** | **113/113 (100.0%)** | **113/113 (100.0%)** | **97/113 (85.8%)** | _measured_ |
+| **Total Verified** | **114** | **114/114 (100.0%)** | **114/114 (100.0%)** | **114/114 (100.0%)** | **98/114 (86.0%)** | _measured_ |
 
 Regenerate with `python3 tools/ci_conformance.py --matrix`, which reads `summary.json`
 from an actual run of `python3 tools/ci_conformance.py` over the corpus. These are
@@ -67,7 +67,7 @@ gap: a construct the checker accepted while the HIR backend rejected it.
 
 ### 3.1 Core Language & Control Flow (`core`)
 - **Status:** **100% Parity** across all 4 engines.
-- **Coverage:** 91 fixtures (positive runtime fixtures, control flow, functions, OOP contracts, recursion, and error diagnostics).
+- **Coverage:** 98 fixtures (positive runtime fixtures, control flow, functions, OOP contracts, recursion, and error diagnostics).
 - **Features Included:**
   - Arithmetic, logic, bitwise, and comparison expressions.
   - While loops, range loops (`for i in 0..10`), break, continue, and scope cleanup.
@@ -137,13 +137,13 @@ It is critical to distinguish between two distinct compiler guarantees:
 The compiler test harness (`tools/ci_conformance.py`) enforces strict behavioral quality gates:
 
 ### 5.1 Integration Profile (`--profile=integration`)
-- Evaluates all 112 corpus fixtures across all engines.
+- Evaluates all 114 corpus fixtures across all engines.
 - Skips unsupported features on specific engines based strictly on `tests/engine_profiles.json`.
 - **Requirement:** Every unsupported feature must carry an explicit, non-empty tracking reason pointing to its roadmap milestone.
-- **Result:** Passes (112/112) if and only if all supported features pass without failure, while accurately reporting unsupported counts.
+- **Result:** Passes (114/114) if and only if all supported features pass without failure, while accurately reporting unsupported counts.
 
 ### 5.2 Release Profile (`--profile=release`)
-- Evaluates all 112 corpus fixtures across all engines without allowing any unsupported exclusions.
+- Evaluates all 114 corpus fixtures across all engines without allowing any unsupported exclusions.
 - **Requirement:** Every engine must pass 100% of all fixtures.
 - **Result:** Intentionally fails as long as W1 has unsupported features (`generics`, `checked_modules`), preventing deceptive releases that claim full self-hosting before D02 is complete.
 

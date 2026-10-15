@@ -2874,7 +2874,7 @@ fn check_delimiters(tokens: list[Token]) -> unit {
             }
             let top = delim_kinds[dl - 1]
             if top == "LPAREN" {
-                report_error("W0001", tok.line, tok.col, "expected ')' before '}'")
+                report_error("W0006", tok.line, tok.col, "expected ')' before '}'")
             }
             if top != "LBRACE" {
                 report_error("W0006", tok.line, tok.col, "mismatched delimiter '}'")
@@ -2890,7 +2890,7 @@ fn check_delimiters(tokens: list[Token]) -> unit {
         if top_k == "LBRACE" {
             report_error("W0006", delim_lines[top_idx], delim_cols[top_idx], "unclosed delimiter '{'")
         } elif top_k == "LPAREN" {
-            report_error("W0001", delim_lines[top_idx], delim_cols[top_idx], "unclosed delimiter '('")
+            report_error("W0006", delim_lines[top_idx], delim_cols[top_idx], "unclosed delimiter '('")
         } elif top_k == "LBRACKET" {
             report_error("W0006", delim_lines[top_idx], delim_cols[top_idx], "unclosed delimiter '['")
         }
