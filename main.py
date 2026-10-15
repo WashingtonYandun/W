@@ -87,15 +87,31 @@ def run_pipeline(
     fmt_write: bool = False,
     emit_c_path: Optional[str] = None,
     build_bin_path: Optional[str] = None,
+    backend: str = "hir",
     use_selfhost: bool = False,
-    use_hir: bool = False,
+    use_hir: Optional[bool] = None,
     sanitize: bool = False,
     show_stats: bool = False,
 ) -> int:
     try:
+        # Resolve legacy flags if passed explicitly
+        if use_selfhost:
+            backend = "selfhost"
+        elif use_hir is False:
+            backend = "ast"
+        elif use_hir is True:
+            backend = "hir"
+
+        import resource
+        import time
+
+        t_start = time.perf_counter()
+
         # 1. Lexing
+        t_lex0 = time.perf_counter()
         lexer = Lexer(source_code, file=file_name)
         tokens = lexer.tokenize()
+        lex_ms = (time.perf_counter() - t_lex0) * 1000.0
         if show_tokens:
             for t in tokens:
                 print(f"  {t}")
@@ -103,8 +119,10 @@ def run_pipeline(
                 return 0
 
         # 2. Parsing
+        t_parse0 = time.perf_counter()
         parser = Parser(file=file_name)
         ast = parser.parse(source_code)
+        parse_ms = (time.perf_counter() - t_parse0) * 1000.0
         if show_ast:
             print(json.dumps(ast.to_dict(), indent=2))
             if not check_only and emit_c_path is None and build_bin_path is None:
@@ -120,16 +138,27 @@ def run_pipeline(
             return 0
 
         # 3. Static Type Checking
+        t_check0 = time.perf_counter()
         checker = TypeChecker(file=file_name)
         checker.check(ast)
+        check_ms = (time.perf_counter() - t_check0) * 1000.0
 
         if check_only:
             if show_stats:
+                rusage = resource.getrusage(resource.RUSAGE_SELF)
+                peak_rss_kb = rusage.ru_maxrss if sys.platform != "darwin" else rusage.ru_maxrss // 1024
                 stat_obj = {
                     "status": "ok",
                     "file": file_name,
                     "telemetry": {
-                        "monomorphization": checker.telemetry.to_dict()
+                        "monomorphization": checker.telemetry.to_dict(),
+                        "timing_ms": {
+                            "lex": round(lex_ms, 2),
+                            "parse": round(parse_ms, 2),
+                            "check": round(check_ms, 2),
+                            "total": round((time.perf_counter() - t_start) * 1000.0, 2),
+                        },
+                        "peak_rss_kb": peak_rss_kb,
                     }
                 }
                 print(json.dumps(stat_obj, indent=2))
@@ -143,19 +172,21 @@ def run_pipeline(
         if emit_c_path is not None or build_bin_path is not None:
             repo_root = get_repo_root()
             codegen_inst = None
-            if use_selfhost and file_name != "<stdin>":
+            if backend == "selfhost" and file_name != "<stdin>":
                 w1_bin = ensure_selfhost_w1_binary(repo_root)
                 abs_input = os.path.abspath(file_name)
                 input_dir = os.path.dirname(abs_input) or os.getcwd()
                 with tempfile.NamedTemporaryFile(mode="w", suffix=".c", delete=False, encoding="utf-8") as tmp_w1_c:
                     tmp_w1_c_path = tmp_w1_c.name
                 try:
+                    t_w10 = time.perf_counter()
                     w1_proc = subprocess.run(
                         [w1_bin, abs_input, tmp_w1_c_path],
                         capture_output=True,
                         text=True,
                         cwd=input_dir,
                     )
+                    codegen_ms = (time.perf_counter() - t_w10) * 1000.0
                     if w1_proc.returncode != 0:
                         print(f"[W1 Self-Hosted Compiler Error]\n{w1_proc.stderr}", file=sys.stderr)
                         return 1
@@ -164,22 +195,41 @@ def run_pipeline(
                 finally:
                     if os.path.exists(tmp_w1_c_path):
                         os.remove(tmp_w1_c_path)
-            elif use_hir:
-                builder = HirBuilder(checker.interner, file_path=file_name)
-                hir_mod = builder.lower(ast)
-                codegen_inst = HirCCodeGen(checker.interner, file_path=file_name)
-                c_code = codegen_inst.generate(hir_mod)
-            else:
+            elif backend == "ast":
+                t_ast0 = time.perf_counter()
                 codegen_inst = CCodeGen(file=file_name)
                 c_code = codegen_inst.generate(ast)
+                codegen_ms = (time.perf_counter() - t_ast0) * 1000.0
+            else:
+                # Default C06 backend: Typed HIR -> HirCCodeGen -> C99
+                t_hir0 = time.perf_counter()
+                builder = HirBuilder(checker.interner, file_path=file_name)
+                hir_mod = builder.lower(ast)
+                hir_ms = (time.perf_counter() - t_hir0) * 1000.0
+
+                t_cg0 = time.perf_counter()
+                codegen_inst = HirCCodeGen(checker.interner, file_path=file_name)
+                c_code = codegen_inst.generate(hir_mod)
+                codegen_ms = (time.perf_counter() - t_cg0) * 1000.0
 
             if show_stats:
+                rusage = resource.getrusage(resource.RUSAGE_SELF)
+                peak_rss_kb = rusage.ru_maxrss if sys.platform != "darwin" else rusage.ru_maxrss // 1024
                 stat_obj = {
                     "status": "ok",
                     "file": file_name,
                     "telemetry": {
                         "monomorphization": checker.telemetry.to_dict(),
-                        "codegen": codegen_inst.telemetry.to_dict() if codegen_inst else None
+                        "codegen": codegen_inst.telemetry.to_dict() if codegen_inst else None,
+                        "timing_ms": {
+                            "lex": round(lex_ms, 2),
+                            "parse": round(parse_ms, 2),
+                            "check": round(check_ms, 2),
+                            "hir": round(hir_ms, 2) if "hir_ms" in locals() else None,
+                            "codegen": round(codegen_ms, 2) if "codegen_ms" in locals() else None,
+                            "total": round((time.perf_counter() - t_start) * 1000.0, 2),
+                        },
+                        "peak_rss_kb": peak_rss_kb,
                     }
                 }
                 print(json.dumps(stat_obj, indent=2), file=sys.stderr)
@@ -208,10 +258,21 @@ def run_pipeline(
 
         # 5. Runtime Interpretation
         if show_stats:
+            rusage = resource.getrusage(resource.RUSAGE_SELF)
+            peak_rss_kb = rusage.ru_maxrss if sys.platform != "darwin" else rusage.ru_maxrss // 1024
             print(json.dumps({
                 "status": "ok",
                 "file": file_name,
-                "telemetry": {"monomorphization": checker.telemetry.to_dict()}
+                "telemetry": {
+                    "monomorphization": checker.telemetry.to_dict(),
+                    "timing_ms": {
+                        "lex": round(lex_ms, 2),
+                        "parse": round(parse_ms, 2),
+                        "check": round(check_ms, 2),
+                        "total": round((time.perf_counter() - t_start) * 1000.0, 2),
+                    },
+                    "peak_rss_kb": peak_rss_kb,
+                }
             }, indent=2), file=sys.stderr)
         interp = Interpreter(file=file_name)
         res = interp.interpret(ast)
@@ -295,8 +356,8 @@ def print_help() -> None:
     print("  w fmt [--write] <file.w>                    # Canonical deterministic formatter")
     print("  w ast [--json] <file.w>                     # Emit canonical JSON AST (v0.1)")
     print("  w tokens <file.w>                           # Emit lexical token stream")
-    print("  w emit-c [--hir] [--selfhost] [--stats] <file.w> [-o <out.c>] # Transpile W source to C99")
-    print("  w build [--hir] [--selfhost] [--stats] <file.w> [-o <bin>]    # Compile W source to native binary")
+    print("  w emit-c [--backend=hir|ast|selfhost] [--stats] <file.w> [-o <out.c>] # Transpile W source to C99 (default: hir)")
+    print("  w build [--backend=hir|ast|selfhost] [--stats] <file.w> [-o <bin>]    # Compile W source to native binary (default: hir)")
     print("  w test [--differential [N]] [--fuzz [N]]            # Run conformance, differential, or fuzz suite")
     print("  w bench [--update-baseline]                         # Run W0/W1 performance benchmark harness")
     print("  w version                                           # Show compiler version")
@@ -311,8 +372,9 @@ def main() -> None:
     show_stats = False
     fmt_only = False
     fmt_write = False
+    backend = "hir"
     use_selfhost = False
-    use_hir = False
+    use_hir = None
     emit_c_path: Optional[str] = None
     build_bin_path: Optional[str] = None
     subcmd: Optional[str] = None
@@ -389,7 +451,11 @@ def main() -> None:
         if arg in ("--tokens", "-t"):
             show_tokens = True
         elif arg == "--ast":
-            show_ast = True
+            if subcmd == "ast":
+                show_ast = True
+            else:
+                backend = "ast"
+                use_hir = False
         elif arg in ("--check", "-c"):
             check_only = True
         elif arg == "--json":
@@ -400,10 +466,22 @@ def main() -> None:
             fmt_only = True
         elif arg in ("--write", "-w"):
             fmt_write = True
-        elif arg == "--selfhost":
+        elif arg in ("--selfhost", "--backend=selfhost"):
+            backend = "selfhost"
             use_selfhost = True
-        elif arg == "--hir":
+        elif arg in ("--hir", "--backend=hir"):
+            backend = "hir"
             use_hir = True
+        elif arg in ("--backend=ast",):
+            backend = "ast"
+            use_hir = False
+        elif arg.startswith("--backend="):
+            b_val = arg.split("=", 1)[1]
+            if b_val in ("hir", "ast", "selfhost"):
+                backend = b_val
+            else:
+                print(f"Error: Unknown backend '{b_val}'. Valid backends: hir, ast, selfhost", file=sys.stderr)
+                sys.exit(1)
         elif arg in ("--version", "-v"):
             print(f"W Language Compiler v{W_VERSION} (W0 + W1 Self-Hosted C99)")
             sys.exit(0)
@@ -457,6 +535,7 @@ def main() -> None:
             fmt_write=fmt_write,
             emit_c_path=emit_c_path,
             build_bin_path=build_bin_path,
+            backend=backend,
             use_selfhost=use_selfhost,
             use_hir=use_hir,
             sanitize=sanitize,

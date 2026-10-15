@@ -81,11 +81,16 @@ class EnumDef:
         name: str,
         variants: List[str],
         variant_payloads: Optional[Dict[str, List[int]]] = None,
+        type_args: Tuple[int, ...] = (),
+        template_name: Optional[str] = None,
     ):
         self.def_id = def_id
         self.name = name
         self.variants = variants
         self.variant_payloads = variant_payloads if variant_payloads is not None else {}
+        self.type_args = type_args
+        self.template_name = template_name
+
 
 
 
@@ -368,6 +373,8 @@ class TypeInterner:
         name: str,
         variants: Optional[List[str]] = None,
         variant_payloads: Optional[Dict[str, List[int]]] = None,
+        type_args: Tuple[int, ...] = (),
+        template_name: Optional[str] = None,
     ) -> int:
         key = ("enum", name)
         if key in self._key_to_id:
@@ -377,6 +384,10 @@ class TypeInterner:
                     self.enum_defs[name].variants = variants
                 if variant_payloads is not None:
                     self.enum_defs[name].variant_payloads = variant_payloads
+                if type_args:
+                    self.enum_defs[name].type_args = type_args
+                if template_name:
+                    self.enum_defs[name].template_name = template_name
             return tid
         caps = TypeCapabilities(
             needs_retain=False,
@@ -389,8 +400,9 @@ class TypeInterner:
         tid = self._intern(key, TypeEntry("enum", name), caps)
         v_list = variants if variants is not None else []
         v_payloads = variant_payloads if variant_payloads is not None else {}
-        self.enum_defs[name] = EnumDef(tid, name, v_list, v_payloads)
+        self.enum_defs[name] = EnumDef(tid, name, v_list, v_payloads, type_args=type_args, template_name=template_name)
         return tid
+
 
     def mk_interface(self, name: str, methods: Optional[Dict[str, int]] = None) -> int:
         key = ("interface", name)
@@ -571,9 +583,13 @@ class TypeInterner:
         if src_entry.tag == "class" and dst_entry.tag == "interface":
             return self.class_implements_interface(src_id, dst_entry.data)
 
-        # Covariant List subtyping: list[S] -> list[T] if S <: T
+        # Invariant List subtyping: list[S] -> list[T] iff S == T (SPEC 4.1 & ADR-002)
         if src_entry.tag == "list" and dst_entry.tag == "list":
-            return self.is_assignable(src_entry.data, dst_entry.data)
+            return src_entry.data == dst_entry.data
+
+        # Invariant Dict subtyping: dict[K1, V1] -> dict[K2, V2] iff K1 == K2 and V1 == V2
+        if src_entry.tag == "dict" and dst_entry.tag == "dict":
+            return src_entry.data == dst_entry.data
 
         # Optional target: T? accepts T, none, and S? if S <: T
         if dst_entry.tag == "optional":
@@ -695,7 +711,8 @@ class TypeInterner:
             if key in self._key_to_id:
                 return self._key_to_id[key]
             variants = wtype.variants if hasattr(wtype, "variants") else []
-            tid = self.mk_enum(wtype.name, variants)
+            type_arg_ids = tuple(self.from_wtype(arg) for arg in args) if args else ()
+            tid = self.mk_enum(wtype.name, variants, type_args=type_arg_ids, template_name=template)
             payloads: Dict[str, List[int]] = {}
             if hasattr(wtype, "variant_payloads") and wtype.variant_payloads:
                 for vname, vtypes in wtype.variant_payloads.items():
@@ -703,6 +720,7 @@ class TypeInterner:
             if wtype.name in self.enum_defs:
                 self.enum_defs[wtype.name].variant_payloads = payloads
             return tid
+
         elif isinstance(wtype, InterfaceType):
             key = ("interface", wtype.name)
             if key in self._key_to_id:

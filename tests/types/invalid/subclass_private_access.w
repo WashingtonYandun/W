@@ -1,0 +1,25 @@
+class Base {
+    private secret: int
+
+    fn init(s: int) {
+        this.secret = s
+    }
+
+    private fn pin() -> int {
+        return this.secret
+    }
+}
+
+class Derived extends Base {
+    fn init(s: int) {
+        super.init(s)
+    }
+
+    public fn leak_field() -> int {
+        return this.secret
+    }
+}
+
+fn main() {
+    let d = new Derived(42)
+}

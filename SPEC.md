@@ -409,6 +409,7 @@ fn compile(source: str) {
        - `W3001`: Mutation of immutable value binding (`let` vs `let mut`)
        - `W3002`: Invalid member access/mutation or `private` visibility violation
        - `W3003`: Invalid class inheritance or unimplemented `interface` contract
+       - `W3004`: Constructor safety violation (uninitialized fields or invalid `super` invocation)
      - **`W4xxx` — Runtime Execution Diagnostics:**
        - `W4001`: Division or modulo by zero
        - `W4002`: Index or key out of bounds
@@ -531,3 +532,32 @@ until the last weak handle is released, and invalidates the object before field
 cleanup. This runtime is single-threaded. W0/HIR enforce weak argument/type rules;
 W1 supports the concrete operations with dynamic argument checks and its existing
 limited static-checking profile. This does not establish W1 generic parity.
+
+---
+
+## 14. Compiler Engine Parity & Determinism Contracts (Phase D / ADR-009)
+
+### 14.1 Four Execution Targets & Architectural Roles
+The W compiler architecture formally defines four execution targets:
+1. **W0 Interpreter (`runtime/Interpreter.py`):** Canonical tree-walking reference implementation over surface AST.
+2. **W0 Typed HIR (`hir/HirCCodeGen.py`):** Default native compilation target (`w build`, `w emit-c`). Operates strictly on type-interned, arena-verified High-Level Intermediate Representation (`HirModule`).
+3. **W0 AST C99 (`codegen/CCodeGen.py`):** Retained secondary native oracle for differential verification (`--backend=ast`).
+4. **W1 Self-Hosted C99 (`selfhost/w1.w`):** Native Stage-2 compiler binary compiled from self-hosted W sources.
+
+### 14.2 Bootstrap Fixed-Point vs. Feature Parity
+W distinguishes between two distinct compiler guarantees:
+* **Bootstrap Fixed-Point:** A 3-stage bootstrap self-compilation of `selfhost/w1.w` produces bit-identical C code:
+  $$\text{SHA256}(c_0) == \text{SHA256}(c_1) == \text{SHA256}(c_2)$$
+  This guarantees determinism and convergence of the self-hosted compiler subset.
+* **Feature Parity:** Documented in `docs/ENGINE_PARITY_MATRIX.md`. The W0 toolchain implements 100% of the language specification (107/107 fixtures). W1 implements 100% of the core language subset (91/91 fixtures); generics and multi-file compilation sessions are supported via the bootstrap pipeline.
+
+### 14.3 Code Generation Determinism
+Given identical source text and compiler flags:
+1. Generated C99 source code is byte-for-byte identical across independent compiler invocations, varied temporary paths, and arbitrary `PYTHONHASHSEED` values.
+2. Emitted declarations (types, functions, global constants) follow deterministic topological and symbol-ordered sequences.
+
+### 14.4 Telemetry & Standard Stream Separation
+Under the `--stats` flag:
+1. Diagnostic telemetry reports phase timings (`timing_ms`: `lex`, `parse`, `check`, `hir`, `codegen`, `total`), peak RSS (`peak_rss_kb`), and specialization counters (`requested`, `unique`, `cache_hits`).
+2. Execution commands (`run --stats`, `build --stats`) write JSON telemetry strictly to `stderr`, leaving program `stdout` unpolluted for exact differential oracle verification. Check commands (`check --stats`) emit JSON telemetry to `stdout`.
+
