@@ -1,7 +1,9 @@
 # W Language Specification
 
-> **Status:** The current toolchain is `0.3.0.dev1`. Sections 1–11 describe the frozen core grammar and are normative; sections 12–14 describe implementation contracts.  
-> **Targets:** `W0` is the reference implementation and the authority on whether a program is valid. `W1` is an experimental self-hosted compiler for a **strict subset** of W: it has no generics, no enum payload layout and no pattern matching on `Option`/`Result`, so it is not a second implementation of this document. See [docs/ENGINE_PARITY_MATRIX.md](docs/ENGINE_PARITY_MATRIX.md) and §12.  
+> **Status:** The current toolchain is `0.3.0.dev1`. Sections 1–11 describe the frozen core grammar and are normative; sections 12–14 describe implementation contracts.
+>
+> **Targets:** `W0` is the reference implementation and the authority on whether a program is valid. `W1` is an experimental self-hosted compiler for a **strict subset** of W: it has no generics, no enum payload layout and no pattern matching on `Option`/`Result`, so it is not a second implementation of this document. See [docs/ENGINE_PARITY_MATRIX.md](docs/ENGINE_PARITY_MATRIX.md) and §12.
+>
 > **Thesis:** W is a compact, statically typed language for small native tools, with deterministic diagnostics and inspectable C99 output. Expansion beyond this core is documented in [docs/EXPANSION.md](docs/EXPANSION.md).
 
 ---
