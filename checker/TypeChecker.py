@@ -32,6 +32,51 @@ from error.Error import TypeError
 from checker.LayoutGraph import LayoutGraph, build_layout_graph_from_declarations
 
 
+def _equality_compatible(left: WType, right: WType, seen: Optional[set] = None) -> bool:
+    """True when `left == right` can be decided at runtime.
+
+    Two specializations of the same generic template count as compatible when their
+    type arguments line up, treating an unbound type parameter as compatible with
+    anything. Without this, `Ok(42) == Err("bad")` is rejected because checking the
+    operands separately infers `Result[int, E]` and `Result[T, str]`: two different
+    specialized names for what is really a single `Result[int, str]` comparison.
+    """
+    if left == right:
+        return True
+    if isinstance(left, TypeParamType) or isinstance(right, TypeParamType):
+        return True
+    if isinstance(left, AnyType) or isinstance(right, AnyType):
+        return True
+    if isinstance(left, EnumType) and isinstance(right, EnumType):
+        if getattr(left, "template_name", None) != getattr(right, "template_name", None):
+            return False
+        if len(left.type_args) != len(right.type_args):
+            return False
+        return all(_equality_compatible(a, b, seen) for a, b in zip(left.type_args, right.type_args))
+    if seen is None:
+        seen = set()
+    if (id(left), id(right)) in seen:
+        return False
+    seen.add((id(left), id(right)))
+    if isinstance(left, StructType) and isinstance(right, StructType):
+        if getattr(left, "template_name", None) != getattr(right, "template_name", None):
+            return False
+        if len(left.type_args) != len(right.type_args):
+            return False
+        return all(_equality_compatible(a, b, seen) for a, b in zip(left.type_args, right.type_args))
+    if isinstance(left, ListType) and isinstance(right, ListType):
+        return _equality_compatible(left.element, right.element, seen)
+    if isinstance(left, OptionalType) and isinstance(right, OptionalType):
+        return _equality_compatible(left.inner, right.inner, seen)
+    if isinstance(left, TupleType) and isinstance(right, TupleType):
+        return len(left.elements) == len(right.elements) and all(
+            _equality_compatible(a, b, seen) for a, b in zip(left.elements, right.elements))
+    if isinstance(left, ResultType) and isinstance(right, ResultType):
+        return (_equality_compatible(left.ok, right.ok, seen)
+                and _equality_compatible(left.err, right.err, seen))
+    return False
+
+
 class GenericInstanceKey(NamedTuple):
     """Session-local specialization identity; not a persistent hash or ABI name."""
     template_name: str
@@ -63,6 +108,11 @@ class SpecializationEntry:
         self.ast_decl = ast_decl
         self.dependencies: Set[GenericInstanceKey] = set()
 
+
+# Largest structural size a single generic specialization may reach. The depth
+# limit below bounds recursion; this bounds growth, which a depth limit alone
+# does not catch because every level is a distinct, cached specialization.
+MAX_SPECIALIZATION_COMPLEXITY = 256
 
 def _mangle_type_static(t: WType) -> str:
     if isinstance(t, AnyType):
@@ -197,6 +247,10 @@ class TypeChecker:
         self.monomorphized_enum_decls: List[EnumDecl] = []
         self._monomorphize_depth: int = 0
         self._instantiation_stack: List[Tuple[str, Tuple[int, ...], int, Tuple[WType, ...], int, int]] = []
+        # Type-parameter substitution in effect while a specialization is being
+        # resolved. Unbound parameters keep their own name, so the resolver has to
+        # consult this binding before treating a name as a declared type.
+        self._active_type_subst: Optional[Dict[str, WType]] = None
         self.telemetry: MonomorphizationTelemetry = MonomorphizationTelemetry()
 
         # Canonical built-in Option[T] template
@@ -873,6 +927,27 @@ class TypeChecker:
                 return True
         return self._block_has_return(block)
 
+    # The synthetic parameter name introduced by closure conversion. Captured
+    # variables are immutable snapshots today, so a mutation attempt is rejected -- but
+    # the diagnostic has to name the captured variable, not a compiler internal.
+    CLOSURE_ENVIRONMENT_PARAMETER = '__w_environment'
+
+    def _binding_error_name(self, symbol) -> str:
+        if symbol is not None and getattr(symbol, 'name', None) == self.CLOSURE_ENVIRONMENT_PARAMETER:
+            return "a captured variable"
+        return symbol.name if symbol is not None else "a captured variable"
+
+    def _immutable_binding_message(self, symbol, action: str) -> str:
+        """Explains why a mutation target is not writable.
+
+        A captured variable is a snapshot in the closure environment, so the reason
+        differs from a plain `let` binding and the message must say which one applies.
+        """
+        if symbol is not None and getattr(symbol, 'name', None) == self.CLOSURE_ENVIRONMENT_PARAMETER:
+            return (f"Cannot {action} on a captured variable: closures capture values "
+                    f"as immutable snapshots")
+        return f"Cannot {action} on immutable binding '{self._binding_error_name(symbol)}'"
+
     def _find_value_root_symbol(self, expr: Expr) -> Optional[Symbol]:
         if isinstance(expr, IdentExpr):
             return self.current_scope.lookup_symbol(expr.name)
@@ -1183,7 +1258,7 @@ class TypeChecker:
                 if expr.name in var_names:
                     if tmpl.name == "Option" and expr.name in ("None", "none"):
                         return NoneType
-                    concrete_args = [AnyType() for _ in tmpl.type_params]
+                    concrete_args = [TypeParamType(p.name if hasattr(p, "name") else str(p)) for p in tmpl.type_params]
                     return self._monomorphize_enum(tmpl, concrete_args, expr.line, expr.col)
             raise TypeError(
                 message=f"Unknown identifier '{expr.name}'",
@@ -1278,7 +1353,8 @@ class TypeChecker:
                     return any(contains_function(child, seen) for child in children)
                 if contains_function(lhs_t, set()) or contains_function(rhs_t, set()):
                     raise TypeError("Function values do not support equality", file=self.file, line=expr.line, col=expr.col, code="W2001")
-                if not is_assignable(lhs_t, rhs_t) and not is_assignable(rhs_t, lhs_t):
+                if not is_assignable(lhs_t, rhs_t) and not is_assignable(rhs_t, lhs_t) \
+                        and not _equality_compatible(lhs_t, rhs_t):
                     raise TypeError(
                         message=f"Cannot compare equality of different types '{lhs_t}' and '{rhs_t}'",
                         line=expr.line,
@@ -1508,6 +1584,24 @@ class TypeChecker:
             return self._check_class_instantiation(class_t, expr.args, expr.line, expr.col)
 
         if isinstance(expr, AssignmentExpr):
+            # W accepts assignment as an expression, which makes `a = b = c = 1` legal.
+            # The HIR has no assignment expression node, so the lowering synthesises a
+            # temporary per level; that is verified for one nested level, and deeper
+            # chains are rejected here rather than miscompiled.
+            depth = 1
+            inner = expr.value
+            while isinstance(inner, AssignmentExpr):
+                depth += 1
+                inner = inner.value
+            if depth > 2:
+                raise TypeError(
+                    message=f"Chained assignment nests {depth} levels; at most 2 are supported "
+                            f"(split it into separate statements)",
+                    line=expr.line,
+                    col=expr.col,
+                    file=self.file,
+                    code="W2013",
+                )
 
             # Target validation
             val_t = self._check_expr(expr.value)
@@ -1645,7 +1739,7 @@ class TypeChecker:
                 sym = self._find_value_root_symbol(expr.target.object)
                 if sym and not sym.is_mut:
                     raise TypeError(
-                        message=f"Cannot mutate field of immutable binding '{sym.name}'",
+                        message=self._immutable_binding_message(sym, "mutate a field"),
                         line=expr.line,
                         col=expr.col,
                         file=self.file,
@@ -1725,7 +1819,7 @@ class TypeChecker:
                     if isinstance(ctx_t, EnumType) and getattr(ctx_t, "template_name", None) == tmpl.name and ctx_t.type_args:
                         concrete_args = list(ctx_t.type_args)
                     else:
-                        concrete_args = [AnyType() for _ in tmpl.type_params]
+                        concrete_args = [TypeParamType(p.name if hasattr(p, "name") else str(p)) for p in tmpl.type_params]
                     enum_t = self._monomorphize_enum(tmpl, concrete_args, expr.line, expr.col)
                     expr.object.name = enum_t.name
                     return enum_t
@@ -1874,7 +1968,11 @@ class TypeChecker:
                         file=self.file,
                         code="T003"
                     )
-                return OptionalType(obj_t.value)
+                # `d[k]` yields V and panics with W4002 when the key is absent (SPEC
+                # 10.2). The optional form is `d.get(k)`, which returns V?. Returning
+                # V? here forced every dictionary read through unwrapping ceremony and
+                # made `d[k].append(x)` impossible to write.
+                return obj_t.value
             raise TypeError(
                 message=f"Cannot index type '{obj_t}'",
                 line=expr.line,
@@ -1932,7 +2030,7 @@ class TypeChecker:
                             if any(parameter.name not in bindings for parameter in template.type_params):
                                 raise TypeError("Cannot infer imported generic function arguments", file=self.file,
                                                 line=expr.line, col=expr.col, code="W2003")
-                            concrete_args = [bindings[parameter.name] for parameter in template.type_params]
+                            concrete_args = self._concrete_type_args(template, bindings)
                         unit = module_type.checked_module
                         specialized = unit.checker._monomorphize_fn(template, concrete_args, expr.line, expr.col)
                         self.session.refresh_specializations(unit)
@@ -1988,7 +2086,7 @@ class TypeChecker:
                                     file=self.file,
                                     code="T003"
                                 )
-                        concrete_args = [bindings[p.name if hasattr(p, "name") else str(p)] for p in template.type_params]
+                        concrete_args = self._concrete_type_args(template, bindings)
 
                     fn_sym = self._monomorphize_fn(template, concrete_args, expr.line, expr.col)
                     expr.callee.name = fn_sym.name
@@ -2031,7 +2129,7 @@ class TypeChecker:
                                     file=self.file,
                                     code="T003"
                                 )
-                        concrete_args = [bindings[p.name if hasattr(p, "name") else str(p)] for p in template.type_params]
+                        concrete_args = self._concrete_type_args(template, bindings)
 
                     struct_t = self._monomorphize_struct(template, concrete_args, expr.line, expr.col)
                     expr.callee.name = struct_t.name
@@ -2133,7 +2231,7 @@ class TypeChecker:
                                     file=self.file,
                                     code="T003"
                                 )
-                        concrete_args = [bindings[p.name if hasattr(p, "name") else str(p)] for p in found_tmpl.type_params]
+                        concrete_args = self._concrete_type_args(found_tmpl, bindings)
                         enum_t = self._monomorphize_enum(found_tmpl, concrete_args, expr.line, expr.col)
                         expr.callee = MemberExpr(IdentExpr(enum_t.name, line=expr.line, col=expr.col), callee_name, line=expr.line, col=expr.col)
                         expr.type_args = []
@@ -2235,7 +2333,7 @@ class TypeChecker:
                                 file=self.file,
                                 code="T003"
                             )
-                    concrete_args = [bindings[p.name if hasattr(p, "name") else str(p)] for p in template.type_params]
+                    concrete_args = self._concrete_type_args(template, bindings)
 
                 enum_t = self._monomorphize_enum(template, concrete_args, expr.line, expr.col)
                 expr.callee.object.name = enum_t.name
@@ -2283,7 +2381,7 @@ class TypeChecker:
                         sym = self._find_value_root_symbol(expr.callee.object)
                         if sym and not sym.is_mut:
                             raise TypeError(
-                                message=f"Cannot call mutating method '{expr.callee.property}' on immutable binding '{sym.name}'",
+                                message=self._immutable_binding_message(sym, f"call mutating method '{expr.callee.property}'"),
                                 line=expr.line,
                                 col=expr.col,
                                 file=self.file,
@@ -2357,6 +2455,29 @@ class TypeChecker:
                     if a_t not in (IntType, FloatType, StrType):
                         raise TypeError(message=f"float() expects int, float, or str, found '{a_t}'", line=expr.line, col=expr.col, file=self.file, code="T003")
                     return FloatType
+
+                if name == "slice":
+                    # SPEC 11.1: slice(x, a, b) works for str and for list[T], and
+                    # preserves the container kind. Each case is checked explicitly
+                    # because the result type depends on the argument type.
+                    if len(expr.args) != 3:
+                        raise TypeError(message="slice() takes exactly 3 arguments (value, start, end)",
+                                        line=expr.line, col=expr.col, file=self.file, code="T015")
+                    a_t = self._check_expr(expr.args[0])
+                    for index in (1, 2):
+                        b_t = self._check_expr(expr.args[index])
+                        if b_t != IntType:
+                            raise TypeError(
+                                message=f"slice() bound {index} expects int, found '{b_t}'",
+                                line=expr.args[index].line, col=expr.args[index].col,
+                                file=self.file, code="T003")
+                    if a_t == StrType:
+                        return StrType
+                    if isinstance(a_t, ListType):
+                        return a_t
+                    raise TypeError(
+                        message=f"slice() expects str or list, found '{a_t}'",
+                        line=expr.line, col=expr.col, file=self.file, code="T003")
 
                 if name == "enumerate":
                     if len(expr.args) != 1:
@@ -2438,7 +2559,7 @@ class TypeChecker:
                                 file=self.file,
                                 code="T003"
                             )
-                    concrete_args = [bindings[p.name if hasattr(p, "name") else str(p)] for p in template.type_params]
+                    concrete_args = self._concrete_type_args(template, bindings)
 
                 struct_t = self._monomorphize_struct(template, concrete_args, expr.line, expr.col)
                 expr.struct_name = struct_t.name
@@ -2635,6 +2756,7 @@ class TypeChecker:
                 return UnitType
 
         if isinstance(expr, MatchExpr):
+            outer_expected = self.expected_type
             subject_t = self._check_expr(expr.subject)
             covered_variants: Set[str] = set()
             has_wildcard = False
@@ -2778,6 +2900,25 @@ class TypeChecker:
                 if not self._pattern_matrix_exhaustive([subject_t], rows):
                     raise TypeError("Non-exhaustive match: missing variant or payload cases",
                                     line=expr.line, col=expr.col, file=self.file, code="W2003")
+            else:
+                # The subject domain is open (int, str, struct, ...), so the pattern
+                # matrix can never be closed. The match is still only well defined when
+                # it yields a value: a falling-through arm would return nothing where a
+                # value is required, which the backends used to reject with an internal
+                # error. A statement-position match may legitimately fall through.
+                yields_value = (
+                    any(at != UnitType for at in arm_types)
+                    or (outer_expected is not None and outer_expected != UnitType)
+                )
+                if yields_value and not has_wildcard:
+                    raise TypeError(
+                        message=f"Non-exhaustive match: '{subject_t}' is an open domain, "
+                                f"so a '_ =>' fallback arm is required when the match produces a value",
+                        line=expr.line,
+                        col=expr.col,
+                        file=self.file,
+                        code="W2003",
+                    )
 
             if arm_types:
                 first_t = arm_types[0]
@@ -2905,6 +3046,24 @@ class TypeChecker:
     # Generics and Monomorphization Helpers
     # ==========================================
 
+    def _concrete_type_args(self, template, bindings: Dict[str, WType]) -> List[WType]:
+        """Builds the specialization arguments for a generic template.
+
+        A type parameter with no binding keeps its own identity instead of collapsing
+        to the `any` placeholder. `any` erases identity, so `Ok(42)` and `Err("bad")`
+        would specialize to `Result__int__any` and `Result__any__int`, two distinct
+        types that then fail to compare even though both are `Result[int, str]`.
+        """
+        arguments: List[WType] = []
+        for parameter in template.type_params:
+            name = parameter.name if hasattr(parameter, "name") else str(parameter)
+            bound = bindings.get(name)
+            if bound is None or isinstance(bound, AnyType):
+                arguments.append(TypeParamType(name))
+            else:
+                arguments.append(bound)
+        return arguments
+
     def _mangle_type_name(self, t: WType) -> str:
         return _mangle_type_static(t)
 
@@ -2917,7 +3076,12 @@ class TypeChecker:
 
     def _wtype_to_type_node_impl(self, t: WType) -> TypeNode:
         if isinstance(t, AnyType):
-            return NamedType("any")
+            # Synthesized, never written by the user: this is the placeholder that
+            # monomorphization binds to an uninferred type parameter. Mark it so the
+            # resolver can tell it apart from a user-written `any`, which is rejected.
+            synthesized = NamedType("any")
+            synthesized.is_internal_any = True
+            return synthesized
         if t == IntType:
             return NamedType("int")
         if t == FloatType:
@@ -3137,8 +3301,19 @@ class TypeChecker:
                 return all(self._unify_type(pt, at, type_params, bindings)
                            for pt, at in zip(param_type_node.type_args, tmpl_args))
 
-        return True
-
+        # The declared payload type mentions no type parameter, so it must be checked
+        # against the argument. Returning True here (the previous behaviour) let
+        # `enum Pair[T] { P(T, int) }` accept `P(1, "wrong")`: the checker certified a
+        # program that both backends then rejected with an internal error.
+        try:
+            declared = self._resolve_type_node(param_type_node)
+        except Exception:
+            # Unresolvable here means "not a declared concrete type"; leave the
+            # verdict to the dedicated resolution paths that report diagnostics.
+            return True
+        if isinstance(declared, (GenericStructTemplate, GenericEnumTemplate, GenericFnTemplate)):
+            return True
+        return is_assignable(arg_wtype, declared)
     def _resolve_constraint_interface(self, constraint: TypeNode, line: int, col: int) -> InterfaceType:
         if not isinstance(constraint, NamedType):
             raise TypeError("Generic constraints must name an interface", line=line,
@@ -3174,6 +3349,13 @@ class TypeChecker:
                 )
 
     def _type_complexity(self, t: WType) -> int:
+        """Structural size of a type: 1 for a scalar, plus the size of every component.
+
+        Used to bound generic specializations by *size* rather than only by recursion
+        depth. A depth limit alone lets a chain of shallow but ever-growing instances
+        (each level adding one list wrapper) allocate until it exhausts memory, because
+        every level is a distinct specialization that is never rebuilt.
+        """
         if isinstance(t, ListType):
             return 1 + self._type_complexity(t.element)
         if isinstance(t, DictType):
@@ -3189,6 +3371,25 @@ class TypeChecker:
         if isinstance(t, FunctionType):
             return 1 + sum(self._type_complexity(p) for p in t.params) + self._type_complexity(t.ret)
         return 1
+
+    def _check_specialization_size(
+        self,
+        template_name: str,
+        concrete_args: Sequence[WType],
+        line: int,
+        col: int
+    ) -> None:
+        total = sum(self._type_complexity(a) for a in concrete_args)
+        if total > MAX_SPECIALIZATION_COMPLEXITY:
+            raise TypeError(
+                message=f"Generic instantiation of '{template_name}' exceeds the maximum "
+                        f"type size ({total} > {MAX_SPECIALIZATION_COMPLEXITY}); the "
+                        f"specialization chain grows without a structural bound",
+                line=line,
+                col=col,
+                file=self.file,
+                code="W2011"
+            )
 
     def _check_specialization_cycle(
         self,
@@ -3270,7 +3471,12 @@ class TypeChecker:
 
         self._check_specialization_cycle(template.name, concrete_args, type_ids, line, col)
 
+        # Frame slot 2 is reserved for a per-instantiation size measurement. Nothing
+        # consumes it: termination is proven structurally by _check_specialization_cycle
+        # and bounded by _monomorphize_depth, so it is recorded as 0 instead of
+        # computing a number that is never read.
         curr_complexity = sum(self._type_complexity(a) for a in concrete_args)
+        self._check_specialization_size(template.name, concrete_args, line, col)
 
         # Direct layout recursion detection
         for f in template.ast_decl.fields:
@@ -3304,6 +3510,8 @@ class TypeChecker:
         frame = (template.name, type_ids, curr_complexity, tuple(concrete_args), line, col)
         self._instantiation_stack.append(frame)
         self._monomorphize_depth += 1
+        previous_subst = self._active_type_subst
+        self._active_type_subst = subst
         try:
             new_fields: List[StructField] = []
             fields_dict: Dict[str, WType] = {}
@@ -3348,6 +3556,7 @@ class TypeChecker:
         finally:
             self._monomorphize_depth -= 1
             self._instantiation_stack.pop()
+            self._active_type_subst = previous_subst
 
     def _monomorphize_fn(
         self,
@@ -3389,7 +3598,12 @@ class TypeChecker:
 
         self._check_specialization_cycle(template.name, concrete_args, type_ids, line, col)
 
+        # Frame slot 2 is reserved for a per-instantiation size measurement. Nothing
+        # consumes it: termination is proven structurally by _check_specialization_cycle
+        # and bounded by _monomorphize_depth, so it is recorded as 0 instead of
+        # computing a number that is never read.
         curr_complexity = sum(self._type_complexity(a) for a in concrete_args)
+        self._check_specialization_size(template.name, concrete_args, line, col)
 
         subst: Dict[str, WType] = {}
         for p, arg in zip(template.type_params, concrete_args):
@@ -3404,15 +3618,20 @@ class TypeChecker:
         cloned_fn = copy.deepcopy(template.ast_decl)
         cloned_fn.name = mangled
         cloned_fn.type_params = []
-        cloned_fn.return_type = self._substitute_type_node(cloned_fn.return_type, subst)
-        cloned_fn.params = [
-            Param(p.name, self._substitute_type_node(p.type_ann, subst), line=p.line, col=p.col)
-            for p in cloned_fn.params
-        ]
-        self._substitute_ast_types(cloned_fn.body, subst)
+        previous_subst = self._active_type_subst
+        self._active_type_subst = subst
+        try:
+            cloned_fn.return_type = self._substitute_type_node(cloned_fn.return_type, subst)
+            cloned_fn.params = [
+                Param(p.name, self._substitute_type_node(p.type_ann, subst), line=p.line, col=p.col)
+                for p in cloned_fn.params
+            ]
+            self._substitute_ast_types(cloned_fn.body, subst)
 
-        p_types = [self._resolve_type_node(p.type_ann) for p in cloned_fn.params]
-        ret_t = self._resolve_type_node(cloned_fn.return_type)
+            p_types = [self._resolve_type_node(p.type_ann) for p in cloned_fn.params]
+            ret_t = self._resolve_type_node(cloned_fn.return_type)
+        finally:
+            self._active_type_subst = previous_subst
         fn_type = FunctionType(params=p_types, ret=ret_t)
         fn_sym = Symbol(mangled, fn_type, is_mut=False, kind="fn", line=line, col=col)
         entry = SpecializationEntry(key=key, state=SpecializationState.SPECIALIZING, specialized_symbol=fn_sym, ast_decl=cloned_fn)
@@ -3476,7 +3695,12 @@ class TypeChecker:
 
         self._check_specialization_cycle(template.name, concrete_args, type_ids, line, col)
 
+        # Frame slot 2 is reserved for a per-instantiation size measurement. Nothing
+        # consumes it: termination is proven structurally by _check_specialization_cycle
+        # and bounded by _monomorphize_depth, so it is recorded as 0 instead of
+        # computing a number that is never read.
         curr_complexity = sum(self._type_complexity(a) for a in concrete_args)
+        self._check_specialization_size(template.name, concrete_args, line, col)
 
         subst: Dict[str, WType] = {}
         for p, arg in zip(template.type_params, concrete_args):
@@ -3499,6 +3723,8 @@ class TypeChecker:
         frame = (template.name, type_ids, curr_complexity, tuple(concrete_args), line, col)
         self._instantiation_stack.append(frame)
         self._monomorphize_depth += 1
+        previous_subst = self._active_type_subst
+        self._active_type_subst = subst
         try:
             variant_names: List[str] = []
             variant_payloads: Dict[str, List[WType]] = {}
@@ -3534,6 +3760,8 @@ class TypeChecker:
         finally:
             self._monomorphize_depth -= 1
             self._instantiation_stack.pop()
+            self._active_type_subst = previous_subst
+
     # ==========================================
     # Type Node Resolution
     # ==========================================
@@ -3555,7 +3783,15 @@ class TypeChecker:
                                 line=node.line, col=node.col, code="W9999")
             resolved = node.session_resolved_type
         else:
-            resolved = self._resolve_type_node_impl(node)
+            # Inside a specialization a type-parameter name is bound by `subst`, so it
+            # must be resolved from that binding rather than looked up as a declared
+            # type: an unbound parameter keeps its own name (see _concrete_type_args)
+            # and there is nothing declared to find.
+            subst = self._active_type_subst
+            if subst and isinstance(node, NamedType) and node.name in subst:
+                resolved = subst[node.name]
+            else:
+                resolved = self._resolve_type_node_impl(node)
         if node is not None:
             node.resolved_type_id = self.interner.from_wtype(resolved)
         return resolved
@@ -3577,7 +3813,17 @@ class TypeChecker:
                                 self._resolve_type_node(node.return_type))
         if isinstance(node, NamedType):
             if node.name == "any":
-                return AnyType()
+                if getattr(node, "is_internal_any", False):
+                    return AnyType()
+                # `any` is reserved for internal variadic builtin signatures and is
+                # deliberately unreachable from source. See checker/WType.py:AnyType.
+                raise TypeError(
+                    message="Unknown type 'any' (reserved for compiler builtins)",
+                    line=node.line,
+                    col=node.col,
+                    file=self.file,
+                    code="W1001",
+                )
             resolved = self._lookup_type_name(node.name)
             if resolved is None:
                 if node.name in self.generic_enum_templates:

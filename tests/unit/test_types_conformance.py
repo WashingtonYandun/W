@@ -1,5 +1,4 @@
 import os
-import sys
 from parser.Parser import Parser
 from checker.TypeChecker import TypeChecker
 from error.Error import TypeError
@@ -66,11 +65,8 @@ def test_types_suite():
     print(f"FAILED:        {len(failures)}")
     print("==================================================")
 
-    if failures:
-        sys.exit(1)
-    else:
-        print("ALL TYPE CHECKER CONFORMANCE TESTS PASSED.")
-        sys.exit(0)
+    assert not failures, f"Type checker conformance failures: {failures}"
+    print("ALL TYPE CHECKER CONFORMANCE TESTS PASSED.")
 
 if __name__ == "__main__":
     test_types_suite()

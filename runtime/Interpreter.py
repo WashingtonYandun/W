@@ -98,7 +98,27 @@ class Interpreter:
             if isinstance(main_fn, WFunction):
                 last_val = self.call_function(main_fn, [])
 
+        # A program whose module body ends in `main()` returns the entrypoint
+        # Result through that expression statement. W has no stack unwinding, so
+        # an unhandled `Err` must still reach the process exit status: discarding
+        # it would make a failing program indistinguishable from a success.
+        if isinstance(last_val, WErr):
+            raise WRuntimeError(
+                message=f"unhandled error returned by main: {self._entrypoint_error_text(last_val.error)}",
+                file=self.file,
+                code="W4003",
+            )
+
         return last_val
+
+    @staticmethod
+    def _entrypoint_error_text(error: WValue) -> str:
+        """Renders an unhandled entrypoint error the way the native runtime does."""
+        if isinstance(error, WStructInstance):
+            inner = error.storage.data.get("message")
+            if isinstance(inner, WStr):
+                return inner.value
+        return str(error)
 
     # ==========================================
     # Statement Dispatch
@@ -501,7 +521,12 @@ class Interpreter:
             if isinstance(obj, WDict):
                 key_raw = idx
                 res = obj.get(key_raw)
-                return WEnumValue("Option", "Some", [res]) if res is not None else WNone()
+                # SPEC 10.2: a missing key is W4002. `d.get(k)` is the optional form.
+                if res is None:
+                    raise WRuntimeError(
+                        f"Dictionary key not found: {idx}",
+                        line=expr.line, col=expr.col, file=self.file)
+                return res
 
             raise WRuntimeError(f"Cannot index type '{type(obj).__name__}'", line=expr.line, col=expr.col, file=self.file)
 
@@ -572,7 +597,11 @@ class Interpreter:
                     if arm.guard is not None and not self.eval_expr(arm.guard, arm_env).value:
                         continue
                     return self.eval_block(arm.body, arm_env)
-            raise WRuntimeError("Non-exhaustive match at runtime", line=expr.line, col=expr.col, file=self.file)
+            # No arm matched. The checker requires a `_ =>` fallback whenever a match
+            # produces a value, so reaching this point means it is a statement-position
+            # match, where the compiled backends simply fall through. Panicking here made
+            # the interpreter disagree with every other engine on valid programs.
+            return WUnit()
 
         return WUnit()
 

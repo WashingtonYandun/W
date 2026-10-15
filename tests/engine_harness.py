@@ -16,6 +16,20 @@ PROFILES = json.loads((ROOT / 'tests/engine_profiles.json').read_text())
 EXPANSION_DIRS = {'regressions', 'functions', 'ffi', 'stdlib', 'generic_oop'}
 
 
+# A fixture whose .expected file starts with this marker is a *panic* case: every engine
+# must report the same diagnostic code and terminate non-zero instead of producing output.
+PANIC_MARKER = '# RUNTIME_PANIC:'
+
+
+def panic_expectation(expected_text):
+    """Returns the diagnostic code a panic fixture must produce, or None."""
+    if not expected_text:
+        return None
+    first = expected_text.strip().splitlines()[0].strip() if expected_text.strip() else ''
+    if first.startswith(PANIC_MARKER):
+        return first[len(PANIC_MARKER):].strip()
+    return None
+
 def corpus_paths():
     """Phase D public corpus. Expansion fixtures live under dedicated directories."""
     positives = sorted((ROOT / 'tests/runtime').glob('*.w')) + sorted((ROOT / 'examples').glob('*.w'))
@@ -139,13 +153,29 @@ def run_engine(engine, source, label, w1_bin, directory, sanitize=False):
 
 
 def compare(results, expected=None):
+    panic_code = panic_expectation(expected)
     for result in results:
         if result.infrastructure_error:
             return False, f'{result.engine}: {result.infrastructure_error}: {result.stderr}'
+        if panic_code is not None:
+            # Every engine must report the declared diagnostic and exit non-zero. The
+            # panic text itself is allowed to differ (the native runtime has no source
+            # position to print), so only the code and the failure are compared.
+            if result.exit_code == 0:
+                return False, f'{result.engine}: expected a runtime panic, but the program exited 0'
+            if result.diag_code != panic_code:
+                return False, (f'{result.engine}: expected panic {panic_code}, '
+                               f'got {result.diag_code or "no diagnostic"}: {result.stderr!r}')
+            continue
         if expected is not None and (result.exit_code != 0 or result.stdout != expected):
             return False, f'{result.engine}: expected successful execution and exact fixture output, got {asdict(result)}'
     if not results:
         return False, 'no supported engines executed'
+    if panic_code is not None:
+        codes = {result.diag_code for result in results}
+        if codes != {panic_code}:
+            return False, f'panic diagnostic mismatch across engines: {sorted(codes)}'
+        return True, 'OK (panic)'
     reference = results[0]
     for result in results[1:]:
         for field in ('compile_ok', 'runtime_ok', 'exit_code', 'stdout', 'diag_code'):
@@ -169,7 +199,7 @@ def verify_case(source, label, w1_bin, work_dir, expected=None, sanitize=False, 
         else:
             results.append(run_engine(engine, source, label, w1_bin, directory, sanitize))
     ok, detail = compare(results, expected)
-    if expect_rejection:
+    if expect_rejection and panic_expectation(expected) is None:
         for result in results:
             if result.compile_ok or result.exit_code != 1 or not result.diag_code:
                 ok, detail = False, f'{result.engine}: invalid fixture was not rejected by the frontend: {asdict(result)}'
@@ -178,7 +208,8 @@ def verify_case(source, label, w1_bin, work_dir, expected=None, sanitize=False, 
     rows = []
     for result in results:
         row_ok, _ = compare([results[0], result], expected)
-        if expect_rejection and (result.compile_ok or result.exit_code != 1 or not result.diag_code):
+        if expect_rejection and panic_expectation(expected) is None and (
+                result.compile_ok or result.exit_code != 1 or not result.diag_code):
             row_ok = False
         rows.append(dict(asdict(result), status='passed' if row_ok else 'failed'))
     report = {'label': label, 'feature': feature_for(label), 'sanitize': sanitize, 'status': 'passed' if ok else 'failed',

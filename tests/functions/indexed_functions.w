@@ -3,5 +3,5 @@ let callbacks = [increment]
 let index = 0
 print(callbacks[index](41))
 let table = {"step": increment}
-let step = table["step"] ?? increment
+let step = table["step"]
 print(step(10))

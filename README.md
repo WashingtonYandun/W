@@ -4,7 +4,7 @@
 
 W es un lenguaje experimental con tipos estáticos, compilación a C99 y memoria mediante ARC y copy-on-write. Su objetivo es escribir herramientas y aplicaciones nativas pequeñas con semántica de valores predecible, errores explícitos y acceso controlado a bibliotecas C.
 
-La versión de desarrollo es `0.3.0.dev1`. El lenguaje cambia; no existe todavía una garantía de compatibilidad para producción. El compilador de referencia W0 y el compilador escrito en W, W1, tienen capacidades distintas. Consulta [la matriz de motores](docs/ENGINE_PARITY_MATRIX.md) y [el estado de la expansión](docs/EXPANSION.md).
+La versión de desarrollo es `0.3.0.dev1`. El lenguaje cambia; no existe todavía una garantía de compatibilidad para producción. El compilador de referencia W0 es la autoridad sobre si un programa es válido; W1 es un compilador escrito en W para un subconjunto estricto (sin genéricos, sin payloads de enum y sin pattern matching sobre `Option`/`Result`). Consulta [la matriz de motores](docs/ENGINE_PARITY_MATRIX.md), [el estado de la expansión](docs/EXPANSION.md) y [los límites conocidos](docs/KNOWN_LIMITS.md).
 
 ## Uso
 
@@ -30,7 +30,7 @@ let add: fn(int) -> int = |value| => value + offset
 print(apply(add, 5))
 ```
 
-Las closures conservan snapshots de listas, diccionarios y structs. Las clases mantienen identidad y referencias fuertes; los ciclos fuertes requieren referencias débiles explícitas.
+Las closures capturan por valor: conservan snapshots de listas, diccionarios y structs, y no pueden mutar lo capturado. Las clases mantienen identidad y referencias fuertes; los ciclos fuertes requieren referencias débiles explícitas. Las limitaciones conocidas y las decisiones aplazadas están en [docs/KNOWN_LIMITS.md](docs/KNOWN_LIMITS.md).
 
 ## Módulos y C
 
@@ -59,6 +59,10 @@ La stdlib se importa como `import "std/text" as text`. Incluye módulos `io`, `t
 - `./w lsp`: servidor LSP por stdio, compartiendo el checker y los snapshots de fuentes.
 - `./w test --differential 25 --seed 1000`: comparación de motores.
 
+Un `Err` devuelto por `main` se informa por `stderr` como `W4003` y termina el proceso con
+un código distinto de cero, para que un programa que falla no sea indistinguible de uno
+que tuvo éxito.
+
 ## Estructura
 
 - `lexer/`, `parser/`, `node/`, `wtokens/`: frontend y sintaxis.
@@ -68,7 +72,7 @@ La stdlib se importa como `import "std/text" as text`. Incluye módulos `io`, `t
 - `stdlib/`, `tooling/`, `editors/`: biblioteca y herramientas de edición.
 - `tests/unit/`, `tests/runtime/`, `tests/types/`, `tests/fuzz/`: contratos, fixtures y fuzzing.
 - `examples/`, `bench/`, `tools/`: ejemplos, medición y utilidades.
-- `docs/adr/`: decisiones técnicas; `docs/history/`: informes históricos.
+- `docs/adr/`: decisiones técnicas; `docs/history/`: informes históricos; `docs/KNOWN_LIMITS.md`: lo que W no hace y por qué.
 
 La [especificación](SPEC.md) define el lenguaje. Los informes de hitos describen resultados de su fecha y no reemplazan los contratos actuales.
 

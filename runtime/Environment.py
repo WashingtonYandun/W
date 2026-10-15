@@ -237,13 +237,19 @@ def create_global_environment(stdout: Optional[TextIO] = None) -> Environment:
 
     def slice_fn(args: List[WValue]) -> WValue:
         if len(args) != 3:
-            raise WRuntimeError("slice() takes exactly 3 arguments (str, start, end)")
+            raise WRuntimeError("slice() takes exactly 3 arguments (value, start, end)")
         s_arg, start_arg, end_arg = args[0], args[1], args[2]
-        if not isinstance(s_arg, WStr) or not isinstance(start_arg, WInt) or not isinstance(end_arg, WInt):
-            raise WRuntimeError("slice() expects (str, int, int)")
-        start = max(0, start_arg.value)
-        end = min(len(s_arg.value), end_arg.value)
-        return WStr(s_arg.value[start:end] if end > start else "")
+        if not isinstance(start_arg, WInt) or not isinstance(end_arg, WInt):
+            raise WRuntimeError("slice() expects (str | list, int, int)")
+        if isinstance(s_arg, WList):
+            start = max(0, start_arg.value)
+            end = min(len(s_arg.storage.data), end_arg.value)
+            return WList(elements=list(s_arg.storage.data[start:end]) if end > start else [])
+        if isinstance(s_arg, WStr):
+            start = max(0, start_arg.value)
+            end = min(len(s_arg.value), end_arg.value)
+            return WStr(s_arg.value[start:end] if end > start else "")
+        raise WRuntimeError("slice() expects str or list")
 
     def bytes_fn(args: List[WValue]) -> WValue:
         if len(args) != 1:

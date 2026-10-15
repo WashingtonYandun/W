@@ -42,6 +42,20 @@ PRECEDENCE = {
     TokenType.PERCENT: 9,            # '%'
 }
 
+# Token types that can begin an expression. Used to decide whether `return` has a
+# value and to detect missing statement separators.
+_EXPRESSION_STARTERS = frozenset({
+    TokenType.INT, TokenType.FLOAT, TokenType.STR, TokenType.TRUE, TokenType.FALSE,
+    TokenType.NONE, TokenType.IDENTIFIER, TokenType.THIS, TokenType.SUPER, TokenType.NEW,
+    TokenType.MINUS, TokenType.NOT, TokenType.LPAREN, TokenType.LBRACKET, TokenType.LBRACE,
+    TokenType.PIPE, TokenType.IF, TokenType.MATCH,
+})
+
+# Token types that can legally follow a complete expression statement. Anything
+# else on the same line means the author wrote two expressions without an operator
+# between them (`let x = 1 2`), which the language does not allow.
+_STATEMENT_END_TOKENS = frozenset({TokenType.RBRACE, TokenType.EOF})
+
 class Parser:
     """
     Recursive Descent + Pratt Parser for W Language v0.1.
@@ -225,7 +239,7 @@ class Parser:
                     if self.check(TokenType.RPAREN):
                         break
                     elements.append(self.parse_pattern(allow_tuple=False))
-            self.expect(TokenType.RPAREN, code="P002", msg="Expected ')' after tuple pattern")
+            self.expect(TokenType.RPAREN, code="W0006", msg="Expected ')' after tuple pattern")
             if len(elements) == 1:
                 return elements[0]
             return TuplePattern(elements=elements, line=token.line, col=token.col)
@@ -238,7 +252,7 @@ class Parser:
 
             # Check for EnumPattern: EnumName.Variant(args...)
             if self.match(TokenType.DOT):
-                variant_tok = self.expect(TokenType.IDENTIFIER, code="P002", msg="Expected enum variant name after '.'")
+                variant_tok = self.expect(TokenType.IDENTIFIER, code="W0001", msg="Expected enum variant name after '.'")
                 payload_args: List[Pattern] = []
                 if self.match(TokenType.LPAREN):
                     if not self.check(TokenType.RPAREN):
@@ -247,7 +261,7 @@ class Parser:
                             if self.check(TokenType.RPAREN):
                                 break
                             payload_args.append(self.parse_pattern(allow_tuple=False))
-                    self.expect(TokenType.RPAREN, code="P002", msg="Expected ')' after pattern arguments")
+                    self.expect(TokenType.RPAREN, code="W0006", msg="Expected ')' after pattern arguments")
                 return EnumPattern(enum_name=first_name, variant=variant_tok.value, args=payload_args, line=token.line, col=token.col)
 
             # Check for unqualified Enum variant with payload: Some(x), Ok(v), Err(e)
@@ -259,7 +273,7 @@ class Parser:
                         if self.check(TokenType.RPAREN):
                             break
                         payload_args.append(self.parse_pattern(allow_tuple=False))
-                self.expect(TokenType.RPAREN, code="P002", msg="Expected ')' after pattern arguments")
+                self.expect(TokenType.RPAREN, code="W0006", msg="Expected ')' after pattern arguments")
                 return EnumPattern(enum_name=None, variant=first_name, args=payload_args, line=token.line, col=token.col)
 
             if first_name in ("None", "none"):
@@ -269,7 +283,7 @@ class Parser:
             if allow_tuple and self.check(TokenType.COMMA):
                 elements: List[Pattern] = [IdentifierPattern(first_name, line=token.line, col=token.col)]
                 while self.match(TokenType.COMMA):
-                    next_tok = self.expect(TokenType.IDENTIFIER, code="P002", msg="Expected identifier in tuple pattern")
+                    next_tok = self.expect(TokenType.IDENTIFIER, code="W0001", msg="Expected identifier in tuple pattern")
                     elements.append(IdentifierPattern(next_tok.value, line=next_tok.line, col=next_tok.col))
                 return TuplePattern(elements=elements, line=token.line, col=token.col)
 
@@ -362,6 +376,45 @@ class Parser:
         expr = self.parse_expr()
         return ExprStmt(expr=expr, line=expr.line, col=expr.col)
 
+    def _require_statement_end(self) -> None:
+        """Rejects a second expression where a statement separator is required.
+
+        W has no statement terminator, so a statement ends at a line break, `}`, or
+        EOF. Without this check a typo such as `0x10` silently becomes the identifier
+        `x10`, which then surfaces as a bogus name-resolution error instead of a
+        syntax error.
+
+        This is applied to declarations, not to bare expression statements: a block
+        body is a sequence of expressions and the language permits several on one
+        line (`else err { report_error(...) "" }` appears in the standard library).
+        Tightening that is a separate language decision.
+        """
+        token = self.at()
+        if token.type in _STATEMENT_END_TOKENS:
+            return
+        previous = self.tokens[self.pos - 1] if self.pos > 0 else token
+        if token.line > previous.end_line:
+            return
+        # A literal or an opening delimiter here can only be a second, unterminated
+        # expression: the expression parser already consumed every postfix operator,
+        # binary operator and member access, so nothing can legitimately follow a
+        # completed initializer on the same line. An identifier is deliberately allowed
+        # through, because a block body is a statement sequence and
+        # `else { let a = f() b = 2 }` is accepted W; tightening that is a separate
+        # language decision recorded in docs/KNOWN_LIMITS.md.
+        if token.type not in (TokenType.INT, TokenType.FLOAT, TokenType.STR,
+                              TokenType.TRUE, TokenType.FALSE, TokenType.NONE,
+                              TokenType.LPAREN, TokenType.LBRACKET):
+            return
+        raise ParserError(
+            message=f"Unexpected '{token.type.name}' after a complete expression; "
+                    f"statements must be separated by a line break",
+            line=token.line,
+            col=token.col,
+            file=self.file,
+            code="W0006",
+        )
+
     def _parse_param_list(self, allow_receiver: bool = False) -> List[Param]:
         params: List[Param] = []
         if not self.check(TokenType.RPAREN):
@@ -380,8 +433,8 @@ class Parser:
                     else:
                         break
                 first = False
-                p_name = self.expect(TokenType.IDENTIFIER, code="P002", msg="Expected parameter name")
-                self.expect(TokenType.COLON, code="P002", msg="Expected ':' after parameter name")
+                p_name = self.expect(TokenType.IDENTIFIER, code="W0001", msg="Expected parameter name")
+                self.expect(TokenType.COLON, code="W0001", msg="Expected ':' after parameter name")
                 p_type = self.parse_type()
                 params.append(Param(p_name.value, p_type, line=p_name.line, col=p_name.col))
                 if not self.match(TokenType.COMMA) or self.check(TokenType.RPAREN):
@@ -406,9 +459,9 @@ class Parser:
         start_tok = self.expect(TokenType.FN, code="P004", msg="Expected 'fn'")
         name_tok = self.expect(TokenType.IDENTIFIER, code="P004", msg="Expected function name after 'fn'")
         type_params = self._parse_type_params()
-        self.expect(TokenType.LPAREN, code="P002", msg="Expected '(' after function name")
+        self.expect(TokenType.LPAREN, code="W0006", msg="Expected '(' after function name")
         params = self._parse_param_list(allow_receiver=False)
-        self.expect(TokenType.RPAREN, code="P002", msg="Expected ')' after parameters")
+        self.expect(TokenType.RPAREN, code="W0006", msg="Expected ')' after parameters")
 
         # Return type: defaults to unit if omitted
         return_type = NamedType("unit", line=name_tok.line, col=name_tok.col)
@@ -422,16 +475,16 @@ class Parser:
         start_tok = self.expect(TokenType.INTERFACE, code="P004", msg="Expected 'interface'")
         name_tok = self.expect(TokenType.IDENTIFIER, code="P004", msg="Expected interface name")
         type_params = self._parse_type_params()
-        self.expect(TokenType.LBRACE, code="P002", msg="Expected '{' to start interface body")
+        self.expect(TokenType.LBRACE, code="W0006", msg="Expected '{' to start interface body")
 
         methods: List[InterfaceMethod] = []
         while not self.check(TokenType.RBRACE) and not self.is_at_end():
             self.match(TokenType.PUBLIC)
             fn_tok = self.expect(TokenType.FN, code="P004", msg="Expected 'fn' in interface method declaration")
             m_name = self.expect(TokenType.IDENTIFIER, code="P004", msg="Expected method name after 'fn'")
-            self.expect(TokenType.LPAREN, code="P002", msg="Expected '(' after interface method name")
+            self.expect(TokenType.LPAREN, code="W0006", msg="Expected '(' after interface method name")
             params = self._parse_param_list(allow_receiver=True)
-            self.expect(TokenType.RPAREN, code="P002", msg="Expected ')' after interface method parameters")
+            self.expect(TokenType.RPAREN, code="W0006", msg="Expected ')' after interface method parameters")
             ret_type = NamedType("unit", line=m_name.line, col=m_name.col)
             if self.match(TokenType.ARROW):
                 ret_type = self.parse_type()
@@ -467,7 +520,7 @@ class Parser:
                     self.pos -= 1
                     interfaces[-1] = self.parse_type()
 
-        self.expect(TokenType.LBRACE, code="P002", msg="Expected '{' to start class body")
+        self.expect(TokenType.LBRACE, code="W0006", msg="Expected '{' to start class body")
 
         fields: List[ClassField] = []
         methods: List[MethodDecl] = []
@@ -482,9 +535,9 @@ class Parser:
             if self.check(TokenType.FN):
                 fn_tok = self.advance()
                 m_name = self.expect(TokenType.IDENTIFIER, code="P004", msg="Expected method name after 'fn'")
-                self.expect(TokenType.LPAREN, code="P002", msg="Expected '(' after method name")
+                self.expect(TokenType.LPAREN, code="W0006", msg="Expected '(' after method name")
                 params = self._parse_param_list(allow_receiver=True)
-                self.expect(TokenType.RPAREN, code="P002", msg="Expected ')' after method parameters")
+                self.expect(TokenType.RPAREN, code="W0006", msg="Expected ')' after method parameters")
                 ret_type = NamedType("unit", line=m_name.line, col=m_name.col)
                 if self.match(TokenType.ARROW):
                     ret_type = self.parse_type()
@@ -531,13 +584,14 @@ class Parser:
         self.expect(TokenType.ASSIGN, code="P004", msg="Expected '=' after variable declaration")
         initializer = self.parse_expr()
 
+        self._require_statement_end()
         return LetDecl(name=name_tok.value, is_mut=is_mut, type_ann=type_ann, initializer=initializer, line=start_tok.line, col=start_tok.col)
 
     def parse_struct_decl(self) -> StructDecl:
         start_tok = self.expect(TokenType.STRUCT, code="P004", msg="Expected 'struct'")
         name_tok = self.expect(TokenType.IDENTIFIER, code="P004", msg="Expected struct name")
         type_params = self._parse_type_params()
-        self.expect(TokenType.LBRACE, code="P002", msg="Expected '{' to start struct body")
+        self.expect(TokenType.LBRACE, code="W0006", msg="Expected '{' to start struct body")
 
         fields: List[StructField] = []
         while not self.check(TokenType.RBRACE) and not self.is_at_end():
@@ -554,7 +608,7 @@ class Parser:
         start_tok = self.expect(TokenType.ENUM, code="P004", msg="Expected 'enum'")
         name_tok = self.expect(TokenType.IDENTIFIER, code="P004", msg="Expected enum name")
         type_params = self._parse_type_params()
-        self.expect(TokenType.LBRACE, code="P002", msg="Expected '{' to start enum body")
+        self.expect(TokenType.LBRACE, code="W0006", msg="Expected '{' to start enum body")
 
         variants: List[VariantDecl] = []
         while not self.check(TokenType.RBRACE) and not self.is_at_end():
@@ -567,7 +621,7 @@ class Parser:
                         if self.check(TokenType.RPAREN):
                             break
                         payload_types.append(self.parse_type())
-                self.expect(TokenType.RPAREN, code="P002", msg="Expected ')' after variant payload types")
+                self.expect(TokenType.RPAREN, code="W0006", msg="Expected ')' after variant payload types")
             variants.append(VariantDecl(name=v_tok.value, payload_types=payload_types, line=v_tok.line, col=v_tok.col))
             self.match(TokenType.COMMA)
 
@@ -610,15 +664,35 @@ class Parser:
         body = self.parse_block()
         return ForStmt(pattern=pattern, iterable=iterable, body=body, line=start_tok.line, col=start_tok.col)
 
+    # Tokens that can never begin an expression. `return` followed by one of these
+    # is a bare return; anything else is the returned expression. Deciding on token
+    # identity (rather than on line numbers) is what keeps `return` free of
+    # whitespace ambiguity: `return` newline `a + b` still returns `a + b`, and a
+    # bare `return` is still a bare return because the next token is `}` or EOF.
+    _EXPRESSION_TERMINATORS = frozenset({
+        TokenType.RBRACE, TokenType.RPAREN, TokenType.RBRACKET, TokenType.COMMA,
+        TokenType.ELSE, TokenType.ELIF,
+    })
+
+    def _starts_expression(self) -> bool:
+        token = self.at()
+        if token.type in self._EXPRESSION_TERMINATORS:
+            return False
+        if token.type == TokenType.EOF:
+            return False
+        # `return` immediately followed by a token that cannot open an expression
+        # belongs to the enclosing construct (e.g. the next statement's keyword).
+        return token.type in _EXPRESSION_STARTERS
+
     def parse_return_stmt(self) -> ReturnStmt:
         start_tok = self.expect(TokenType.RETURN, code="P004", msg="Expected 'return'")
-        if self.check(TokenType.RBRACE) or self.is_at_end() or self.at().line > start_tok.line:
+        if not self._starts_expression():
             return ReturnStmt(value=None, line=start_tok.line, col=start_tok.col)
         val = self.parse_expr()
         return ReturnStmt(value=val, line=start_tok.line, col=start_tok.col)
 
     def parse_block(self) -> Block:
-        start_tok = self.expect(TokenType.LBRACE, code="P002", msg="Expected '{' to start block")
+        start_tok = self.expect(TokenType.LBRACE, code="W0006", msg="Expected '{' to start block")
         statements: List[Stmt] = []
         tail_expr: Optional[Expr] = None
 
@@ -658,13 +732,13 @@ class Parser:
                             if self.check(TokenType.RPAREN):
                                 break
                             args.append(self.parse_expr())
-                    self.expect(TokenType.RPAREN, code="P002", msg="Expected ')' after call arguments")
+                    self.expect(TokenType.RPAREN, code="W0006", msg="Expected ')' after call arguments")
                     left = CallExpr(callee=left, args=args, line=paren.line, col=paren.col)
 
                 elif self.check(TokenType.DOT):
                     # Member access
                     dot = self.advance()
-                    prop_tok = self.expect(TokenType.IDENTIFIER, code="P002", msg="Expected property name after '.'")
+                    prop_tok = self.expect(TokenType.IDENTIFIER, code="W0001", msg="Expected property name after '.'")
                     left = MemberExpr(object=left, property=prop_tok.value, line=dot.line, col=dot.col)
 
                 elif self.check(TokenType.LBRACKET):
@@ -679,7 +753,7 @@ class Parser:
                                     if self.check(TokenType.RPAREN):
                                         break
                                     args.append(self.parse_expr())
-                            self.expect(TokenType.RPAREN, code="P002", msg="Expected ')' after generic module call")
+                            self.expect(TokenType.RPAREN, code="W0006", msg="Expected ')' after generic module call")
                             left = CallExpr(left, args, type_args, line=left.line, col=left.col)
                             left.index_alternative = self._parse_index_alternative(saved)
                             continue
@@ -687,7 +761,7 @@ class Parser:
                     # Indexing
                     bracket = self.advance()
                     index_expr = self.parse_expr()
-                    self.expect(TokenType.RBRACKET, code="P002", msg="Expected ']' after index")
+                    self.expect(TokenType.RBRACKET, code="W0006", msg="Expected ']' after index")
                     left = IndexExpr(object=left, index=index_expr, line=bracket.line, col=bracket.col)
 
                 elif self.check(TokenType.QUESTION):
@@ -695,7 +769,7 @@ class Parser:
                     q_tok = self.advance()
                     left = PostfixTryExpr(operand=left, line=q_tok.line, col=q_tok.col)
 
-                elif self.check(TokenType.ELSE):
+                elif self.check(TokenType.ELSE) and not self._begins_match_arm():
                     # In-place error/optional handling: expr else err { ... } or expr else { ... }
                     else_tok = self.advance()
                     err_name: Optional[str] = None
@@ -786,6 +860,27 @@ class Parser:
             self.pos = saved_pos
             return None
 
+    def _begins_match_arm(self) -> bool:
+        """Decides whether a `else` token starts a match arm rather than the postfix
+        error-recovery operator.
+
+        The two uses overlap on a single token. From here we see `else` at the head:
+          `else => ...`          wildcard arm, nothing may consume it
+          `else name => ...`     binding arm, nothing may consume it
+          `else { ... }`         error recovery without a bound error name
+          `else name { ... }`    error recovery binding the error to `name`
+
+        Only the block forms are the operator, so the lookahead is exact and needs no
+        context flag. Without this, `match x { 1 => 10 else => 30 }` swallows the
+        `else` of the arm and reports "expected '{' to start block".
+        """
+        after = self.peek(1)
+        if after.type == TokenType.LBRACE:
+            return False
+        if after.type == TokenType.IDENTIFIER and self.peek(2).type == TokenType.LBRACE:
+            return False
+        return True
+
     def parse_prefix_expr(self, allow_struct_init: bool = True) -> Expr:
         token = self.at()
         if self.match(TokenType.PIPE):
@@ -836,7 +931,7 @@ class Parser:
             while self.match(TokenType.DOT):
                 class_name += "." + self.expect(TokenType.IDENTIFIER).value
             type_args = self._try_parse_generic_type_args(False) if self.check(TokenType.LBRACKET) else None
-            self.expect(TokenType.LPAREN, code="P002", msg="Expected '(' after class name in 'new' expression")
+            self.expect(TokenType.LPAREN, code="W0006", msg="Expected '(' after class name in 'new' expression")
             args: List[Expr] = []
             if not self.check(TokenType.RPAREN):
                 args.append(self.parse_expr())
@@ -844,7 +939,7 @@ class Parser:
                     if self.check(TokenType.RPAREN):
                         break
                     args.append(self.parse_expr())
-            self.expect(TokenType.RPAREN, code="P002", msg="Expected ')' after 'new' arguments")
+            self.expect(TokenType.RPAREN, code="W0006", msg="Expected ')' after 'new' arguments")
             expression = NewExpr(class_name=class_name, args=args, line=token.line, col=token.col)
             expression.type_args = type_args
             return expression
@@ -867,7 +962,7 @@ class Parser:
                         if self.check(TokenType.RPAREN):
                             break
                         call_args.append(self.parse_expr())
-                self.expect(TokenType.RPAREN, code="P002", msg="Expected ')' after call arguments")
+                self.expect(TokenType.RPAREN, code="W0006", msg="Expected ')' after call arguments")
                 call = CallExpr(
                     callee=IdentExpr(name=ident_name, line=token.line, col=token.col),
                     args=call_args,
@@ -885,8 +980,8 @@ class Parser:
                     self.advance()  # consume '{'
                     fields: List[FieldInit] = []
                     while not self.check(TokenType.RBRACE) and not self.is_at_end():
-                        f_tok = self.expect(TokenType.IDENTIFIER, code="P002", msg="Expected struct field name")
-                        self.expect(TokenType.COLON, code="P002", msg="Expected ':' after struct field name")
+                        f_tok = self.expect(TokenType.IDENTIFIER, code="W0001", msg="Expected struct field name")
+                        self.expect(TokenType.COLON, code="W0001", msg="Expected ':' after struct field name")
                         f_val = self.parse_expr()
                         fields.append(FieldInit(name=f_tok.value, value=f_val, line=f_tok.line, col=f_tok.col))
                         self.match(TokenType.COMMA)
@@ -895,11 +990,24 @@ class Parser:
 
             return IdentExpr(name=ident_name, line=token.line, col=token.col)
 
-        # Unary operations: '-' and 'not'
+        # Unary operations: '-' and 'not'.
+        # SPEC 5 puts unary at level 3, tighter than multiplicative (level 4), so the
+        # operand stops below `* / %`. Passing 8 here let `*` bind inside the unary
+        # operator, which made `not a == b` mean `(not a) == b` and broke the int64
+        # minimum literal in `-9223372036854775808 * 1`.
         if self.match(TokenType.MINUS, TokenType.NOT):
-            operand = self.parse_expr(min_prec=8, allow_struct_init=allow_struct_init)
-            if token.value == "-" and isinstance(operand, IntLiteral) and operand.value == 9223372036854775808:
-                return IntLiteral(value=-9223372036854775808, line=token.line, col=token.col)
+            operand = self.parse_expr(min_prec=9, allow_struct_init=allow_struct_init)
+            if token.value == "-" and isinstance(operand, IntLiteral):
+                if operand.value == 9223372036854775808:
+                    return IntLiteral(value=-9223372036854775808, line=token.line, col=token.col)
+                if operand.value > 9223372036854775807:
+                    raise ParserError(
+                        message=f"Integer literal '-{operand.value}' is below the int64 minimum",
+                        line=token.line,
+                        col=token.col,
+                        file=self.file,
+                        code="W0002",
+                    )
             return UnaryExpr(op=token.value, operand=operand, line=token.line, col=token.col)
 
         # Parenthesized expressions & Tuples
@@ -916,10 +1024,10 @@ class Parser:
                         if self.check(TokenType.RPAREN):
                             break
                         elements.append(self.parse_expr())
-                self.expect(TokenType.RPAREN, code="P002", msg="Expected ')' after tuple elements")
+                self.expect(TokenType.RPAREN, code="W0006", msg="Expected ')' after tuple elements")
                 return TupleExpr(elements=elements, line=token.line, col=token.col)
 
-            self.expect(TokenType.RPAREN, code="P002", msg="Expected ')' after expression")
+            self.expect(TokenType.RPAREN, code="W0006", msg="Expected ')' after expression")
             return first_expr
 
         # List Literals
@@ -931,7 +1039,7 @@ class Parser:
                     if self.check(TokenType.RBRACKET):
                         break
                     elements.append(self.parse_expr())
-            self.expect(TokenType.RBRACKET, code="P002", msg="Expected ']' after list elements")
+            self.expect(TokenType.RBRACKET, code="W0006", msg="Expected ']' after list elements")
             return ListExpr(elements=elements, line=token.line, col=token.col)
 
         # Dict Literals: { key: value, ... }
@@ -939,14 +1047,14 @@ class Parser:
             entries: List[DictEntry] = []
             if not self.check(TokenType.RBRACE):
                 k = self.parse_expr()
-                self.expect(TokenType.COLON, code="P002", msg="Expected ':' after dict key")
+                self.expect(TokenType.COLON, code="W0001", msg="Expected ':' after dict key")
                 v = self.parse_expr()
                 entries.append(DictEntry(key=k, value=v, line=k.line, col=k.col))
                 while self.match(TokenType.COMMA):
                     if self.check(TokenType.RBRACE):
                         break
                     k = self.parse_expr()
-                    self.expect(TokenType.COLON, code="P002", msg="Expected ':' after dict key")
+                    self.expect(TokenType.COLON, code="W0001", msg="Expected ':' after dict key")
                     v = self.parse_expr()
                     entries.append(DictEntry(key=k, value=v, line=k.line, col=k.col))
             self.expect(TokenType.RBRACE, code="P007", msg="Unterminated dict literal, expected '}'")
@@ -996,7 +1104,7 @@ class Parser:
     def parse_match_expr(self) -> MatchExpr:
         start_tok = self.expect(TokenType.MATCH, code="P004", msg="Expected 'match'")
         subject = self.parse_expr(allow_struct_init=False)
-        self.expect(TokenType.LBRACE, code="P002", msg="Expected '{' after match subject")
+        self.expect(TokenType.LBRACE, code="W0006", msg="Expected '{' after match subject")
 
         arms: List[MatchArm] = []
         while not self.check(TokenType.RBRACE) and not self.is_at_end():
@@ -1011,7 +1119,7 @@ class Parser:
             if self.match(TokenType.IF):
                 guard = self.parse_expr()
 
-            self.expect(TokenType.FAT_ARROW, code="P002", msg="Expected '=>' after match pattern")
+            self.expect(TokenType.FAT_ARROW, code="W0001", msg="Expected '=>' after match pattern")
 
             body: Block
             if self.check(TokenType.LBRACE):

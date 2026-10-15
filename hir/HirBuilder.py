@@ -68,6 +68,13 @@ class HirBuilder:
         self.imported_files: Set[str] = set()
         self.symbol_counter = 0
         self.scopes: List[Dict[str, SymbolId]] = [{}]
+        # Statements recorded while lowering an assignment used as a sub-expression;
+        # drained by the enclosing block (`a = b` yields the assigned value).
+        self.pending_stmts: List[HirStmt] = []
+        # Nesting depth of assignment-expression lowering: only the outermost call
+        # re-parks the ordered statement list for the enclosing block.
+        self._pending_depth = 0
+        self.assign_temp_counter = 0
 
     def _push_scope(self) -> None:
         self.scopes.append({})
@@ -390,19 +397,96 @@ class HirBuilder:
 
     def _lower_block(self, block: Block) -> HirBlock:
         self._push_scope()
-        stmts = [self._lower_stmt(s) for s in block.statements]
+        stmts: List[HirStmt] = []
+        for statement in block.statements:
+            lowered = self._lower_stmt(statement)
+            # An assignment used as a sub-expression records its statements here,
+            # because the HIR has no assignment expression node. They execute before
+            # the statement that consumes the assigned value.
+            stmts.extend(self._take_pending_stmts())
+            stmts.append(lowered)
         tail_hir = None
         if block.tail_expr is not None:
             if isinstance(block.tail_expr, AssignmentExpr):
                 tgt_hir = self._lower_expr(block.tail_expr.target)
                 val_hir = self._lower_expr(block.tail_expr.value)
                 path = self._build_cow_path(tgt_hir)
+                stmts.extend(self._take_pending_stmts())
                 stmts.append(HirAssign(tgt_hir, val_hir, Span(block.tail_expr.line, block.tail_expr.col), path=path))
                 tail_hir = HirConstUnit(TYPE_UNIT, Span(block.tail_expr.line, block.tail_expr.col))
             else:
                 tail_hir = self._lower_expr(block.tail_expr)
+                stmts.extend(self._take_pending_stmts())
         self._pop_scope()
         return HirBlock(stmts, self._span(block), tail_expr=tail_hir)
+
+    def _take_pending_stmts(self) -> List[HirStmt]:
+        """Drains statements recorded by expression lowering (`a = b` as a value)."""
+        pending = self.pending_stmts
+        self.pending_stmts = []
+        return pending
+
+    def _lower_assignment_expression(self, expr: AssignmentExpr) -> HirExpr:
+        """Lowers `a = b` used where a value is required.
+
+        W defines assignment as a right-associative expression (`=` has a precedence level
+        in SPEC 5), so `a = b = 5`, `let x = (a = 1)` and `d = e = f = 9` are all legal,
+        but the HIR has no assignment expression node.
+
+        The lowering produces a complete, already ordered statement plan:
+
+            1. what the target expression needed,
+            2. what the value expression needed (including a nested assignment's plan),
+            3. the assignment that gives this target its new value,
+            4. a capture of the target, so an enclosing assignment cannot overwrite the
+               value before this expression reads it.
+
+        Reading the target instead of capturing it (which `w_assign` returning its argument
+        suggests) resurfaces the *old* value whenever the target is written again later in
+        the same chain, so the capture is required.
+
+        Only the outermost assignment publishes the plan through `pending_stmts`; nested
+        calls return theirs through the value expression's own `pending_stmts`, which this
+        call absorbs. A nested call must never clear the list, because that list belongs to
+        the enclosing one.
+        """
+        span = self._span(expr)
+        outer = self._pending_depth == 0
+
+        self._pending_depth += 1
+        try:
+            tgt_hir = self._lower_expr(expr.target)
+            pre = self.pending_stmts
+            self.pending_stmts = []
+            val_hir = self._lower_expr(expr.value)
+            inner = self.pending_stmts
+        finally:
+            self._pending_depth -= 1
+        self.pending_stmts = []
+
+        # A nested assignment's plan ends with the statement that gives the value; that
+        # statement is this target's assignment too, so it is taken out and re-appended
+        # in place instead of being duplicated.
+        nested = list(inner)
+        creation = nested.pop() if isinstance(nested[-1] if nested else None, HirAssign) else None
+        statements: List[HirStmt] = []
+        statements.extend(pre)
+        statements.extend(nested)
+        if creation is not None:
+            statements.append(creation)
+        else:
+            statements.append(HirAssign(tgt_hir, val_hir, span,
+                                        path=self._build_cow_path(tgt_hir)))
+
+        temp_name = f"__w_assign_value_{self.assign_temp_counter}"
+        self.assign_temp_counter += 1
+        tempid = self._declare_symbol(temp_name)
+        tid = self._get_expr_type_id(expr) or tgt_hir.type_id
+        statements.append(HirBindTemp(temp_name, tid, tgt_hir, span, symbol_id=tempid))
+
+        if outer:
+            self.pending_stmts = statements
+        return HirLocalRef(temp_name, tid, span, symbol_id=tempid)
 
     def _lower_stmt(self, stmt: Stmt) -> HirStmt:
         span = self._span(stmt)
@@ -510,6 +594,8 @@ class HirBuilder:
             left_hir = self._lower_expr(expr.left)
             right_hir = self._lower_expr(expr.right)
             return HirBinaryOp(getattr(expr, "op", getattr(expr, "operator", "+")), left_hir, right_hir, tid, span)
+        elif isinstance(expr, AssignmentExpr):
+            return self._lower_assignment_expression(expr)
         elif isinstance(expr, NewExpr):
             raw_args = getattr(expr, "arguments", getattr(expr, "args", []))
             args_hir = [self._lower_expr(a) for a in raw_args]

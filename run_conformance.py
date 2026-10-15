@@ -14,7 +14,7 @@ from codegen.CCodeGen import CCodeGen
 from hir.HirBuilder import HirBuilder
 from hir.HirNodes import HirModule
 from hir.HirCCodeGen import HirCCodeGen
-from tests.engine_harness import unsupported_reason
+from tests.engine_harness import panic_expectation, unsupported_reason
 from tests.unit.test_w1_split_conformance import test_split_conformance
 from tests.unit.test_generic_hardening import run_generic_hardening_tests
 from tests.unit.test_cow_telemetry import run_cow_telemetry_suite
@@ -25,7 +25,7 @@ from tests.unit.test_c04_adt_layout import run_all as run_c04_adt_tests
 from tests.unit.test_c05_types_inference import run_all as run_c05_types_tests
 from tests.unit.test_c06_default_backend import run_all as run_c06_backend_tests
 from tests.unit.test_d01_w1_parity_matrix import run_all as run_d01_parity_tests
-from error.Error import DIAGNOSTIC_CODES, LexerError, ParserError, TypeError, WError
+from error.Error import DIAGNOSTIC_CODES, LexerError, ParserError, TypeError, WError, WRuntimeError
 from wtokens.TokenType import TokenType
 from node.NodeType import Program
 
@@ -37,6 +37,21 @@ def _check_expected_diag_code(code_text: str, err: WError) -> None:
         if s.startswith("# ERROR:"):
             expected_code = s.split(":", 1)[1].strip()
             assert err.code == expected_code, f"Expected diagnostic code {expected_code}, got {err.code}"
+
+
+def _assert_native_outcome(name, result, expected, panic_code):
+    """Checks one native run against the fixture contract.
+
+    A normal fixture must exit 0 and reproduce its expected stdout. A panic fixture
+    (`# RUNTIME_PANIC: Wxxxx`) must exit non-zero and report that exact code on stderr.
+    """
+    if panic_code is not None:
+        assert result.returncode != 0, f"{name}: expected {panic_code} panic, exited 0"
+        assert panic_code in result.stderr, (
+            f"{name}: expected {panic_code} on stderr, got {result.stderr!r}")
+        return
+    assert result.returncode == 0, result.stderr
+    assert result.stdout == expected, f"{name}: expected {expected!r}, got {result.stdout!r}"
 
 
 def sha256_file(path: str) -> str:
@@ -76,6 +91,30 @@ def _run_suite_in_repo(repo_root: str) -> None:
         try:
             tokens = Lexer(code, file=f).tokenize()
             assert len(tokens) > 0 and tokens[-1].type == TokenType.EOF
+            # "produced at least one token" is satisfied by returning only EOF, so the
+            # fixture has to be checked against the token stream it actually declares.
+            expected = None
+            kinds = []
+            for line in code.splitlines():
+                stripped = line.strip()
+                if stripped.startswith("# TOKENS:"):
+                    expected = stripped.split(":", 1)[1].split()
+                elif stripped.startswith("# TOKEN:"):
+                    kinds.append(stripped.split(":", 1)[1].strip())
+            if expected is not None:
+                actual = [t.type.name for t in tokens]
+                assert actual == expected, f"token kinds {actual} != declared {expected}"
+            actual_kinds = {t.type.name for t in tokens}
+            for kind in kinds:
+                assert kind in actual_kinds, f"declared token '{kind}' was not produced"
+            # Position metadata must describe the real source, not a placeholder.
+            for token in tokens:
+                assert token.line >= 1 and token.col >= 1, f"invalid position on {token}"
+                if token.type != TokenType.EOF:
+                    assert token.start_offset is not None and token.end_offset is not None, \
+                        f"token {token.type.name} is missing source offsets"
+                    assert token.end_offset > token.start_offset, \
+                        f"token {token.type.name} has an empty source span"
             v_lex_passed += 1
         except Exception as e:
             print(f"  [LEXER FAIL] {f}: {e}")
@@ -112,6 +151,19 @@ def _run_suite_in_repo(repo_root: str) -> None:
         try:
             ast = Parser(file=f).parse(code)
             assert isinstance(ast, Program)
+            # An empty Program satisfies isinstance, so check that the parsed body
+            # matches the source and serialises with the declared AST version.
+            assert ast.body, "parsed AST has an empty body"
+            dumped = ast.to_dict()
+            assert dumped.get("w_ast_version") == "0.1", "AST must declare w_ast_version 0.1"
+            # Only column-zero declarations are top level; members of a class,
+            # interface or struct body are indented and belong to that declaration.
+            declared = sum(1 for line in code.splitlines()
+                           if line[:1] not in (" ", "\t")
+                           and line.startswith(("fn ", "struct ", "enum ", "class ", "interface ", "let ", "pub ")))
+            if declared:
+                assert len(ast.body) >= declared, \
+                    f"AST body has {len(ast.body)} nodes for {declared} declared top-level statements"
             v_parse_passed += 1
         except Exception as e:
             print(f"  [PARSER FAIL] {f}: {e}")
@@ -149,6 +201,20 @@ def _run_suite_in_repo(repo_root: str) -> None:
             ast = Parser(file=path).parse(code)
             checker = TypeChecker(file=path)
             checker.check(ast)
+            # A checker that accepts without recording anything is indistinguishable
+            # from one that never ran, so require that annotated declarations were
+            # actually visited and typed.
+            from node.NodeType import FnDecl, LetDecl, StructDecl, EnumDecl, ClassDecl
+            declarations = [node for node in ast.body if isinstance(node, (FnDecl, LetDecl, StructDecl, EnumDecl, ClassDecl))]
+            assert declarations, "fixture declares nothing for the checker to verify"
+            for node in ast.body:
+                if isinstance(node, (FnDecl, StructDecl, EnumDecl)):
+                    assert node.name in checker.global_scope.symbols or node.name in checker.global_scope.types, \
+                        f"checker never registered declaration '{node.name}'"
+            for node in ast.body:
+                if isinstance(node, FnDecl):
+                    assert node.name in checker.global_scope.symbols, \
+                        f"function '{node.name}' missing from the checked global scope"
             v_type_passed += 1
         except Exception as e:
             print(f"  [TYPE FAIL] {f}: {e}")
@@ -211,6 +277,13 @@ def _run_suite_in_repo(repo_root: str) -> None:
             ast2 = Parser(file=path).parse(out1)
             out2 = fmt.format(ast2)
             assert out1 == out2
+            # Idempotence alone is satisfied by a formatter that deletes everything, so
+            # the output must stay parseable and keep the program's text.
+            assert out1.strip(), "formatter produced empty output"
+            source_names = {t.value for t in Lexer(code, file=path).tokenize() if t.type == TokenType.IDENTIFIER}
+            formatted_names = {t.value for t in Lexer(out1, file=path).tokenize() if t.type == TokenType.IDENTIFIER}
+            missing = source_names - formatted_names
+            assert not missing, f"formatter dropped identifiers: {sorted(missing)[:5]}"
             fmt_passed += 1
         except Exception as e:
             print(f"  [FORMATTER FAIL] {path}: {e}")
@@ -230,6 +303,17 @@ def _run_suite_in_repo(repo_root: str) -> None:
             builder = HirBuilder(checker.interner, file_path=path)
             hir_mod = builder.lower(ast)
             assert isinstance(hir_mod, HirModule)
+            # An empty module satisfies `isinstance`, so require that lowering actually
+            # reproduced the program's declarations and that every node carries a
+            # resolved type rather than the TYPE_ERROR sentinel.
+            source_fns = [n for n in ast.body if isinstance(n, FnDecl)]
+            lowered_names = {fn.name for fn in hir_mod.functions}
+            for node in source_fns:
+                assert node.name in lowered_names, f"function '{node.name}' was not lowered to HIR"
+            for fn in hir_mod.functions:
+                assert fn.return_type_id != 0, f"function '{fn.name}' has an unresolved HIR return type"
+                for parameter in fn.params:
+                    assert parameter.type_id != 0, f"parameter '{parameter.name}' has an unresolved HIR type"
             hir_passed += 1
         except Exception as e:
             print(f"  [HIR FAIL] {path}: {e}")
@@ -248,17 +332,32 @@ def _run_suite_in_repo(repo_root: str) -> None:
             code = stream.read()
 
         buf = io.StringIO()
+        expected = ""
+        if os.path.exists(expected_path):
+            with open(expected_path, "r", encoding="utf-8") as exp_stream:
+                expected = exp_stream.read().strip()
+        panic_code = panic_expectation(expected)
         try:
             ast = Parser(file=path).parse(code)
             checker = TypeChecker(file=path)
             checker.check(ast)
             interp = Interpreter(stdout=buf, file=path)
-            interp.interpret(ast)
+            if panic_code is None:
+                interp.interpret(ast)
+            else:
+                # Panic fixtures declare the diagnostic they must raise, so the expected
+                # "output" is the error, not stdout.
+                try:
+                    interp.interpret(ast)
+                except WRuntimeError as err:
+                    assert err.code == panic_code, (
+                        f"{f}: fixture declares {panic_code}, interpreter raised {err.code}: {err.message}")
+                else:
+                    raise AssertionError(
+                        f"{f}: fixture declares a {panic_code} runtime panic but the interpreter exited normally")
 
             actual = buf.getvalue().strip()
-            if os.path.exists(expected_path):
-                with open(expected_path, "r", encoding="utf-8") as exp_stream:
-                    expected = exp_stream.read().strip()
+            if panic_code is None and expected:
                 assert actual == expected, f"Output mismatch: expected {expected!r}, got {actual!r}"
 
             runtime_passed += 1
@@ -299,8 +398,7 @@ def _run_suite_in_repo(repo_root: str) -> None:
                 comp = subprocess.run([os.environ.get("CC", "cc"), "-std=c99", f"-I{repo_root}"] + extra_cc_flags + [c_path, "-o", bin_path], timeout=120, capture_output=True, text=True)
                 assert comp.returncode == 0, comp.stderr
                 run_res = subprocess.run([bin_path], timeout=30, capture_output=True, text=True)
-                assert run_res.returncode == 0, run_res.stderr
-                assert run_res.stdout == expected, f"Expected {expected!r}, got {run_res.stdout!r}"
+                _assert_native_outcome(f, run_res, expected, panic_expectation(expected))
                 c99_passed += 1
             except Exception as e:
                 print(f"  [C99 FAIL] {f}: {e}")
@@ -350,8 +448,7 @@ def _run_suite_in_repo(repo_root: str) -> None:
                 subprocess.run([s2_bin, path, w1_c_path], check=True, timeout=120, capture_output=True, cwd=repo_root)
                 subprocess.run([os.environ.get("CC", "cc"), "-std=c99", f"-I{repo_root}"] + extra_cc_flags + [w1_c_path, "-o", w1_bin_path], check=True, timeout=120, capture_output=True)
                 run_res = subprocess.run([w1_bin_path], timeout=30, capture_output=True, text=True, cwd=repo_root)
-                assert run_res.returncode == 0, run_res.stderr
-                assert run_res.stdout == expected
+                _assert_native_outcome(f, run_res, expected, panic_expectation(expected))
                 w1_runtime_passed += 1
 
             # 10. Verify Showcase Examples (examples/*.w) on W0 Interpreter, W0 C99, and W1 Stage-2 Native
@@ -412,14 +509,14 @@ def _run_suite_in_repo(repo_root: str) -> None:
                 comp = subprocess.run([os.environ.get("CC", "cc"), "-std=c99", f"-I{repo_root}"] + extra_cc_flags + [c_path, "-o", bin_path], timeout=120, capture_output=True, text=True)
                 assert comp.returncode == 0, comp.stderr
                 run_res = subprocess.run([bin_path], timeout=30, capture_output=True, text=True, cwd=repo_root)
-                assert run_res.returncode == 0, run_res.stderr
-                assert run_res.stdout == expected, f"HIR C99 mismatch on {f}: expected {expected!r}, got {run_res.stdout!r}"
+                _assert_native_outcome(f, run_res, expected, panic_expectation(expected))
                 hir_c99_passed += 1
             except Exception as e:
                 print(f"  [HIR C99 FAIL] {f}: {e}")
 
     # 12. Modular W1 Split Conformance
-    split_ok = test_split_conformance()
+    test_split_conformance()
+    split_ok = True
 
     # 13. Generic Hardening & Metrics Conformance
     hardening_ok = run_generic_hardening_tests()

@@ -30,6 +30,11 @@ from runtime.Interpreter import Interpreter
 from hir.HirBuilder import HirBuilder
 from hir.HirCCodeGen import HirCCodeGen
 
+# Samples per measurement, after one warmup run. Three samples cannot
+# characterise an OS-scheduled process, and the two engines are now measured
+# with the same protocol.
+SAMPLES = 15
+
 BENCHMARK_ORDER: List[str] = [
     "arithmetic.w",
     "function_calls.w",
@@ -53,7 +58,8 @@ def run_benchmark_suite(repo_root: str, w1_bin: str, update_baseline: bool = Fal
     print("=========================================================================================================")
     header = (
         f"{'Benchmark':<20} | {'W0 Interp (ms)':>14} | {'W0 Compile (ms)':>15} | "
-        f"{'W0 HIR C99(ms)':>14} | {'W1 Compile (ms)':>15} | {'W1 C99 (ms)':>11} | {'Bin (KB)':>8} | {'Speedup':>8}"
+        f"{'W0 HIR C99(ms)':>14} | {'W1 Compile (ms)':>15} | {'W1 C99 (ms)':>11} | {'Bin (KB)':>8} | "
+        f"{'vs HIR':>7} | {'vs W1':>7}"
     )
     print(header)
     print("-" * len(header))
@@ -64,19 +70,31 @@ def run_benchmark_suite(repo_root: str, w1_bin: str, update_baseline: bool = Fal
             with open(path, "r", encoding="utf-8") as f:
                 source = f.read()
 
-            # 1. W0 Interpreter timing
-            old_stdout = sys.stdout
-            buf_out = io.StringIO()
-            sys.stdout = buf_out
-            t0 = time.perf_counter()
-            try:
-                ast = Parser(file=path).parse(source)
-                TypeChecker(file=path).check(ast)
-                Interpreter(file=path).interpret(ast)
-            finally:
-                sys.stdout = old_stdout
-            w0_interp_ms = (time.perf_counter() - t0) * 1000.0
-            interp_out = buf_out.getvalue()
+            # 1. W0 Interpreter timing.
+            # Parsing and type checking are hoisted out of the timer: they are frontend
+            # work that the native rows book in their "Compile" column, and leaving them
+            # inside the interpreter measurement inflated the headline ratio. The
+            # interpreter also gets a warmup run and a median of samples, matching the
+            # treatment the native binaries receive.
+            ast = Parser(file=path).parse(source)
+            TypeChecker(file=path).check(ast)
+
+            def run_interpreter() -> str:
+                captured = io.StringIO()
+                saved, sys.stdout = sys.stdout, captured
+                try:
+                    Interpreter(file=path).interpret(ast)
+                finally:
+                    sys.stdout = saved
+                return captured.getvalue()
+
+            interp_out = run_interpreter()
+            interp_times = []
+            for _ in range(SAMPLES):
+                t0 = time.perf_counter()
+                run_interpreter()
+                interp_times.append((time.perf_counter() - t0) * 1000.0)
+            w0_interp_ms = statistics.median(interp_times)
 
             # 2. W0 Typed HIR C99 Native compile + execution timing
             w0_c_path = os.path.join(work_dir, f"w0_{fname}.c")
@@ -100,11 +118,11 @@ def run_benchmark_suite(repo_root: str, w1_bin: str, update_baseline: bool = Fal
             )
             w0_compile_ms = (time.perf_counter() - t_c0) * 1000.0
 
-            # Warmup + 3 sample median execution
+            # Warmup + SAMPLES sample median execution
             subprocess.run([w0_bin_path], check=True, capture_output=True, text=True, cwd=repo_root)
             r0_times = []
             r0_proc = None
-            for _ in range(3):
+            for _ in range(SAMPLES):
                 t_r0 = time.perf_counter()
                 r0_proc = subprocess.run([w0_bin_path], check=True, capture_output=True, text=True, cwd=repo_root)
                 r0_times.append((time.perf_counter() - t_r0) * 1000.0)
@@ -133,7 +151,7 @@ def run_benchmark_suite(repo_root: str, w1_bin: str, update_baseline: bool = Fal
             subprocess.run([w1_bin_path], check=True, capture_output=True, text=True, cwd=repo_root)
             r1_times = []
             r1_proc = None
-            for _ in range(3):
+            for _ in range(SAMPLES):
                 t_r1 = time.perf_counter()
                 r1_proc = subprocess.run([w1_bin_path], check=True, capture_output=True, text=True, cwd=repo_root)
                 r1_times.append((time.perf_counter() - t_r1) * 1000.0)
@@ -141,6 +159,12 @@ def run_benchmark_suite(repo_root: str, w1_bin: str, update_baseline: bool = Fal
             assert r1_proc is not None and r1_proc.stdout == interp_out, f"W1 C99 output mismatch on {fname}"
 
             bin_kb = os.path.getsize(w1_bin_path) / 1024.0
+            # Two ratios, because "the speedup" depends entirely on which native binary
+            # is in the denominator and reporting only the slower one flattered every
+            # row by 10-25%. These are ratios against W's own interpreter, not against
+            # C, Rust or Go; a comparison with a hand-written C equivalent is the only
+            # way to make a claim about the compiler's output quality.
+            speedup_vs_hir = w0_interp_ms / max(w0_c99_ms, 0.01)
             speedup = w0_interp_ms / max(w1_c99_ms, 0.01)
 
             row = {
@@ -152,13 +176,17 @@ def run_benchmark_suite(repo_root: str, w1_bin: str, update_baseline: bool = Fal
                 "w1_c99_ms": w1_c99_ms,
                 "bin_kb": bin_kb,
                 "speedup": speedup,
+                "speedup_vs_hir": speedup_vs_hir,
+                "interp_samples_ms": interp_times,
+                "w0_c99_samples_ms": r0_times,
+                "w1_c99_samples_ms": r1_times,
             }
             rows.append(row)
 
             print(
                 f"{fname:<20} | {w0_interp_ms:>14.2f} | {w0_compile_ms:>15.2f} | "
                 f"{w0_c99_ms:>14.2f} | {w1_compile_ms:>15.2f} | {w1_c99_ms:>11.2f} | "
-                f"{bin_kb:>8.1f} | {speedup:>7.1f}x"
+                f"{bin_kb:>8.1f} | {speedup_vs_hir:>6.1f}x | {speedup:>6.1f}x"
             )
 
     print("=========================================================================================================")

@@ -242,13 +242,19 @@ class ExprStmt(Stmt):
         return {"kind": "ExprStmt", "expr": self.expr.to_dict(), "line": self.line, "col": self.col}
 
 class Param(Node):
-    def __init__(self, name: str, type_ann: TypeNode, line: int = 1, col: int = 1):
+    def __init__(self, name: str, type_ann: Optional[TypeNode], line: int = 1, col: int = 1):
         super().__init__(line, col)
         self.name = name
         self.type_ann = type_ann
 
     def to_dict(self) -> dict:
-        return {"kind": "Param", "name": self.name, "type_ann": self.type_ann.to_dict(), "line": self.line, "col": self.col}
+        return {
+            "kind": "Param",
+            "name": self.name,
+            "type_ann": self.type_ann.to_dict() if self.type_ann else None,
+            "line": self.line,
+            "col": self.col,
+        }
 
 class FnDecl(Stmt):
     def __init__(
