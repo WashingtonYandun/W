@@ -310,6 +310,13 @@ class HirBuilder:
         ret_tid = self._get_type_id_from_node(decl.return_type) if decl.return_type else TYPE_UNIT
         body_hir = self._lower_block(decl.body)
         self._pop_scope()
+        if ret_tid == TYPE_UNIT:
+            if body_hir.tail_expr is not None and body_hir.tail_expr.type_id != TYPE_UNIT:
+                body_hir.statements.append(HirExprStmt(body_hir.tail_expr, body_hir.tail_expr.span))
+                body_hir.tail_expr = HirConstUnit(TYPE_UNIT, body_hir.tail_expr.span)
+            elif body_hir.tail_expr is None:
+                body_hir.tail_expr = HirConstUnit(TYPE_UNIT, body_hir.span)
+
         is_fallible = False
         err_type_name = ""
         if decl.return_type and isinstance(decl.return_type, AstResultType):
@@ -342,6 +349,13 @@ class HirBuilder:
         ret_tid = self._get_type_id_from_node(decl.return_type) if decl.return_type else TYPE_UNIT
         body_hir = self._lower_block(decl.body)
         self._pop_scope()
+        if ret_tid == TYPE_UNIT:
+            if body_hir.tail_expr is not None and body_hir.tail_expr.type_id != TYPE_UNIT:
+                body_hir.statements.append(HirExprStmt(body_hir.tail_expr, body_hir.tail_expr.span))
+                body_hir.tail_expr = HirConstUnit(TYPE_UNIT, body_hir.tail_expr.span)
+            elif body_hir.tail_expr is None:
+                body_hir.tail_expr = HirConstUnit(TYPE_UNIT, body_hir.span)
+
         is_fallible = False
         err_type_name = ""
         if decl.return_type and isinstance(decl.return_type, AstResultType):

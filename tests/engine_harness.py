@@ -88,9 +88,10 @@ def run_engine(engine, source, label, w1_bin, directory, sanitize=False):
     elif engine == 'w1':
         # Direct invocation: no W0 parser/checker runs on the input first.
         command = [str(w1_bin), str(source_path), str(c_path)]
-    else:
-        command = driver + ['emit-c'] + (['--hir'] if engine == 'hir' else [])
-        command += [str(source_path), '-o', str(c_path)]
+    elif engine == 'ast':
+        command = driver + ['emit-c', '--backend=ast', str(source_path), '-o', str(c_path)]
+    elif engine == 'hir':
+        command = driver + ['emit-c', '--backend=hir', str(source_path), '-o', str(c_path)]
     front = execute(command, directory, 'frontend', 120)
     result = EngineResult(engine)
     failure = ('timeout' in front or 'launch_error' in front or front['returncode'] < 0)

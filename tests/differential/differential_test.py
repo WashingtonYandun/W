@@ -10,6 +10,8 @@ from parser.Parser import Parser
 from checker.TypeChecker import TypeChecker
 from formatter.Formatter import Formatter
 from codegen.CCodeGen import CCodeGen
+from hir.HirBuilder import HirBuilder
+from hir.HirCCodeGen import HirCCodeGen
 from error.Error import WError
 
 
@@ -331,7 +333,10 @@ def run_fuzz_suite(
             if tokens:
                 ast = Parser(file=label).parse(fuzz_code)
                 Formatter().format(ast)
-                TypeChecker(file=label).check(ast)
+                tc = TypeChecker(file=label)
+                tc.check(ast)
+                hir_mod = HirBuilder(tc.interner, file_path=label).lower(ast)
+                HirCCodeGen(tc.interner, file_path=label).generate(hir_mod)
                 CCodeGen(file=label).generate(ast)
         except WError:
             # Expected structured diagnostic rejection on invalid fuzz inputs

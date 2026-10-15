@@ -87,12 +87,21 @@ def run_pipeline(
     fmt_write: bool = False,
     emit_c_path: Optional[str] = None,
     build_bin_path: Optional[str] = None,
+    backend: str = "hir",
     use_selfhost: bool = False,
-    use_hir: bool = False,
+    use_hir: Optional[bool] = None,
     sanitize: bool = False,
     show_stats: bool = False,
 ) -> int:
     try:
+        # Resolve legacy flags if passed explicitly
+        if use_selfhost:
+            backend = "selfhost"
+        elif use_hir is False:
+            backend = "ast"
+        elif use_hir is True:
+            backend = "hir"
+
         # 1. Lexing
         lexer = Lexer(source_code, file=file_name)
         tokens = lexer.tokenize()
@@ -143,7 +152,7 @@ def run_pipeline(
         if emit_c_path is not None or build_bin_path is not None:
             repo_root = get_repo_root()
             codegen_inst = None
-            if use_selfhost and file_name != "<stdin>":
+            if backend == "selfhost" and file_name != "<stdin>":
                 w1_bin = ensure_selfhost_w1_binary(repo_root)
                 abs_input = os.path.abspath(file_name)
                 input_dir = os.path.dirname(abs_input) or os.getcwd()
@@ -164,14 +173,15 @@ def run_pipeline(
                 finally:
                     if os.path.exists(tmp_w1_c_path):
                         os.remove(tmp_w1_c_path)
-            elif use_hir:
+            elif backend == "ast":
+                codegen_inst = CCodeGen(file=file_name)
+                c_code = codegen_inst.generate(ast)
+            else:
+                # Default C06 backend: Typed HIR -> HirCCodeGen -> C99
                 builder = HirBuilder(checker.interner, file_path=file_name)
                 hir_mod = builder.lower(ast)
                 codegen_inst = HirCCodeGen(checker.interner, file_path=file_name)
                 c_code = codegen_inst.generate(hir_mod)
-            else:
-                codegen_inst = CCodeGen(file=file_name)
-                c_code = codegen_inst.generate(ast)
 
             if show_stats:
                 stat_obj = {
@@ -295,8 +305,8 @@ def print_help() -> None:
     print("  w fmt [--write] <file.w>                    # Canonical deterministic formatter")
     print("  w ast [--json] <file.w>                     # Emit canonical JSON AST (v0.1)")
     print("  w tokens <file.w>                           # Emit lexical token stream")
-    print("  w emit-c [--hir] [--selfhost] [--stats] <file.w> [-o <out.c>] # Transpile W source to C99")
-    print("  w build [--hir] [--selfhost] [--stats] <file.w> [-o <bin>]    # Compile W source to native binary")
+    print("  w emit-c [--backend=hir|ast|selfhost] [--stats] <file.w> [-o <out.c>] # Transpile W source to C99 (default: hir)")
+    print("  w build [--backend=hir|ast|selfhost] [--stats] <file.w> [-o <bin>]    # Compile W source to native binary (default: hir)")
     print("  w test [--differential [N]] [--fuzz [N]]            # Run conformance, differential, or fuzz suite")
     print("  w bench [--update-baseline]                         # Run W0/W1 performance benchmark harness")
     print("  w version                                           # Show compiler version")
@@ -311,8 +321,9 @@ def main() -> None:
     show_stats = False
     fmt_only = False
     fmt_write = False
+    backend = "hir"
     use_selfhost = False
-    use_hir = False
+    use_hir = None
     emit_c_path: Optional[str] = None
     build_bin_path: Optional[str] = None
     subcmd: Optional[str] = None
@@ -389,7 +400,11 @@ def main() -> None:
         if arg in ("--tokens", "-t"):
             show_tokens = True
         elif arg == "--ast":
-            show_ast = True
+            if subcmd == "ast":
+                show_ast = True
+            else:
+                backend = "ast"
+                use_hir = False
         elif arg in ("--check", "-c"):
             check_only = True
         elif arg == "--json":
@@ -400,10 +415,22 @@ def main() -> None:
             fmt_only = True
         elif arg in ("--write", "-w"):
             fmt_write = True
-        elif arg == "--selfhost":
+        elif arg in ("--selfhost", "--backend=selfhost"):
+            backend = "selfhost"
             use_selfhost = True
-        elif arg == "--hir":
+        elif arg in ("--hir", "--backend=hir"):
+            backend = "hir"
             use_hir = True
+        elif arg in ("--backend=ast",):
+            backend = "ast"
+            use_hir = False
+        elif arg.startswith("--backend="):
+            b_val = arg.split("=", 1)[1]
+            if b_val in ("hir", "ast", "selfhost"):
+                backend = b_val
+            else:
+                print(f"Error: Unknown backend '{b_val}'. Valid backends: hir, ast, selfhost", file=sys.stderr)
+                sys.exit(1)
         elif arg in ("--version", "-v"):
             print(f"W Language Compiler v{W_VERSION} (W0 + W1 Self-Hosted C99)")
             sys.exit(0)
@@ -457,6 +484,7 @@ def main() -> None:
             fmt_write=fmt_write,
             emit_c_path=emit_c_path,
             build_bin_path=build_bin_path,
+            backend=backend,
             use_selfhost=use_selfhost,
             use_hir=use_hir,
             sanitize=sanitize,
