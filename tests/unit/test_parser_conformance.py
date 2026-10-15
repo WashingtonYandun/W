@@ -1,8 +1,7 @@
 import os
-import sys
 import json
 from parser.Parser import Parser
-from error.Error import ParserError
+from error.Error import DIAGNOSTIC_CODES, ParserError
 from node.NodeType import Program
 
 def test_parser_suite():
@@ -17,7 +16,7 @@ def test_parser_suite():
     failures = []
 
     print("==================================================")
-    print("W Language Parser Conformance Suite (SPEC v0.1)")
+    print("W Language Parser Conformance Suite")
     print("==================================================")
 
     print(f"\n--- Parser Valid ({len(valid_files)} tests) ---")
@@ -57,7 +56,8 @@ def test_parser_suite():
             print(f"  [FAIL] {f}: Expected ParserError, but AST produced: {ast}")
             failures.append((f, "Expected ParserError but succeeded"))
         except ParserError as err:
-            assert err.code.startswith("P"), f"Parser error code should start with 'P', got {err.code}"
+            assert err.code in DIAGNOSTIC_CODES, f"Expected a canonical W diagnostic code, got {err.code}"
+            assert err.stage == "parser", f"Expected parser-stage diagnostic, got {err.stage}"
             assert err.line >= 1 and err.col >= 1, f"Invalid position line={err.line}, col={err.col}"
             print(f"  [PASS] {f}: Caught {err.code} at line {err.line}:{err.col} -> {err.message}")
             invalid_passed += 1
@@ -71,11 +71,8 @@ def test_parser_suite():
     print(f"FAILED:         {len(failures)}")
     print("==================================================")
 
-    if failures:
-        sys.exit(1)
-    else:
-        print("ALL PARSER CONFORMANCE TESTS PASSED.")
-        sys.exit(0)
+    assert not failures, f"Parser conformance failures: {failures}"
+    print("ALL PARSER CONFORMANCE TESTS PASSED.")
 
 if __name__ == "__main__":
     test_parser_suite()
