@@ -69,7 +69,7 @@ class Lexer:
 
             # Numbers (Integers & Floats)
             if ch.isascii() and ch.isdigit():
-                tokens.append(self._lex_number(start_line, start_col))
+                tokens.append(self._lex_number(start_line, start_col, prev_token=tokens[-1] if tokens else None))
                 continue
 
             # Strings
@@ -89,7 +89,7 @@ class Lexer:
         tokens.append(Token(value=None, type=TokenType.EOF, line=self.line, col=self.col))
         return tokens
 
-    def _lex_number(self, start_line: int, start_col: int) -> Token:
+    def _lex_number(self, start_line: int, start_col: int, prev_token: Optional[Token] = None) -> Token:
         num_str = ""
         is_float = False
         prev_was_underscore = False
@@ -179,8 +179,11 @@ class Lexer:
                 if len(clean_str) > 20:
                     raise ValueError("Integer literal exceeds 64-bit range")
                 ival = int(clean_str)
-                if ival > 9223372036854775808:
-                    raise ValueError("Integer literal exceeds 64-bit range")
+                if ival > 9223372036854775807:
+                    if ival == 9223372036854775808 and prev_token is not None and prev_token.type == TokenType.MINUS:
+                        pass
+                    else:
+                        raise ValueError("Integer literal exceeds 64-bit range")
                 return Token(value=ival, type=TokenType.INT, line=start_line, col=start_col)
         except (ValueError, OverflowError):
             raise LexerError(

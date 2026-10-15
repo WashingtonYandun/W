@@ -1,6 +1,5 @@
 """Verify lexical names and direct-call/return contracts in the current HIR."""
 from hir import HirNodes as H
-from node.NodeType import IdentifierPattern, TuplePattern, EnumPattern
 from checker.TypeInterner import TYPE_UNIT, TYPE_NONE
 
 
@@ -37,7 +36,10 @@ class HirBindings:
         previous = self.return_type
         self.return_type = function.return_type_id
         scope = dict(globals_)
-        scope.update((parameter.name, parameter.type_id) for parameter in function.params)
+        for parameter in function.params:
+            scope[parameter.name] = parameter.type_id
+            if hasattr(parameter, "symbol_id") and parameter.symbol_id:
+                scope[parameter.symbol_id.id] = parameter.type_id
         try:
             self.visit(function.body, scope)
             if (function.body.tail_expr is not None
@@ -67,16 +69,30 @@ class HirBindings:
         return False
 
     def bind(self, pattern, scope, type_id=None):
-        type_id = getattr(pattern, "inferred_type_id", type_id)
-        if isinstance(pattern, IdentifierPattern) and pattern.name not in ('None', 'none'):
+        if pattern is None:
+            return
+        type_id = getattr(pattern, "type_id", getattr(pattern, "inferred_type_id", type_id))
+        if isinstance(pattern, H.HirBindingPattern) and pattern.name not in ('None', 'none'):
             scope[pattern.name] = type_id
-        elif isinstance(pattern, TuplePattern):
+            if hasattr(pattern, "symbol_id") and pattern.symbol_id:
+                scope[pattern.symbol_id.id] = type_id
+        elif isinstance(pattern, H.HirTuplePattern):
             entry = self.interner.get_entry(type_id) if type_id is not None else None
             types = entry.data if entry and entry.tag == 'tuple' else [None] * len(pattern.elements)
             for subpattern, subtype in zip(pattern.elements, types):
                 self.bind(subpattern, scope, subtype)
-        elif isinstance(pattern, EnumPattern):
-            for subpattern in getattr(pattern, 'args', getattr(pattern, 'payload', [])):
+        elif isinstance(pattern, H.HirEnumPattern):
+            for subpattern in pattern.subpatterns:
+                self.bind(subpattern, scope)
+        elif hasattr(pattern, "name") and pattern.name not in ('None', 'none'):
+            scope[pattern.name] = type_id
+        elif hasattr(pattern, "elements"):
+            entry = self.interner.get_entry(type_id) if type_id is not None else None
+            types = entry.data if entry and entry.tag == 'tuple' else [None] * len(pattern.elements)
+            for subpattern, subtype in zip(pattern.elements, types):
+                self.bind(subpattern, scope, subtype)
+        elif hasattr(pattern, "args"):
+            for subpattern in getattr(pattern, "args", []):
                 self.bind(subpattern, scope)
 
     def class_method(self, name, method):
@@ -109,12 +125,21 @@ class HirBindings:
             if not self.compatible(node.init_expr.type_id, node.type_id):
                 self.verifier._fail(node, 'Initializer type does not match binding type')
             scope[getattr(node, 'name', getattr(node, 'temp_name', ''))] = node.type_id
+            if hasattr(node, "symbol_id") and node.symbol_id:
+                scope[node.symbol_id.id] = node.type_id
             return
         if isinstance(node, H.HirLocalRef):
-            if node.name not in scope:
-                self.verifier._fail(node, f'Unresolved HIR local: {node.name}')
-            if scope[node.name] is not None and scope[node.name] != node.type_id:
-                self.verifier._fail(node, f'HIR local type does not match binding: {node.name}')
+            resolved_by_sym = False
+            if hasattr(node, "symbol_id") and node.symbol_id and node.symbol_id.id != 0:
+                if node.symbol_id.id in scope:
+                    resolved_by_sym = True
+                    if scope[node.symbol_id.id] is not None and scope[node.symbol_id.id] != node.type_id:
+                        self.verifier._fail(node, f'HIR local type does not match binding: {node.name}')
+            if not resolved_by_sym:
+                if node.name not in scope:
+                    self.verifier._fail(node, f'Unresolved HIR local: {node.name}')
+                if scope[node.name] is not None and scope[node.name] != node.type_id:
+                    self.verifier._fail(node, f'HIR local type does not match binding: {node.name}')
         if isinstance(node, H.HirReturn) and self.return_type is not None:
             if not self.compatible(node.value_expr.type_id, self.return_type):
                 self.verifier._fail(node, 'Returned value type does not match function return type')

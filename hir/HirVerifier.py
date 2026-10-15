@@ -1,6 +1,5 @@
 """Validate HIR structure, type decorations and control-flow invariants."""
 from error.Error import WError
-from node.NodeType import (Pattern, IdentifierPattern, WildcardPattern, TuplePattern, EnumPattern, LiteralPattern, IntLiteral, FloatLiteral, BoolLiteral, StringLiteral, NoneLiteral)
 from checker.TypeInterner import TYPE_BOOL, TYPE_INT, TYPE_FLOAT, TYPE_STR, TYPE_UNIT, TYPE_NONE
 from hir import HirNodes as H
 
@@ -126,6 +125,15 @@ class HirVerifier:
             entry = self.interner.get_entry(value.type_id)
             if entry.tag != 'dict' or entry.data != (value.key_type_id, value.val_type_id):
                 self._fail(value, 'Dictionary metadata does not match result type')
+        if isinstance(value, H.HirCoerce):
+            if value.kind == "wrap_ok":
+                entry = self.interner.get_entry(value.type_id)
+                if entry.tag != "result" or not self.interner.is_assignable(value.expr.type_id, entry.data[0]):
+                    self._fail(value, "Invalid wrap_ok coercion")
+            elif value.kind == "wrap_some":
+                entry = self.interner.get_entry(value.type_id)
+                if entry.tag != "optional" or not self.interner.is_assignable(value.expr.type_id, entry.data):
+                    self._fail(value, "Invalid wrap_some coercion")
 
     def _visit(self, value, loop_depth, in_function):
         if isinstance(value, (list, tuple)):
@@ -138,14 +146,33 @@ class HirVerifier:
             finally:
                 self.active.remove(id(value))
             return
-        if isinstance(value, Pattern):
-            if type(value) not in (IdentifierPattern, WildcardPattern, TuplePattern, EnumPattern, LiteralPattern):
+        if isinstance(value, H.HirPattern):
+            if type(value) not in (H.HirWildcardPattern, H.HirBindingPattern, H.HirTuplePattern, H.HirEnumPattern, H.HirLiteralPattern):
                 self._fail(value, "Unsupported HIR pattern")
-            if isinstance(value, LiteralPattern):
-                if not isinstance(value.literal, (IntLiteral, FloatLiteral, BoolLiteral, StringLiteral, NoneLiteral)):
-                    self._fail(value, "Unsupported HIR pattern literal")
-                self._type(getattr(value.literal, "inferred_type_id", None), value, "literal type")
-            self._type(getattr(value, "inferred_type_id", None), value, "pattern type")
+            self._type(value.type_id, value, "pattern type")
+            if isinstance(value, H.HirBindingPattern):
+                if not isinstance(value.symbol_id, H.SymbolId):
+                    self._fail(value, "Binding pattern requires SymbolId")
+            elif isinstance(value, H.HirLiteralPattern):
+                expected = {
+                    "int": TYPE_INT, "float": TYPE_FLOAT, "bool": TYPE_BOOL,
+                    "str": TYPE_STR, "none": TYPE_NONE
+                }.get(value.literal_kind)
+                if expected is not None and value.type_id != expected:
+                    self._fail(value, "Literal pattern type mismatch")
+            elif isinstance(value, H.HirEnumPattern):
+                if not isinstance(value.variant_id, H.VariantId):
+                    self._fail(value, "Enum pattern requires VariantId")
+            if id(value) in self.active:
+                self._fail(value, "Cyclic HIR pattern")
+            self.active.add(id(value))
+            try:
+                for field in ("subpatterns", "elements"):
+                    self._visit(getattr(value, field, []), loop_depth, in_function)
+            finally:
+                self.active.remove(id(value))
+            return
+        if hasattr(value, "__module__") and "Pattern" in type(value).__name__:
             if id(value) in self.active:
                 self._fail(value, "Cyclic HIR pattern")
             self.active.add(id(value))
@@ -165,7 +192,7 @@ class HirVerifier:
         required = []
         if isinstance(value, (H.HirExpr, H.HirParam, H.HirFieldDef, H.HirLet,
                               H.HirBindTemp, H.HirStructDecl, H.HirEnumDecl,
-                              H.HirClassDecl, H.HirInterfaceDecl)):
+                              H.HirClassDecl, H.HirInterfaceDecl, H.HirPattern)):
             required.append('type_id')
         if isinstance(value, (H.HirConstructList, H.HirForList)):
             required.append('elem_type_id')

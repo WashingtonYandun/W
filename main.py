@@ -15,7 +15,7 @@ from hir.HirBuilder import HirBuilder
 from hir.HirCCodeGen import HirCCodeGen
 from error.Error import WError
 
-W_VERSION = "0.2.1"
+W_VERSION = "0.2.4"
 
 
 def get_repo_root() -> str:

@@ -41,12 +41,12 @@ Just as classic systems and languages are anchored by living totems (Linux's Tux
 
 | Pillar | How W Solves It | Technical & Operational Benefit |
 | :--- | :--- | :--- |
-| **Hybrid Memory Architecture & Weak References** | Pure Value Semantics + Copy-on-Write (CoW) with $O(N+M)$ path detach; Single-threaded ARC with `WWeakControl` blocks for OOP `class` objects | Zero garbage collector pauses; deterministic `CleanupScope` releases memory immediately at scope exit; built-in `weak(obj)` and safe `upgrade(w)` eliminate cyclic leaks. ASan/UBSan/LSan clean. |
+| **Hybrid Memory Architecture & Weak References** | Pure Value Semantics + Copy-on-Write (CoW) with path detach; Single-threaded ARC with `WWeakControl` blocks for OOP `class` objects | Zero garbage collector pauses; deterministic `CleanupScope` releases memory immediately at scope exit; built-in `weak(obj)` and safe `upgrade(w)` eliminate cyclic leaks (strong cycles require explicit weak handles). ASan/UBSan/LSan clean. |
 | **Whole-Program Compilation Sessions** | Single `CompilationSession` and `SourceManager` with shared `TypeInterner`, canonical `ModuleId`, and `DeclId` | Zero type ID collisions across imports; diamond dependencies and symlinks are parsed, checked, and initialized once; runtime module values rejected before lowering (`[W2003]`). |
 | **Semantic Unification (`Option` & `Result`)** | Formal equivalence: `T?` $\equiv$ `Option[T]` (`Some(T)`, `None`) and `T ! E` $\equiv$ `Result[T, E]` (`Ok(T)`, `Err(E)`) | Single mental model: use `?` and `??` for concise control flow or `match` for structural destructuring interchangeably. |
 | **Monomorphized Generics & ADTs** | Compile-time specialization of generic `struct[T]`, `enum[T]`, and `fn[T]` with deterministic `TypeId` tuple mangling | Zero runtime dispatch overhead for generics; static detection of infinite recursive layouts (`W2011`); nominal constraints (`[T: Printable]`). |
 | **Nominal OOP & Polymorphism** | Single-inheritance `class` hierarchies, nominal `interface`, explicit `implements`, `super`, and field encapsulation (`public`/`private`) | Reliable enterprise software modeling with static vtable layout and dynamic method dispatch. |
-| **Self-Hosting Fixed-Point** | 3-stage bootstrap fixed-point: $\text{SHA256}(c_0) == \text{SHA256}(c_1) == \text{SHA256}(c_2)$ | Proof of linguistic maturity, deterministic code generation, and complete compiler autonomy. |
+| **Self-Hosting Fixed-Point (Core Subset)** | 3-stage bootstrap fixed-point on core language subset: $\text{SHA256}(c_0) == \text{SHA256}(c_1) == \text{SHA256}(c_2)$ | Proof of deterministic code generation across 38 core fixtures; full self-hosted parity with generics/modules scheduled for Phase D. |
 | **Verified Typed HIR Multi-Pass Pipeline** | `Lexer` $\to$ `Parser` $\to$ `TypeInterner` $\to$ `Typed HIR` $\to$ `HirVerifier` $\to$ `HirCCodeGen` $\to$ `C99` | Clean separation between semantic validation, arena provenance verification, generic monomorphization, and target code generation. |
 | **Ultra-Lightweight Footprint** | Standalone single-header runtime (`runtime/w_runtime.h`), zero external runtime dependencies | Generated binaries are $\approx 34\text{ KB}$, portable across Linux, macOS, BSD, and embedded targets. |
 
@@ -318,7 +318,7 @@ The self-hosted compiler is decomposed into 9 single-responsibility modules:
 - `selfhost/src/05_metadata.w`: Type tables, OOP class/interface vtables.
 - `selfhost/src/06_parser_expr.w`: Precedence-based expression parser.
 - `selfhost/src/07_parser_decl.w`: Top-level statement and type declaration parser.
-- `selfhost/src/08_checker.w`: Semantic validation and stable error codes (`W0xxx`–`W4xxx`).
+- `selfhost/src/08_checker.w`: Bootstrap semantic validation and error reporting (`W0xxx`–`W4xxx`) for the 38-fixture core subset; to be replaced by full AST/HIR type checking in Milestone D02.
 - `selfhost/src/09_main.w`: CLI driver and pipeline coordinator.
 
 ---
