@@ -130,6 +130,14 @@ static inline void w_cow_reset_stats(void) {
     w_g_cow_allocated_bytes = 0;
 }
 
+/*
+ * Logical container allocation tracking for W runtime.
+ * NOTE on W_MEM_CHECK vs ASan/LSan:
+ * w_mem_on_alloc() and w_mem_on_free() track high-level container lifecycle
+ * (lists, dicts, objects, structs, tuples, strings) as a fast runtime invariant.
+ * Comprehensive byte-level leak detection and memory safety are enforced by
+ * Clang/GCC AddressSanitizer and LeakSanitizer (ASan/LSan) in CI and test suites.
+ */
 static inline void w_mem_on_alloc(void) {
     w_g_alloc_count++;
     w_g_live_objects++;
@@ -149,6 +157,29 @@ static inline void w_check_refcount(int32_t rc, const char* op) {
         fprintf(stderr, "[W4003] RuntimeError: Memory safety violation (%s on object with refcount %" PRId32 ")\n", op, rc);
         exit(1);
     }
+}
+
+static inline void* w_alloc_safe(size_t size) {
+    if (size == 0) return NULL;
+    void* ptr = malloc(size);
+    if (!ptr) {
+        fprintf(stderr, "[W4003] RuntimeError: Out of memory (failed to allocate %zu bytes)\n", size);
+        exit(1);
+    }
+    return ptr;
+}
+
+static inline void* w_realloc_safe(void* old_ptr, size_t new_size) {
+    if (new_size == 0) {
+        free(old_ptr);
+        return NULL;
+    }
+    void* ptr = realloc(old_ptr, new_size);
+    if (!ptr) {
+        fprintf(stderr, "[W4003] RuntimeError: Out of memory (failed to reallocate %zu bytes)\n", new_size);
+        exit(1);
+    }
+    return ptr;
 }
 
 static inline void w_runtime_cleanup(void) {
@@ -199,7 +230,7 @@ static inline WVal w_str(const char* s) {
 
 /* Takes ownership of a heap buffer; w_str is for static storage only. */
 static inline WVal w_owned_str(char* data) {
-    WStringBuf* buffer = (WStringBuf*)malloc(sizeof(WStringBuf));
+    WStringBuf* buffer = (WStringBuf*)w_alloc_safe(sizeof(WStringBuf));
     buffer->refcount = 1;
     buffer->byte_length = strlen(data);
     buffer->data = data;
@@ -211,7 +242,7 @@ static inline WVal w_owned_str(char* data) {
 
 static inline WVal w_copy_str(const char* data) {
     size_t length = strlen(data);
-    char* copy = (char*)malloc(length + 1);
+    char* copy = (char*)w_alloc_safe(length + 1);
     memcpy(copy, data, length + 1);
     return w_owned_str(copy);
 }
@@ -240,7 +271,7 @@ static inline WVal w_enum_payload(const char* enum_name, const char* variant, WV
         if (strcmp(variant, "Ok") == 0) return w_ok(payload);
         if (strcmp(variant, "Err") == 0) return w_err(payload);
     }
-    WBoxBuf* b = (WBoxBuf*)malloc(sizeof(WBoxBuf));
+    WBoxBuf* b = (WBoxBuf*)w_alloc_safe(sizeof(WBoxBuf));
     b->refcount = 1;
     b->val = payload;
     w_mem_on_alloc();
@@ -253,7 +284,7 @@ static inline WVal w_enum_payload(const char* enum_name, const char* variant, WV
 }
 
 static inline WVal w_ok(WVal inner) {
-    WBoxBuf* b = (WBoxBuf*)malloc(sizeof(WBoxBuf));
+    WBoxBuf* b = (WBoxBuf*)w_alloc_safe(sizeof(WBoxBuf));
     b->refcount = 1;
     b->val = inner;
     w_mem_on_alloc();
@@ -264,7 +295,7 @@ static inline WVal w_ok(WVal inner) {
 }
 
 static inline WVal w_err(WVal inner) {
-    WBoxBuf* b = (WBoxBuf*)malloc(sizeof(WBoxBuf));
+    WBoxBuf* b = (WBoxBuf*)w_alloc_safe(sizeof(WBoxBuf));
     b->refcount = 1;
     b->val = inner;
     w_mem_on_alloc();
@@ -519,11 +550,11 @@ static inline void w_list_detach(WVal* v) {
     if (old_b->refcount <= 1) return;
     old_b->refcount--;
     w_g_release_count++;
-    WListBuf* new_b = (WListBuf*)malloc(sizeof(WListBuf));
+    WListBuf* new_b = (WListBuf*)w_alloc_safe(sizeof(WListBuf));
     new_b->refcount = 1;
     new_b->len = old_b->len;
     new_b->cap = old_b->cap > 0 ? old_b->cap : 4;
-    new_b->data = (WVal*)malloc(sizeof(WVal) * new_b->cap);
+    new_b->data = (WVal*)w_alloc_safe(sizeof(WVal) * new_b->cap);
     w_mem_on_alloc();
 
     /* B02: CoW detach telemetry */
@@ -546,12 +577,12 @@ static inline void w_dict_detach(WVal* v) {
     if (old_b->refcount <= 1) return;
     old_b->refcount--;
     w_g_release_count++;
-    WDictBuf* new_b = (WDictBuf*)malloc(sizeof(WDictBuf));
+    WDictBuf* new_b = (WDictBuf*)w_alloc_safe(sizeof(WDictBuf));
     new_b->refcount = 1;
     new_b->len = old_b->len;
     new_b->cap = old_b->cap > 0 ? old_b->cap : 4;
-    new_b->keys = (WVal*)malloc(sizeof(WVal) * new_b->cap);
-    new_b->vals = (WVal*)malloc(sizeof(WVal) * new_b->cap);
+    new_b->keys = (WVal*)w_alloc_safe(sizeof(WVal) * new_b->cap);
+    new_b->vals = (WVal*)w_alloc_safe(sizeof(WVal) * new_b->cap);
     w_mem_on_alloc();
 
     /* B02: CoW detach telemetry */
@@ -575,14 +606,14 @@ static inline void w_struct_detach(WVal* v) {
     if (old_b->refcount <= 1) return;
     old_b->refcount--;
     w_g_release_count++;
-    WStructBuf* new_b = (WStructBuf*)malloc(sizeof(WStructBuf));
+    WStructBuf* new_b = (WStructBuf*)w_alloc_safe(sizeof(WStructBuf));
     new_b->refcount = 1;
     new_b->control = NULL;
     new_b->name = old_b->name;
     new_b->len = old_b->len;
     int32_t cap = old_b->len > 0 ? old_b->len : 1;
-    new_b->keys = (const char**)malloc(sizeof(const char*) * cap);
-    new_b->vals = (WVal*)malloc(sizeof(WVal) * cap);
+    new_b->keys = (const char**)w_alloc_safe(sizeof(const char*) * cap);
+    new_b->vals = (WVal*)w_alloc_safe(sizeof(WVal) * cap);
     w_mem_on_alloc();
 
     /* B02: CoW detach telemetry */
@@ -690,11 +721,11 @@ static inline bool w_eq(WVal a, WVal b) {
 
 /* Containers: List, Dict, Tuple, Struct */
 static inline WVal w_make_list(int32_t count, const WVal* elems) {
-    WListBuf* b = (WListBuf*)malloc(sizeof(WListBuf));
+    WListBuf* b = (WListBuf*)w_alloc_safe(sizeof(WListBuf));
     b->refcount = 1;
     b->len = count;
     b->cap = count > 4 ? count : 4;
-    b->data = (WVal*)malloc(sizeof(WVal) * b->cap);
+    b->data = (WVal*)w_alloc_safe(sizeof(WVal) * b->cap);
     w_mem_on_alloc();
     for (int32_t i = 0; i < count; i++) {
         b->data[i] = w_clone(elems[i]);
@@ -704,25 +735,37 @@ static inline WVal w_make_list(int32_t count, const WVal* elems) {
 
 static inline WVal w_make_range(WVal start, WVal end, bool inclusive) {
     int64_t s = start.as.i;
-    int64_t e = inclusive ? (end.as.i + 1) : end.as.i;
-    int32_t count = (e > s) ? (int32_t)(e - s) : 0;
-    WListBuf* b = (WListBuf*)malloc(sizeof(WListBuf));
+    int64_t e = end.as.i;
+    if (inclusive) {
+        if (e == INT64_MAX) {
+            fprintf(stderr, "[W4003] RuntimeError: Range bound overflow at INT64_MAX\n");
+            exit(1);
+        }
+        e++;
+    }
+    int64_t diff = (e > s) ? (e - s) : 0;
+    if (diff > 100000000LL) {
+        fprintf(stderr, "[W4003] RuntimeError: Range length %" PRId64 " exceeds maximum list capacity\n", diff);
+        exit(1);
+    }
+    int32_t count = (int32_t)diff;
+    WListBuf* b = (WListBuf*)w_alloc_safe(sizeof(WListBuf));
     b->refcount = 1;
     b->len = count;
     b->cap = count > 4 ? count : 4;
-    b->data = (WVal*)malloc(sizeof(WVal) * b->cap);
+    b->data = (WVal*)w_alloc_safe(sizeof(WVal) * b->cap);
     w_mem_on_alloc();
     for (int32_t i = 0; i < count; i++) {
-        b->data[i] = w_int(s + i);
+        b->data[i] = w_int(s + (int64_t)i);
     }
     WVal v; v.tag = W_LIST; v.as.list = b; return v;
 }
 
 static inline WVal w_make_tuple(int32_t count, const WVal* elems) {
-    WTupleBuf* t = (WTupleBuf*)malloc(sizeof(WTupleBuf));
+    WTupleBuf* t = (WTupleBuf*)w_alloc_safe(sizeof(WTupleBuf));
     t->refcount = 1;
     t->len = count;
-    t->items = (WVal*)malloc(sizeof(WVal) * (count > 0 ? count : 1));
+    t->items = (WVal*)w_alloc_safe(sizeof(WVal) * (count > 0 ? count : 1));
     w_mem_on_alloc();
     for (int32_t i = 0; i < count; i++) {
         t->items[i] = w_clone(elems[i]);
@@ -731,12 +774,12 @@ static inline WVal w_make_tuple(int32_t count, const WVal* elems) {
 }
 
 static inline WVal w_make_dict(int32_t count, const WVal* keys, const WVal* vals) {
-    WDictBuf* d = (WDictBuf*)malloc(sizeof(WDictBuf));
+    WDictBuf* d = (WDictBuf*)w_alloc_safe(sizeof(WDictBuf));
     d->refcount = 1;
     d->len = 0;
     d->cap = count > 4 ? count * 2 : 4;
-    d->keys = (WVal*)malloc(sizeof(WVal) * d->cap);
-    d->vals = (WVal*)malloc(sizeof(WVal) * d->cap);
+    d->keys = (WVal*)w_alloc_safe(sizeof(WVal) * d->cap);
+    d->vals = (WVal*)w_alloc_safe(sizeof(WVal) * d->cap);
     w_mem_on_alloc();
     WVal v; v.tag = W_DICT; v.as.dict = d;
     for (int32_t i = 0; i < count; i++) {
@@ -759,13 +802,13 @@ static inline WVal w_make_dict(int32_t count, const WVal* keys, const WVal* vals
 }
 
 static inline WVal w_make_struct(const char* name, int32_t count, const char** keys, const WVal* vals) {
-    WStructBuf* st = (WStructBuf*)malloc(sizeof(WStructBuf));
+    WStructBuf* st = (WStructBuf*)w_alloc_safe(sizeof(WStructBuf));
     st->refcount = 1;
     st->control = NULL;
     st->name = name;
     st->len = count;
-    st->keys = (const char**)malloc(sizeof(const char*) * (count > 0 ? count : 1));
-    st->vals = (WVal*)malloc(sizeof(WVal) * (count > 0 ? count : 1));
+    st->keys = (const char**)w_alloc_safe(sizeof(const char*) * (count > 0 ? count : 1));
+    st->vals = (WVal*)w_alloc_safe(sizeof(WVal) * (count > 0 ? count : 1));
     w_mem_on_alloc();
     for (int32_t i = 0; i < count; i++) {
         st->keys[i] = keys[i];
@@ -775,17 +818,17 @@ static inline WVal w_make_struct(const char* name, int32_t count, const char** k
 }
 
 static inline WVal w_make_object(const char* name, int32_t count, const char** keys, const WVal* vals) {
-    WStructBuf* st = (WStructBuf*)malloc(sizeof(WStructBuf));
+    WStructBuf* st = (WStructBuf*)w_alloc_safe(sizeof(WStructBuf));
     st->refcount = 1;
-    st->control = (WWeakControl*)malloc(sizeof(WWeakControl));
+    st->control = (WWeakControl*)w_alloc_safe(sizeof(WWeakControl));
     st->control->strong = 1;
     st->control->weak = 1;
     st->control->object = st;
     w_mem_on_alloc();
     st->name = name;
     st->len = count;
-    st->keys = (const char**)malloc(sizeof(const char*) * (count > 0 ? count : 1));
-    st->vals = (WVal*)malloc(sizeof(WVal) * (count > 0 ? count : 1));
+    st->keys = (const char**)w_alloc_safe(sizeof(const char*) * (count > 0 ? count : 1));
+    st->vals = (WVal*)w_alloc_safe(sizeof(WVal) * (count > 0 ? count : 1));
     w_mem_on_alloc();
     for (int32_t i = 0; i < count; i++) {
         st->keys[i] = keys[i];
@@ -796,7 +839,7 @@ static inline WVal w_make_object(const char* name, int32_t count, const char** k
 
 /* Default non-optional weak fields are independent expired handles. */
 static inline WVal w_empty_weak(void) {
-    WWeakControl* control = (WWeakControl*)malloc(sizeof(WWeakControl));
+    WWeakControl* control = (WWeakControl*)w_alloc_safe(sizeof(WWeakControl));
     control->strong = 0;
     control->weak = 1;
     control->object = NULL;
@@ -850,12 +893,52 @@ static inline size_t w_utf8_seq_len(unsigned char c) {
     return 1;
 }
 
+static inline bool w_utf8_valid_codepoint_at(const char* s, size_t pos, size_t* out_len, int64_t* out_cp) {
+    const unsigned char* u = (const unsigned char*)s + pos;
+    if (u[0] == '\0') {
+        if (out_len) *out_len = 0;
+        return false;
+    }
+    if (u[0] < 0x80) {
+        if (out_len) *out_len = 1;
+        if (out_cp) *out_cp = u[0];
+        return true;
+    }
+    if ((u[0] & 0xE0) == 0xC0) {
+        if ((u[1] & 0xC0) != 0x80) return false;
+        int64_t cp = ((u[0] & 0x1F) << 6) | (u[1] & 0x3F);
+        if (cp < 0x80) return false;
+        if (out_len) *out_len = 2;
+        if (out_cp) *out_cp = cp;
+        return true;
+    }
+    if ((u[0] & 0xF0) == 0xE0) {
+        if ((u[1] & 0xC0) != 0x80 || (u[2] & 0xC0) != 0x80) return false;
+        int64_t cp = ((u[0] & 0x0F) << 12) | ((u[1] & 0x3F) << 6) | (u[2] & 0x3F);
+        if (cp < 0x800 || (cp >= 0xD800 && cp <= 0xDFFF)) return false;
+        if (out_len) *out_len = 3;
+        if (out_cp) *out_cp = cp;
+        return true;
+    }
+    if ((u[0] & 0xF8) == 0xF0) {
+        if ((u[1] & 0xC0) != 0x80 || (u[2] & 0xC0) != 0x80 || (u[3] & 0xC0) != 0x80) return false;
+        int64_t cp = ((u[0] & 0x07) << 18) | ((u[1] & 0x3F) << 12) | ((u[2] & 0x3F) << 6) | (u[3] & 0x3F);
+        if (cp < 0x10000 || cp > 0x10FFFF) return false;
+        if (out_len) *out_len = 4;
+        if (out_cp) *out_cp = cp;
+        return true;
+    }
+    return false;
+}
+
 static inline int64_t w_utf8_cp_len(const char* s) {
     int64_t count = 0;
     size_t pos = 0;
     while (s[pos] != '\0') {
-        size_t step = w_utf8_seq_len((unsigned char)s[pos]);
-        for (size_t k = 0; k < step && s[pos] != '\0'; k++) {
+        size_t step = 0;
+        if (w_utf8_valid_codepoint_at(s, pos, &step, NULL)) {
+            pos += step;
+        } else {
             pos++;
         }
         count++;
@@ -868,14 +951,17 @@ static inline bool w_utf8_cp_offset(const char* s, int64_t target_cp, size_t* ou
     int64_t idx = 0;
     size_t pos = 0;
     while (s[pos] != '\0') {
-        size_t step = w_utf8_seq_len((unsigned char)s[pos]);
+        size_t step = 0;
         size_t start = pos;
-        for (size_t k = 0; k < step && s[pos] != '\0'; k++) {
+        if (w_utf8_valid_codepoint_at(s, pos, &step, NULL)) {
+            pos += step;
+        } else {
+            step = 1;
             pos++;
         }
         if (idx == target_cp) {
             *out_off = start;
-            *out_len = pos - start;
+            *out_len = step;
             return true;
         }
         idx++;
@@ -904,7 +990,7 @@ static inline WVal w_index_get(WVal obj, WVal idx) {
             fprintf(stderr, "[W4002] RuntimeError: String index out of bounds\n");
             exit(1);
         }
-        char* buf = (char*)malloc(blen + 1);
+        char* buf = (char*)w_alloc_safe(blen + 1);
         memcpy(buf, obj.as.s + off, blen);
         buf[blen] = '\0';
         return w_owned_str(buf);
@@ -917,7 +1003,8 @@ static inline WVal w_index_get(WVal obj, WVal idx) {
         }
         return w_none();
     }
-    return w_none();
+    fprintf(stderr, "[W4003] RuntimeError: Cannot index object of tag %d\n", obj.tag);
+    exit(1);
 }
 
 static inline WVal w_index_get_owned(WVal object, WVal index) {
@@ -952,8 +1039,8 @@ static inline WVal* w_index_ref(WVal* obj, WVal idx) {
         }
         if (d->len >= d->cap) {
             d->cap = d->cap > 0 ? d->cap * 2 : 4;
-            d->keys = (WVal*)realloc(d->keys, sizeof(WVal) * d->cap);
-            d->vals = (WVal*)realloc(d->vals, sizeof(WVal) * d->cap);
+            d->keys = (WVal*)w_realloc_safe(d->keys, sizeof(WVal) * d->cap);
+            d->vals = (WVal*)w_realloc_safe(d->vals, sizeof(WVal) * d->cap);
         }
         d->keys[d->len] = w_clone(idx);
         d->vals[d->len] = w_none();
@@ -1000,7 +1087,7 @@ static inline WVal w_list_append(WVal* list_val, WVal item) {
     WListBuf* b = list_val->as.list;
     if (b->len >= b->cap) {
         b->cap = b->cap > 0 ? b->cap * 2 : 4;
-        b->data = (WVal*)realloc(b->data, sizeof(WVal) * b->cap);
+        b->data = (WVal*)w_realloc_safe(b->data, sizeof(WVal) * b->cap);
     }
     b->data[b->len++] = w_clone(item);
     return w_unit();
@@ -1047,68 +1134,91 @@ static inline WVal w_add(WVal a, WVal b) {
     if (a.tag == W_STR && b.tag == W_STR) {
         size_t la = strlen(a.as.s);
         size_t lb = strlen(b.as.s);
-        char* res = (char*)malloc(la + lb + 1);
+        char* res = (char*)w_alloc_safe(la + lb + 1);
         memcpy(res, a.as.s, la);
         memcpy(res + la, b.as.s, lb);
         res[la + lb] = '\0';
         return w_owned_str(res);
     }
-    return w_unit();
+    fprintf(stderr, "[W4003] RuntimeError: Invalid operand types for addition (tags %d, %d)\n", a.tag, b.tag);
+    exit(1);
 }
 
 static inline WVal w_sub(WVal a, WVal b) {
-    if (a.tag == W_INT) return w_int((int64_t)((uint64_t)a.as.i - (uint64_t)b.as.i));
-    return w_float(a.as.f - b.as.f);
+    if (a.tag == W_INT && b.tag == W_INT) return w_int((int64_t)((uint64_t)a.as.i - (uint64_t)b.as.i));
+    if (a.tag == W_FLOAT && b.tag == W_FLOAT) return w_float(a.as.f - b.as.f);
+    fprintf(stderr, "[W4003] RuntimeError: Invalid operand types for subtraction (tags %d, %d)\n", a.tag, b.tag);
+    exit(1);
 }
 
 static inline WVal w_mul(WVal a, WVal b) {
-    if (a.tag == W_INT) return w_int((int64_t)((uint64_t)a.as.i * (uint64_t)b.as.i));
-    return w_float(a.as.f * b.as.f);
+    if (a.tag == W_INT && b.tag == W_INT) return w_int((int64_t)((uint64_t)a.as.i * (uint64_t)b.as.i));
+    if (a.tag == W_FLOAT && b.tag == W_FLOAT) return w_float(a.as.f * b.as.f);
+    fprintf(stderr, "[W4003] RuntimeError: Invalid operand types for multiplication (tags %d, %d)\n", a.tag, b.tag);
+    exit(1);
 }
 
 static inline WVal w_div(WVal a, WVal b) {
-    if (a.tag == W_INT) {
+    if (a.tag == W_INT && b.tag == W_INT) {
         if (b.as.i == 0) { fprintf(stderr, "[W4001] RuntimeError: Division by zero\n"); exit(1); }
         if (a.as.i == INT64_MIN && b.as.i == -1) return w_int(INT64_MIN);
         return w_int(a.as.i / b.as.i);
     }
-    if (b.as.f == 0.0) { fprintf(stderr, "[W4001] RuntimeError: Division by zero\n"); exit(1); }
-    return w_float(a.as.f / b.as.f);
+    if (a.tag == W_FLOAT && b.tag == W_FLOAT) {
+        if (b.as.f == 0.0) { fprintf(stderr, "[W4001] RuntimeError: Division by zero\n"); exit(1); }
+        return w_float(a.as.f / b.as.f);
+    }
+    fprintf(stderr, "[W4003] RuntimeError: Invalid operand types for division (tags %d, %d)\n", a.tag, b.tag);
+    exit(1);
 }
 
 static inline WVal w_mod(WVal a, WVal b) {
-    if (b.as.i == 0) { fprintf(stderr, "[W4001] RuntimeError: Modulo by zero\n"); exit(1); }
-    if (a.as.i == INT64_MIN && b.as.i == -1) return w_int(0);
-    return w_int(a.as.i % b.as.i);
+    if (a.tag == W_INT && b.tag == W_INT) {
+        if (b.as.i == 0) { fprintf(stderr, "[W4001] RuntimeError: Modulo by zero\n"); exit(1); }
+        if (a.as.i == INT64_MIN && b.as.i == -1) return w_int(0);
+        return w_int(a.as.i % b.as.i);
+    }
+    fprintf(stderr, "[W4003] RuntimeError: Invalid operand types for modulo (tags %d, %d)\n", a.tag, b.tag);
+    exit(1);
 }
 
 static inline WVal w_neg(WVal a) {
     if (a.tag == W_INT) return w_int((int64_t)(0ULL - (uint64_t)a.as.i));
-    return w_float(-a.as.f);
+    if (a.tag == W_FLOAT) return w_float(-a.as.f);
+    fprintf(stderr, "[W4003] RuntimeError: Invalid operand type for negation (tag %d)\n", a.tag);
+    exit(1);
 }
 
 static inline WVal w_lt(WVal a, WVal b) {
-    if (a.tag == W_INT) return w_bool(a.as.i < b.as.i);
-    if (a.tag == W_FLOAT) return w_bool(a.as.f < b.as.f);
-    return w_bool(strcmp(a.as.s, b.as.s) < 0);
+    if (a.tag == W_INT && b.tag == W_INT) return w_bool(a.as.i < b.as.i);
+    if (a.tag == W_FLOAT && b.tag == W_FLOAT) return w_bool(a.as.f < b.as.f);
+    if (a.tag == W_STR && b.tag == W_STR) return w_bool(strcmp(a.as.s, b.as.s) < 0);
+    fprintf(stderr, "[W4003] RuntimeError: Invalid operand types for comparison (tags %d, %d)\n", a.tag, b.tag);
+    exit(1);
 }
 
 static inline WVal w_le(WVal a, WVal b) {
-    if (a.tag == W_INT) return w_bool(a.as.i <= b.as.i);
-    if (a.tag == W_FLOAT) return w_bool(a.as.f <= b.as.f);
-    return w_bool(strcmp(a.as.s, b.as.s) <= 0);
+    if (a.tag == W_INT && b.tag == W_INT) return w_bool(a.as.i <= b.as.i);
+    if (a.tag == W_FLOAT && b.tag == W_FLOAT) return w_bool(a.as.f <= b.as.f);
+    if (a.tag == W_STR && b.tag == W_STR) return w_bool(strcmp(a.as.s, b.as.s) <= 0);
+    fprintf(stderr, "[W4003] RuntimeError: Invalid operand types for comparison (tags %d, %d)\n", a.tag, b.tag);
+    exit(1);
 }
 
 static inline WVal w_gt(WVal a, WVal b) {
-    if (a.tag == W_INT) return w_bool(a.as.i > b.as.i);
-    if (a.tag == W_FLOAT) return w_bool(a.as.f > b.as.f);
-    return w_bool(strcmp(a.as.s, b.as.s) > 0);
+    if (a.tag == W_INT && b.tag == W_INT) return w_bool(a.as.i > b.as.i);
+    if (a.tag == W_FLOAT && b.tag == W_FLOAT) return w_bool(a.as.f > b.as.f);
+    if (a.tag == W_STR && b.tag == W_STR) return w_bool(strcmp(a.as.s, b.as.s) > 0);
+    fprintf(stderr, "[W4003] RuntimeError: Invalid operand types for comparison (tags %d, %d)\n", a.tag, b.tag);
+    exit(1);
 }
 
 static inline WVal w_ge(WVal a, WVal b) {
-    if (a.tag == W_INT) return w_bool(a.as.i >= b.as.i);
-    if (a.tag == W_FLOAT) return w_bool(a.as.f >= b.as.f);
-    return w_bool(strcmp(a.as.s, b.as.s) >= 0);
+    if (a.tag == W_INT && b.tag == W_INT) return w_bool(a.as.i >= b.as.i);
+    if (a.tag == W_FLOAT && b.tag == W_FLOAT) return w_bool(a.as.f >= b.as.f);
+    if (a.tag == W_STR && b.tag == W_STR) return w_bool(strcmp(a.as.s, b.as.s) >= 0);
+    fprintf(stderr, "[W4003] RuntimeError: Invalid operand types for comparison (tags %d, %d)\n", a.tag, b.tag);
+    exit(1);
 }
 
 /* Formatting & String Conversion (matching W0 Values.__str__ exactly) */
@@ -1126,25 +1236,25 @@ static inline char* w_to_cstr(WVal v, bool quote_str) {
     switch (v.tag) {
         case W_WEAK: {
             const char* text = v.as.weak->object ? "weak(alive)" : "weak(expired)";
-            char* result = (char*)malloc(strlen(text) + 1);
+            char* result = (char*)w_alloc_safe(strlen(text) + 1);
             strcpy(result, text);
             return result;
         }
 
         case W_UNIT:
-            buf = (char*)malloc(5);
+            buf = (char*)w_alloc_safe(5);
             strcpy(buf, "unit");
             return buf;
         case W_NONE:
-            buf = (char*)malloc(5);
+            buf = (char*)w_alloc_safe(5);
             strcpy(buf, "none");
             return buf;
         case W_INT:
-            buf = (char*)malloc(32);
+            buf = (char*)w_alloc_safe(32);
             snprintf(buf, 32, "%" PRId64, v.as.i);
             return buf;
         case W_FLOAT: {
-            buf = (char*)malloc(64);
+            buf = (char*)w_alloc_safe(64);
             snprintf(buf, 64, "%g", v.as.f);
             if (!strchr(buf, '.') && !strchr(buf, 'e') && !strchr(buf, 'E')) {
                 strcat(buf, ".0");
@@ -1152,17 +1262,17 @@ static inline char* w_to_cstr(WVal v, bool quote_str) {
             return buf;
         }
         case W_BOOL:
-            buf = (char*)malloc(6);
+            buf = (char*)w_alloc_safe(6);
             strcpy(buf, v.as.b ? "true" : "false");
             return buf;
         case W_STR: {
             size_t len = strlen(v.as.s);
             if (!quote_str) {
-                buf = (char*)malloc(len + 1);
+                buf = (char*)w_alloc_safe(len + 1);
                 strcpy(buf, v.as.s);
                 return buf;
             }
-            buf = (char*)malloc(len + 3);
+            buf = (char*)w_alloc_safe(len + 3);
             buf[0] = '"';
             memcpy(buf + 1, v.as.s, len);
             buf[len + 1] = '"';
@@ -1176,22 +1286,22 @@ static inline char* w_to_cstr(WVal v, bool quote_str) {
                 if (v.as.en.box->val.tag == W_TUPLE) {
                     size_t cap = 64;
                     size_t pos = 0;
-                    buf = (char*)malloc(cap);
+                    buf = (char*)w_alloc_safe(cap);
                     size_t l1 = strlen(w_nominal_display_name(v.as.en.enum_name));
                     size_t l2 = strlen(v.as.en.variant);
-                    while (pos + l1 + l2 + 2 >= cap) { cap *= 2; buf = (char*)realloc(buf, cap); }
+                    while (pos + l1 + l2 + 2 >= cap) { cap *= 2; buf = (char*)w_realloc_safe(buf, cap); }
                     memcpy(buf + pos, w_nominal_display_name(v.as.en.enum_name), l1); pos += l1;
                     buf[pos++] = '.';
                     memcpy(buf + pos, v.as.en.variant, l2); pos += l2;
                     buf[pos++] = '(';
                     for (int32_t i = 0; i < v.as.en.box->val.as.tuple->len; i++) {
                         if (i > 0) {
-                            if (pos + 3 >= cap) { cap *= 2; buf = (char*)realloc(buf, cap); }
+                            if (pos + 3 >= cap) { cap *= 2; buf = (char*)w_realloc_safe(buf, cap); }
                             buf[pos++] = ','; buf[pos++] = ' ';
                         }
                         char* sub = w_to_cstr(v.as.en.box->val.as.tuple->items[i], true);
                         size_t lsub = strlen(sub);
-                        while (pos + lsub + 3 >= cap) { cap *= 2; buf = (char*)realloc(buf, cap); }
+                        while (pos + lsub + 3 >= cap) { cap *= 2; buf = (char*)w_realloc_safe(buf, cap); }
                         memcpy(buf + pos, sub, lsub); pos += lsub;
                         free(sub);
                     }
@@ -1203,7 +1313,7 @@ static inline char* w_to_cstr(WVal v, bool quote_str) {
                     size_t l1 = strlen(w_nominal_display_name(v.as.en.enum_name));
                     size_t l2 = strlen(v.as.en.variant);
                     size_t lsub = strlen(sub);
-                    buf = (char*)malloc(l1 + l2 + lsub + 4);
+                    buf = (char*)w_alloc_safe(l1 + l2 + lsub + 4);
                     snprintf(buf, l1 + l2 + lsub + 4, "%s.%s(%s)", w_nominal_display_name(v.as.en.enum_name), v.as.en.variant, sub);
                     free(sub);
                     return buf;
@@ -1211,23 +1321,23 @@ static inline char* w_to_cstr(WVal v, bool quote_str) {
             }
             size_t l1 = strlen(w_nominal_display_name(v.as.en.enum_name));
             size_t l2 = strlen(v.as.en.variant);
-            buf = (char*)malloc(l1 + l2 + 2);
+            buf = (char*)w_alloc_safe(l1 + l2 + 2);
             snprintf(buf, l1 + l2 + 2, "%s.%s", w_nominal_display_name(v.as.en.enum_name), v.as.en.variant);
             return buf;
         }
         case W_LIST: {
             size_t cap = 64;
             size_t pos = 0;
-            buf = (char*)malloc(cap);
+            buf = (char*)w_alloc_safe(cap);
             buf[pos++] = '[';
             for (int32_t i = 0; i < v.as.list->len; i++) {
                 if (i > 0) {
-                    if (pos + 3 >= cap) { cap *= 2; buf = (char*)realloc(buf, cap); }
+                    if (pos + 3 >= cap) { cap *= 2; buf = (char*)w_realloc_safe(buf, cap); }
                     buf[pos++] = ','; buf[pos++] = ' ';
                 }
                 char* sub = w_to_cstr(v.as.list->data[i], true);
                 size_t sl = strlen(sub);
-                while (pos + sl + 4 >= cap) { cap *= 2; buf = (char*)realloc(buf, cap); }
+                while (pos + sl + 4 >= cap) { cap *= 2; buf = (char*)w_realloc_safe(buf, cap); }
                 memcpy(buf + pos, sub, sl);
                 pos += sl;
                 free(sub);
@@ -1239,16 +1349,16 @@ static inline char* w_to_cstr(WVal v, bool quote_str) {
         case W_TUPLE: {
             size_t cap = 64;
             size_t pos = 0;
-            buf = (char*)malloc(cap);
+            buf = (char*)w_alloc_safe(cap);
             buf[pos++] = '(';
             for (int32_t i = 0; i < v.as.tuple->len; i++) {
                 if (i > 0) {
-                    if (pos + 3 >= cap) { cap *= 2; buf = (char*)realloc(buf, cap); }
+                    if (pos + 3 >= cap) { cap *= 2; buf = (char*)w_realloc_safe(buf, cap); }
                     buf[pos++] = ','; buf[pos++] = ' ';
                 }
                 char* sub = w_to_cstr(v.as.tuple->items[i], true);
                 size_t sl = strlen(sub);
-                while (pos + sl + 4 >= cap) { cap *= 2; buf = (char*)realloc(buf, cap); }
+                while (pos + sl + 4 >= cap) { cap *= 2; buf = (char*)w_realloc_safe(buf, cap); }
                 memcpy(buf + pos, sub, sl);
                 pos += sl;
                 free(sub);
@@ -1260,17 +1370,17 @@ static inline char* w_to_cstr(WVal v, bool quote_str) {
         case W_DICT: {
             size_t cap = 64;
             size_t pos = 0;
-            buf = (char*)malloc(cap);
+            buf = (char*)w_alloc_safe(cap);
             buf[pos++] = '{';
             for (int32_t i = 0; i < v.as.dict->len; i++) {
                 if (i > 0) {
-                    if (pos + 3 >= cap) { cap *= 2; buf = (char*)realloc(buf, cap); }
+                    if (pos + 3 >= cap) { cap *= 2; buf = (char*)w_realloc_safe(buf, cap); }
                     buf[pos++] = ','; buf[pos++] = ' ';
                 }
                 char* ks = w_to_cstr(v.as.dict->keys[i], true);
                 char* vs = w_to_cstr(v.as.dict->vals[i], true);
                 size_t kl = strlen(ks), vl = strlen(vs);
-                while (pos + kl + vl + 6 >= cap) { cap *= 2; buf = (char*)realloc(buf, cap); }
+                while (pos + kl + vl + 6 >= cap) { cap *= 2; buf = (char*)w_realloc_safe(buf, cap); }
                 memcpy(buf + pos, ks, kl); pos += kl;
                 buf[pos++] = ':'; buf[pos++] = ' ';
                 memcpy(buf + pos, vs, vl); pos += vl;
@@ -1284,19 +1394,19 @@ static inline char* w_to_cstr(WVal v, bool quote_str) {
         case W_OBJECT: {
             size_t cap = 128;
             size_t pos = 0;
-            buf = (char*)malloc(cap);
+            buf = (char*)w_alloc_safe(cap);
             size_t nl = strlen(w_nominal_display_name(v.as.st->name));
             memcpy(buf + pos, w_nominal_display_name(v.as.st->name), nl); pos += nl;
             buf[pos++] = ' '; buf[pos++] = '{'; buf[pos++] = ' ';
             for (int32_t i = 0; i < v.as.st->len; i++) {
                 if (i > 0) {
-                    if (pos + 3 >= cap) { cap *= 2; buf = (char*)realloc(buf, cap); }
+                    if (pos + 3 >= cap) { cap *= 2; buf = (char*)w_realloc_safe(buf, cap); }
                     buf[pos++] = ','; buf[pos++] = ' ';
                 }
                 const char* fn = v.as.st->keys[i];
                 char* vs = w_to_cstr(v.as.st->vals[i], true);
                 size_t fl = strlen(fn), vl = strlen(vs);
-                while (pos + fl + vl + 8 >= cap) { cap *= 2; buf = (char*)realloc(buf, cap); }
+                while (pos + fl + vl + 8 >= cap) { cap *= 2; buf = (char*)w_realloc_safe(buf, cap); }
                 memcpy(buf + pos, fn, fl); pos += fl;
                 buf[pos++] = ':'; buf[pos++] = ' ';
                 memcpy(buf + pos, vs, vl); pos += vl;
@@ -1309,7 +1419,7 @@ static inline char* w_to_cstr(WVal v, bool quote_str) {
         case W_OK: {
             char* inner = w_to_cstr(v.as.box->val, false);
             size_t il = strlen(inner);
-            buf = (char*)malloc(il + 5);
+            buf = (char*)w_alloc_safe(il + 5);
             snprintf(buf, il + 5, "Ok(%s)", inner);
             free(inner);
             return buf;
@@ -1317,13 +1427,13 @@ static inline char* w_to_cstr(WVal v, bool quote_str) {
         case W_ERR: {
             char* inner = w_to_cstr(v.as.box->val, false);
             size_t il = strlen(inner);
-            buf = (char*)malloc(il + 6);
+            buf = (char*)w_alloc_safe(il + 6);
             snprintf(buf, il + 6, "Err(%s)", inner);
             free(inner);
             return buf;
         }
     }
-    buf = (char*)malloc(1);
+    buf = (char*)w_alloc_safe(1);
     buf[0] = '\0';
     return buf;
 }
@@ -1399,19 +1509,26 @@ static inline WVal w_builtin_ord(WVal v) {
         fprintf(stderr, "[W4003] RuntimeError: ord() expects non-empty str\n");
         exit(1);
     }
-    const unsigned char* u = (const unsigned char*)v.as.s;
-    size_t slen = w_utf8_seq_len(u[0]);
+    size_t slen = 0;
     int64_t cp = 0;
-    if (slen == 1) cp = u[0];
-    else if (slen == 2) cp = ((u[0] & 0x1F) << 6) | (u[1] & 0x3F);
-    else if (slen == 3) cp = ((u[0] & 0x0F) << 12) | ((u[1] & 0x3F) << 6) | (u[2] & 0x3F);
-    else cp = ((u[0] & 0x07) << 18) | ((u[1] & 0x3F) << 12) | ((u[2] & 0x3F) << 6) | (u[3] & 0x3F);
+    if (!w_utf8_valid_codepoint_at(v.as.s, 0, &slen, &cp)) {
+        fprintf(stderr, "[W4003] RuntimeError: ord() invalid UTF-8 sequence\n");
+        exit(1);
+    }
     return w_int(cp);
 }
 
 static inline WVal w_builtin_chr(WVal v) {
+    if (v.tag != W_INT) {
+        fprintf(stderr, "[W4003] RuntimeError: chr() expects int\n");
+        exit(1);
+    }
     int64_t cp = v.as.i;
-    char* buf = (char*)malloc(5);
+    if (cp < 0 || cp > 0x10FFFF || (cp >= 0xD800 && cp <= 0xDFFF)) {
+        fprintf(stderr, "[W4003] RuntimeError: chr() arg not in valid Unicode scalar range: %" PRId64 "\n", cp);
+        exit(1);
+    }
+    char* buf = (char*)w_alloc_safe(5);
     if (cp < 0x80) {
         buf[0] = (char)cp;
         buf[1] = '\0';
@@ -1447,19 +1564,23 @@ static inline WVal w_builtin_slice(WVal s, WVal start, WVal end) {
         w_utf8_cp_offset(s.as.s, en, &en_off, &dummy_len);
     }
     size_t blen = en_off - st_off;
-    char* buf = (char*)malloc(blen + 1);
+    char* buf = (char*)w_alloc_safe(blen + 1);
     memcpy(buf, s.as.s + st_off, blen);
     buf[blen] = '\0';
     return w_owned_str(buf);
 }
 
 static inline WVal w_builtin_bytes(WVal s) {
+    if (s.tag != W_STR) {
+        fprintf(stderr, "[W4003] RuntimeError: bytes() expects str\n");
+        exit(1);
+    }
     size_t slen = strlen(s.as.s);
-    WListBuf* b = (WListBuf*)malloc(sizeof(WListBuf));
+    WListBuf* b = (WListBuf*)w_alloc_safe(sizeof(WListBuf));
     b->refcount = 1;
     b->len = (int32_t)slen;
     b->cap = slen > 4 ? (int32_t)slen : 4;
-    b->data = (WVal*)malloc(sizeof(WVal) * b->cap);
+    b->data = (WVal*)w_alloc_safe(sizeof(WVal) * b->cap);
     w_mem_on_alloc();
     for (size_t i = 0; i < slen; i++) {
         b->data[i] = w_int((int64_t)(unsigned char)s.as.s[i]);
@@ -1468,12 +1589,16 @@ static inline WVal w_builtin_bytes(WVal s) {
 }
 
 static inline WVal w_builtin_enumerate(WVal list_val) {
+    if (list_val.tag != W_LIST) {
+        fprintf(stderr, "[W4003] RuntimeError: enumerate() expects list\n");
+        exit(1);
+    }
     WListBuf* src = list_val.as.list;
-    WListBuf* b = (WListBuf*)malloc(sizeof(WListBuf));
+    WListBuf* b = (WListBuf*)w_alloc_safe(sizeof(WListBuf));
     b->refcount = 1;
     b->len = src->len;
     b->cap = src->len > 4 ? src->len : 4;
-    b->data = (WVal*)malloc(sizeof(WVal) * b->cap);
+    b->data = (WVal*)w_alloc_safe(sizeof(WVal) * b->cap);
     w_mem_on_alloc();
     for (int32_t i = 0; i < src->len; i++) {
         WVal pair[2] = { w_int(i), src->data[i] };
@@ -1483,12 +1608,16 @@ static inline WVal w_builtin_enumerate(WVal list_val) {
 }
 
 static inline WVal w_builtin_dict_items(WVal dict_val) {
+    if (dict_val.tag != W_DICT) {
+        fprintf(stderr, "[W4003] RuntimeError: dict_items() expects dict\n");
+        exit(1);
+    }
     WDictBuf* d = dict_val.as.dict;
-    WListBuf* b = (WListBuf*)malloc(sizeof(WListBuf));
+    WListBuf* b = (WListBuf*)w_alloc_safe(sizeof(WListBuf));
     b->refcount = 1;
     b->len = d->len;
     b->cap = d->len > 4 ? d->len : 4;
-    b->data = (WVal*)malloc(sizeof(WVal) * b->cap);
+    b->data = (WVal*)w_alloc_safe(sizeof(WVal) * b->cap);
     w_mem_on_alloc();
     for (int32_t i = 0; i < d->len; i++) {
         WVal pair[2] = { d->keys[i], d->vals[i] };
@@ -1498,6 +1627,11 @@ static inline WVal w_builtin_dict_items(WVal dict_val) {
 }
 
 static inline WVal w_builtin_read_file(WVal path) {
+    if (path.tag != W_STR) {
+        const char* k[1] = { "message" };
+        WVal v[1] = { w_str("Invalid path type") };
+        return w_err(w_make_struct("IoError", 1, k, v));
+    }
     FILE* f = fopen(path.as.s, "rb");
     if (!f) {
         const char* k[1] = { "message" };
@@ -1507,7 +1641,7 @@ static inline WVal w_builtin_read_file(WVal path) {
     fseek(f, 0, SEEK_END);
     long sz = ftell(f);
     fseek(f, 0, SEEK_SET);
-    char* buf = (char*)malloc((size_t)sz + 1);
+    char* buf = (char*)w_alloc_safe((size_t)sz + 1);
     size_t read_bytes = fread(buf, 1, (size_t)sz, f);
     buf[read_bytes] = '\0';
     fclose(f);
@@ -1515,6 +1649,11 @@ static inline WVal w_builtin_read_file(WVal path) {
 }
 
 static inline WVal w_builtin_write_file(WVal path, WVal content) {
+    if (path.tag != W_STR || content.tag != W_STR) {
+        const char* k[1] = { "message" };
+        WVal v[1] = { w_str("Invalid argument type for write_file") };
+        return w_err(w_make_struct("IoError", 1, k, v));
+    }
     FILE* f = fopen(path.as.s, "wb");
     if (!f) {
         const char* k[1] = { "message" };
@@ -1536,11 +1675,11 @@ static inline void w_init_args(int argc, char** argv) {
 }
 
 static inline WVal w_builtin_args(void) {
-    WListBuf* b = (WListBuf*)malloc(sizeof(WListBuf));
+    WListBuf* b = (WListBuf*)w_alloc_safe(sizeof(WListBuf));
     b->refcount = 1;
     b->len = (int32_t)w_g_argc;
     b->cap = w_g_argc > 4 ? (int32_t)w_g_argc : 4;
-    b->data = (WVal*)malloc(sizeof(WVal) * b->cap);
+    b->data = (WVal*)w_alloc_safe(sizeof(WVal) * b->cap);
     w_mem_on_alloc();
     for (int i = 0; i < w_g_argc; i++) {
         b->data[i] = w_copy_str(w_g_argv[i]);

@@ -714,6 +714,8 @@ class CCodeGen:
 
     def _emit_expr_impl(self, expr: Expr, out: List[str]) -> str:
         if isinstance(expr, IntLiteral):
+            if expr.value == -9223372036854775808:
+                return "w_int((-9223372036854775807LL - 1LL))"
             return f"w_int({expr.value}LL)"
 
         if isinstance(expr, FloatLiteral):

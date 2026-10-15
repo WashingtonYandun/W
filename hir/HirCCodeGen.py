@@ -22,10 +22,11 @@ from hir.HirNodes import (
     HirLocalRef, HirThisRef, HirUnaryOp, HirBinaryOp,
     HirConstructStruct, HirConstructEnum, HirConstructObject, HirConstructList, HirConstructDict, HirConstructTuple,
     HirDirectCall, HirBuiltinCall, HirMethodCall, HirFieldRead, HirIndexRead,
-    HirTryPropagate, HirCoalesce, HirElseHandle, HirIf, HirMatch, HirMatchArm, HirRange, HirSuperRef
-)
-from node.NodeType import (
-    Pattern, IdentifierPattern, TuplePattern, EnumPattern, LiteralPattern, WildcardPattern
+    HirTryPropagate, HirCoalesce, HirElseHandle, HirIf, HirMatch, HirMatchArm, HirRange, HirSuperRef,
+    SymbolId, FieldId, VariantId, CallTarget, DirectCallTarget, BuiltinCallTarget, VirtualCallTarget,
+    CowProjection, CowFieldProjection, CowIndexProjection, CowPath,
+    HirPattern, HirWildcardPattern, HirBindingPattern, HirLiteralPattern, HirEnumPattern, HirTuplePattern,
+    HirCoerce
 )
 from common.Telemetry import CodegenTelemetry
 
@@ -56,6 +57,8 @@ class HirCCodeGen:
         self.fn_prototypes: List[str] = []
         self.fn_definitions: List[str] = []
         self.scope_stack: List[CleanupScope] = []
+        self.symbol_names: Dict[int, str] = {}
+        self.declared_names: Set[str] = set()
         self.telemetry: CodegenTelemetry = CodegenTelemetry()
 
     def new_temp(self) -> str:
@@ -134,7 +137,23 @@ class HirCCodeGen:
                 return True
         return False
 
-    def c_var(self, name: str) -> str:
+    def c_var_decl(self, name: str, symbol_id: Optional[SymbolId] = None) -> str:
+        if symbol_id is not None:
+            if symbol_id.id in self.symbol_names:
+                return self.symbol_names[symbol_id.id]
+            base_name = f"v_{name}"
+            if base_name in self.declared_names:
+                c_name = f"v_{name}_{symbol_id.id}"
+            else:
+                c_name = base_name
+            self.declared_names.add(c_name)
+            self.symbol_names[symbol_id.id] = c_name
+            return c_name
+        return f"v_{name}"
+
+    def c_var(self, name: str, symbol_id: Optional[SymbolId] = None) -> str:
+        if symbol_id is not None and symbol_id.id in self.symbol_names:
+            return self.symbol_names[symbol_id.id]
         local_name = f"v_{name}"
         if self._is_local_var(local_name):
             return local_name
@@ -199,6 +218,8 @@ class HirCCodeGen:
                 gv_name = f"v_{stmt.name}"
                 if gv_name not in self.global_vars:
                     self.global_vars.append(gv_name)
+                if stmt.symbol_id is not None:
+                    self.symbol_names[stmt.symbol_id.id] = gv_name
 
         # 2. OOP Prototypes
         for cls_name in self.class_order:
@@ -229,7 +250,12 @@ class HirCCodeGen:
         main_stmts: List[str] = []
         self._push_scope("fn")
         self.is_top_level = True
+        self.symbol_names.clear()
+        self.declared_names.clear()
+        self.declared_names.update(self.global_vars)
         for stmt in module.top_level_stmts:
+            if isinstance(stmt, HirLet) and stmt.symbol_id is not None:
+                self.symbol_names[stmt.symbol_id.id] = f"v_{stmt.name}"
             self.emit_stmt(stmt, main_stmts)
         self.is_top_level = False
 
@@ -333,7 +359,10 @@ class HirCCodeGen:
         try:
             for m in cl.methods:
                 c_name = f"w_method_{cl.name}__{m.name}"
-                params = ["WVal v_self"] + [f"WVal v_{p.name}" for p in m.params]
+                self.symbol_names.clear()
+                self.declared_names.clear()
+                self.declared_names.add("v_self")
+                params = ["WVal v_self"] + [f"WVal {self.c_var_decl(p.name, p.symbol_id)}" for p in m.params]
                 prev_fallible = self.current_fn_fallible
                 prev_err_type = self.current_fn_err_type
                 self.current_fn_fallible = m.is_fallible
@@ -409,7 +438,9 @@ class HirCCodeGen:
 
     def _emit_function(self, fn: HirFnDecl) -> None:
         c_name = f"w_fn_{fn.name}"
-        params_sig = ", ".join([f"WVal v_{p.name}" for p in fn.params]) if fn.params else "void"
+        self.symbol_names.clear()
+        self.declared_names.clear()
+        params_sig = ", ".join([f"WVal {self.c_var_decl(p.name, p.symbol_id)}" for p in fn.params]) if fn.params else "void"
         prev_fallible = self.current_fn_fallible
         prev_err_type = self.current_fn_err_type
         self.current_fn_fallible = fn.is_fallible
@@ -463,7 +494,7 @@ class HirCCodeGen:
 
         if isinstance(stmt, HirLet):
             val = self.emit_expr(stmt.init_expr, out)
-            c_name = f"v_{stmt.name}"
+            c_name = self.c_var_decl(stmt.name, stmt.symbol_id)
             if self.is_top_level:
                 out.append(f"w_assign(&{c_name}, {self._own_expr(val)});")
             else:
@@ -479,19 +510,26 @@ class HirCCodeGen:
             val = self.emit_expr(stmt.value, out)
             rhs_hold = self.new_aux("_rhs")
             self._declare_owned_var(rhs_hold, self._own_expr(val), out)
-            if isinstance(stmt.target, HirLocalRef):
-                c_target = self.c_var(stmt.target.name)
-                out.append(f"w_assign(&{c_target}, w_move(&{rhs_hold}));")
-            elif isinstance(stmt.target, HirFieldRead):
-                obj_lref = self.emit_lvalue_ref(stmt.target.object, out)
-                out.append(f'w_assign(w_member_ref({obj_lref}, "{stmt.target.field_name}"), w_move(&{rhs_hold}));')
+            if stmt.path is not None:
+                lref = self.emit_lvalue_ref(stmt.path.root, out)
+                for proj in stmt.path.projections:
+                    if isinstance(proj, CowFieldProjection):
+                        lref = f'w_member_ref({lref}, "{proj.field_name}")'
+                    elif isinstance(proj, CowIndexProjection):
+                        idx_val = self.emit_value(proj.index, out)
+                        lref = f"w_index_ref({lref}, {idx_val})"
             elif isinstance(stmt.target, HirIndexRead):
                 obj_lref = self.emit_lvalue_ref(stmt.target.object, out)
-                idx_val = self.emit_expr(stmt.target.index, out)
-                out.append(f"w_assign(w_index_ref({obj_lref}, {idx_val}), w_move(&{rhs_hold}));")
+                idx_val = self.emit_value(stmt.target.index, out)
+                lref = f"w_index_ref({obj_lref}, {idx_val})"
+            elif isinstance(stmt.target, HirFieldRead):
+                obj_lref = self.emit_lvalue_ref(stmt.target.object, out)
+                lref = f'w_member_ref({obj_lref}, "{stmt.target.field_name}")'
+            elif isinstance(stmt.target, HirLocalRef):
+                lref = f"&{self.c_var(stmt.target.name, stmt.target.symbol_id)}"
             else:
                 lref = self.emit_lvalue_ref(stmt.target, out)
-                out.append(f"w_assign({lref}, w_move(&{rhs_hold}));")
+            out.append(f"w_assign({lref}, w_move(&{rhs_hold}));")
             return
 
         if isinstance(stmt, HirReturn):
@@ -552,10 +590,11 @@ class HirCCodeGen:
             for_outer.append(f"for (int32_t {idx_tmp} = 0; {idx_tmp} < {iter_tmp}.as.list->len; {idx_tmp}++) {{")
             self._push_scope("loop")
             loop_inner = [f"WVal {item_tmp} = {iter_tmp}.as.list->data[{idx_tmp}];"]
-            if hasattr(stmt, "pattern") and isinstance(stmt.pattern, Pattern):
+            if getattr(stmt, "pattern", None) is not None and isinstance(stmt.pattern, HirPattern):
                 self._emit_pattern_bindings(stmt.pattern, item_tmp, loop_inner)
             else:
-                self._declare_owned_var(f"v_{stmt.elem_name}", f"w_clone({item_tmp})", loop_inner)
+                c_name = self.c_var_decl(stmt.elem_name, getattr(stmt, "symbol_id", None))
+                self._declare_owned_var(c_name, f"w_clone({item_tmp})", loop_inner)
             body_v = self.emit_block_value(stmt.body, loop_inner)
             loop_inner.append(f"(void){body_v};")
             self._pop_scope(loop_inner)
@@ -580,7 +619,7 @@ class HirCCodeGen:
         if isinstance(target, HirThisRef):
             return "&v_self"
         if isinstance(target, HirLocalRef):
-            return f"&{self.c_var(target.name)}"
+            return f"&{self.c_var(target.name, target.symbol_id)}"
         if isinstance(target, HirIndexRead):
             obj_ref = self.emit_lvalue_ref(target.object, out)
             idx_val = self.emit_value(target.index, out)
@@ -596,7 +635,21 @@ class HirCCodeGen:
         return f"&{tmp}"
 
     def emit_expr(self, expr: HirExpr, out: List[str]) -> str:
+        if isinstance(expr, HirCoerce):
+            val = self.emit_expr(expr.expr, out)
+            if expr.kind == "wrap_ok":
+                return self._bind_call(f"w_ok({self._own_expr(val)})", out)
+            elif expr.kind == "wrap_some":
+                return val
+            elif expr.kind == "int_to_float":
+                return f"w_float((double)({val}).as.i)"
+            elif expr.kind == "upcast":
+                return val
+            return val
+
         if isinstance(expr, HirConstInt):
+            if expr.value == -9223372036854775808:
+                return "w_int((-9223372036854775807LL - 1LL))"
             return f"w_int({expr.value}LL)"
 
         if isinstance(expr, HirConstFloat):
@@ -615,7 +668,7 @@ class HirCCodeGen:
             return "w_unit()"
 
         if isinstance(expr, HirLocalRef):
-            return self.c_var(expr.name)
+            return self.c_var(expr.name, expr.symbol_id)
 
         if isinstance(expr, HirThisRef):
             return "v_self"
@@ -889,7 +942,8 @@ class HirCCodeGen:
             self._push_scope("block")
             handler_stmts: List[str] = []
             if expr.err_var is not None:
-                self._declare_owned_var(f"v_{expr.err_var}", f"w_unwrap_err({tmp})", handler_stmts)
+                c_err = self.c_var_decl(expr.err_var, getattr(expr, "symbol_id", None))
+                self._declare_owned_var(c_err, f"w_unwrap_err({tmp})", handler_stmts)
             h_val = self.emit_block_value(expr.handler, handler_stmts)
             handler_stmts.append(f"w_assign(&{res}, {self._own_expr(h_val)});")
             self._pop_scope(handler_stmts)
@@ -1033,15 +1087,16 @@ class HirCCodeGen:
             out.append(f"    {s}")
         out.append("}")
 
-    def _emit_pattern_bindings(self, pattern: Pattern, val_expr: str, out: List[str]) -> None:
-        if isinstance(pattern, IdentifierPattern):
+    def _emit_pattern_bindings(self, pattern: HirPattern, val_expr: str, out: List[str]) -> None:
+        if isinstance(pattern, HirBindingPattern):
             if pattern.name not in ("None", "none"):
-                self._declare_owned_var(f"v_{pattern.name}", f"w_clone({val_expr})", out)
-        elif isinstance(pattern, TuplePattern):
+                c_name = self.c_var_decl(pattern.name, pattern.symbol_id)
+                self._declare_owned_var(c_name, f"w_clone({val_expr})", out)
+        elif isinstance(pattern, HirTuplePattern):
             for idx, elem_pat in enumerate(pattern.elements):
                 sub_expr = f"({val_expr}).as.tuple->items[{idx}]"
                 self._emit_pattern_bindings(elem_pat, sub_expr, out)
-        elif isinstance(pattern, EnumPattern):
+        elif isinstance(pattern, HirEnumPattern):
             if pattern.variant in ("None", "none") and (pattern.enum_name is None or pattern.enum_name.split("__", 1)[0] == "Option"):
                 pass
             elif pattern.variant == "Some" and (pattern.enum_name is None or pattern.enum_name.split("__", 1)[0] == "Option"):
@@ -1071,17 +1126,17 @@ class HirCCodeGen:
                         sub_val = f"({val_expr}).as.en.box->val.as.tuple->items[{idx}]"
                         self._emit_pattern_bindings(arg_pat, sub_val, out)
 
-    def _emit_pattern_cond(self, pattern: Pattern, val_expr: str, out: List[str]) -> str:
-        if isinstance(pattern, WildcardPattern):
+    def _emit_pattern_cond(self, pattern: HirPattern, val_expr: str, out: List[str]) -> str:
+        if isinstance(pattern, HirWildcardPattern):
             return "true"
-        if isinstance(pattern, IdentifierPattern):
+        if isinstance(pattern, HirBindingPattern):
             if pattern.name in ("None", "none"):
                 return f"(({val_expr}).tag == W_NONE || (({val_expr}).tag == W_ENUM && strcmp(({val_expr}).as.en.enum_name, \"Option\") == 0 && strcmp(({val_expr}).as.en.variant, \"None\") == 0))"
             return "true"
-        if isinstance(pattern, LiteralPattern):
-            lit_v = self.emit_expr(self._literal_to_hir(pattern.literal), out)
+        if isinstance(pattern, HirLiteralPattern):
+            lit_v = self.emit_expr(pattern.expr, out)
             return f"w_eq({val_expr}, {lit_v})"
-        if isinstance(pattern, EnumPattern):
+        if isinstance(pattern, HirEnumPattern):
             if pattern.variant in ("None", "none") and (pattern.enum_name is None or pattern.enum_name.split("__", 1)[0] == "Option"):
                 return f"(({val_expr}).tag == W_NONE || (({val_expr}).tag == W_ENUM && strcmp(({val_expr}).as.en.enum_name, \"Option\") == 0 && strcmp(({val_expr}).as.en.variant, \"None\") == 0))"
             if pattern.variant == "Some" and (pattern.enum_name is None or pattern.enum_name.split("__", 1)[0] == "Option"):
@@ -1128,7 +1183,7 @@ class HirCCodeGen:
                         conds.append(sub_c)
             return "(" + " && ".join(conds) + ")"
 
-        if isinstance(pattern, TuplePattern):
+        if isinstance(pattern, HirTuplePattern):
             conds = [f"(({val_expr}).tag == W_TUPLE && ({val_expr}).as.tuple->len == {len(pattern.elements)})"]
             for idx, elem_pat in enumerate(pattern.elements):
                 sub_c = self._emit_pattern_cond(elem_pat, f"({val_expr}).as.tuple->items[{idx}]", out)
@@ -1136,17 +1191,3 @@ class HirCCodeGen:
                     conds.append(sub_c)
             return "(" + " && ".join(conds) + ")"
         return "true"
-
-    def _literal_to_hir(self, lit: Any) -> HirExpr:
-        from node.NodeType import IntLiteral, FloatLiteral, StringLiteral, BoolLiteral, NoneLiteral
-        if isinstance(lit, IntLiteral):
-            return HirConstInt(lit.value, TYPE_INT, Span(lit.line, lit.col))
-        if isinstance(lit, FloatLiteral):
-            return HirConstFloat(lit.value, TYPE_FLOAT, Span(lit.line, lit.col))
-        if isinstance(lit, StringLiteral):
-            return HirConstStr(lit.value, TYPE_STR, Span(lit.line, lit.col))
-        if isinstance(lit, BoolLiteral):
-            return HirConstBool(lit.value, TYPE_BOOL, Span(lit.line, lit.col))
-        if isinstance(lit, NoneLiteral):
-            return HirConstNone(TYPE_NONE, Span(lit.line, lit.col))
-        return HirConstUnit(TYPE_UNIT, Span())

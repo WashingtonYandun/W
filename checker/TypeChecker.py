@@ -1,5 +1,6 @@
 import copy
-from typing import Any, Dict, List, Optional, Set, Tuple, NamedTuple
+from enum import Enum
+from typing import Any, Dict, List, Optional, Set, Tuple, NamedTuple, Sequence
 from node.NodeType import (
     Node, Program, Stmt, Expr, TypeNode, Pattern, Block,
     NamedType, OptionalType as AstOptionalType, ListType as AstListType,
@@ -33,6 +34,103 @@ class GenericInstanceKey(NamedTuple):
     """Session-local specialization identity; not a persistent hash or ABI name."""
     template_name: str
     type_ids: Tuple[int, ...]
+    module_id: Optional[str] = None
+    decl_id: Optional[Any] = None
+
+
+class SpecializationState(Enum):
+    PENDING = "pending"
+    SPECIALIZING = "specializing"
+    COMPLETE = "complete"
+    FAILED = "failed"
+
+
+class SpecializationEntry:
+    def __init__(
+        self,
+        key: GenericInstanceKey,
+        state: SpecializationState = SpecializationState.PENDING,
+        specialized_type: Optional[WType] = None,
+        specialized_symbol: Optional[Symbol] = None,
+        ast_decl: Optional[Any] = None
+    ):
+        self.key = key
+        self.state = state
+        self.specialized_type = specialized_type
+        self.specialized_symbol = specialized_symbol
+        self.ast_decl = ast_decl
+        self.dependencies: Set[GenericInstanceKey] = set()
+
+
+def _mangle_type_static(t: WType) -> str:
+    if isinstance(t, AnyType):
+        return "any"
+    if t == IntType:
+        return "int"
+    if t == FloatType:
+        return "float"
+    if t == BoolType:
+        return "bool"
+    if t == StrType:
+        return "str"
+    if t == UnitType:
+        return "unit"
+    if t == NoneType:
+        return "none"
+    if isinstance(t, (StructType, EnumType, ClassType, InterfaceType)):
+        return f"{len(t.name)}_{t.name}"
+    if isinstance(t, OptionalType):
+        return f"opt__{_mangle_type_static(t.inner)}"
+    if isinstance(t, ListType):
+        return f"list__{_mangle_type_static(t.element)}"
+    if isinstance(t, DictType):
+        return f"dict__{_mangle_type_static(t.key)}__{_mangle_type_static(t.value)}"
+    if isinstance(t, TupleType):
+        elems = "__".join(_mangle_type_static(e) for e in t.elements)
+        return f"tuple_{len(t.elements)}__{elems}"
+    if isinstance(t, ResultType):
+        return f"res__{_mangle_type_static(t.ok)}__{_mangle_type_static(t.err)}"
+    if isinstance(t, TypeParamType):
+        return t.name
+    safe_str = str(t).replace("[", "__").replace("]", "").replace(", ", "__").replace(" ", "_")
+    return f"{len(safe_str)}_{safe_str}"
+
+
+def mangle_generic_name(
+    template_name: str,
+    concrete_args: Sequence[WType],
+    module_name: Optional[str] = None
+) -> str:
+    args_part = "__".join(_mangle_type_static(a) for a in concrete_args)
+    if template_name in ("Option", "Result"):
+        return f"{template_name}__{args_part}"
+    mod_prefix = f"{len(module_name)}_{module_name}__" if module_name else ""
+    return f"_W_G_{mod_prefix}{len(template_name)}_{template_name}__{args_part}"
+
+
+def type_strictly_contains(sub: WType, container: WType) -> bool:
+    """Returns True if sub is a strict structural sub-component of container."""
+    if sub == container:
+        return False
+    return _type_contains(sub, container)
+
+
+def _type_contains(sub: WType, container: WType) -> bool:
+    if sub == container:
+        return True
+    if isinstance(container, ListType):
+        return _type_contains(sub, container.element)
+    if isinstance(container, DictType):
+        return _type_contains(sub, container.key) or _type_contains(sub, container.value)
+    if isinstance(container, TupleType):
+        return any(_type_contains(sub, e) for e in container.elements)
+    if isinstance(container, OptionalType):
+        return _type_contains(sub, container.inner)
+    if isinstance(container, ResultType):
+        return _type_contains(sub, container.ok) or _type_contains(sub, container.err)
+    if isinstance(container, (StructType, EnumType)) and getattr(container, "type_args", None):
+        return any(_type_contains(sub, arg) for arg in container.type_args)
+    return False
 
 
 class MonomorphizationTelemetry:
@@ -85,6 +183,7 @@ class TypeChecker:
         self.generic_struct_templates: Dict[str, GenericStructTemplate] = {}
         self.generic_fn_templates: Dict[str, GenericFnTemplate] = {}
         self.generic_enum_templates: Dict[str, GenericEnumTemplate] = {}
+        self.specializations: Dict[GenericInstanceKey, SpecializationEntry] = {}
         self.monomorphized_structs: Dict[GenericInstanceKey, StructType] = {}
         self.monomorphized_fns: Dict[GenericInstanceKey, Symbol] = {}
         self.monomorphized_enums: Dict[GenericInstanceKey, EnumType] = {}
@@ -92,7 +191,7 @@ class TypeChecker:
         self.monomorphized_fn_decls: List[FnDecl] = []
         self.monomorphized_enum_decls: List[EnumDecl] = []
         self._monomorphize_depth: int = 0
-        self._instantiation_stack: List[Tuple[str, Tuple[int, ...], int]] = []
+        self._instantiation_stack: List[Tuple[str, Tuple[int, ...], int, Tuple[WType, ...], int, int]] = []
         self.telemetry: MonomorphizationTelemetry = MonomorphizationTelemetry()
 
         # Canonical built-in Option[T] template
@@ -151,14 +250,50 @@ class TypeChecker:
                 continue
             filtered_body.append(stmt)
 
+        sorted_structs, sorted_enums, sorted_fns = self._sort_monomorphized_decls()
         final_body: List[Stmt] = []
-        final_body.extend(self.monomorphized_struct_decls)
-        final_body.extend(self.monomorphized_enum_decls)
-        final_body.extend(self.monomorphized_fn_decls)
+        final_body.extend(sorted_structs)
+        final_body.extend(sorted_enums)
+        final_body.extend(sorted_fns)
         final_body.extend(filtered_body)
         program.body = final_body
 
         program.interner = self.interner
+
+    def _sort_monomorphized_decls(self) -> Tuple[List[StructDecl], List[EnumDecl], List[FnDecl]]:
+        struct_map = {s.name: s for s in self.monomorphized_struct_decls}
+        struct_deps: Dict[str, Set[str]] = {}
+        for s in self.monomorphized_struct_decls:
+            deps = set()
+            for f in s.fields:
+                f_type_name = getattr(f.type_ann, "name", None)
+                if f_type_name and f_type_name in struct_map and f_type_name != s.name:
+                    deps.add(f_type_name)
+            struct_deps[s.name] = deps
+
+        sorted_struct_names: List[str] = []
+        visited_structs: Set[str] = set()
+        temp_structs: Set[str] = set()
+
+        def visit_struct(name: str):
+            if name in temp_structs:
+                return
+            if name not in visited_structs:
+                temp_structs.add(name)
+                for dep in sorted(struct_deps.get(name, set())):
+                    visit_struct(dep)
+                temp_structs.remove(name)
+                visited_structs.add(name)
+                sorted_struct_names.append(name)
+
+        for name in sorted(struct_map.keys()):
+            if name not in visited_structs:
+                visit_struct(name)
+
+        sorted_structs = [struct_map[n] for n in sorted_struct_names]
+        sorted_enums = sorted(self.monomorphized_enum_decls, key=lambda e: e.name)
+        sorted_fns = sorted(self.monomorphized_fn_decls, key=lambda f: f.name)
+        return sorted_structs, sorted_enums, sorted_fns
 
     # ==========================================
     # Pass 1: Collect Top-Level Declarations
@@ -168,6 +303,18 @@ class TypeChecker:
         return self.session.import_module(stmt, self.file)
 
     def _pass1_collect_declarations(self, program: Program) -> None:
+        # Reject user declarations starting with reserved compiler prefixes
+        for stmt in program.body:
+            if hasattr(stmt, "name") and isinstance(stmt.name, str):
+                if stmt.name.startswith("_W_") or stmt.name.startswith("__w_"):
+                    raise TypeError(
+                        message=f"Identifier '{stmt.name}' is reserved for internal compiler use",
+                        line=stmt.line,
+                        col=stmt.col,
+                        file=self.file,
+                        code="W1002"
+                    )
+
         # Step 1a: Pre-register nominal type shells (Enums, Interfaces, Classes, Imports)
         for stmt in program.body:
             if isinstance(stmt, EnumDecl):
@@ -701,6 +848,14 @@ class TypeChecker:
             self.current_scope = old_scope
 
     def _check_let_decl(self, stmt: LetDecl) -> None:
+        if stmt.name.startswith("_W_") or stmt.name.startswith("__w_"):
+            raise TypeError(
+                message=f"Identifier '{stmt.name}' is reserved for internal compiler use",
+                line=stmt.line,
+                col=stmt.col,
+                file=self.file,
+                code="W1002"
+            )
         # Check for unannotated empty list or none
         if isinstance(stmt.initializer, ListExpr) and len(stmt.initializer.elements) == 0 and stmt.type_ann is None:
             raise TypeError(
@@ -865,6 +1020,11 @@ class TypeChecker:
 
     def _check_expr_impl(self, expr: Expr, is_statement_context: bool = False) -> WType:
         if isinstance(expr, IntLiteral):
+            if expr.value > 9223372036854775807 or expr.value < -9223372036854775808:
+                raise TypeError(
+                    message=f"Integer literal {expr.value} exceeds 64-bit signed range [-9223372036854775808, 9223372036854775807]",
+                    line=expr.line, col=expr.col, file=self.file, code="W0002"
+                )
             return IntType
         if isinstance(expr, FloatLiteral):
             return FloatType
@@ -2355,13 +2515,20 @@ class TypeChecker:
 
         return UnitType
 
-    def _pattern_matrix_exhaustive(self, types: List[WType], rows: List[List[Pattern]]) -> bool:
+    def _pattern_matrix_exhaustive(self, types: List[WType], rows: List[List[Any]]) -> bool:
         if not types:
             return bool(rows)
         if not rows:
             return False
+        from hir.HirNodes import (
+            HirWildcardPattern, HirBindingPattern, HirLiteralPattern, HirEnumPattern, HirTuplePattern
+        )
         def wildcard(pattern):
-            return isinstance(pattern, WildcardPattern) or (isinstance(pattern, IdentifierPattern) and pattern.name not in ("None", "none"))
+            if isinstance(pattern, (WildcardPattern, HirWildcardPattern)):
+                return True
+            if isinstance(pattern, (IdentifierPattern, HirBindingPattern)) and pattern.name not in ("None", "none"):
+                return True
+            return False
         defaults = [row[1:] for row in rows if wildcard(row[0])]
         if defaults and self._pattern_matrix_exhaustive(types[1:], defaults):
             return True
@@ -2388,11 +2555,22 @@ class TypeChecker:
                     specialized.append([WildcardPattern() for _ in payload] + row[1:])
                 elif isinstance(pattern, EnumPattern) and pattern.variant == name:
                     specialized.append(pattern.args + row[1:])
+                elif isinstance(pattern, HirEnumPattern) and pattern.variant_name == name:
+                    specialized.append(pattern.subpatterns + row[1:])
                 elif isinstance(pattern, TuplePattern) and name == "tuple":
                     specialized.append(pattern.elements + row[1:])
-                elif name == "None" and ((isinstance(pattern, IdentifierPattern) and pattern.name in ("None", "none")) or (isinstance(pattern, LiteralPattern) and isinstance(pattern.literal, NoneLiteral))):
+                elif isinstance(pattern, HirTuplePattern) and name == "tuple":
+                    specialized.append(pattern.elements + row[1:])
+                elif name == "None" and (
+                    (isinstance(pattern, (IdentifierPattern, HirBindingPattern)) and pattern.name in ("None", "none")) or
+                    (isinstance(pattern, LiteralPattern) and isinstance(pattern.literal, NoneLiteral)) or
+                    (isinstance(pattern, HirLiteralPattern) and pattern.literal_kind == "none")
+                ):
                     specialized.append(row[1:])
-                elif isinstance(pattern, LiteralPattern) and isinstance(pattern.literal, BoolLiteral) and name == ("true" if pattern.literal.value else "false"):
+                elif (
+                    (isinstance(pattern, LiteralPattern) and isinstance(pattern.literal, BoolLiteral) and name == ("true" if pattern.literal.value else "false")) or
+                    (isinstance(pattern, HirLiteralPattern) and pattern.literal_kind == "bool" and name == ("true" if pattern.value else "false"))
+                ):
                     specialized.append(row[1:])
             if not self._pattern_matrix_exhaustive(payload + types[1:], specialized):
                 return False
@@ -2448,42 +2626,7 @@ class TypeChecker:
     # ==========================================
 
     def _mangle_type_name(self, t: WType) -> str:
-        if isinstance(t, AnyType):
-            return "any"
-        if t == IntType:
-            return "int"
-        if t == FloatType:
-            return "float"
-        if t == BoolType:
-            return "bool"
-        if t == StrType:
-            return "str"
-        if t == UnitType:
-            return "unit"
-        if t == NoneType:
-            return "none"
-        if isinstance(t, StructType):
-            return t.name
-        if isinstance(t, EnumType):
-            return t.name
-        if isinstance(t, ClassType):
-            return t.name
-        if isinstance(t, InterfaceType):
-            return t.name
-        if isinstance(t, OptionalType):
-            return f"opt__{self._mangle_type_name(t.inner)}"
-        if isinstance(t, ListType):
-            return f"list__{self._mangle_type_name(t.element)}"
-        if isinstance(t, DictType):
-            return f"dict__{self._mangle_type_name(t.key)}__{self._mangle_type_name(t.value)}"
-        if isinstance(t, TupleType):
-            elems = "__".join(self._mangle_type_name(e) for e in t.elements)
-            return f"tuple__{elems}"
-        if isinstance(t, ResultType):
-            return f"res__{self._mangle_type_name(t.ok)}__{self._mangle_type_name(t.err)}"
-        if isinstance(t, TypeParamType):
-            return t.name
-        return str(t).replace("[", "__").replace("]", "").replace(", ", "__").replace(" ", "_")
+        return _mangle_type_static(t)
 
     def _wtype_to_type_node(self, t: WType) -> TypeNode:
         node = self._wtype_to_type_node_impl(t)
@@ -2567,7 +2710,9 @@ class TypeChecker:
         if isinstance(node, LetDecl):
             if node.type_ann is not None:
                 node.type_ann = self._substitute_type_node(node.type_ann, subst)
-            self._substitute_ast_types(node.init, subst)
+            init_val = getattr(node, "initializer", getattr(node, "init", None))
+            if init_val is not None:
+                self._substitute_ast_types(init_val, subst)
         elif isinstance(node, StructInitExpr):
             if node.type_args:
                 node.type_args = [self._substitute_type_node(a, subst) for a in node.type_args]
@@ -2742,6 +2887,46 @@ class TypeChecker:
             return 1 + sum(self._type_complexity(p) for p in t.params) + self._type_complexity(t.ret)
         return 1
 
+    def _check_specialization_cycle(
+        self,
+        template_name: str,
+        concrete_args: Sequence[WType],
+        type_ids: Tuple[int, ...],
+        line: int,
+        col: int
+    ) -> None:
+        matching_frames = [f for f in self._instantiation_stack if f[0] == template_name]
+        if len(matching_frames) >= 2:
+            f0 = matching_frames[-2]
+            f1 = matching_frames[-1]
+            if len(f0[3]) == len(concrete_args) and len(f1[3]) == len(concrete_args):
+                step1_sub = all(_type_contains(fa, fb) for fa, fb in zip(f0[3], f1[3]))
+                step1_strict = any(type_strictly_contains(fa, fb) for fa, fb in zip(f0[3], f1[3]))
+                step2_sub = all(_type_contains(fb, ca) for fb, ca in zip(f1[3], concrete_args))
+                step2_strict = any(type_strictly_contains(fb, ca) for fb, ca in zip(f1[3], concrete_args))
+                if step1_sub and step1_strict and step2_sub and step2_strict:
+                    start_idx = self._instantiation_stack.index(f0)
+                    chain_frames = self._instantiation_stack[start_idx:]
+                    chain = [f"{frame[0]}[{', '.join(str(a) for a in frame[3])}]" for frame in chain_frames]
+                    chain.append(f"{template_name}[{', '.join(str(a) for a in concrete_args)}]")
+                    chain_str = " -> ".join(chain)
+                    raise TypeError(
+                        message=f"Monomorphization recursion depth limit exceeded (64) / structural generic expansion cycle detected for '{template_name}': instantiation chain {chain_str} expands argument types indefinitely",
+                        line=line,
+                        col=col,
+                        file=self.file,
+                        code="W2011"
+                    )
+
+        if self._monomorphize_depth >= 64:
+            raise TypeError(
+                message=f"Monomorphization recursion depth limit exceeded for '{template_name}': maximum instantiation depth reached without proven termination",
+                line=line,
+                col=col,
+                file=self.file,
+                code="W2011"
+            )
+
     def _monomorphize_struct(
         self,
         template: GenericStructTemplate,
@@ -2759,20 +2944,28 @@ class TypeChecker:
             )
 
         type_ids = tuple(self.interner.intern(a) for a in concrete_args)
-        key = GenericInstanceKey(template.name, type_ids)
+        decl_id = getattr(template, "decl_id", None)
+        module_id = getattr(template, "module_id", getattr(self.session, "current_module_id", None))
+        key = GenericInstanceKey(template.name, type_ids, module_id=module_id, decl_id=decl_id)
         self.telemetry.specialization_requests += 1
+
+        if key in self.specializations:
+            entry = self.specializations[key]
+            if entry.state in (SpecializationState.COMPLETE, SpecializationState.SPECIALIZING):
+                self.telemetry.deduplicated_hits += 1
+                assert entry.specialized_type is not None
+                return entry.specialized_type
+            elif entry.state == SpecializationState.FAILED:
+                raise TypeError(
+                    message=f"Previous specialization failed for '{template.name}'",
+                    line=line, col=col, file=self.file, code="W2011"
+                )
+
         if key in self.monomorphized_structs:
             self.telemetry.deduplicated_hits += 1
             return self.monomorphized_structs[key]
 
-        if self._monomorphize_depth >= 64:
-            raise TypeError(
-                message=f"Monomorphization recursion depth limit exceeded for struct '{template.name}'",
-                line=line,
-                col=col,
-                file=self.file,
-                code="W2011"
-            )
+        self._check_specialization_cycle(template.name, concrete_args, type_ids, line, col)
 
         curr_complexity = sum(self._type_complexity(a) for a in concrete_args)
 
@@ -2795,15 +2988,18 @@ class TypeChecker:
                 self._check_type_constraint(arg, p_constraint, line, col)
             subst[p_name] = arg
 
-        mangled = f"{template.name}__{'__'.join(self._mangle_type_name(a) for a in concrete_args)}"
+        mangled = mangle_generic_name(template.name, concrete_args, module_id)
 
         struct_t = StructType(name=mangled, fields={})
         struct_t.template_name = template.name
         struct_t.type_args = concrete_args
+        entry = SpecializationEntry(key=key, state=SpecializationState.SPECIALIZING, specialized_type=struct_t)
+        self.specializations[key] = entry
         self.monomorphized_structs[key] = struct_t
         self.global_scope.define_type(mangled, struct_t, line=line, col=col, file=self.file)
 
-        self._instantiation_stack.append((template.name, type_ids, curr_complexity))
+        frame = (template.name, type_ids, curr_complexity, tuple(concrete_args), line, col)
+        self._instantiation_stack.append(frame)
         self._monomorphize_depth += 1
         try:
             new_fields: List[StructField] = []
@@ -2839,8 +3035,13 @@ class TypeChecker:
             self._check_fn_decl(ctor_fn)
             self.monomorphized_fn_decls.append(ctor_fn)
             self.telemetry.specialized_structs += 1
+            entry.state = SpecializationState.COMPLETE
+            entry.ast_decl = concrete_decl
 
             return struct_t
+        except Exception:
+            entry.state = SpecializationState.FAILED
+            raise
         finally:
             self._monomorphize_depth -= 1
             self._instantiation_stack.pop()
@@ -2862,20 +3063,28 @@ class TypeChecker:
             )
 
         type_ids = tuple(self.interner.intern(a) for a in concrete_args)
-        key = GenericInstanceKey(template.name, type_ids)
+        decl_id = getattr(template, "decl_id", None)
+        module_id = getattr(template, "module_id", getattr(self.session, "current_module_id", None))
+        key = GenericInstanceKey(template.name, type_ids, module_id=module_id, decl_id=decl_id)
         self.telemetry.specialization_requests += 1
+
+        if key in self.specializations:
+            entry = self.specializations[key]
+            if entry.state in (SpecializationState.COMPLETE, SpecializationState.SPECIALIZING):
+                self.telemetry.deduplicated_hits += 1
+                assert entry.specialized_symbol is not None
+                return entry.specialized_symbol
+            elif entry.state == SpecializationState.FAILED:
+                raise TypeError(
+                    message=f"Previous specialization failed for '{template.name}'",
+                    line=line, col=col, file=self.file, code="W2011"
+                )
+
         if key in self.monomorphized_fns:
             self.telemetry.deduplicated_hits += 1
             return self.monomorphized_fns[key]
 
-        if self._monomorphize_depth >= 64:
-            raise TypeError(
-                message=f"Monomorphization recursion depth limit exceeded for function '{template.name}'",
-                line=line,
-                col=col,
-                file=self.file,
-                code="W2011"
-            )
+        self._check_specialization_cycle(template.name, concrete_args, type_ids, line, col)
 
         curr_complexity = sum(self._type_complexity(a) for a in concrete_args)
 
@@ -2887,7 +3096,7 @@ class TypeChecker:
                 self._check_type_constraint(arg, p_constraint, line, col)
             subst[p_name] = arg
 
-        mangled = f"{template.name}__{'__'.join(self._mangle_type_name(a) for a in concrete_args)}"
+        mangled = mangle_generic_name(template.name, concrete_args, module_id)
 
         cloned_fn = copy.deepcopy(template.ast_decl)
         cloned_fn.name = mangled
@@ -2903,16 +3112,23 @@ class TypeChecker:
         ret_t = self._resolve_type_node(cloned_fn.return_type)
         fn_type = FunctionType(params=p_types, ret=ret_t)
         fn_sym = Symbol(mangled, fn_type, is_mut=False, kind="fn", line=line, col=col)
+        entry = SpecializationEntry(key=key, state=SpecializationState.SPECIALIZING, specialized_symbol=fn_sym, ast_decl=cloned_fn)
+        self.specializations[key] = entry
         self.monomorphized_fns[key] = fn_sym
         self.global_scope.define_symbol(fn_sym, file=self.file)
         self.monomorphized_fn_decls.append(cloned_fn)
         self.telemetry.specialized_functions += 1
 
-        self._instantiation_stack.append((template.name, type_ids, curr_complexity))
+        frame = (template.name, type_ids, curr_complexity, tuple(concrete_args), line, col)
+        self._instantiation_stack.append(frame)
         self._monomorphize_depth += 1
         try:
             self._check_fn_decl(cloned_fn)
+            entry.state = SpecializationState.COMPLETE
             return fn_sym
+        except Exception:
+            entry.state = SpecializationState.FAILED
+            raise
         finally:
             self._monomorphize_depth -= 1
             self._instantiation_stack.pop()
@@ -2934,44 +3150,53 @@ class TypeChecker:
             )
 
         type_ids = tuple(self.interner.intern(a) for a in concrete_args)
-        key = GenericInstanceKey(template.name, type_ids)
+        decl_id = getattr(template, "decl_id", None)
+        module_id = getattr(template, "module_id", getattr(self.session, "current_module_id", None))
+        key = GenericInstanceKey(template.name, type_ids, module_id=module_id, decl_id=decl_id)
         self.telemetry.specialization_requests += 1
+
+        if key in self.specializations:
+            entry = self.specializations[key]
+            if entry.state in (SpecializationState.COMPLETE, SpecializationState.SPECIALIZING):
+                self.telemetry.deduplicated_hits += 1
+                assert entry.specialized_type is not None
+                return entry.specialized_type
+            elif entry.state == SpecializationState.FAILED:
+                raise TypeError(
+                    message=f"Previous specialization failed for '{template.name}'",
+                    line=line, col=col, file=self.file, code="W2011"
+                )
 
         if key in self.monomorphized_enums:
             self.telemetry.deduplicated_hits += 1
             return self.monomorphized_enums[key]
 
-        if self._monomorphize_depth >= 64:
-            raise TypeError(
-                message=f"Monomorphization recursion depth limit exceeded for enum '{template.name}'",
-                line=line,
-                col=col,
-                file=self.file,
-                code="W2011"
-            )
+        self._check_specialization_cycle(template.name, concrete_args, type_ids, line, col)
 
         curr_complexity = sum(self._type_complexity(a) for a in concrete_args)
 
-        self._instantiation_stack.append((template.name, type_ids, curr_complexity))
+        subst: Dict[str, WType] = {}
+        for p, arg in zip(template.type_params, concrete_args):
+            p_name = p.name if hasattr(p, "name") else str(p)
+            p_constraint = getattr(p, "constraint", None)
+            if p_constraint:
+                self._check_type_constraint(arg, p_constraint, line, col)
+            subst[p_name] = arg
+
+        mangled = mangle_generic_name(template.name, concrete_args, module_id)
+
+        enum_t = EnumType(name=mangled, variants=[], variant_payloads={})
+        enum_t.template_name = template.name
+        enum_t.type_args = concrete_args
+        entry = SpecializationEntry(key=key, state=SpecializationState.SPECIALIZING, specialized_type=enum_t)
+        self.specializations[key] = entry
+        self.monomorphized_enums[key] = enum_t
+        self.global_scope.define_type(mangled, enum_t, line=line, col=col, file=self.file)
+
+        frame = (template.name, type_ids, curr_complexity, tuple(concrete_args), line, col)
+        self._instantiation_stack.append(frame)
         self._monomorphize_depth += 1
         try:
-            subst: Dict[str, WType] = {}
-            for p, arg in zip(template.type_params, concrete_args):
-                p_name = p.name if hasattr(p, "name") else str(p)
-                p_constraint = getattr(p, "constraint", None)
-                if p_constraint:
-                    self._check_type_constraint(arg, p_constraint, line, col)
-                subst[p_name] = arg
-
-            arg_mangles = [self._mangle_type_name(a) for a in concrete_args]
-            mangled = f"{template.name}__{'__'.join(arg_mangles)}"
-
-            enum_t = EnumType(name=mangled, variants=[], variant_payloads={})
-            enum_t.template_name = template.name
-            enum_t.type_args = concrete_args
-            self.monomorphized_enums[key] = enum_t
-            self.global_scope.define_type(mangled, enum_t, line=line, col=col, file=self.file)
-
             variant_names: List[str] = []
             variant_payloads: Dict[str, List[WType]] = {}
             new_variants: List[VariantDecl] = []
@@ -3005,8 +3230,13 @@ class TypeChecker:
             concrete_decl = EnumDecl(name=mangled, variants=new_variants, type_params=[], line=template.ast_decl.line, col=template.ast_decl.col)
             self.monomorphized_enum_decls.append(concrete_decl)
             self.telemetry.specialized_enums += 1
+            entry.state = SpecializationState.COMPLETE
+            entry.ast_decl = concrete_decl
 
             return enum_t
+        except Exception:
+            entry.state = SpecializationState.FAILED
+            raise
         finally:
             self._monomorphize_depth -= 1
             self._instantiation_stack.pop()
