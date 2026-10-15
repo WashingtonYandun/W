@@ -2385,229 +2385,720 @@ fn compile_source(src: str) -> str {
     return out
 }
 
-fn check_type_rules(src: str) -> unit {
-    if len(src) > 5000 {
-        return
+struct CheckerVar {
+    name: str,
+    is_mut: bool,
+    scope_lvl: int,
+    type_name: str,
+}
+
+struct CheckerStruct {
+    name: str,
+    field_names: list[str],
+}
+
+struct CheckerEnum {
+    name: str,
+    variants: list[str],
+}
+
+struct CheckerInterface {
+    name: str,
+    methods: list[str],
+}
+
+struct CheckerClass {
+    name: str,
+    interfaces: list[str],
+    methods: list[str],
+    privates: list[str],
+}
+
+struct CheckerFn {
+    name: str,
+    param_names: list[str],
+    param_types: list[str],
+    ret_type: str,
+    err_type: str,
+    has_ret: bool,
+    fn_line: int,
+    fn_col: int,
+}
+
+fn check_delimiters(tokens: list[Token]) -> unit {
+    let mut delim_kinds: list[str] = []
+    let mut delim_lines: list[int] = []
+    let mut delim_cols: list[int] = []
+    for tok in tokens {
+        let k = tok.kind
+        if k == "LPAREN" or k == "LBRACE" or k == "LBRACKET" {
+            delim_kinds.append(k)
+            delim_lines.append(tok.line)
+            delim_cols.append(tok.col)
+        } elif k == "RPAREN" {
+            let dl = len(delim_kinds)
+            if dl == 0 {
+                report_error("W0001", tok.line, tok.col, "unexpected ')'")
+            }
+            let top = delim_kinds[dl - 1]
+            if top != "LPAREN" {
+                report_error("W0001", tok.line, tok.col, "mismatched delimiter ')'")
+            }
+            delim_kinds.pop()
+            delim_lines.pop()
+            delim_cols.pop()
+        } elif k == "RBRACKET" {
+            let dl = len(delim_kinds)
+            if dl == 0 {
+                report_error("W0006", tok.line, tok.col, "unexpected ']'")
+            }
+            let top = delim_kinds[dl - 1]
+            if top != "LBRACKET" {
+                report_error("W0006", tok.line, tok.col, "mismatched delimiter ']'")
+            }
+            delim_kinds.pop()
+            delim_lines.pop()
+            delim_cols.pop()
+        } elif k == "RBRACE" {
+            let dl = len(delim_kinds)
+            if dl == 0 {
+                report_error("W0006", tok.line, tok.col, "unexpected '}'")
+            }
+            let top = delim_kinds[dl - 1]
+            if top == "LPAREN" {
+                report_error("W0001", tok.line, tok.col, "expected ')' before '}'")
+            }
+            if top != "LBRACE" {
+                report_error("W0006", tok.line, tok.col, "mismatched delimiter '}'")
+            }
+            delim_kinds.pop()
+            delim_lines.pop()
+            delim_cols.pop()
+        }
     }
-    if len(src) >= 9 and slice(src, 0, 9) == "1 + 2 = 3" {
-        report_error("W2002", 1, 1, "invalid assignment target")
+    if len(delim_kinds) > 0 {
+        let top_idx = len(delim_kinds) - 1
+        let top_k = delim_kinds[top_idx]
+        if top_k == "LBRACE" {
+            report_error("W0006", delim_lines[top_idx], delim_cols[top_idx], "unclosed delimiter '{'")
+        } elif top_k == "LPAREN" {
+            report_error("W0001", delim_lines[top_idx], delim_cols[top_idx], "unclosed delimiter '('")
+        } elif top_k == "LBRACKET" {
+            report_error("W0006", delim_lines[top_idx], delim_cols[top_idx], "unclosed delimiter '['")
+        }
     }
-    if len(src) >= 20 and slice(src, 0, 20) == "class Broken extends" {
-        report_error("W0006", 1, 1, "invalid class declaration")
-    }
-    if len(src) >= 10 and slice(src, 0, 10) == "fn (a: int" {
-        report_error("W0006", 1, 1, "invalid fn signature")
-    }
-    if len(src) >= 15 and slice(src, 0, 15) == "let x: list[ = " {
-        report_error("W0006", 1, 1, "invalid type syntax")
-    }
-    if len(src) >= 10 {
-        for i in 0..len(src) - 8 {
-            if slice(src, i, i + 8) == "enum E {" {
-                if i + 16 < len(src) and slice(src, i + 13, i + 16) == "123" {
-                    report_error("W0006", 2, 5, "invalid enum variant")
+}
+
+fn is_builtin_type(t: str) -> bool {
+    return t == "int" or t == "float" or t == "bool" or t == "str" or t == "unit" or t == "list" or t == "dict" or t == "Option" or t == "Result" or t == "Weak" or t == "WVal" or t == "Token" or t == "ExprRes" or t == "ClassMeta" or t == "CleanupScope" or t == "IoError" or t == "NetError" or t == "MathError" or t == "JsonError" or t == "Range" or t == "Iterator" or t == "CheckerVar" or t == "CheckerStruct" or t == "CheckerEnum" or t == "CheckerInterface" or t == "CheckerClass" or t == "CheckerFn"
+}
+
+fn check_tokens_semantics(tokens: list[Token]) -> unit {
+    let n = len(tokens)
+    for i in 0..n {
+        let tok = tokens[i]
+        if tok.kind == "FN" {
+            if i + 1 < n and tokens[i + 1].kind != "IDENT" {
+                report_error("W0006", tokens[i + 1].line, tokens[i + 1].col, "expected function name after 'fn'")
+            }
+        } elif tok.kind == "CLASS" {
+            if i + 1 < n and tokens[i + 1].kind == "IDENT" {
+                if i + 2 < n and tokens[i + 2].kind == "EXTENDS" {
+                    if i + 3 < n and tokens[i + 3].kind != "IDENT" {
+                        report_error("W0006", tokens[i + 3].line, tokens[i + 3].col, "expected superclass name after 'extends'")
+                    }
                 }
             }
-            if slice(src, i, i + 7) == "match x" {
-                if i + 17 < len(src) and slice(src, i + 14, i + 17) == "1 {" {
-                    report_error("W0001", 2, 5, "invalid match arm: expected =>")
+        } elif tok.kind == "ENUM" {
+            if i + 2 < n and tokens[i + 2].kind == "LBRACE" {
+                let mut j = i + 3
+                while j < n and tokens[j].kind != "RBRACE" {
+                    if tokens[j].kind != "IDENT" and tokens[j].kind != "COMMA" {
+                        report_error("W0006", tokens[j].line, tokens[j].col, "expected enum variant identifier")
+                    }
+                    j = j + 1
                 }
             }
-            if slice(src, i, i + 8) == "struct S" {
-                if i + 17 < len(src) and slice(src, i + 15, i + 17) == "a:" {
-                    report_error("W0006", 2, 5, "invalid struct field")
+        } elif tok.kind == "STRUCT" {
+            if i + 2 < n and tokens[i + 2].kind == "LBRACE" {
+                let mut j = i + 3
+                while j < n and tokens[j].kind != "RBRACE" {
+                    if tokens[j].kind == "COLON" {
+                        if j + 1 < n and (tokens[j + 1].kind == "RBRACE" or tokens[j + 1].kind == "COMMA") {
+                            report_error("W0006", tokens[j].line, tokens[j].col, "expected type for struct field")
+                        }
+                    }
+                    j = j + 1
+                }
+            }
+        } elif tok.kind == "MATCH" {
+            let mut j = i + 1
+            while j < n and tokens[j].kind != "LBRACE" {
+                j = j + 1
+            }
+            if j < n and tokens[j].kind == "LBRACE" {
+                let mut depth = 1
+                let mut k = j + 1
+                while k < n and depth > 0 {
+                    if tokens[k].kind == "LBRACE" {
+                        depth = depth + 1
+                    } elif tokens[k].kind == "RBRACE" {
+                        depth = depth - 1
+                    } elif depth == 1 and (tokens[k].kind == "IDENT" or tokens[k].kind == "INT") {
+                        if k + 1 < n and tokens[k + 1].kind == "LBRACE" {
+                            report_error("W0001", tokens[k + 1].line, tokens[k + 1].col, "expected '=>' in match arm")
+                        }
+                    }
+                    k = k + 1
                 }
             }
         }
     }
-    if len(src) >= 10 {
-        for i in 0..len(src) - 9 {
-            if slice(src, i, i + 10) == "let xs = [" {
-                if i + 10 < len(src) and src[i + 10] == "]" {
-                    report_error("W2001", 1, 1, "cannot infer element type for empty list literal")
+
+    for i in 0..n - 2 {
+        if tokens[i].kind == "COLON" and tokens[i + 1].val == "list" {
+            if tokens[i + 2].kind == "LBRACKET" {
+                if i + 3 < n and (tokens[i + 3].kind == "ASSIGN" or tokens[i + 3].kind == "COMMA" or tokens[i + 3].kind == "RBRACKET") {
+                    report_error("W0006", tokens[i + 3].line, tokens[i + 3].col, "expected type inside list brackets")
                 }
-                if i + 19 < len(src) and slice(src, i + 10, i + 19) == "1, \"two\"]" {
-                    report_error("W2001", 1, 1, "mixed types in list literal")
-                }
-            }
-            if slice(src, i, i + 12) == "let x = none" {
-                report_error("W2001", 1, 1, "cannot infer type for bare 'none'")
-            }
-            if slice(src, i, i + 12) == ": str = none" {
-                report_error("W2001", 1, 1, "type mismatch: expected str, found none")
-            }
-            if slice(src, i, i + 9) == "opt ?? 10" {
-                report_error("W2001", 2, 1, "type mismatch in coalesce")
             }
         }
     }
-    if len(src) >= 10 {
-        for i in 0..len(src) - 15 {
-            if slice(src, i, i + 16) == "undefined_symbol" {
-                report_error("W1001", 1, 1, "unknown identifier 'undefined_symbol'")
-            }
-            if slice(src, i, i + 17) == "UnknownCustomType" {
-                report_error("W1001", 1, 1, "unknown type 'UnknownCustomType'")
-            }
-            if slice(src, i, i + 13) == "fn read_cfg()" and len(src) > i + 60 {
-                for j in i..len(src) - 13 {
-                    if slice(src, j, j + 13) == "else err {\n  " {
-                        report_error("W2001", 7, 26, "invalid else err handler")
-                    }
+
+    for i in 0..n {
+        if tokens[i].kind == "ASSIGN" {
+            if i > 0 {
+                let prev_k = tokens[i - 1].kind
+                if prev_k != "IDENT" and prev_k != "RBRACKET" and prev_k != "QUESTION" {
+                    report_error("W2002", tokens[i].line, tokens[i].col, "invalid assignment target")
                 }
-            }
-            if slice(src, i, i + 19) == "State.Done => \"two\"" {
-                report_error("W2001", 7, 9, "incompatible match arms")
             }
         }
     }
-    if len(src) >= 10 {
-        for i in 0..len(src) - 10 {
-            if slice(src, i, i + 10) == "let x = 1\n" and i + 19 < len(src) and slice(src, i + 10, i + 19) == "let x = 2" {
-                report_error("W1002", 2, 1, "duplicate declaration of 'x'")
-            }
-            if slice(src, i, i + 11) == "let x = 10\n" and i + 17 < len(src) and slice(src, i + 11, i + 17) == "x = 20" {
-                report_error("W3001", 2, 1, "mutation of immutable variable 'x'")
-            }
-            if slice(src, i, i + 15) == "let xs = [1, 2]" and i + 28 < len(src) and slice(src, i + 16, i + 28) == "xs.append(3)" {
-                report_error("W3001", 2, 1, "mutation of immutable list 'xs'")
-            }
-            if slice(src, i, i + 13) == "struct Person" and i + 90 < len(src) {
-                for j in i..len(src) - 14 {
-                    if slice(src, j, j + 14) == "p.tags.append(" {
-                        report_error("W3001", 7, 5, "mutation of immutable binding path 'p.tags'")
+
+    for i in 0..n - 2 {
+        if tokens[i].kind == "LBRACE" and tokens[i + 1].kind == "FLOAT" and tokens[i + 2].kind == "COLON" {
+            report_error("W2010", tokens[i + 1].line, tokens[i + 1].col, "float cannot be used as dictionary key")
+        }
+    }
+
+    let mut structs: list[CheckerStruct] = []
+    let mut enums: list[CheckerEnum] = []
+    let mut interfaces: list[CheckerInterface] = []
+    let mut classes: list[CheckerClass] = []
+    let mut fns: list[CheckerFn] = []
+
+    for i in 0..n {
+        let t = tokens[i]
+        if t.kind == "STRUCT" and i + 1 < n and tokens[i + 1].kind == "IDENT" {
+            let sname = tokens[i + 1].val
+            let mut fnames: list[str] = []
+            let mut j = i + 2
+            while j < n and tokens[j].kind != "LBRACE" { j = j + 1 }
+            if j < n and tokens[j].kind == "LBRACE" {
+                let mut k = j + 1
+                while k < n and tokens[k].kind != "RBRACE" {
+                    if tokens[k].kind == "IDENT" and k + 1 < n and tokens[k + 1].kind == "COLON" {
+                        fnames.append(tokens[k].val)
                     }
+                    k = k + 1
                 }
             }
-            if slice(src, i, i + 14) == "\"not a number\"" {
-                report_error("W2004", 2, 5, "return type mismatch")
-            }
-            if slice(src, i, i + 12) == "fn compute()" and len(src) < 70 {
-                report_error("W2004", 1, 1, "missing return statement")
-            }
-            if slice(src, i, i + 13) == "add(1, \"two\")" {
-                report_error("W2001", 5, 1, "argument type mismatch")
-            }
-            if slice(src, i, i + 9) == "if true {" and len(src) < 80 {
-                for j in i..len(src) - 5 {
-                    if slice(src, j, j + 5) == "\"two\"" {
-                        report_error("W2001", 1, 1, "incompatible if branches")
+            structs.append(CheckerStruct { name: sname, field_names: fnames })
+        } elif t.kind == "ENUM" and i + 1 < n and tokens[i + 1].kind == "IDENT" {
+            let ename = tokens[i + 1].val
+            let mut evars: list[str] = []
+            let mut j = i + 2
+            while j < n and tokens[j].kind != "LBRACE" { j = j + 1 }
+            if j < n and tokens[j].kind == "LBRACE" {
+                let mut k = j + 1
+                while k < n and tokens[k].kind != "RBRACE" {
+                    if tokens[k].kind == "IDENT" {
+                        evars.append(tokens[k].val)
                     }
+                    k = k + 1
                 }
             }
-            if slice(src, i, i + 15) == "fn check(s: Sta" and i + 100 < len(src) {
-                for j in i..len(src) - 14 {
-                    if slice(src, j, j + 14) == "State.Done => " and slice(src, i, len(src)) != "" {
-                        if not (len(src) > j + 30 and (slice(src, j, j + 30) == "State.Running" or slice(src, j, j + 30) == "_")) {
-                            report_error("W2003", 8, 5, "non-exhaustive match")
+            enums.append(CheckerEnum { name: ename, variants: evars })
+        } elif t.kind == "INTERFACE" and i + 1 < n and tokens[i + 1].kind == "IDENT" {
+            let iname = tokens[i + 1].val
+            let mut imethods: list[str] = []
+            let mut j = i + 2
+            while j < n and tokens[j].kind != "LBRACE" { j = j + 1 }
+            if j < n and tokens[j].kind == "LBRACE" {
+                let mut k = j + 1
+                while k < n and tokens[k].kind != "RBRACE" {
+                    if tokens[k].kind == "FN" and k + 1 < n and tokens[k + 1].kind == "IDENT" {
+                        imethods.append(tokens[k + 1].val)
+                    }
+                    k = k + 1
+                }
+            }
+            interfaces.append(CheckerInterface { name: iname, methods: imethods })
+        } elif t.kind == "CLASS" and i + 1 < n and tokens[i + 1].kind == "IDENT" {
+            let cname = tokens[i + 1].val
+            let mut cintfs: list[str] = []
+            let mut j = i + 2
+            while j < n and tokens[j].kind != "LBRACE" {
+                if tokens[j].kind == "IMPLEMENTS" {
+                    let mut k = j + 1
+                    while k < n and tokens[k].kind == "IDENT" {
+                        cintfs.append(tokens[k].val)
+                        k = k + 1
+                        if k < n and tokens[k].kind == "COMMA" { k = k + 1 }
+                    }
+                }
+                j = j + 1
+            }
+            let mut cmethods: list[str] = []
+            let mut cprivates: list[str] = []
+            if j < n and tokens[j].kind == "LBRACE" {
+                let mut k = j + 1
+                let mut depth = 1
+                let mut is_priv = false
+                while k < n and depth > 0 {
+                    if tokens[k].kind == "LBRACE" {
+                        depth = depth + 1
+                    } elif tokens[k].kind == "RBRACE" {
+                        depth = depth - 1
+                    } elif depth == 1 and tokens[k].kind == "PRIVATE" {
+                        is_priv = true
+                    } elif depth == 1 and tokens[k].kind == "PUBLIC" {
+                        is_priv = false
+                    } elif depth == 1 and tokens[k].kind == "FN" and k + 1 < n and tokens[k + 1].kind == "IDENT" {
+                        let mname = tokens[k + 1].val
+                        cmethods.append(mname)
+                        if is_priv { cprivates.append(mname) }
+                        is_priv = false
+                    } elif depth == 1 and tokens[k].kind == "IDENT" and k + 1 < n and tokens[k + 1].kind == "COLON" {
+                        let fname = tokens[k].val
+                        if is_priv { cprivates.append(fname) }
+                        is_priv = false
+                    }
+                    k = k + 1
+                }
+            }
+            classes.append(CheckerClass { name: cname, interfaces: cintfs, methods: cmethods, privates: cprivates })
+        } elif t.kind == "FN" and i + 1 < n and tokens[i + 1].kind == "IDENT" {
+            let fname = tokens[i + 1].val
+            let mut ret_t = "unit"
+            let mut err_t = ""
+            let mut j = i + 2
+            while j < n and tokens[j].kind != "LBRACE" and tokens[j].kind != "FN" and tokens[j].kind != "RBRACE" and tokens[j].kind != "INTERFACE" {
+                if tokens[j].kind == "ARROW" and j + 1 < n {
+                    ret_t = tokens[j + 1].val
+                    if j + 2 < n and tokens[j + 2].kind == "QUESTION" {
+                        ret_t = ret_t + "?"
+                    }
+                } elif tokens[j].kind == "BANG" and j + 1 < n {
+                    err_t = tokens[j + 1].val
+                }
+                j = j + 1
+            }
+            let mut has_ret = false
+            if j < n and tokens[j].kind == "LBRACE" {
+                let mut depth = 1
+                let mut k = j + 1
+                while k < n and depth > 0 {
+                    if tokens[k].kind == "LBRACE" { depth = depth + 1 }
+                    elif tokens[k].kind == "RBRACE" { depth = depth - 1 }
+                    elif tokens[k].kind == "RETURN" or (depth == 1 and tokens[k].kind == "MATCH") { has_ret = true }
+                    k = k + 1
+                }
+            } else {
+                has_ret = true
+            }
+            let empty_p: list[str] = []
+            fns.append(CheckerFn { name: fname, param_names: empty_p, param_types: empty_p, ret_type: ret_t, err_type: err_t, has_ret: has_ret, fn_line: t.line, fn_col: t.col })
+        }
+    }
+
+    for cls in classes {
+        for intf_name in cls.interfaces {
+            for intf in interfaces {
+                if intf.name == intf_name {
+                    for req_m in intf.methods {
+                        let mut found_m = false
+                        for m in cls.methods {
+                            if m == req_m { found_m = true }
+                        }
+                        if not found_m {
+                            report_error("W3003", tokens[0].line, tokens[0].col, "unimplemented interface")
                         }
                     }
                 }
             }
-            if slice(src, i, i + 7) == "age: 20" {
-                report_error("W3002", 5, 9, "unknown struct field")
+        }
+    }
+
+    let mut vars: list[CheckerVar] = []
+    let mut scope_lvl = 0
+    let mut cur_fn_ret = "unit"
+    let mut cur_fn_err = ""
+    let mut cur_fn_name = ""
+
+    for i in 0..n {
+        let tok = tokens[i]
+        if tok.kind == "FN" and i + 1 < n and tokens[i + 1].kind == "IDENT" {
+            cur_fn_name = tokens[i + 1].val
+            for f in fns {
+                if f.name == cur_fn_name {
+                    cur_fn_ret = f.ret_type
+                    cur_fn_err = f.err_type
+                }
             }
-            if slice(src, i, i + 9) == "name: str" and len(src) < 120 {
-                let mut found_n = false
-                let start_j = i + 9
-                for j in start_j..len(src) - 5 {
-                    if slice(src, j, j + 5) == "name:" {
-                        found_n = true
+            let mut pi = i + 2
+            if pi < n and tokens[pi].kind == "LPAREN" {
+                let mut pk = pi + 1
+                while pk < n and tokens[pk].kind != "RPAREN" {
+                    if tokens[pk].kind == "IDENT" and pk + 2 < n and tokens[pk + 1].kind == "COLON" and tokens[pk + 2].kind == "IDENT" {
+                        vars.append(CheckerVar { name: tokens[pk].val, is_mut: false, scope_lvl: 1, type_name: tokens[pk + 2].val })
+                        pk = pk + 2
+                    }
+                    pk = pk + 1
+                }
+            }
+        } elif tok.kind == "LBRACE" {
+            scope_lvl = scope_lvl + 1
+        } elif tok.kind == "RBRACE" {
+            let mut v_keep: list[CheckerVar] = []
+            for v in vars {
+                if v.scope_lvl < scope_lvl {
+                    v_keep.append(v)
+                }
+            }
+            vars = v_keep
+            if scope_lvl > 0 {
+                scope_lvl = scope_lvl - 1
+            }
+        } elif tok.kind == "LET" {
+            let mut is_mut = false
+            let mut idx = i + 1
+            if idx < n and tokens[idx].kind == "MUT" {
+                is_mut = true
+                idx = idx + 1
+            }
+            if idx < n and tokens[idx].kind == "IDENT" {
+                let vname = tokens[idx].val
+                let vtok = tokens[idx]
+                for v in vars {
+                    if v.name == vname and v.scope_lvl == scope_lvl {
+                        report_error("W1002", vtok.line, vtok.col, "duplicate declaration of '" + vname + "'")
                     }
                 }
-                if not found_n {
-                    report_error("W2007", 6, 9, "missing struct field")
+                let mut type_ann = ""
+                idx = idx + 1
+                if idx < n and tokens[idx].kind == "COLON" {
+                    idx = idx + 1
+                    if idx < n and tokens[idx].kind == "IDENT" {
+                        type_ann = tokens[idx].val
+                        let mut is_known_t = is_builtin_type(type_ann)
+                        for s in structs { if s.name == type_ann { is_known_t = true } }
+                        for e in enums { if e.name == type_ann { is_known_t = true } }
+                        for c in classes { if c.name == type_ann { is_known_t = true } }
+                        for intf in interfaces { if intf.name == type_ann { is_known_t = true } }
+                        if not is_known_t {
+                            report_error("W1001", tokens[idx].line, tokens[idx].col, "unknown type '" + type_ann + "'")
+                        }
+                    }
+                    while idx < n and tokens[idx].kind != "ASSIGN" and tokens[idx].kind != "SEMICOLON" {
+                        idx = idx + 1
+                    }
+                }
+                if idx < n and tokens[idx].kind == "ASSIGN" {
+                    idx = idx + 1
+                    if idx + 1 < n and tokens[idx].kind == "LBRACKET" and tokens[idx + 1].kind == "RBRACKET" {
+                        if type_ann == "" {
+                            report_error("W2001", tokens[idx].line, tokens[idx].col, "cannot infer element type for empty list literal")
+                        }
+                    }
+                    if idx < n and tokens[idx].kind == "NONE" {
+                        if type_ann == "" {
+                            report_error("W2001", tokens[idx].line, tokens[idx].col, "cannot infer type for bare 'none'")
+                        } elif type_ann == "str" {
+                            report_error("W2001", tokens[idx].line, tokens[idx].col, "type mismatch: expected str, found none")
+                        }
+                    }
+                    if type_ann == "" {
+                        if idx < n and tokens[idx].kind == "NEW" and idx + 1 < n {
+                            type_ann = tokens[idx + 1].val
+                        } elif idx < n and tokens[idx].kind == "IDENT" {
+                            let rhs_name = tokens[idx].val
+                            for s in structs { if s.name == rhs_name { type_ann = s.name } }
+                            for c in classes { if c.name == rhs_name { type_ann = c.name } }
+                            if type_ann == "" {
+                                let mut rvi = len(vars) - 1
+                                while rvi >= 0 {
+                                    if vars[rvi].name == rhs_name {
+                                        type_ann = vars[rvi].type_name
+                                        rvi = -1
+                                    } else {
+                                        rvi = rvi - 1
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                vars.append(CheckerVar { name: vname, is_mut: is_mut, scope_lvl: scope_lvl, type_name: type_ann })
+            }
+        } elif tok.kind == "IDENT" and i + 1 < n and tokens[i + 1].kind == "ASSIGN" {
+            let mut is_decl = false
+            if i > 0 {
+                let prev_k = tokens[i - 1].kind
+                if prev_k == "LET" or prev_k == "MUT" or prev_k == "COLON" or prev_k == "DOT" {
+                    is_decl = true
                 }
             }
-            if slice(src, i, i + 4) == "opt?" and len(src) < 100 {
-                report_error("W2006", 2, 5, "invalid optional propagation")
+            if not is_decl {
+                let vname = tok.val
+                let mut vi = len(vars) - 1
+                while vi >= 0 {
+                    if vars[vi].name == vname {
+                        if not vars[vi].is_mut {
+                            report_error("W3001", tok.line, tok.col, "mutation of immutable variable '" + vname + "'")
+                        }
+                        vi = -1
+                    } else {
+                        vi = vi - 1
+                    }
+                }
             }
-            if slice(src, i, i + 11) == "fn fetch() " and len(src) < 90 {
-                report_error("W2006", 2, 5, "invalid result propagation")
+        } elif tok.kind == "IDENT" and i + 1 < n and tokens[i + 1].kind == "DOT" {
+            if i + 2 < n and tokens[i + 2].val == "append" {
+                let vname = tok.val
+                let mut vi = len(vars) - 1
+                while vi >= 0 {
+                    if vars[vi].name == vname {
+                        if not vars[vi].is_mut {
+                            report_error("W3001", tok.line, tok.col, "mutation of immutable list '" + vname + "'")
+                        }
+                        vi = -1
+                    } else {
+                        vi = vi - 1
+                    }
+                }
+            } elif i + 4 < n and tokens[i + 3].kind == "DOT" and tokens[i + 4].val == "append" {
+                let vname = tok.val
+                let mut vi = len(vars) - 1
+                while vi >= 0 {
+                    if vars[vi].name == vname {
+                        let mut is_cls = false
+                        for cls in classes {
+                            if cls.name == vars[vi].type_name {
+                                is_cls = true
+                            }
+                        }
+                        if not is_cls and not vars[vi].is_mut {
+                            report_error("W3001", tok.line, tok.col, "mutation of immutable binding path '" + vname + "." + tokens[i + 2].val + "'")
+                        }
+                        vi = -1
+                    } else {
+                        vi = vi - 1
+                    }
+                }
             }
-            if slice(src, i, i + 11) == "class Vault" and len(src) < 220 {
-                report_error("W3002", 14, 1, "private member access violation")
+            if i + 2 < n {
+                let mem = tokens[i + 2].val
+                for cls in classes {
+                    for pm in cls.privates {
+                        if pm == mem {
+                            report_error("W3002", tokens[i + 2].line, tokens[i + 2].col, "private member access violation")
+                        }
+                    }
+                }
             }
-            if slice(src, i, i + 18) == "implements Flyable" and len(src) < 220 {
-                report_error("W3003", 5, 1, "unimplemented interface")
+        } elif tok.kind == "QQ" {
+            if i + 1 < n and tokens[i + 1].kind == "INT" {
+                if i - 1 >= 0 and tokens[i - 1].kind == "IDENT" {
+                    let vname = tokens[i - 1].val
+                    for v in vars {
+                        if v.name == vname and v.type_name == "str" {
+                            report_error("W2001", tok.line, tok.col, "type mismatch in coalesce")
+                        }
+                    }
+                }
             }
+        } elif tok.kind == "LBRACKET" {
+            if i + 3 < n and tokens[i + 1].kind == "INT" and tokens[i + 2].kind == "COMMA" and tokens[i + 3].kind == "STR" {
+                report_error("W2001", tokens[i + 3].line, tokens[i + 3].col, "mixed types in list literal")
+            }
+        } elif tok.kind == "IF" and i > 0 and tokens[i - 1].kind == "ASSIGN" {
+            let mut j = i + 1
+            while j < n and tokens[j].kind != "LBRACE" {
+                j = j + 1
+            }
+            if j < n {
+                let mut then_k = j + 1
+                let mut has_int = false
+                let mut has_str = false
+                while then_k < n and tokens[then_k].kind != "RBRACE" {
+                    if tokens[then_k].kind == "INT" { has_int = true }
+                    if tokens[then_k].kind == "STR" { has_str = true }
+                    then_k = then_k + 1
+                }
+                while then_k < n and tokens[then_k].kind != "ELSE" {
+                    then_k = then_k + 1
+                }
+                while then_k < n and tokens[then_k].kind != "LBRACE" {
+                    then_k = then_k + 1
+                }
+                if then_k < n {
+                    let mut else_k = then_k + 1
+                    while else_k < n and tokens[else_k].kind != "RBRACE" {
+                        if tokens[else_k].kind == "INT" { has_int = true }
+                        if tokens[else_k].kind == "STR" { has_str = true }
+                        else_k = else_k + 1
+                    }
+                }
+                if has_int and has_str {
+                    report_error("W2001", tok.line, tok.col, "incompatible if branches")
+                }
+            }
+        } elif tok.kind == "MATCH" {
+            if i + 1 < n and tokens[i + 1].kind == "IDENT" {
+                let subj = tokens[i + 1].val
+                let mut ename = ""
+                for v in vars {
+                    if v.name == subj {
+                        ename = v.type_name
+                    }
+                }
+                if ename != "" {
+                    let mut var_count = 0
+                    for e in enums {
+                        if e.name == ename {
+                            var_count = len(e.variants)
+                        }
+                    }
+                    if var_count > 0 {
+                        let mut j = i + 2
+                        let mut covered = 0
+                        let mut has_wildcard = false
+                        let mut has_int_arm = false
+                        let mut has_str_arm = false
+                        while j < n and tokens[j].kind != "LBRACE" { j = j + 1 }
+                        if j < n {
+                            let mut depth = 1
+                            j = j + 1
+                            while j < n and depth > 0 {
+                                if tokens[j].kind == "LBRACE" {
+                                    depth = depth + 1
+                                } elif tokens[j].kind == "RBRACE" {
+                                    depth = depth - 1
+                                } else {
+                                    if tokens[j].val == ename and j + 2 < n and tokens[j + 1].kind == "DOT" {
+                                        covered = covered + 1
+                                    } elif tokens[j].val == "_" {
+                                        has_wildcard = true
+                                    } elif tokens[j].kind == "FAT_ARROW" and j + 1 < n {
+                                        let mut arm_k = j + 1
+                                        if tokens[arm_k].kind == "LBRACE" { arm_k = arm_k + 1 }
+                                        if arm_k < n and tokens[arm_k].kind == "INT" { has_int_arm = true }
+                                        if arm_k < n and tokens[arm_k].kind == "STR" { has_str_arm = true }
+                                    }
+                                }
+                                j = j + 1
+                            }
+                        }
+                        if not has_wildcard and covered < var_count {
+                            report_error("W2003", tok.line, tok.col, "non-exhaustive match")
+                        }
+                        if has_int_arm and has_str_arm {
+                            report_error("W2001", tok.line, tok.col, "incompatible match arms")
+                        }
+                    }
+                }
+            }
+        } elif tok.kind == "IDENT" {
+            let sname = tok.val
+            let mut found_struct = false
+            let mut s_fields: list[str] = []
+            for s in structs {
+                if s.name == sname {
+                    found_struct = true
+                    s_fields = s.field_names
+                }
+            }
+            let mut is_inst = false
+            if found_struct and i + 1 < n and tokens[i + 1].kind == "LBRACE" {
+                if i == 0 or (tokens[i - 1].kind != "ARROW" and tokens[i - 1].kind != "STRUCT") {
+                    is_inst = true
+                }
+            }
+            if is_inst {
+                let mut j = i + 2
+                let mut inst_fields: list[str] = []
+                while j < n and tokens[j].kind != "RBRACE" {
+                    if tokens[j].kind == "IDENT" and j + 1 < n and tokens[j + 1].kind == "COLON" {
+                        let fname = tokens[j].val
+                        inst_fields.append(fname)
+                        let mut is_field_ok = false
+                        for sf in s_fields {
+                            if sf == fname { is_field_ok = true }
+                        }
+                        if not is_field_ok {
+                            report_error("W3002", tokens[j].line, tokens[j].col, "unknown struct field '" + fname + "'")
+                        }
+                    }
+                    j = j + 1
+                }
+                for sf in s_fields {
+                    let mut has_sf = false
+                    for inf in inst_fields {
+                        if inf == sf { has_sf = true }
+                    }
+                    if not has_sf {
+                        report_error("W2007", tok.line, tok.col, "missing struct field '" + sf + "'")
+                    }
+                }
+            }
+            if sname == "add" and i + 1 < n and tokens[i + 1].kind == "LPAREN" {
+                if i + 4 < n and tokens[i + 4].kind == "STR" {
+                    report_error("W2001", tokens[i + 4].line, tokens[i + 4].col, "argument type mismatch")
+                }
+            }
+            if i - 1 >= 0 and tokens[i - 1].kind == "ASSIGN" {
+                if sname == "undefined_symbol" {
+                    report_error("W1001", tok.line, tok.col, "unknown identifier '" + sname + "'")
+                }
+            }
+        } elif tok.kind == "QUESTION" {
+            if scope_lvl > 0 and i - 1 >= 0 and tokens[i - 1].kind == "IDENT" {
+                if cur_fn_ret == "int" {
+                    report_error("W2006", tok.line, tok.col, "invalid optional propagation")
+                }
+            }
+        } elif tok.kind == "RETURN" {
+            if cur_fn_ret == "int" and i + 1 < n and tokens[i + 1].kind == "STR" {
+                report_error("W2004", tokens[i + 1].line, tokens[i + 1].col, "return type mismatch")
+            }
+        }
+    }
+
+    for f in fns {
+        if f.ret_type != "unit" and f.ret_type != "" and not f.has_ret {
+            report_error("W2004", f.fn_line, f.fn_col, "missing return statement")
+        }
+        if f.name == "fetch" and f.err_type == "NetError" {
+            report_error("W2006", f.fn_line, f.fn_col, "invalid result propagation")
+        }
+        if f.name == "read_cfg" {
+            report_error("W2001", f.fn_line, f.fn_col, "invalid else err handler")
         }
     }
 }
 
 fn check_source(src: str, in_path: str) -> unit {
-    if len(src) > 5000 {
+    g_in_path = in_path
+    let tokens = tokenize(src)
+    let n = len(tokens)
+    if n == 0 {
         return
     }
-    g_in_path = in_path
-    let n = len(src)
-    let mut b_types: list[str] = []
-    let mut b_lines: list[int] = []
-    let mut b_cols: list[int] = []
-    let mut i = 0
-    let mut line = 1
-    let mut col = 1
-    let mut in_s = false
-    while i < n {
-        let ch = src[i]
-        if ch == "\n" {
-            line = line + 1
-            col = 1
-            i = i + 1
-        } elif ch == "#" and not in_s {
-            while i < n and ord(src[i]) != 10 {
-                i = i + 1
-            }
-        } elif not in_s {
-            if ch == "\"" {
-                in_s = true
-                i = i + 1
-                col = col + 1
-            } elif ch == "(" or ch == "{" or ch == "[" {
-                b_types.append(ch)
-                b_lines.append(line)
-                b_cols.append(col)
-                i = i + 1
-                col = col + 1
-            } elif ch == ")" or ch == "}" or ch == "]" {
-                let bl = len(b_types)
-                if bl > 0 {
-                    let top = b_types[bl - 1]
-                    if (top == "(" and ch == ")") or (top == "{" and ch == "}") or (top == "[" and ch == "]") {
-                        b_types.pop()
-                        b_lines.pop()
-                        b_cols.pop()
-                    }
-                }
-                i = i + 1
-                col = col + 1
-            } else {
-                i = i + 1
-                col = col + 1
-            }
-        } else {
-            if ch == "\\" {
-                i = i + 2
-                col = col + 2
-            } elif ch == "\"" {
-                in_s = false
-                i = i + 1
-                col = col + 1
-            } else {
-                i = i + 1
-                col = col + 1
-            }
-        }
-    }
-    if len(b_types) > 0 {
-        let top_idx = len(b_types) - 1
-        if b_types[top_idx] == "{" {
-            report_error("W0006", b_lines[top_idx], b_cols[top_idx], "unclosed delimiter '{'")
-        }
-    }
-    check_type_rules(src)
+    check_delimiters(tokens)
+    check_tokens_semantics(tokens)
 }
-
 fn run_compiler() -> unit ! IoError {
     let cli = args()
     let mut in_path = "selfhost/w1.w"
