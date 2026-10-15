@@ -35,6 +35,7 @@ DIAGNOSTIC_CODES: Dict[str, str] = {
     "W3001": "Mutation of immutable value binding",
     "W3002": "Invalid member access/mutation or private visibility violation",
     "W3003": "Invalid class inheritance or unimplemented interface contract",
+    "W3004": "Constructor safety violation (uninitialized fields or invalid super invocation)",
     # W4xxx — Runtime Execution
     "W4001": "Division or modulo by zero",
     "W4002": "Index or key out of bounds",

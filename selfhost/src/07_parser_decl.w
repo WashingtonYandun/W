@@ -211,8 +211,13 @@ fn parse_class_decl() -> unit {
     g_cur_super = sup_name
     expect_kind("LBRACE")
     while not check_kind("RBRACE") and not is_eof() {
-        if check_kind("PUBLIC") or check_kind("PRIVATE") {
+        let mut is_pub = true
+        if check_kind("PUBLIC") {
             advance_tok()
+            is_pub = true
+        } elif check_kind("PRIVATE") {
+            advance_tok()
+            is_pub = false
         }
         if check_kind("FN") {
             advance_tok()
@@ -244,7 +249,7 @@ fn parse_class_decl() -> unit {
             m_arities.append(len(p_names))
             if mname == "init" {
                 init_p = p_names
-            } else {
+            } elif is_pub {
                 register_dispatch(mname, len(p_names))
             }
             let mut m_sig = "WVal v_self"

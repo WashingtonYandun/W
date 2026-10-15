@@ -556,6 +556,14 @@ class TypeChecker:
             for mname, minfo in cls_type.methods.items():
                 if mname in merged_methods:
                     base_m = merged_methods[mname]
+                    if not base_m.is_public:
+                        raise TypeError(
+                            message=f"Cannot override private method '{mname}' of superclass '{base_m.owner_class}'",
+                            line=stmt.line,
+                            col=stmt.col,
+                            file=self.file,
+                            code="W3002"
+                        )
                     if minfo.fn_type.params != base_m.fn_type.params or not is_assignable(minfo.fn_type.ret, base_m.fn_type.ret):
                         raise TypeError(
                             message=f"Method '{mname}' in class '{stmt.name}' has incompatible override signature with superclass '{base_m.owner_class}'",
@@ -685,6 +693,108 @@ class TypeChecker:
         elif isinstance(stmt, ExprStmt):
             self._check_expr(stmt.expr, is_statement_context=True)
 
+    def _check_constructor_rules(self, stmt: ClassDecl, cls_type: ClassType, m: MethodDecl) -> None:
+        # 1. Constructor return type check: init cannot return non-unit
+        if cls_type.init_type is not None and cls_type.init_type.ret != UnitType:
+            raise TypeError(
+                message=f"Constructor 'init' of class '{stmt.name}' cannot return a value of type '{cls_type.init_type.ret}', expected 'unit'",
+                line=m.line,
+                col=m.col,
+                file=self.file,
+                code="W3004"
+            )
+
+        # 2. Super constructor invocation validation
+        sup_has_init = False
+        curr_s = cls_type.superclass
+        while curr_s is not None:
+            if curr_s.init_type is not None:
+                sup_has_init = True
+                break
+            curr_s = curr_s.superclass
+
+        def _get_block_exprs(block: Block) -> List[Expr]:
+            res: List[Expr] = []
+            for s in block.statements:
+                if isinstance(s, ExprStmt):
+                    res.append(s.expr)
+            if block.tail_expr is not None:
+                res.append(block.tail_expr)
+            return res
+
+        block_exprs = _get_block_exprs(m.body)
+
+        def _is_super_init_call(expr: Expr) -> bool:
+            if isinstance(expr, CallExpr):
+                callee = expr.callee
+                if isinstance(callee, MemberExpr) and isinstance(callee.object, SuperExpr) and callee.property == "init":
+                    return True
+            return False
+
+        def _contains_super_init(expr: Expr) -> bool:
+            if _is_super_init_call(expr):
+                return True
+            if isinstance(expr, CallExpr):
+                for a in getattr(expr, "arguments", getattr(expr, "args", [])):
+                    if _contains_super_init(a):
+                        return True
+            return False
+
+        super_init_calls: List[Tuple[int, Expr]] = []
+        for idx, expr in enumerate(block_exprs):
+            if _is_super_init_call(expr) or _contains_super_init(expr):
+                super_init_calls.append((idx, expr))
+
+        if sup_has_init:
+            if not super_init_calls:
+                raise TypeError(
+                    message=f"Constructor of derived class '{stmt.name}' must call 'super.init'",
+                    line=m.line,
+                    col=m.col,
+                    file=self.file,
+                    code="W3004"
+                )
+            first_idx, first_expr = super_init_calls[0]
+            if first_idx != 0:
+                raise TypeError(
+                    message=f"Call to 'super.init' must be the first statement in constructor of class '{stmt.name}'",
+                    line=first_expr.line,
+                    col=first_expr.col,
+                    file=self.file,
+                    code="W3004"
+                )
+            if len(super_init_calls) > 1:
+                second_idx, second_expr = super_init_calls[1]
+                raise TypeError(
+                    message=f"Multiple calls to 'super.init' in constructor of class '{stmt.name}'",
+                    line=second_expr.line,
+                    col=second_expr.col,
+                    file=self.file,
+                    code="W3004"
+                )
+
+        # 3. Strict field initialization validation
+        own_field_names = {f.name for f in stmt.fields}
+        if own_field_names:
+            assigned_fields: Set[str] = set()
+            for expr in block_exprs:
+                if isinstance(expr, AssignmentExpr):
+                    target = expr.target
+                    if isinstance(target, MemberExpr):
+                        if isinstance(target.object, ThisExpr) or (isinstance(target.object, IdentExpr) and target.object.name == "self"):
+                            if target.property in own_field_names:
+                                assigned_fields.add(target.property)
+
+            for f in stmt.fields:
+                if f.name not in assigned_fields:
+                    raise TypeError(
+                        message=f"Field '{f.name}' of class '{stmt.name}' is not initialized in constructor",
+                        line=m.line,
+                        col=m.col,
+                        file=self.file,
+                        code="W3004"
+                    )
+
     def _check_class_decl(self, stmt: ClassDecl) -> None:
         cls_type = self.global_scope.lookup_type(stmt.name)
         assert isinstance(cls_type, ClassType)
@@ -692,6 +802,8 @@ class TypeChecker:
         self.current_class = cls_type
         try:
             for m in stmt.methods:
+                if m.name == "init":
+                    self._check_constructor_rules(stmt, cls_type, m)
                 fn_type = cls_type.init_type if m.name == "init" else cls_type.methods[m.name].fn_type
                 assert fn_type is not None
                 fn_scope = Scope(parent=self.current_scope, is_function_scope=True)
@@ -1521,7 +1633,7 @@ class TypeChecker:
                             line=expr.target.line,
                             col=expr.target.col,
                             file=self.file,
-                            code="T012"
+                            code="W3002"
                         )
                     if not is_assignable(val_t, f_info.type):
                         raise TypeError(
@@ -1639,7 +1751,7 @@ class TypeChecker:
                             line=expr.line,
                             col=expr.col,
                             file=self.file,
-                            code="T012"
+                            code="W3002"
                         )
                     return f_info.type
 
@@ -1651,7 +1763,7 @@ class TypeChecker:
                             line=expr.line,
                             col=expr.col,
                             file=self.file,
-                            code="T012"
+                            code="W3002"
                         )
                     return m_info.fn_type
 
