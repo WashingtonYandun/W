@@ -14,7 +14,7 @@ from hir.HirNodes import (
     HirConstInt, HirConstFloat, HirConstBool, HirConstStr, HirConstNone, HirConstUnit,
     HirLocalRef, HirThisRef, HirSuperRef, HirUnaryOp, HirBinaryOp,
     HirConstructStruct, HirConstructEnum, HirConstructObject, HirConstructList, HirConstructDict, HirConstructTuple,
-    HirDirectCall, HirBuiltinCall, HirMethodCall, HirFieldRead, HirIndexRead,
+    HirFunctionRef, HirClosure, HirIndirectCall, HirDirectCall, HirBuiltinCall, HirMethodCall, HirFieldRead, HirIndexRead,
     HirCoerce, HirTryPropagate, HirCoalesce, HirElseHandle, HirRange, HirIf, HirMatch, HirMatchArm,
     HirPattern, HirWildcardPattern, HirBindingPattern, HirLiteralPattern, HirEnumPattern, HirTuplePattern
 )
@@ -185,6 +185,12 @@ class HirDumper:
         if isinstance(expr, HirConstructTuple):
             e_str = ", ".join(self.format_expr(e) for e in expr.elems)
             return f"({e_str}):type_id={expr.type_id}"
+        if isinstance(expr, HirFunctionRef):
+            return f"FunctionRef({expr.name}) : {expr.type_id}"
+        if isinstance(expr, HirClosure):
+            return f"Closure({expr.name}, {self.format_expr(expr.environment)}) : {expr.type_id}"
+        if isinstance(expr, HirIndirectCall):
+            return f"IndirectCall({self.format_expr(expr.callee)}, [{', '.join(self.format_expr(a) for a in expr.args)}]) : {expr.type_id}"
         if isinstance(expr, HirDirectCall):
             a_str = ", ".join(self.format_expr(a) for a in expr.args)
             return f"call {expr.fn_name}[{expr.target}]({a_str}):type_id={expr.type_id}"

@@ -15,7 +15,7 @@ from checker.TypeInterner import (
     TypeInterner, TYPE_ERROR, TYPE_UNIT, TYPE_BOOL, TYPE_INT, TYPE_FLOAT, TYPE_STR, TYPE_NONE
 )
 from hir.HirNodes import (
-    Span, HirNode, HirExpr, HirStmt, HirParam, HirBlock, HirFieldDef,
+    HirClosure, HirFunctionRef, HirIndirectCall, Span, HirNode, HirExpr, HirStmt, HirParam, HirBlock, HirFieldDef,
     HirFnDecl, HirStructDecl, HirEnumDecl, HirInterfaceDecl, HirClassDecl, HirModule,
     HirLet, HirBindTemp, HirAssign, HirWhile, HirForList, HirReturn, HirBreak, HirContinue, HirExprStmt,
     HirConstInt, HirConstFloat, HirConstBool, HirConstStr, HirConstNone, HirConstUnit,
@@ -41,6 +41,7 @@ class HirCCodeGen:
     def __init__(self, interner: Optional[TypeInterner] = None, file_path: str = "<stdin>"):
         self.interner = interner
         self.file_path = file_path
+        self.function_adapters = set()
         self.temp_counter = 0
         self.aux_counter = 0
         self.is_top_level = False
@@ -176,7 +177,7 @@ class HirCCodeGen:
             elif code == 9:
                 out.append("\\t")
             elif code == 0:
-                out.append("\\0")
+                out.append("\\000")
             else:
                 out.append(ch)
         out.append('"')
@@ -201,7 +202,7 @@ class HirCCodeGen:
                 self.classes[cl.name] = cl
                 self.class_order.append(cl.name)
             for m in cl.methods:
-                if m.name != "init" and m.is_public:
+                if m.name != "init":
                     key = (m.name, len(m.params))
                     if key not in self.dispatch_methods:
                         self.dispatch_methods.append(key)
@@ -224,6 +225,7 @@ class HirCCodeGen:
         # 2. OOP Prototypes
         for cls_name in self.class_order:
             cdecl = self.classes[cls_name]
+            self.fn_prototypes.append(f"static const WClassVTable w_vtable_{cls_name};")
             for m in cdecl.methods:
                 params = ["WVal v_self"] + [f"WVal v_{p.name}" for p in m.params]
                 self.fn_prototypes.append(f"static WVal w_method_{cls_name}__{m.name}({', '.join(params)});")
@@ -410,6 +412,7 @@ class HirCCodeGen:
                 new_lines.append(f"    w_release_array({len(all_fields)}, _v);")
             else:
                 new_lines.append(f'    WVal v_self = w_make_object("{cl.name}", 0, NULL, NULL);')
+            new_lines.append(f"    v_self.as.st->vtable = &w_vtable_{cl.name};")
             if init_m is not None:
                 new_lines.append(f"    w_release(w_method_{init_cls}__init({', '.join(init_args)}));")
             new_lines.append("    return v_self;")
@@ -419,24 +422,16 @@ class HirCCodeGen:
             self.current_class = prev_cls
 
     def _emit_oop_dispatchers(self) -> None:
-        for mname, arity in self.dispatch_methods:
-            params = ["WVal v_self"] + [f"WVal _a{i}" for i in range(arity)]
-            call_args = ["v_self"] + [f"_a{i}" for i in range(arity)]
-            d_lines = [f"static WVal w_dispatch__{mname}__{arity}({', '.join(params)}) {{"]
-            for cls_name in self.class_order:
-                resolved = self._find_class_method(cls_name, mname)
-                if resolved is not None:
-                    def_cls, m_decl = resolved
-                    if len(m_decl.params) == arity and m_decl.is_public:
-                        d_lines.append(
-                            f'    if (v_self.tag == W_OBJECT && strcmp(v_self.as.st->name, "{cls_name}") == 0) '
-                            f'return w_method_{def_cls}__{mname}({", ".join(call_args)});'
-                        )
-            d_lines.append("    return w_none();")
-            d_lines.append("}")
-            self.fn_definitions.append("\n".join(d_lines))
+        from codegen.VirtualDispatch import emit_vtables
+        self.fn_definitions.extend(emit_vtables(self.class_order, self.dispatch_methods, self._find_class_method))
 
     def _emit_function(self, fn: HirFnDecl) -> None:
+        if hasattr(fn, "extern_types"):
+            from codegen.ForeignAbi import foreign_wrapper
+            prototype, wrapper = foreign_wrapper("w_fn_" + fn.name, fn.extern_name, fn.extern_types)
+            self.fn_prototypes.append(prototype)
+            self.fn_definitions.append(wrapper)
+            return
         c_name = f"w_fn_{fn.name}"
         self.symbol_names.clear()
         self.declared_names.clear()
@@ -507,28 +502,10 @@ class HirCCodeGen:
             return
 
         if isinstance(stmt, HirAssign):
+            lref = self.prepare_assignment_ref(stmt.target, out)
             val = self.emit_expr(stmt.value, out)
             rhs_hold = self.new_aux("_rhs")
             self._declare_owned_var(rhs_hold, self._own_expr(val), out)
-            if stmt.path is not None:
-                lref = self.emit_lvalue_ref(stmt.path.root, out)
-                for proj in stmt.path.projections:
-                    if isinstance(proj, CowFieldProjection):
-                        lref = f'w_member_ref({lref}, "{proj.field_name}")'
-                    elif isinstance(proj, CowIndexProjection):
-                        idx_val = self.emit_value(proj.index, out)
-                        lref = f"w_index_ref({lref}, {idx_val})"
-            elif isinstance(stmt.target, HirIndexRead):
-                obj_lref = self.emit_lvalue_ref(stmt.target.object, out)
-                idx_val = self.emit_value(stmt.target.index, out)
-                lref = f"w_index_ref({obj_lref}, {idx_val})"
-            elif isinstance(stmt.target, HirFieldRead):
-                obj_lref = self.emit_lvalue_ref(stmt.target.object, out)
-                lref = f'w_member_ref({obj_lref}, "{stmt.target.field_name}")'
-            elif isinstance(stmt.target, HirLocalRef):
-                lref = f"&{self.c_var(stmt.target.name, stmt.target.symbol_id)}"
-            else:
-                lref = self.emit_lvalue_ref(stmt.target, out)
             out.append(f"w_assign({lref}, w_move(&{rhs_hold}));")
             return
 
@@ -615,6 +592,19 @@ class HirCCodeGen:
     # Expression Emission
     # -------------------------------------------------------------
 
+    def prepare_assignment_ref(self, target, out):
+        if isinstance(target, HirIndexRead):
+            parent = self.prepare_assignment_ref(target.object, out)
+            index = self.emit_value(target.index, out)
+            return f"w_index_ref({parent}, {index})"
+        if isinstance(target, HirFieldRead):
+            if self.interner.get_entry(target.object.type_id).tag == 'class':
+                parent = '&' + self.emit_value(target.object, out)
+            else:
+                parent = self.prepare_assignment_ref(target.object, out)
+            return f'w_member_ref({parent}, "{target.field_name}")'
+        return self.emit_lvalue_ref(target, out)
+
     def emit_lvalue_ref(self, target: HirExpr, out: List[str]) -> str:
         if isinstance(target, HirThisRef):
             return "&v_self"
@@ -634,7 +624,35 @@ class HirCCodeGen:
         self._declare_owned_var(tmp, self._own_expr(val), out)
         return f"&{tmp}"
 
+    def function_value(self, name, arity, out, environment="w_unit()", captured=False):
+        adapter = "w_adapter_" + name
+        if adapter not in self.function_adapters:
+            self.function_adapters.add(adapter)
+            self.fn_prototypes.append(f"static WVal {adapter}(WVal environment, int32_t argc, const WVal* argv);")
+            args = ", ".join((["environment"] if captured else []) + [f"argv[{i}]" for i in range(arity)])
+            body = f"static WVal {adapter}(WVal environment, int32_t argc, const WVal* argv) {{\n"
+            body += "    (void)environment; (void)argv;\n"
+            body += f'    if (argc != {arity}) {{ fprintf(stderr, "[W4003] RuntimeError: Call arity mismatch\\n"); exit(1); }}\n'
+            body += f"    return w_fn_{name}({args});\n}}"
+            self.fn_definitions.append(body)
+        return self._bind_call(f"w_function_new({adapter}, {environment})", out)
+
+    def indirect_call(self, callee, args, out):
+        function = self.emit_value(callee, out)
+        values = [self.emit_value(argument, out) for argument in args]
+        array = "(WVal[]){ " + ", ".join(values) + " }" if values else "NULL"
+        return self._bind_call(f"w_call({function}, {len(values)}, {array})", out)
+
     def emit_expr(self, expr: HirExpr, out: List[str]) -> str:
+        if isinstance(expr, HirClosure):
+            environment = self.emit_expr(expr.environment, out)
+            signature = self.interner.get_entry(expr.type_id)
+            return self.function_value(expr.name, len(signature.data[0]), out, self._own_expr(environment), True)
+        if isinstance(expr, HirFunctionRef):
+            entry = self.interner.get_entry(expr.type_id)
+            return self.function_value(expr.name, len(entry.data[0]), out)
+        if isinstance(expr, HirIndirectCall):
+            return self.indirect_call(expr.callee, expr.args, out)
         if isinstance(expr, HirCoerce):
             val = self.emit_expr(expr.expr, out)
             if expr.kind == "wrap_ok":
@@ -656,7 +674,7 @@ class HirCCodeGen:
             return f"w_float({repr(expr.value)})"
 
         if isinstance(expr, HirConstStr):
-            return f"w_str({self.escape_c_str(expr.value)})"
+            return f"w_str_n({self.escape_c_str(expr.value)}, {len(expr.value.encode('utf-8'))})"
 
         if isinstance(expr, HirConstBool):
             return "w_bool(true)" if expr.value else "w_bool(false)"

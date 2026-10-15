@@ -32,6 +32,7 @@ BoolType = PrimitiveType("bool")
 StrType = PrimitiveType("str")
 UnitType = PrimitiveType("unit")
 NoneType = PrimitiveType("none")
+OpaqueType = PrimitiveType("opaque")
 
 
 class OptionalType(WType):

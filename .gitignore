@@ -22,3 +22,6 @@ build/
 # Test runtime scratch files
 tests/runtime/temp_file.txt
 
+
+# Private investigation records
+audit/

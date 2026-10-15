@@ -24,12 +24,13 @@ class DeclId(tuple):
 class SourceManager:
     def __init__(self):
         self.snapshots = {}
+        self.overlays = {}
         self.batch = {}
         self.read_counts = {}
 
     def read(self, path):
         if path not in self.batch:
-            self.batch[path] = Path(path).read_text(encoding='utf-8')
+            self.batch[path] = self.overlays[path] if path in self.overlays else Path(path).read_text(encoding='utf-8')
             self.read_counts[path] = self.read_counts.get(path, 0) + 1
         self.snapshots[path] = self.batch[path]
         return self.batch[path]
@@ -181,7 +182,11 @@ class CompilationSession:
         finally:
             self.active.pop()
         exports = Scope()
+        public_names = {getattr(node, "source_name", getattr(node, "name", getattr(node, "namespace", None)))
+                        for node in original_declarations if getattr(node, "is_exported", False)}
         for name, emitted in names.items():
+            if imported and name not in public_names:
+                continue
             if emitted in checker.global_scope.symbols:
                 exports.symbols[name] = checker.global_scope.symbols[emitted]
             if emitted in checker.global_scope.types:
@@ -215,10 +220,13 @@ class CompilationSession:
 
     def import_module(self, statement, importer):
         directory = os.path.dirname(importer) if not importer.startswith('<') else os.getcwd()
-        candidate = self.path(os.path.join(directory, statement.path))
-        if not os.path.isfile(candidate):
+        if statement.path.startswith('std/'):
+            candidate = self.path(str(Path(__file__).resolve().parent.parent / 'stdlib' / (statement.path[4:] + '.w')))
+        else:
+            candidate = self.path(os.path.join(directory, statement.path))
+        if not os.path.isfile(candidate) and candidate not in self.sources.overlays:
             candidate = self.path(statement.path)
-        if not os.path.isfile(candidate):
+        if not os.path.isfile(candidate) and candidate not in self.sources.overlays:
             raise TypeError(f"Module not found: '{statement.path}'", file=importer,
                             line=statement.line, col=statement.col, code='W1003')
         if candidate in self.active:
@@ -238,7 +246,7 @@ class CompilationSession:
     def refresh_specializations(self, unit):
         checker = unit.checker
         existing = {id(node) for node in unit.program.body}
-        generated = checker.monomorphized_struct_decls + checker.monomorphized_enum_decls + checker.monomorphized_fn_decls
+        generated = checker.monomorphized_oop_decls + checker.monomorphized_struct_decls + checker.monomorphized_enum_decls + checker.monomorphized_fn_decls
         for node in generated:
             if id(node) not in existing:
                 node.decl_id = DeclId(unit.module_id, type(node).__name__, node.name)

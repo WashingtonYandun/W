@@ -1,5 +1,7 @@
 import atexit
 import os
+import math
+import re
 import sys
 from typing import Any, Dict, List, Optional, Set, TextIO
 from error.Error import WRuntimeError
@@ -165,7 +167,7 @@ def create_global_environment(stdout: Optional[TextIO] = None) -> Environment:
             raise WRuntimeError("dict_items() expects dict argument")
         tuples = []
         for k, v in arg.storage.data.items():
-            k_val = WStr(k) if isinstance(k, str) else WInt(k)
+            k_val = k.clone_value()
             tuples.append(WTuple([k_val, v]))
         return WList(elements=tuples)
 
@@ -177,9 +179,17 @@ def create_global_environment(stdout: Optional[TextIO] = None) -> Environment:
         if isinstance(arg, WInt):
             return arg
         if isinstance(arg, WFloat):
+            if not math.isfinite(arg.value) or not -9223372036854775808 <= arg.value < 9223372036854775808:
+                raise WRuntimeError("Invalid int conversion", code="W4003")
             return WInt(int(arg.value))
         if isinstance(arg, WStr):
-            return WInt(int(arg.value))
+            text = arg.value.strip(" \t\n\r\v\f")
+            if re.fullmatch(r"[+-]?[0-9]+", text) is None:
+                raise WRuntimeError("Invalid int conversion", code="W4003")
+            value = int(text)
+            if not -9223372036854775808 <= value <= 9223372036854775807:
+                raise WRuntimeError("Invalid int conversion", code="W4003")
+            return WInt(value)
         raise WRuntimeError(f"Cannot convert '{type(arg).__name__}' to int")
 
     def float_fn(args: List[WValue]) -> WValue:
@@ -191,7 +201,12 @@ def create_global_environment(stdout: Optional[TextIO] = None) -> Environment:
         if isinstance(arg, WInt):
             return WFloat(float(arg.value))
         if isinstance(arg, WStr):
-            return WFloat(float(arg.value))
+            try:
+                if "\0" in arg.value or "_" in arg.value:
+                    raise ValueError()
+                return WFloat(float(arg.value))
+            except ValueError:
+                raise WRuntimeError("Invalid float conversion", code="W4003")
         raise WRuntimeError(f"Cannot convert '{type(arg).__name__}' to float")
 
     def str_fn(args: List[WValue]) -> WValue:
@@ -216,6 +231,8 @@ def create_global_environment(stdout: Optional[TextIO] = None) -> Environment:
         arg = args[0]
         if not isinstance(arg, WInt):
             raise WRuntimeError("chr() expects int argument")
+        if arg.value < 0 or arg.value > 0x10ffff or 0xd800 <= arg.value <= 0xdfff:
+            raise WRuntimeError("chr() expects a Unicode scalar", code="W4003")
         return WStr(chr(arg.value))
 
     def slice_fn(args: List[WValue]) -> WValue:
@@ -224,7 +241,9 @@ def create_global_environment(stdout: Optional[TextIO] = None) -> Environment:
         s_arg, start_arg, end_arg = args[0], args[1], args[2]
         if not isinstance(s_arg, WStr) or not isinstance(start_arg, WInt) or not isinstance(end_arg, WInt):
             raise WRuntimeError("slice() expects (str, int, int)")
-        return WStr(s_arg.value[start_arg.value:end_arg.value])
+        start = max(0, start_arg.value)
+        end = min(len(s_arg.value), end_arg.value)
+        return WStr(s_arg.value[start:end] if end > start else "")
 
     def bytes_fn(args: List[WValue]) -> WValue:
         if len(args) != 1:

@@ -1,33 +1,33 @@
 print("init")
 
-struct Item {
+pub struct Item {
     value: bool,
 }
 
-enum Mode { On, Off }
+pub enum Mode { On, Off }
 
-fn mode() -> Mode {
+pub fn mode() -> Mode {
     return On
 }
 
-fn shadow(value: int) -> int {
+pub fn shadow(value: int) -> int {
     return value
 }
 
-fn identity[Item](x: Item) -> Item {
+pub fn identity[Item](x: Item) -> Item {
     return x
 }
 
-fn id[T](x: T) -> T {
+pub fn id[T](x: T) -> T {
     return x
 }
 
-let values = [3]
+pub let values = [3]
 
-fn value() -> int {
+pub fn value() -> int {
     return id(values[0])
 }
 
-fn main() -> unit {
+pub fn main() -> unit {
     print("imported entry must not run")
 }

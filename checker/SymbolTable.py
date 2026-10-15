@@ -37,6 +37,7 @@ class Scope:
                 file=file,
                 code="T008"
             )
+        symbol.file = file
         self.symbols[symbol.name] = symbol
 
     def lookup_symbol(self, name: str) -> Optional[Symbol]:
@@ -71,6 +72,11 @@ def create_global_scope() -> Scope:
 
     # 1. Built-in Types
     scope.define_type("int", IntType)
+    scope.define_type("int32", IntType)
+    scope.define_type("int64", IntType)
+    scope.define_type("double", FloatType)
+    from checker.WType import OpaqueType
+    scope.define_type("opaque", OpaqueType)
     scope.define_type("float", FloatType)
     scope.define_type("bool", BoolType)
     scope.define_type("str", StrType)

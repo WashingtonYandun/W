@@ -1,4 +1,5 @@
-fn snapshot_callee(callee: ExprRes) -> ExprRes {
+fn snapshot_callee(callee: ExprRes, collection: bool) -> ExprRes {
+    if is_bound_variable(callee.val) { return ExprRes { val: snapshot_value(callee.val), lref: "" } }
     let raw = callee.lref
     let mut separators: list[int] = []
     let mut skip = -1
@@ -11,7 +12,7 @@ fn snapshot_callee(callee: ExprRes) -> ExprRes {
     if len(separators) < 3 { return callee }
     let method = slice(raw, separators[0] + 2, separators[1])
     let receiver = slice(raw, separators[2] + 2, len(raw))
-    if method == "append" or method == "pop" or method == "clear" or receiver == "v_super" { return callee }
+    if (collection and (method == "append" or method == "pop" or method == "clear")) or receiver == "v_super" { return callee }
     if len(receiver) >= 2 and slice(receiver, 0, 2) == "v_" {
         if is_module_name(slice(receiver, 2, len(receiver))) { return callee }
     }
@@ -44,7 +45,10 @@ fn projection_is_mutated() -> bool {
 }
 
 
-fn emit_call(callee: ExprRes, args_c: list[str]) -> ExprRes {
+fn emit_call(callee: ExprRes, args_c: list[str], collection: bool) -> ExprRes {
+    if is_bound_variable(callee.val) or (callee.lref == "" and not (len(callee.val) >= 2 and slice(callee.val, 0, 2) == "v_")) {
+        return emit_indirect_call(callee.val, args_c)
+    }
     let raw = callee.lref
     let n = len(raw)
     let mut s1 = -1
@@ -94,22 +98,22 @@ fn emit_call(callee: ExprRes, args_c: list[str]) -> ExprRes {
                 return bind_call("w_fn_" + obj_name + "__" + method + "(" + joined + ")")
             }
         }
-        if method == "append" {
+        if collection and method == "append" {
             return bind_call("w_list_append(" + recv_lref + ", " + args_c[0] + ")")
         }
-        if method == "pop" {
+        if collection and method == "pop" {
             return bind_call("w_list_pop(" + recv_lref + ")")
         }
-        if method == "clear" {
+        if collection and method == "clear" {
             return bind_call("w_list_clear(" + recv_lref + ")")
         }
-        if method == "get" {
+        if collection and method == "get" {
             return bind_call("w_dict_get(" + recv_val + ", " + args_c[0] + ")")
         }
-        if method == "keys" {
+        if collection and method == "keys" {
             return bind_call("w_dict_keys(" + recv_val + ")")
         }
-        if method == "values" {
+        if collection and method == "values" {
             return bind_call("w_dict_values(" + recv_val + ")")
         }
         let mut d_args = recv_val
@@ -436,6 +440,7 @@ fn parse_match_arms(subj_tmp: str, res: str) -> unit {
 
 fn parse_prefix_expr(allow_struct: bool) -> ExprRes {
     let tok = at_tok()
+    if check_kind("PIPE") { return parse_lambda() }
     if match_kind("INT") {
         return ExprRes { val: "w_int(" + tok.val + "LL)", lref: "" }
     }
@@ -443,7 +448,7 @@ fn parse_prefix_expr(allow_struct: bool) -> ExprRes {
         return ExprRes { val: "w_float(" + tok.val + ")", lref: "" }
     }
     if match_kind("STR") {
-        return ExprRes { val: "w_str(" + escape_c_str(tok.val) + ")", lref: "" }
+        return ExprRes { val: "w_str_n(" + escape_c_str(tok.val) + ", " + str(len(bytes(tok.val))) + ")", lref: "" }
     }
     if match_kind("TRUE") {
         return ExprRes { val: "w_bool(true)", lref: "" }
@@ -523,6 +528,9 @@ fn parse_prefix_expr(allow_struct: bool) -> ExprRes {
                 emit_line("WVal " + v_tmp + "[" + cnt + "] = { " + v_joined + " };")
                 return bind_call("w_make_struct(\"" + name + "\", " + cnt + ", " + k_tmp + ", " + v_tmp + ")")
             }
+        }
+        if not check_kind("LPAREN") and not is_bound_variable("v_" + name) and sem_function(name) >= 0 {
+            return emit_function_value(name)
         }
         return ExprRes { val: "v_" + name, lref: "&v_" + name }
     }
@@ -666,7 +674,12 @@ fn parse_expr(min_prec: int, allow_struct: bool) -> ExprRes {
     while true {
         while true {
             if check_kind("LPAREN") {
-                left = snapshot_callee(left)
+                let mut collection = false
+                for position in sem_collection_call_positions { if position == g_pos + 1 { collection = true } }
+                for position in sem_indirect_positions {
+                    if position == g_pos + 1 { left = ExprRes { val: snapshot_value(left.val), lref: "" } }
+                }
+                left = snapshot_callee(left, collection)
                 advance_tok()
                 let mut args_c: list[str] = []
                 if not check_kind("RPAREN") {
@@ -681,11 +694,20 @@ fn parse_expr(min_prec: int, allow_struct: bool) -> ExprRes {
                     }
                 }
                 expect_kind("RPAREN")
-                left = emit_call(left, args_c)
+                left = emit_call(left, args_c, collection)
             } elif check_kind("DOT") {
+                let projection_position = g_pos + 1
                 advance_tok()
                 let prop_tok = expect_kind("IDENT")
                 let prop = prop_tok.val
+                if projection_is_mutated() {
+                    for position in sem_class_projection_positions {
+                        if position == projection_position {
+                            let held = snapshot_value(left.val)
+                            left = ExprRes { val: held, lref: "&" + held }
+                        }
+                    }
+                }
                 if len(left.val) >= 2 and slice(left.val, 0, 2) == "v_" {
                     let raw_obj = slice(left.val, 2, len(left.val))
                     if is_enum_name(raw_obj) {
@@ -838,13 +860,6 @@ fn parse_expr(min_prec: int, allow_struct: bool) -> ExprRes {
             emit_line("}")
             left = ExprRes { val: res, lref: "" }
         } else {
-            if op_tok.kind == "ASSIGN" {
-                # Replay the target after the owned RHS, matching the interpreter contract.
-                g_cur_stmts = statements_before
-                g_scope_stack = scopes_before
-                g_temp_id = temps_before
-                g_aux_id = aux_before
-            }
             if op_tok.kind != "ASSIGN" {
                 left = ExprRes { val: snapshot_value(left.val), lref: left.lref }
             }
@@ -855,10 +870,6 @@ fn parse_expr(min_prec: int, allow_struct: bool) -> ExprRes {
                 }
                 let rhs_hold = new_aux("_rhs")
                 declare_owned_var(rhs_hold, own_expr(right.val))
-                let expression_end = g_pos
-                g_pos = expression_start
-                left = parse_expr(prec, allow_struct)
-                g_pos = expression_end
                 if len(left.val) >= 2 and slice(left.val, 0, 2) == "v_" {
                     emit_line("w_assign(&" + left.val + ", " + "w_move(&" + rhs_hold + "));")
                     left = ExprRes { val: left.val, lref: left.lref }
@@ -897,4 +908,74 @@ fn parse_expr(min_prec: int, allow_struct: bool) -> ExprRes {
         }
     }
     return left
+}
+
+fn parse_lambda() -> ExprRes {
+    let token = expect_kind("PIPE")
+    let mut index = -1
+    for i in 0..len(sem_lambdas) { if sem_lambdas[i].position == g_pos { index = i } }
+    if index < 0 { report_error("W9999", token.line, token.col, "missing checked closure") }
+    let lambda = sem_lambdas[index]
+    while not check_kind("PIPE") {
+        expect_kind("IDENT")
+        if match_kind("COLON") { parse_type_ann() }
+        if not match_kind("COMMA") { break }
+    }
+    expect_kind("PIPE")
+    if match_kind("ARROW") { parse_type_ann() }
+    let saved_statements = g_cur_stmts
+    let saved_scopes = g_scope_stack
+    let saved_borrowed = g_borrowed_vars
+    let saved_fallible = g_fn_fallible
+    let saved_error = g_cur_err_type
+    let empty_statements: list[str] = []
+    let empty_scopes: list[CleanupScope] = []
+    let mut borrowed: list[str] = []
+    g_cur_stmts = empty_statements
+    g_scope_stack = empty_scopes
+    g_fn_fallible = false
+    g_cur_err_type = ""
+    push_scope("fn")
+    for i in 0..len(lambda.params) {
+        let variable = "v_" + lambda.params[i]
+        emit_line("WVal " + variable + " = argv[" + str(i) + "];")
+        borrowed.append(variable)
+    }
+    for i in 0..len(lambda.captures) {
+        let variable = "v_" + lambda.captures[i]
+        declare_owned_var(variable, "w_clone(environment.as.tuple->items[" + str(i) + "])")
+    }
+    g_borrowed_vars = borrowed
+    let mut result = "w_unit()"
+    if match_kind("FAT_ARROW") { result = parse_expr(0, true).val }
+    else { result = parse_block_expr() }
+    let returned = new_aux("_ret")
+    emit_line("WVal " + returned + " = " + own_expr(result) + ";")
+    pop_scope()
+    emit_line("return " + returned + ";")
+    let name = "w_lambda_" + str(index)
+    let signature = "static WVal " + name + "(WVal environment, int32_t argc, const WVal* argv)"
+    let mut definition = signature + " {\n"
+    definition = definition + "    if (argc != " + str(len(lambda.params)) + ") { fprintf(stderr, \"[W4003] RuntimeError: Call arity mismatch\\n\"); exit(1); }\n"
+    for line in g_cur_stmts { definition = definition + "    " + line + "\n" }
+    definition = definition + "}"
+    g_protos.append(signature + ";")
+    g_fn_defs.append(definition)
+    g_cur_stmts = saved_statements
+    g_scope_stack = saved_scopes
+    g_borrowed_vars = saved_borrowed
+    g_fn_fallible = saved_fallible
+    g_cur_err_type = saved_error
+    let mut captures = ""
+    for i in 0..len(lambda.captures) {
+        if i > 0 { captures = captures + ", " }
+        captures = captures + "v_" + lambda.captures[i]
+    }
+    let mut environment = "w_make_tuple(0, NULL)"
+    if len(lambda.captures) > 0 {
+        let array = new_aux("_captures")
+        emit_line("WVal " + array + "[" + str(len(lambda.captures)) + "] = { " + captures + " };")
+        environment = "w_make_tuple(" + str(len(lambda.captures)) + ", " + array + ")"
+    }
+    return bind_call("w_function_new(" + name + ", " + environment + ")")
 }

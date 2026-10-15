@@ -33,6 +33,8 @@ class HirBindings:
                 self.function(function, globals_)
 
     def function(self, function, globals_):
+        if hasattr(function, "extern_types"):
+            return
         previous = self.return_type
         self.return_type = function.return_type_id
         scope = dict(globals_)
@@ -128,6 +130,24 @@ class HirBindings:
             if hasattr(node, "symbol_id") and node.symbol_id:
                 scope[node.symbol_id.id] = node.type_id
             return
+        if isinstance(node, H.HirClosure):
+            declaration = self.functions.get(node.name)
+            signature = self.interner.get_entry(node.type_id)
+            if (declaration is None or signature.tag != "function" or not declaration.params
+                    or declaration.params[0].type_id != node.environment.type_id
+                    or tuple(p.type_id for p in declaration.params[1:]) != signature.data[0]
+                    or declaration.return_type_id != signature.data[1]):
+                self.verifier._fail(node, "Closure environment/signature mismatch")
+        if isinstance(node, H.HirFunctionRef):
+            declaration = self.functions.get(node.name)
+            expected = self.interner.mk_function(tuple(p.type_id for p in declaration.params), declaration.return_type_id) if declaration else None
+            if node.type_id != expected:
+                self.verifier._fail(node, "Unresolved HIR function reference")
+        if isinstance(node, H.HirIndirectCall):
+            signature = self.interner.get_entry(node.callee.type_id)
+            if signature.tag != "function":
+                self.verifier._fail(node, "Indirect callee must have function type")
+            self.signature(node, signature.data[0], signature.data[1])
         if isinstance(node, H.HirLocalRef):
             resolved_by_sym = False
             if hasattr(node, "symbol_id") and node.symbol_id and node.symbol_id.id != 0:

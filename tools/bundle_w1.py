@@ -13,11 +13,13 @@ MODULE_ORDER = [
     "01_ast.w",
     "02_lexer.w",
     "03_token_stream.w",
+    "03_modules.w",
     "04_emitter.w",
     "05_metadata.w",
     "06_parser_expr.w",
     "07_parser_decl.w",
     "08_checker.w",
+    "08_semantics.w",
     "09_main.w",
 ]
 

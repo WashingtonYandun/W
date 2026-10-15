@@ -31,6 +31,7 @@ DIAGNOSTIC_CODES: Dict[str, str] = {
     "W2010": "Invalid dictionary key type",
     "W2011": "Recursive generic instantiation cycle or infinite layout",
     "W2012": "Generic constraint violation",
+    "W2013": "Feature unsupported by the selected backend",
     # W3xxx — Mutability & OOP Contracts
     "W3001": "Mutation of immutable value binding",
     "W3002": "Invalid member access/mutation or private visibility violation",

@@ -101,7 +101,7 @@ class WStr(WValue):
         return self.value
 
     def __repr__(self) -> str:
-        return f'"{self.value}"'
+        return '"' + self.value.replace("\0", "\\0") + '"'
 
 
 class WUnit(WValue):
@@ -174,6 +174,9 @@ class WEnumValue(WValue):
         self.enum_name = "Option" if enum_name.startswith("Option__") else enum_name
         self.variant = variant
         self.payload: List[WValue] = payload if payload is not None else []
+
+    def __hash__(self) -> int:
+        return hash((self.enum_name, self.variant, tuple(self.payload)))
 
     def clone_value(self) -> 'WEnumValue':
         return WEnumValue(self.enum_name, self.variant, [p.clone_value() for p in self.payload])
@@ -345,12 +348,22 @@ class WList(CowOwner):
         return f"[{elems}]"
 
 
+def dict_key(key):
+    if isinstance(key, WValue):
+        return key
+    if isinstance(key, bool):
+        return WBool(key)
+    if isinstance(key, str):
+        return WStr(key)
+    return WInt(key)
+
+
 class WDict(CowOwner):
     def __init__(self, storage: Optional[SharedBuffer] = None, pairs: Optional[Dict[Any, WValue]] = None):
         if storage is not None:
             self.storage = storage
         else:
-            cloned_pairs = {k: v.clone_value() for k, v in pairs.items()} if pairs is not None else {}
+            cloned_pairs = {dict_key(k): v.clone_value() for k, v in pairs.items()} if pairs is not None else {}
             self.storage = SharedBuffer(cloned_pairs)
 
     def clone_value(self) -> 'WDict':
@@ -367,13 +380,13 @@ class WDict(CowOwner):
 
     def set(self, key: Any, val: WValue) -> None:
         self.ensure_unique()
-        self.storage.data[key] = val.clone_value()
+        self.storage.data[dict_key(key)] = val.clone_value()
 
     def get(self, key: Any) -> Optional[WValue]:
-        return self.storage.data.get(key)
+        return self.storage.data.get(dict_key(key))
 
     def keys(self) -> List[WValue]:
-        return [WStr(k) if isinstance(k, str) else WInt(k) for k in self.storage.data.keys()]
+        return [k.clone_value() for k in self.storage.data.keys()]
 
     def values(self) -> List[WValue]:
         return list(self.storage.data.values())
@@ -389,7 +402,7 @@ class WDict(CowOwner):
     def __str__(self) -> str:
         items = []
         for k, v in self.storage.data.items():
-            k_str = f'"{k}"' if isinstance(k, str) else str(k)
+            k_str = display_value(k, True)
             v_str = display_value(v, True)
             items.append(f"{k_str}: {v_str}")
         return "{" + ", ".join(items) + "}"
@@ -565,3 +578,14 @@ class WModule(WValue):
         return f"<module {self.name}>"
 
 
+
+
+class WPointer(WValue):
+    def __init__(self, address):
+        self.address = address
+
+    def __eq__(self, other):
+        return isinstance(other, WPointer) and self.address == other.address
+
+    def __str__(self):
+        return "<opaque>"

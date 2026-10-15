@@ -2,7 +2,7 @@ import sys
 from typing import Any, Dict, List, Optional, TextIO, Tuple
 from error.Error import WRuntimeError
 from node.NodeType import (
-    Program, Stmt, Expr, ExprStmt, LetDecl, FnDecl, StructDecl, EnumDecl, ImportDecl,
+    LambdaExpr, Program, Stmt, Expr, ExprStmt, LetDecl, FnDecl, StructDecl, EnumDecl, ImportDecl,
     InterfaceDecl, ClassDecl, MethodDecl,
     WhileStmt, ForStmt, ReturnStmt, BreakStmt, ContinueStmt, Block,
     IntLiteral, FloatLiteral, StringLiteral, BoolLiteral, NoneLiteral, IdentExpr,
@@ -73,6 +73,10 @@ class Interpreter:
                     is_mut=False
                 )
             elif isinstance(stmt, FnDecl):
+                if hasattr(stmt, "extern_abi"):
+                    from runtime.ForeignAbi import bind_foreign
+                    self.global_env.declare(stmt.name, WNativeFunction(stmt.name, bind_foreign(stmt, getattr(self, "foreign_libraries", ()))))
+                    continue
                 self.global_env.declare(
                     stmt.name,
                     WFunction(decl=stmt, closure_env=self.global_env),
@@ -200,6 +204,11 @@ class Interpreter:
         return WOk(value) if hasattr(expr, "force_result_wrap_id") else value
 
     def _eval_expr_impl(self, expr: Expr, env: Environment) -> WValue:
+        if isinstance(expr, LambdaExpr):
+            original = self.global_env.lookup(expr.function_name)
+            closure = WFunction(original.decl, self.global_env)
+            closure.captured_environment = self.eval_expr(expr.environment, env).clone_value()
+            return closure
         if isinstance(expr, IntLiteral):
             return WInt(expr.value)
 
@@ -216,6 +225,8 @@ class Interpreter:
             return WNone()
 
         if isinstance(expr, IdentExpr):
+            if hasattr(expr, "resolved_enum_name"):
+                return WEnumValue(expr.resolved_enum_name, expr.name)
             return env.lookup(expr.name)
 
         if isinstance(expr, UnaryExpr):
@@ -410,7 +421,13 @@ class Interpreter:
 
         if isinstance(expr, AssignmentExpr):
             target = expr.target
+            prepared, indices = self.prepare_assignment(target, env)
             val = self.eval_expr(expr.value, env)
+            target_env = Environment(parent=env)
+            for name, value in indices.items():
+                target_env.declare(name, value)
+            target = prepared
+            env = target_env
 
             if isinstance(target, IdentExpr):
                 env.assign(target.name, val)
@@ -425,7 +442,7 @@ class Interpreter:
                     obj.set(idx.value, val)
                     return val
                 if isinstance(obj, WDict):
-                    key_raw = idx.value if hasattr(idx, 'value') else idx
+                    key_raw = idx
                     obj.set(key_raw, val)
                     return val
                 raise WRuntimeError(f"Cannot assign to index of '{type(obj).__name__}'", line=target.line, col=target.col, file=self.file)
@@ -482,7 +499,7 @@ class Interpreter:
                 return WStr(obj.value[idx.value])
 
             if isinstance(obj, WDict):
-                key_raw = idx.value if hasattr(idx, 'value') else idx
+                key_raw = idx
                 res = obj.get(key_raw)
                 return WEnumValue("Option", "Some", [res]) if res is not None else WNone()
 
@@ -519,7 +536,7 @@ class Interpreter:
             for entry in expr.entries:
                 k = self.eval_expr(entry.key, env)
                 v = self.eval_expr(entry.value, env)
-                key_raw = k.value if hasattr(k, 'value') else k
+                key_raw = k
                 pairs[key_raw] = v
             return WDict(pairs=pairs)
 
@@ -563,6 +580,30 @@ class Interpreter:
     # Helper Call & OOP Methods
     # ==========================================
 
+    def prepare_assignment(self, target, env):
+        indices = {}
+        def prepare(node):
+            if isinstance(node, IndexExpr):
+                parent = prepare(node.object)
+                name = "__assignment_index_" + str(len(indices))
+                indices[name] = self.eval_expr(node.index, env).clone_value()
+                return IndexExpr(parent, IdentExpr(name), node.line, node.col)
+            if isinstance(node, MemberExpr):
+                from checker.WType import ClassType
+                if isinstance(getattr(node.object, 'inferred_type', None), ClassType):
+                    name = "__assignment_receiver_" + str(len(indices))
+                    indices[name] = self.eval_expr(node.object, env).clone_value()
+                    return MemberExpr(IdentExpr(name, node.line, node.col), node.property, node.line, node.col)
+                return MemberExpr(prepare(node.object), node.property, node.line, node.col)
+            if isinstance(node, (IdentExpr, ThisExpr)):
+                return node
+            name = "__assignment_receiver_" + str(len(indices))
+            indices[name] = self.eval_expr(node, env).clone_value()
+            return IdentExpr(name, node.line, node.col)
+        prepared = prepare(target)
+        del prepare
+        return prepared, indices
+
     def eval_mutable_lvalue(self, expr: Expr, env: Environment) -> WValue:
         if isinstance(expr, IdentExpr):
             val = env.lookup(expr.name)
@@ -586,7 +627,7 @@ class Interpreter:
                     elem.ensure_unique()
                 return elem
             if isinstance(parent, WDict):
-                key_raw = idx.value if hasattr(idx, 'value') else idx
+                key_raw = idx
                 elem = parent.get(key_raw)
                 if elem is not None and isinstance(elem, (WList, WDict, WStructInstance)):
                     elem.ensure_unique()
@@ -699,6 +740,8 @@ class Interpreter:
         return WOk(ret_val)
 
     def call_function(self, func: WFunction, args: List[WValue]) -> WValue:
+        if hasattr(func, "captured_environment"):
+            args = [func.captured_environment] + args
         if len(args) != len(func.decl.params):
             raise WRuntimeError(
                 message=f"Function '{func.decl.name}' expected {len(func.decl.params)} arguments, got {len(args)}",
@@ -751,7 +794,7 @@ class Interpreter:
             if method == "get":
                 if len(args) != 1:
                     raise WRuntimeError("get() takes 1 argument", file=self.file)
-                key_raw = args[0].value if hasattr(args[0], 'value') else args[0]
+                key_raw = args[0]
                 val = receiver.get(key_raw)
                 return WEnumValue("Option", "Some", [val]) if val is not None else WNone()
             if method == "keys":

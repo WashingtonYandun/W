@@ -1,0 +1,7 @@
+class C {
+ public text: str
+ fn init(b: bool) {
+  if b { this.text = "yes" } else { this.text = "no" }
+ }
+}
+print(C(true).text)

@@ -5,7 +5,7 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TARGET_DIR="${1:-$HOME/.local/bin}"
 
 echo "=================================================="
-echo "W Language v0.1 — Toolchain Installer"
+echo "W Language toolchain installer"
 echo "=================================================="
 
 if ! command -v python3 >/dev/null 2>&1; then

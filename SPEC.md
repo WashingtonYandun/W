@@ -1,8 +1,8 @@
 # W Language Specification v0.1
 
-> **Status:** Frozen Specification (v0.1 — Implemented & Self-Hosted)  
-> **Targets:** `W0` (Python Reference Frontend, Interpreter & C99 Transpiler) & `W1` (`selfhost/w1.w` Self-Hosting Native C99 Compiler)  
-> **Core Thesis:** *W is a small, statically typed programming language optimized for semantic density, deterministic tooling, and reliable code generation by humans and AI systems.*
+> **Status:** Frozen core grammar (v0.1). The current toolchain is `0.3.0.dev1`.  
+> **Targets:** `W0` is the reference implementation; `W1` is an experimental self-hosted compiler with a smaller surface.  
+> **Thesis:** W is a compact, statically typed language for small native tools, with deterministic diagnostics and inspectable C99 output. Expansion beyond this core is documented in [docs/EXPANSION.md](docs/EXPANSION.md) and [docs/ENGINE_PARITY_MATRIX.md](docs/ENGINE_PARITY_MATRIX.md).
 
 ---
 

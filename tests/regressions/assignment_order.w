@@ -1,0 +1,9 @@
+class C {
+ public xs: list[int]
+ fn init() { this.xs = [0] }
+}
+let c = C()
+fn idx() -> int { print("index") return 0 }
+fn val() -> int { print("value") return 7 }
+c.xs[idx()] = val()
+print(c.xs)

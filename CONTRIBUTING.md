@@ -45,15 +45,15 @@ Source (.w)
    ├──────────────────────────────┬──────────────────────────────┐
    ▼                              ▼                              ▼
 [ W0 Interpreter ]       [ HirCCodeGen ]                [ W1 Compiler ]
-runtime/Interpreter.py   hir/HirCCodeGen.py             selfhost/src/ (01-09)
+runtime/Interpreter.py   hir/HirCCodeGen.py             selfhost/src/
    │                              │                              │
    ▼                              ▼                              ▼
 Value Evaluation           ANSI C99 Code                  Pure W Self-Host
 ```
 
 - **W0 Compiler / Driver (`main.py`, `w`):** Reference implementation in Python 3. Contains the two-pass type checker, monomorphization engine, Typed HIR middle-end, and C99 native code generator.
-- **W1 Self-Hosting Compiler (`selfhost/src/`):** 9 modular source components (`01_ast.w` through `09_main.w`) written in 100% pure W, bundled loss-lessly into `selfhost/w1.w`.
-- **C99 Runtime (`runtime/w_runtime.h`):** Single-header runtime providing deterministic Automatic Reference Counting (ARC), thread-safe atomic RC, Copy-on-Write (CoW) value graphs, UTF-8 code point strings, and zero-allocation pattern matching (`w_peek_ok`, `w_peek_err`).
+- **W1 Self-Hosting Compiler (`selfhost/src/`):** modular sources written in W, bundled into `selfhost/w1.w`. W1 is experimental; W0/HIR is the reference product.
+- **C99 Runtime (`runtime/w_runtime.h`):** Single-header runtime with single-threaded ARC, copy-on-write value graphs, length-aware UTF-8 strings, and explicit weak references.
 
 ---
 
@@ -113,12 +113,12 @@ CC=clang python3 tools/ci_conformance.py --sanitize
 python3 tools/ci_conformance.py --profile=release
 ```
 
-Integration permits explicitly declared unsupported W1 generic rows while running the other three engines. The release profile fails on every unsupported row until D02 is complete. Linux runs Clang ASan/UBSan/LSan and a separate GCC C99 gate; macOS runs Clang ASan/UBSan. Reports count coverage by engine and feature. Failure artifacts retain source, generated C, commands, diagnostics, signals/timeouts and toolchain versions. See [B04 completion](docs/B04_COMPLETION.md).
+Integration permits explicitly declared unsupported W1 generic rows while running the other three engines. The release profile fails on every unsupported row until D02 is complete. Linux runs Clang ASan/UBSan/LSan and a separate GCC C99 gate; macOS runs Clang ASan/UBSan. Reports count coverage by engine and feature. Failure artifacts retain source, generated C, commands, diagnostics, signals/timeouts and toolchain versions. See [B04 completion](docs/history/B04_COMPLETION.md).
 
 ### 4. Modular Split Verification
-Ensures the 9 modular compiler files in `selfhost/src/` combine loss-lessly to exactly match `selfhost/w1.w`:
+Ensures the modular compiler files in `selfhost/src/` combine loss-lessly to exactly match `selfhost/w1.w`:
 ```bash
-python3 test_w1_split_conformance.py
+python3 -m tests.unit.test_w1_split_conformance
 ```
 
 ### 5. Performance Benchmark
@@ -141,7 +141,7 @@ When modifying compiler frontend, parser, or code generation logic that affects 
    ```
 2. Verify the bootstrap fixed-point:
    ```bash
-   python3 test_bootstrap_conformance.py
+   python3 -m tests.unit.test_bootstrap_conformance
    ```
 
 ---

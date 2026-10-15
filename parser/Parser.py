@@ -1,11 +1,11 @@
 import os
 from typing import List, Optional
-from token.Token import Token
-from token.TokenType import TokenType
+from wtokens.Token import Token
+from wtokens.TokenType import TokenType
 from lexer.Lexer import Lexer
 from error.Error import ParserError
 from node.NodeType import (
-    Node, Program, Stmt, Expr, TypeNode, Pattern, Block,
+    ExternFnDecl, LambdaExpr, FunctionType as AstFunctionType, Node, Program, Stmt, Expr, TypeNode, Pattern, Block,
     NamedType, GenericType, TypeParam, OptionalType, ListType, DictType, TupleType, ResultType,
     IdentifierPattern, TuplePattern, EnumPattern, LiteralPattern, WildcardPattern,
     FnDecl, Param, StructDecl, StructField, EnumDecl, VariantDecl,
@@ -132,6 +132,16 @@ class Parser:
 
     def parse_type(self) -> TypeNode:
         token = self.at()
+        if self.match(TokenType.FN):
+            self.expect(TokenType.LPAREN)
+            params = []
+            if not self.check(TokenType.RPAREN):
+                params.append(self.parse_type())
+                while self.match(TokenType.COMMA):
+                    params.append(self.parse_type())
+            self.expect(TokenType.RPAREN)
+            self.expect(TokenType.ARROW)
+            return AstFunctionType(params, self.parse_type(), token.line, token.col)
         if self.match(TokenType.LPAREN):
             inner_type = self.parse_type()
             self.expect(TokenType.RPAREN, code="P006", msg="Expected ')' after grouped type")
@@ -147,6 +157,8 @@ class Parser:
 
         name_tok = self.advance()
         name = name_tok.value
+        while self.match(TokenType.DOT):
+            name += "." + self.expect(TokenType.IDENTIFIER).value
         line = name_tok.line
         col = name_tok.col
 
@@ -288,6 +300,27 @@ class Parser:
     # ==========================================
 
     def parse_stmt(self, allow_top_level: bool = False) -> Stmt:
+        if self.match(TokenType.PUB):
+            if not allow_top_level:
+                raise ParserError("pub requires a top-level declaration", file=self.file, code="W0006")
+            statement = self.parse_stmt(allow_top_level=True)
+            if not isinstance(statement, (FnDecl, StructDecl, EnumDecl, ClassDecl, InterfaceDecl, LetDecl, ImportDecl)):
+                raise ParserError("pub requires a declaration", file=self.file, code="W0006")
+            statement.is_exported = True
+            return statement
+        if self.match(TokenType.EXTERN):
+            token = self.tokens[self.pos - 1]
+            abi = self.expect(TokenType.STR)
+            if abi.value != "C":
+                raise ParserError("Only the C ABI is supported", file=self.file, line=abi.line, col=abi.col, code="W0006")
+            self.expect(TokenType.FN)
+            name = self.expect(TokenType.IDENTIFIER)
+            self.expect(TokenType.LPAREN)
+            params = self._parse_param_list()
+            self.expect(TokenType.RPAREN)
+            self.expect(TokenType.ARROW)
+            returned = self.parse_type()
+            return ExternFnDecl(name.value, params, returned, token.line, token.col)
         if self.check(TokenType.FN) or self.check(TokenType.STRUCT) or self.check(TokenType.ENUM) or self.check(TokenType.INTERFACE) or self.check(TokenType.CLASS) or self.check(TokenType.IMPORT):
             if not allow_top_level:
                 tok = self.at()
@@ -388,6 +421,7 @@ class Parser:
     def parse_interface_decl(self) -> InterfaceDecl:
         start_tok = self.expect(TokenType.INTERFACE, code="P004", msg="Expected 'interface'")
         name_tok = self.expect(TokenType.IDENTIFIER, code="P004", msg="Expected interface name")
+        type_params = self._parse_type_params()
         self.expect(TokenType.LBRACE, code="P002", msg="Expected '{' to start interface body")
 
         methods: List[InterfaceMethod] = []
@@ -404,24 +438,34 @@ class Parser:
             methods.append(InterfaceMethod(name=m_name.value, params=params, return_type=ret_type, line=fn_tok.line, col=fn_tok.col))
 
         self.expect(TokenType.RBRACE, code="P007", msg="Unterminated interface body, expected '}'")
-        return InterfaceDecl(name=name_tok.value, methods=methods, line=start_tok.line, col=start_tok.col)
+        return InterfaceDecl(name=name_tok.value, methods=methods, line=start_tok.line, col=start_tok.col, type_params=type_params)
 
     def parse_class_decl(self) -> ClassDecl:
         start_tok = self.expect(TokenType.CLASS, code="P004", msg="Expected 'class'")
         name_tok = self.expect(TokenType.IDENTIFIER, code="P004", msg="Expected class name")
+        type_params = self._parse_type_params()
 
         superclass: Optional[str] = None
         if self.match(TokenType.EXTENDS):
             sup_tok = self.expect(TokenType.IDENTIFIER, code="P004", msg="Expected superclass name after 'extends'")
             superclass = sup_tok.value
+            if self.check(TokenType.LBRACKET):
+                self.pos -= 1
+                superclass = self.parse_type()
 
         interfaces: List[str] = []
         if self.match(TokenType.IMPLEMENTS):
             first_intf = self.expect(TokenType.IDENTIFIER, code="P004", msg="Expected interface name after 'implements'")
             interfaces.append(first_intf.value)
+            if self.check(TokenType.LBRACKET):
+                self.pos -= 1
+                interfaces[-1] = self.parse_type()
             while self.match(TokenType.COMMA):
                 next_intf = self.expect(TokenType.IDENTIFIER, code="P004", msg="Expected interface name after ','")
                 interfaces.append(next_intf.value)
+                if self.check(TokenType.LBRACKET):
+                    self.pos -= 1
+                    interfaces[-1] = self.parse_type()
 
         self.expect(TokenType.LBRACE, code="P002", msg="Expected '{' to start class body")
 
@@ -467,6 +511,7 @@ class Parser:
         return ClassDecl(
             name=name_tok.value,
             superclass=superclass,
+            type_params=type_params,
             interfaces=interfaces,
             fields=fields,
             methods=methods,
@@ -538,6 +583,9 @@ class Parser:
         base = os.path.basename(raw_path)
         namespace = base.split(".")[0] if "." in base else base
 
+        if self.check(TokenType.IDENTIFIER) and self.at().value == "as":
+            self.advance()
+            namespace = self.expect(TokenType.IDENTIFIER).value
         return ImportDecl(path=raw_path, namespace=namespace, line=start_tok.line, col=start_tok.col)
 
     def parse_while_stmt(self) -> WhileStmt:
@@ -564,7 +612,7 @@ class Parser:
 
     def parse_return_stmt(self) -> ReturnStmt:
         start_tok = self.expect(TokenType.RETURN, code="P004", msg="Expected 'return'")
-        if self.check(TokenType.RBRACE) or self.is_at_end():
+        if self.check(TokenType.RBRACE) or self.is_at_end() or self.at().line > start_tok.line:
             return ReturnStmt(value=None, line=start_tok.line, col=start_tok.col)
         val = self.parse_expr()
         return ReturnStmt(value=val, line=start_tok.line, col=start_tok.col)
@@ -584,7 +632,9 @@ class Parser:
         if statements and isinstance(statements[-1], ExprStmt):
             tail_expr = statements.pop().expr
 
-        return Block(statements=statements, tail_expr=tail_expr, line=start_tok.line, col=start_tok.col)
+        block = Block(statements=statements, tail_expr=tail_expr, line=start_tok.line, col=start_tok.col)
+        block.end_line, block.end_col = self.tokens[self.pos - 1].line, self.tokens[self.pos - 1].col
+        return block
 
 
     # ==========================================
@@ -631,6 +681,7 @@ class Parser:
                                     args.append(self.parse_expr())
                             self.expect(TokenType.RPAREN, code="P002", msg="Expected ')' after generic module call")
                             left = CallExpr(left, args, type_args, line=left.line, col=left.col)
+                            left.index_alternative = self._parse_index_alternative(saved)
                             continue
                         self.pos = saved
                     # Indexing
@@ -695,7 +746,19 @@ class Parser:
 
         return left
 
-    def _try_parse_generic_type_args(self) -> Optional[List[TypeNode]]:
+    def _parse_index_alternative(self, start):
+        previous = self.pos
+        self.pos = start + 1
+        try:
+            expression = self.parse_expr()
+            self.expect(TokenType.RBRACKET)
+            return expression
+        except ParserError:
+            return None
+        finally:
+            self.pos = previous
+
+    def _try_parse_generic_type_args(self, allow_struct_init: bool = True) -> Optional[List[TypeNode]]:
         if not self.check(TokenType.LBRACKET):
             return None
         saved_pos = self.pos
@@ -713,7 +776,9 @@ class Parser:
                 self.pos = saved_pos
                 return None
             # Only treat as generic args if followed by '{' or '('
-            if not (self.check(TokenType.LBRACE) or self.check(TokenType.LPAREN)):
+            if not (self.check(TokenType.LPAREN) or (allow_struct_init and self.check(TokenType.LBRACE)
+                    and (self.peek(1).type == TokenType.RBRACE or
+                         (self.peek(1).type == TokenType.IDENTIFIER and self.peek(2).type == TokenType.COLON)))):
                 self.pos = saved_pos
                 return None
             return args
@@ -723,6 +788,22 @@ class Parser:
 
     def parse_prefix_expr(self, allow_struct_init: bool = True) -> Expr:
         token = self.at()
+        if self.match(TokenType.PIPE):
+            params = []
+            if not self.check(TokenType.PIPE):
+                while True:
+                    name = self.expect(TokenType.IDENTIFIER)
+                    annotation = self.parse_type() if self.match(TokenType.COLON) else None
+                    params.append(Param(name.value, annotation, name.line, name.col))
+                    if not self.match(TokenType.COMMA):
+                        break
+            self.expect(TokenType.PIPE)
+            returned = self.parse_type() if self.match(TokenType.ARROW) else None
+            if self.match(TokenType.FAT_ARROW):
+                body = Block([], self.parse_expr(), token.line, token.col)
+            else:
+                body = self.parse_block()
+            return LambdaExpr(params, body, returned, token.line, token.col)
 
         # Literals
         if self.match(TokenType.INT):
@@ -751,6 +832,10 @@ class Parser:
 
         if self.match(TokenType.NEW):
             cls_tok = self.expect(TokenType.IDENTIFIER, code="P004", msg="Expected class name after 'new'")
+            class_name = cls_tok.value
+            while self.match(TokenType.DOT):
+                class_name += "." + self.expect(TokenType.IDENTIFIER).value
+            type_args = self._try_parse_generic_type_args(False) if self.check(TokenType.LBRACKET) else None
             self.expect(TokenType.LPAREN, code="P002", msg="Expected '(' after class name in 'new' expression")
             args: List[Expr] = []
             if not self.check(TokenType.RPAREN):
@@ -760,15 +845,18 @@ class Parser:
                         break
                     args.append(self.parse_expr())
             self.expect(TokenType.RPAREN, code="P002", msg="Expected ')' after 'new' arguments")
-            return NewExpr(class_name=cls_tok.value, args=args, line=token.line, col=token.col)
+            expression = NewExpr(class_name=class_name, args=args, line=token.line, col=token.col)
+            expression.type_args = type_args
+            return expression
 
         # Identifiers & Named Struct Initializations
         if self.match(TokenType.IDENTIFIER):
             ident_name = token.value
 
             type_args: Optional[List[TypeNode]] = None
+            bracket_start = self.pos
             if self.check(TokenType.LBRACKET):
-                type_args = self._try_parse_generic_type_args()
+                type_args = self._try_parse_generic_type_args(allow_struct_init)
 
             # Check if this is a generic call: ident[T](args) or Box[T](args)
             if type_args and self.match(TokenType.LPAREN):
@@ -780,13 +868,15 @@ class Parser:
                             break
                         call_args.append(self.parse_expr())
                 self.expect(TokenType.RPAREN, code="P002", msg="Expected ')' after call arguments")
-                return CallExpr(
+                call = CallExpr(
                     callee=IdentExpr(name=ident_name, line=token.line, col=token.col),
                     args=call_args,
                     type_args=type_args,
                     line=token.line,
                     col=token.col
                 )
+                call.index_alternative = self._parse_index_alternative(bracket_start)
+                return call
 
             # Check if this is a Struct Initialization: Identifier { field: val, ... } or Identifier[T] { field: val, ... }
             if allow_struct_init and self.check(TokenType.LBRACE):

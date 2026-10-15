@@ -1,0 +1,1166 @@
+fn sem_at() -> Token { return sem_tokens[sem_pos] }
+fn sem_is(kind: str) -> bool { return sem_at().kind == kind }
+fn sem_take() -> Token {
+    let token = sem_at()
+    if sem_pos + 1 < len(sem_tokens) { sem_pos = sem_pos + 1 }
+    return token
+}
+fn sem_match(kind: str) -> bool {
+    if sem_is(kind) { sem_take() return true }
+    return false
+}
+fn sem_error(code: str, message: str) {
+    report_error(code, sem_at().line, sem_at().col, message)
+}
+fn sem_expect(kind: str) -> Token {
+    if not sem_is(kind) { sem_error("W0006", "expected " + kind) }
+    return sem_take()
+}
+fn sem_intern(kind: str, name: str, args: list[int]) -> int {
+    for i in 0..len(sem_types) {
+        let candidate = sem_types[i]
+        if candidate.kind == kind and candidate.name == name and candidate.args == args { return i }
+    }
+    sem_types.append(SemType { kind: kind, name: name, args: args })
+    return len(sem_types) - 1
+}
+fn sem_simple(kind: str) -> int {
+    let empty: list[int] = []
+    return sem_intern(kind, "", empty)
+}
+fn sem_wrap(kind: str, child: int) -> int { return sem_intern(kind, "", [child]) }
+fn sem_kind(type_id: int) -> str { return sem_types[type_id].kind }
+fn sem_named(name: str) -> int {
+    for i in 0..len(sem_types) { if sem_types[i].name == name { return i } }
+    sem_error("W1001", "unknown type: " + name)
+    return sem_unit
+}
+fn sem_function(name: str) -> int {
+    for i in 0..len(sem_functions) { if sem_functions[i].name == name { return i } }
+    return -1
+}
+fn sem_method(owner: str, name: str) -> int {
+    let mut current = owner
+    let mut visits = 0
+    while current != "" and visits <= len(sem_classes) {
+        let index = sem_function(current + "." + name)
+        if index >= 0 { return index }
+        let mut next = ""
+        for class_ in sem_classes { if class_.name == current { next = class_.parent } }
+        current = next
+        visits = visits + 1
+    }
+    return -1
+}
+fn sem_assignable(source: int, target: int) -> bool {
+    if source == target { return true }
+    let s = sem_types[source]
+    let t = sem_types[target]
+    if s.kind == "empty" and (t.kind == "list" or t.kind == "dict") { return true }
+    if t.kind == "optional" {
+        if source == sem_none { return true }
+        if s.kind == "optional" { return sem_assignable(s.args[0], t.args[0]) }
+        return sem_assignable(source, t.args[0])
+    }
+    if t.kind == "result" {
+        if s.kind == "ok" { return sem_assignable(s.args[0], t.args[0]) }
+        if s.kind == "err" { return sem_assignable(s.args[0], t.args[1]) }
+        return sem_assignable(source, t.args[0])
+    }
+    if s.kind == "class" and (t.kind == "class" or t.kind == "interface") {
+        let mut current = s.name
+        let mut visits = 0
+        while current != "" and visits <= len(sem_classes) {
+            if current == t.name { return true }
+            let mut next = ""
+            for class_ in sem_classes {
+                if class_.name == current {
+                    for interface_ in class_.interfaces { if interface_ == t.name { return true } }
+                    next = class_.parent
+                }
+            }
+            current = next
+            visits = visits + 1
+        }
+    }
+    return false
+}
+fn sem_require(source: int, target: int, code: str) {
+    if not sem_assignable(source, target) { sem_error(code, "incompatible types") }
+}
+fn sem_type() -> int {
+    let mut result = sem_unit
+    if sem_match("FN") {
+        sem_expect("LPAREN")
+        let mut args: list[int] = []
+        if not sem_is("RPAREN") {
+            args.append(sem_type())
+            while sem_match("COMMA") { args.append(sem_type()) }
+        }
+        sem_expect("RPAREN")
+        sem_expect("ARROW")
+        args.append(sem_type())
+        return sem_intern("function", "", args)
+    } elif sem_match("LPAREN") {
+        result = sem_type()
+        sem_expect("RPAREN")
+    } else {
+        let name = sem_expect("IDENT").val
+        if name == "int" or name == "int32" or name == "int64" { result = sem_int }
+        elif name == "float" or name == "double" { result = sem_float }
+        elif name == "bool" { result = sem_bool }
+        elif name == "str" { result = sem_str }
+        elif name == "unit" { result = sem_unit }
+        elif name == "list" or name == "dict" or name == "tuple" or name == "Option" or name == "Result" or name == "Weak" {
+            sem_expect("LBRACKET")
+            let mut args: list[int] = [sem_type()]
+            while sem_match("COMMA") { args.append(sem_type()) }
+            sem_expect("RBRACKET")
+            let mut kind = name
+            if name == "Option" { kind = "optional" }
+            if name == "Result" { kind = "result" }
+            if name == "Weak" { kind = "weak" }
+            if (kind == "list" or kind == "optional" or kind == "weak") and len(args) != 1 { sem_error("W2001", "type arity") }
+            if (kind == "dict" or kind == "result") and len(args) != 2 { sem_error("W2001", "type arity") }
+            if kind == "dict" and not sem_key(args[0]) { sem_error("W2010", "invalid dictionary key") }
+            result = sem_intern(kind, "", args)
+        } else { result = sem_named(name) }
+    }
+    if sem_match("QUESTION") { result = sem_wrap("optional", result) }
+    if sem_match("BANG") { result = sem_intern("result", "", [result, sem_type()]) }
+    return result
+}
+fn sem_key(type_id: int) -> bool {
+    return type_id == sem_int or type_id == sem_str or type_id == sem_bool or sem_kind(type_id) == "enum"
+}
+fn sem_lookup(name: str) -> int {
+    let mut i = len(sem_variables) - 1
+    while i >= 0 {
+        if sem_variables[i].name == name { return i }
+        i = i - 1
+    }
+    return -1
+}
+fn sem_declare(name: str, type_id: int, mutable: bool) {
+    for variable in sem_variables {
+        if variable.name == name and variable.depth == sem_depth { sem_error("W1002", "duplicate declaration: " + name) }
+    }
+    sem_variables.append(SemVar { name: name, type_id: type_id, mutable: mutable, depth: sem_depth })
+}
+fn sem_value(type_id: int) -> SemValue {
+    return SemValue { type_id: type_id, root: "", writable: -1, terminates: false }
+}
+fn sem_mutable(root: str) {
+    if len(root) >= 5 and slice(root, 0, 5) == "this:" { return }
+    if root != "" {
+        let variable = sem_lookup(root)
+        if variable >= 0 and sem_capture_depth >= 0 and sem_variables[variable].depth < sem_capture_depth { sem_error("W3001", "captured snapshots are immutable") }
+        if variable < 0 or not sem_variables[variable].mutable { sem_error("W3001", "mutation of immutable binding") }
+    }
+}
+fn sem_skip_block() -> int {
+    sem_expect("LBRACE")
+    let mut depth = 1
+    while depth > 0 and not sem_is("EOF") {
+        if sem_match("LBRACE") { depth = depth + 1 }
+        elif sem_match("RBRACE") { depth = depth - 1 }
+        else { sem_take() }
+    }
+    if depth != 0 { sem_error("W0006", "unclosed block") }
+    return sem_pos
+}
+fn sem_collect_function(owner: str, visible: bool) {
+    sem_expect("FN")
+    let local = sem_expect("IDENT").val
+    if sem_is("LBRACKET") { sem_error("W2013", "W1 generic specialization is not implemented") }
+    let name = owner + local
+    if sem_function(name) >= 0 { sem_error("W1002", "duplicate function: " + name) }
+    sem_expect("LPAREN")
+    let mut params: list[str] = []
+    let mut types: list[int] = []
+    while not sem_is("RPAREN") {
+        params.append(sem_expect("IDENT").val)
+        sem_expect("COLON")
+        types.append(sem_type())
+        if not sem_match("COMMA") { break }
+    }
+    sem_expect("RPAREN")
+    let mut returned = sem_unit
+    if sem_match("ARROW") { returned = sem_type() }
+    types.append(returned)
+    let signature = sem_intern("function", "", types)
+    let mut body = -1
+    let mut end = sem_pos
+    if sem_is("LBRACE") { body = sem_pos end = sem_skip_block() }
+    sem_functions.append(SemFunction { name: name, params: params, type_id: signature, body: body, end: end, owner: owner, visible: visible })
+}
+fn sem_collect_record(kind: str) {
+    sem_take()
+    let name = sem_expect("IDENT").val
+    if sem_is("LBRACKET") { sem_error("W2013", "W1 generic declarations are not implemented") }
+    let type_id = sem_named(name)
+    let mut parent = ""
+    let mut interfaces: list[str] = []
+    if sem_match("EXTENDS") { parent = sem_expect("IDENT").val }
+    if sem_match("IMPLEMENTS") {
+        interfaces.append(sem_expect("IDENT").val)
+        while sem_match("COMMA") { interfaces.append(sem_expect("IDENT").val) }
+    }
+    if kind == "class" { sem_classes.append(SemClass { name: name, parent: parent, interfaces: interfaces }) }
+    sem_expect("LBRACE")
+    while not sem_is("RBRACE") {
+        let mut visible = true
+        if sem_match("PRIVATE") { visible = false } else { sem_match("PUBLIC") }
+        if sem_is("FN") { sem_collect_function(name + ".", visible) }
+        elif kind == "enum" {
+            let variant = sem_expect("IDENT").val
+            if sem_is("LPAREN") { sem_error("W2013", "W1 enum payload layout is not implemented") }
+            sem_variants.append(variant)
+            sem_variant_types.append(type_id)
+            sem_match("COMMA")
+        } else {
+            let field = sem_expect("IDENT").val
+            sem_expect("COLON")
+            let field_type = sem_type()
+            sem_fields.append(SemField { owner: name, name: field, type_id: field_type, visible: visible })
+            sem_match("COMMA")
+        }
+    }
+    sem_expect("RBRACE")
+}
+let mut sem_expected = -1
+fn sem_builtin(name: str) -> bool {
+    return name == "print" or name == "eprint" or name == "len" or name == "int" or name == "float" or name == "str" or name == "ord" or name == "chr" or name == "bytes" or name == "slice" or name == "args" or name == "exit" or name == "enumerate" or name == "dict_items" or name == "read_file" or name == "write_file" or name == "Some" or name == "Ok" or name == "Err" or name == "weak" or name == "upgrade"
+}
+fn sem_call_builtin(name: str, args: list[int]) -> int {
+    let count = len(args)
+    if name == "print" or name == "eprint" { return sem_unit }
+    if name == "args" {
+        if count != 0 { sem_error("W2005", "args arity") }
+        return sem_wrap("list", sem_str)
+    }
+    let mut arity = 1
+    if name == "slice" { arity = 3 }
+    if name == "write_file" { arity = 2 }
+    if count != arity { sem_error("W2005", "builtin arity: " + name) }
+    let first = args[0]
+    let kind = sem_kind(first)
+    if name == "Some" { return sem_wrap("optional", first) }
+    if name == "Ok" or name == "Err" {
+        if sem_expected >= 0 and sem_kind(sem_expected) == "result" {
+            let channel = sem_types[sem_expected].args
+            if name == "Ok" { sem_require(first, channel[0], "W2001") }
+            else { sem_require(first, channel[1], "W2001") }
+            return sem_expected
+        }
+        if name == "Ok" { return sem_wrap("ok", first) }
+        return sem_wrap("err", first)
+    }
+    if name == "len" {
+        if kind != "list" and kind != "dict" and first != sem_str { sem_error("W2001", "len requires a collection or string") }
+        return sem_int
+    }
+    if name == "int" or name == "float" or name == "str" {
+        if first != sem_int and first != sem_float and first != sem_str and (name != "str" or first != sem_bool) { sem_error("W2001", "conversion argument") }
+        if name == "int" { return sem_int }
+        if name == "float" { return sem_float }
+        return sem_str
+    }
+    if name == "chr" or name == "exit" {
+        sem_require(first, sem_int, "W2001")
+        if name == "chr" { return sem_str }
+        return sem_unit
+    }
+    if name == "ord" or name == "bytes" or name == "slice" or name == "read_file" or name == "write_file" {
+        sem_require(first, sem_str, "W2001")
+        if name == "ord" { return sem_int }
+        if name == "bytes" { return sem_wrap("list", sem_int) }
+        if name == "slice" {
+            sem_require(args[1], sem_int, "W2001")
+            sem_require(args[2], sem_int, "W2001")
+            return sem_str
+        }
+        let io = sem_named("IoError")
+        if name == "read_file" { return sem_intern("result", "", [sem_str, io]) }
+        sem_require(args[1], sem_str, "W2001")
+        return sem_intern("result", "", [sem_unit, io])
+    }
+    if name == "weak" {
+        if kind != "class" { sem_error("W2001", "weak requires class") }
+        return sem_wrap("weak", first)
+    }
+    if name == "upgrade" {
+        if kind != "weak" { sem_error("W2001", "upgrade requires weak") }
+        return sem_wrap("optional", sem_types[first].args[0])
+    }
+    if name == "enumerate" {
+        if kind != "list" { sem_error("W2001", "enumerate requires list") }
+        return sem_wrap("list", sem_intern("tuple", "", [sem_int, sem_types[first].args[0]]))
+    }
+    if name == "dict_items" {
+        if kind != "dict" { sem_error("W2001", "dict_items requires dict") }
+        return sem_wrap("list", sem_intern("tuple", "", sem_types[first].args))
+    }
+    sem_error("W1001", "unknown builtin")
+    return sem_unit
+}
+fn sem_check_call(signature: int, args: list[int]) -> int {
+    let type_ = sem_types[signature]
+    if type_.kind == "builtin" { return sem_call_builtin(type_.name, args) }
+    if type_.kind == "constructor" {
+        let target = type_.args[0]
+        let method = sem_method(sem_types[target].name, "init")
+        if method >= 0 { sem_check_call(sem_functions[method].type_id, args) }
+        elif len(args) != 0 { sem_error("W2005", "constructor arity") }
+        return target
+    }
+    if type_.kind != "function" { sem_error("W2005", "value is not callable") }
+    if len(type_.args) != len(args) + 1 { sem_error("W2005", "call arity") }
+    for i in 0..len(args) { sem_require(args[i], type_.args[i], "W2001") }
+    return type_.args[len(args)]
+}
+fn sem_field(owner: str, name: str) -> int {
+    let mut current = owner
+    let mut visits = 0
+    while current != "" and visits <= len(sem_classes) {
+        for i in 0..len(sem_fields) {
+            let field = sem_fields[i]
+            if field.owner == current and field.name == name { return i }
+        }
+        let mut next = ""
+        for class_ in sem_classes { if class_.name == current { next = class_.parent } }
+        current = next
+        visits = visits + 1
+    }
+    return -1
+}
+fn sem_member(receiver: SemValue, name: str) -> SemValue {
+    let type_ = sem_types[receiver.type_id]
+    if type_.kind == "enum" {
+        for i in 0..len(sem_variants) {
+            if sem_variants[i] == name and sem_variant_types[i] == receiver.type_id { return sem_value(receiver.type_id) }
+        }
+        sem_error("W1001", "unknown enum variant")
+    }
+    if type_.kind == "list" or type_.kind == "dict" {
+        let mut args: list[int] = []
+        if name == "append" and type_.kind == "list" {
+            sem_mutable(receiver.root)
+            args = [type_.args[0], sem_unit]
+        } elif name == "pop" and type_.kind == "list" {
+            sem_mutable(receiver.root)
+            args = [type_.args[0]]
+        } elif name == "clear" and type_.kind == "list" {
+            sem_mutable(receiver.root)
+            args = [sem_unit]
+        } elif name == "get" and type_.kind == "dict" { args = [type_.args[0], sem_wrap("optional", type_.args[1])] }
+        elif name == "keys" and type_.kind == "dict" { args = [sem_wrap("list", type_.args[0])] }
+        elif name == "values" and type_.kind == "dict" { args = [sem_wrap("list", type_.args[1])] }
+        else { sem_error("W3002", "unknown collection method") }
+        return SemValue { type_id: sem_intern("function", "", args), root: "#collection", writable: -1, terminates: false }
+    }
+    let field_index = sem_field(type_.name, name)
+    if field_index >= 0 {
+        let field = sem_fields[field_index]
+        if not field.visible and sem_owner != field.owner { sem_error("W3002", "private field") }
+        if sem_initializing and receiver.root == "this" and field.owner == sem_owner {
+            let mut found = false
+            for initialized in sem_initialized { if initialized == name { found = true } }
+            if not found and not sem_is("ASSIGN") { sem_error("W3004", "read before initialization") }
+        }
+        let mut root = receiver.root
+        if type_.kind == "class" {
+            root = ""
+            if sem_initializing and receiver.root == "this" { root = "this:" + name }
+        }
+        return SemValue { type_id: field.type_id, root: root, writable: field.type_id, terminates: false }
+    }
+    let method_index = sem_method(type_.name, name)
+    if method_index >= 0 {
+        let method = sem_functions[method_index]
+        if not method.visible and method.owner != sem_owner + "." { sem_error("W3002", "private method access") }
+        return SemValue { type_id: method.type_id, root: "#method", writable: -1, terminates: false }
+    }
+    sem_error("W3002", "unknown member: " + name)
+    return sem_value(sem_unit)
+}
+fn sem_prefix(allow_struct: bool, statement: bool) -> SemValue {
+    if sem_is("PIPE") { return sem_lambda() }
+    if sem_match("INT") { return sem_value(sem_int) }
+    if sem_match("FLOAT") { return sem_value(sem_float) }
+    if sem_match("STR") { return sem_value(sem_str) }
+    if sem_match("TRUE") or sem_match("FALSE") { return sem_value(sem_bool) }
+    if sem_match("NONE") { return sem_value(sem_none) }
+    if sem_match("MINUS") {
+        let value = sem_expression(9, allow_struct)
+        if value.type_id != sem_int and value.type_id != sem_float { sem_error("W2001", "numeric negation") }
+        return sem_value(value.type_id)
+    }
+    if sem_match("NOT") {
+        sem_require(sem_expression(9, allow_struct).type_id, sem_bool, "W2001")
+        return sem_value(sem_bool)
+    }
+    if sem_match("LPAREN") {
+        if sem_match("RPAREN") {
+            let empty: list[int] = []
+            return sem_value(sem_intern("tuple", "", empty))
+        }
+        let first = sem_expression(0, true)
+        if sem_match("COMMA") {
+            let mut types: list[int] = [first.type_id]
+            while not sem_is("RPAREN") {
+                types.append(sem_expression(0, true).type_id)
+                if not sem_match("COMMA") { break }
+            }
+            sem_expect("RPAREN")
+            return sem_value(sem_intern("tuple", "", types))
+        }
+        sem_expect("RPAREN")
+        return first
+    }
+    if sem_match("LBRACKET") {
+        if sem_match("RBRACKET") { return sem_value(sem_simple("empty")) }
+        let context = sem_expected
+        let mut element = -1
+        if context >= 0 and sem_kind(context) == "list" { element = sem_types[context].args[0] }
+        sem_expected = element
+        let mut first = sem_expression(0, true).type_id
+        if element >= 0 { sem_require(first, element, "W2001") first = element }
+        while sem_match("COMMA") {
+            if sem_is("RBRACKET") { break }
+            sem_require(sem_expression(0, true).type_id, first, "W2001")
+        }
+        sem_expect("RBRACKET")
+        sem_expected = context
+        return sem_value(sem_wrap("list", first))
+    }
+    if sem_match("LBRACE") {
+        if sem_match("RBRACE") { return sem_value(sem_simple("empty")) }
+        let key = sem_expression(0, true).type_id
+        if not sem_key(key) { sem_error("W2010", "invalid dictionary key") }
+        sem_expect("COLON")
+        let value = sem_expression(0, true).type_id
+        while sem_match("COMMA") {
+            if sem_is("RBRACE") { break }
+            sem_require(sem_expression(0, true).type_id, key, "W2001")
+            sem_expect("COLON")
+            sem_require(sem_expression(0, true).type_id, value, "W2001")
+        }
+        sem_expect("RBRACE")
+        return sem_value(sem_intern("dict", "", [key, value]))
+    }
+    if sem_is("IF") { return sem_if(statement) }
+    if sem_is("MATCH") { return sem_match_expression() }
+    if sem_is("THIS") or sem_is("SUPER") {
+        if sem_capture_depth >= 0 { sem_error("W2001", "capture receiver through explicit local binding") }
+        let is_super = sem_take().kind == "SUPER"
+        if sem_owner == "" { sem_error("W1004", "receiver outside method") }
+        let mut owner = sem_owner
+        if is_super {
+            owner = ""
+            for class_ in sem_classes { if class_.name == sem_owner { owner = class_.parent } }
+            if owner == "" { sem_error("W1004", "super without base class") }
+        }
+        return SemValue { type_id: sem_named(owner), root: "this", writable: -1, terminates: false }
+    }
+    sem_match("NEW")
+    let name = sem_expect("IDENT").val
+    if name == "None" { return sem_value(sem_none) }
+    let variable = sem_lookup(name)
+    if variable >= 0 {
+        let value = sem_variables[variable]
+        if sem_capture_depth >= 0 and value.depth < sem_capture_depth and not module_contains(sem_capture_names, name) { sem_capture_names.append(name) }
+        return SemValue { type_id: value.type_id, root: name, writable: value.type_id, terminates: false }
+    }
+    if sem_builtin(name) {
+        let empty: list[int] = []
+        return sem_value(sem_intern("builtin", name, empty))
+    }
+    let function = sem_function(name)
+    if function >= 0 { return SemValue { type_id: sem_functions[function].type_id, root: "fn:" + name, writable: -1, terminates: false } }
+    for i in 0..len(sem_types) {
+        let type_ = sem_types[i]
+        if type_.name == name {
+            if type_.kind == "class" { return sem_value(sem_wrap("constructor", i)) }
+            if type_.kind == "struct" and allow_struct and sem_match("LBRACE") {
+                let mut initialized: list[str] = []
+                while not sem_is("RBRACE") {
+                    let field_name = sem_expect("IDENT").val
+                    let field = sem_field(name, field_name)
+                    if field < 0 { sem_error("W3002", "unknown struct field") }
+                    for previous in initialized { if previous == field_name { sem_error("W2007", "duplicate initializer") } }
+                    initialized.append(field_name)
+                    sem_expect("COLON")
+                    sem_require(sem_expression(0, true).type_id, sem_fields[field].type_id, "W2001")
+                    sem_match("COMMA")
+                }
+                sem_expect("RBRACE")
+                for field in sem_fields {
+                    if field.owner == name {
+                        let mut found = false
+                        for candidate in initialized { if candidate == field.name { found = true } }
+                        if not found { sem_error("W2007", "missing struct field") }
+                    }
+                }
+            }
+            return sem_value(i)
+        }
+    }
+    let mut variant = -1
+    for i in 0..len(sem_variants) {
+        if sem_variants[i] == name {
+            if variant >= 0 { sem_error("W1001", "ambiguous enum variant") }
+            variant = sem_variant_types[i]
+        }
+    }
+    if variant >= 0 { return sem_value(variant) }
+    sem_error("W1001", "unknown identifier: " + name)
+    return sem_value(sem_unit)
+}
+fn sem_complete_constructor() {
+    if sem_initializing {
+        for field in sem_fields {
+            if field.owner == sem_owner {
+                let mut found = false
+                for initialized in sem_initialized { if initialized == field.name { found = true } }
+                if not found { sem_error("W3004", "uninitialized constructor field: " + field.name) }
+            }
+        }
+    }
+}
+fn sem_expression(minimum: int, allow_struct: bool) -> SemValue {
+    let statement = sem_statement_context
+    sem_statement_context = false
+    let mut left = sem_prefix(allow_struct, statement)
+    while true {
+        let call_position = sem_pos + sem_token_offset
+        if sem_match("LPAREN") {
+            if left.root == "#collection" { sem_collection_call_positions.append(call_position) }
+            if sem_kind(left.type_id) == "function" and left.root != "#method" and left.root != "#collection" and not (len(left.root) >= 3 and slice(left.root, 0, 3) == "fn:") { sem_indirect_positions.append(call_position) }
+            let mut args: list[int] = []
+            let signature = sem_types[left.type_id]
+            let previous_expected = sem_expected
+            while not sem_is("RPAREN") {
+                sem_expected = -1
+                if signature.kind == "function" and len(args) + 1 < len(signature.args) { sem_expected = signature.args[len(args)] }
+                let argument = sem_expression(0, true)
+                if sem_initializing and argument.root == "this" { sem_complete_constructor() }
+                args.append(argument.type_id)
+                if not sem_match("COMMA") { break }
+            }
+            sem_expect("RPAREN")
+            sem_expected = previous_expected
+            left = sem_value(sem_check_call(left.type_id, args))
+        } elif sem_match("DOT") {
+            if sem_kind(left.type_id) == "class" { sem_class_projection_positions.append(call_position) }
+            let name = sem_expect("IDENT").val
+            left = sem_member(left, name)
+        } elif sem_match("LBRACKET") {
+            let index = sem_expression(0, true).type_id
+            sem_expect("RBRACKET")
+            let type_ = sem_types[left.type_id]
+            if type_.kind == "list" {
+                sem_require(index, sem_int, "W2001")
+                left = SemValue { type_id: type_.args[0], root: left.root, writable: type_.args[0], terminates: false }
+            } elif type_.kind == "dict" {
+                sem_require(index, type_.args[0], "W2001")
+                left = SemValue { type_id: sem_wrap("optional", type_.args[1]), root: left.root, writable: type_.args[1], terminates: false }
+            } elif left.type_id == sem_str {
+                sem_require(index, sem_int, "W2001")
+                left = sem_value(sem_str)
+            } else { sem_error("W2001", "value cannot be indexed") }
+        } elif sem_match("QUESTION") {
+            let type_ = sem_types[left.type_id]
+            let returned = sem_types[sem_return]
+            if type_.kind != "optional" and type_.kind != "result" { sem_error("W2006", "propagation operand") }
+            if returned.kind != type_.kind { sem_error("W2006", "propagation return channel") }
+            if type_.kind == "result" and type_.args[1] != returned.args[1] { sem_error("W2006", "propagation error channel") }
+            left = sem_value(type_.args[0])
+        } elif sem_match("ELSE") {
+            let operand = sem_types[left.type_id]
+            if operand.kind != "optional" and operand.kind != "result" { sem_error("W2006", "handler operand") }
+            let old_variables = sem_variables
+            sem_depth = sem_depth + 1
+            if sem_is("IDENT") {
+                let error_name = sem_take().val
+                if operand.kind != "result" { sem_error("W2006", "optional has no error binding") }
+                sem_declare(error_name, operand.args[1], false)
+            }
+            let handler = sem_block(false)
+            sem_depth = sem_depth - 1
+            sem_variables = old_variables
+            if not handler.terminates { sem_require(handler.type_id, operand.args[0], "W2001") }
+            left = sem_value(operand.args[0])
+        } else {
+            let operator = sem_at().kind
+            let precedence = op_precedence(operator)
+            if precedence <= minimum { break }
+            sem_take()
+            let mut right_minimum = precedence
+            if operator == "ASSIGN" or operator == "QQ" { right_minimum = precedence - 1 }
+            let previous_expected = sem_expected
+            if operator == "ASSIGN" { sem_expected = left.writable }
+            let right = sem_expression(right_minimum, allow_struct)
+            sem_expected = previous_expected
+            if operator == "ASSIGN" {
+                if left.writable < 0 { sem_error("W2002", "invalid assignment target") }
+                sem_mutable(left.root)
+                sem_require(right.type_id, left.writable, "W2001")
+                if sem_initializing and len(left.root) > 5 and slice(left.root, 0, 5) == "this:" { sem_initialized.append(slice(left.root, 5, len(left.root))) }
+                left = sem_value(left.writable)
+            } elif operator == "QQ" {
+                if left.type_id == sem_none { left = right }
+                elif sem_kind(left.type_id) == "optional" {
+                    let inner = sem_types[left.type_id].args[0]
+                    sem_require(right.type_id, inner, "W2001")
+                    left = sem_value(inner)
+                } else { sem_error("W2006", "coalesce requires optional") }
+            } elif operator == "DOT_DOT" or operator == "DOT_DOT_EQ" {
+                sem_require(left.type_id, sem_int, "W2001")
+                sem_require(right.type_id, sem_int, "W2001")
+                left = sem_value(sem_wrap("list", sem_int))
+            } elif operator == "AND" or operator == "OR" {
+                sem_require(left.type_id, sem_bool, "W2001")
+                sem_require(right.type_id, sem_bool, "W2001")
+                left = sem_value(sem_bool)
+            } elif operator == "EQ" or operator == "NEQ" {
+                if not sem_assignable(left.type_id, right.type_id) and not sem_assignable(right.type_id, left.type_id) { sem_error("W2001", "equality types") }
+                left = sem_value(sem_bool)
+            } else {
+                if left.type_id != right.type_id { sem_error("W2001", "binary operand types") }
+                if left.type_id != sem_int and left.type_id != sem_float and (operator != "PLUS" or left.type_id != sem_str) { sem_error("W2001", "invalid binary operation") }
+                if operator == "PERCENT" and left.type_id != sem_int { sem_error("W2001", "modulo requires integers") }
+                if operator == "LT" or operator == "LTE" or operator == "GT" or operator == "GTE" { left = sem_value(sem_bool) }
+                else { left = sem_value(left.type_id) }
+            }
+        }
+    }
+    if left.root == "#method" or left.root == "#collection" or sem_kind(left.type_id) == "builtin" or sem_kind(left.type_id) == "constructor" { sem_error("W2013", "callable syntax requires an explicit lambda adapter") }
+    return left
+}
+fn sem_intersect(left: list[str], right: list[str]) -> list[str] {
+    let mut result: list[str] = []
+    for value in left { for other in right { if value == other { result.append(value) } } }
+    return result
+}
+fn sem_if(statement: bool) -> SemValue {
+    sem_expect("IF")
+    sem_require(sem_expression(0, false).type_id, sem_bool, "W2001")
+    let initial = sem_initialized
+    let first = sem_block(statement)
+    let mut initialized = sem_initialized
+    let mut all_return = first.terminates
+    let mut common = first.type_id
+    while sem_match("ELIF") {
+        sem_initialized = initial
+        sem_require(sem_expression(0, false).type_id, sem_bool, "W2001")
+        let branch = sem_block(statement)
+        if not branch.terminates and not all_return and branch.type_id != common { if not statement { sem_error("W2001", "incompatible if branches") } common = sem_unit }
+        if not branch.terminates {
+            if all_return { initialized = sem_initialized } else { initialized = sem_intersect(initialized, sem_initialized) }
+            if all_return { common = branch.type_id }
+        }
+        all_return = all_return and branch.terminates
+    }
+    sem_initialized = initial
+    if sem_match("ELSE") {
+        let branch = sem_block(statement)
+        if not branch.terminates {
+            if not all_return and branch.type_id != common { if not statement { sem_error("W2001", "incompatible if branches") } common = sem_unit }
+            if all_return { initialized = sem_initialized } else { initialized = sem_intersect(initialized, sem_initialized) }
+            if all_return { common = branch.type_id }
+        }
+        all_return = all_return and branch.terminates
+    } else {
+        initialized = sem_intersect(initialized, initial)
+        all_return = false
+        common = sem_unit
+    }
+    sem_initialized = initialized
+    if statement { common = sem_unit }
+    return SemValue { type_id: common, root: "", writable: -1, terminates: all_return }
+}
+fn sem_pattern(subject: int) -> str {
+    if sem_match("ELSE") { return "*" }
+    if sem_match("NONE") { return "None" }
+    if sem_is("INT") or sem_is("FLOAT") or sem_is("STR") or sem_is("TRUE") or sem_is("FALSE") {
+        let token = sem_take()
+        let mut type_id = sem_bool
+        if token.kind == "INT" { type_id = sem_int }
+        elif token.kind == "FLOAT" { type_id = sem_float }
+        elif token.kind == "STR" { type_id = sem_str }
+        sem_require(type_id, subject, "W2001")
+        return "literal:" + token.val
+    }
+    let name = sem_expect("IDENT").val
+    if name == "_" { return "*" }
+    if sem_match("DOT") {
+        let variant = sem_expect("IDENT").val
+        if name != sem_types[subject].name { sem_error("W2001", "pattern enum identity") }
+        let mut valid = false
+        for i in 0..len(sem_variants) { if sem_variants[i] == variant and sem_variant_types[i] == subject { valid = true } }
+        if not valid { sem_error("W1001", "unknown enum pattern") }
+        return variant
+    }
+    if sem_match("LPAREN") {
+        let kind = sem_kind(subject)
+        let mut payload = sem_unit
+        if name == "Some" and kind == "optional" { payload = sem_types[subject].args[0] }
+        elif name == "Ok" and kind == "result" { payload = sem_types[subject].args[0] }
+        elif name == "Err" and kind == "result" { payload = sem_types[subject].args[1] }
+        else { sem_error("W2001", "payload pattern") }
+        let binding = sem_expect("IDENT").val
+        if binding != "_" { sem_declare(binding, payload, false) }
+        sem_expect("RPAREN")
+        return name
+    }
+    if name == "None" { return "None" }
+    sem_declare(name, subject, false)
+    return "*"
+}
+fn sem_match_expression() -> SemValue {
+    sem_expect("MATCH")
+    let subject = sem_expression(0, false).type_id
+    sem_expect("LBRACE")
+    let mut covered: list[str] = []
+    let mut all_return = true
+    let mut common = -1
+    let mut wildcard = false
+    let initial = sem_initialized
+    let mut initialized = initial
+    let mut live_branches = 0
+    while not sem_is("RBRACE") {
+        let saved_variables = sem_variables
+        sem_initialized = initial
+        sem_depth = sem_depth + 1
+        let pattern = sem_pattern(subject)
+        let mut guarded = false
+        if sem_match("IF") { guarded = true sem_require(sem_expression(0, false).type_id, sem_bool, "W2001") }
+        sem_expect("FAT_ARROW")
+        let mut branch = SemFlow { type_id: sem_unit, terminates: false }
+        if sem_is("LBRACE") { branch = sem_block(false) }
+        else { let value = sem_expression(0, true) branch = SemFlow { type_id: value.type_id, terminates: value.terminates } }
+        if not guarded {
+            covered.append(pattern)
+            if pattern == "*" { wildcard = true }
+        }
+        if not branch.terminates {
+            if live_branches == 0 { initialized = sem_initialized } else { initialized = sem_intersect(initialized, sem_initialized) }
+            live_branches = live_branches + 1
+            if common >= 0 { sem_require(branch.type_id, common, "W2001") } else { common = branch.type_id }
+        }
+        all_return = all_return and branch.terminates
+        sem_variables = saved_variables
+        sem_depth = sem_depth - 1
+        sem_match("COMMA")
+    }
+    sem_expect("RBRACE")
+    if not wildcard and sem_kind(subject) == "enum" {
+        for i in 0..len(sem_variants) {
+            if sem_variant_types[i] == subject {
+                let mut found = false
+                for variant in covered { if variant == sem_variants[i] { found = true } }
+                if not found { sem_error("W2003", "non-exhaustive match") }
+            }
+        }
+    }
+    if not wildcard {
+        let kind = sem_kind(subject)
+        let mut required: list[str] = []
+        if kind == "bool" { required = ["literal:true", "literal:false"] }
+        elif kind == "optional" { required = ["Some", "None"] }
+        elif kind == "result" { required = ["Ok", "Err"] }
+        elif kind != "enum" { sem_error("W2003", "match requires exhaustive patterns") }
+        for name in required { if not module_contains(covered, name) { sem_error("W2003", "non-exhaustive match") } }
+    }
+    sem_initialized = initialized
+    if common < 0 { common = sem_unit }
+    return SemValue { type_id: common, root: "", writable: -1, terminates: all_return }
+}
+fn sem_let() {
+    sem_expect("LET")
+    let mutable = sem_match("MUT")
+    let name = sem_expect("IDENT").val
+    let mut annotation = -1
+    if sem_match("COLON") { annotation = sem_type() }
+    sem_expect("ASSIGN")
+    let previous = sem_expected
+    sem_expected = annotation
+    let value = sem_expression(0, true).type_id
+    sem_expected = previous
+    if sem_kind(value) == "builtin" { sem_error("W2013", "builtin values require an explicit lambda adapter") }
+    if annotation < 0 {
+        if value == sem_none or sem_kind(value) == "empty" { sem_error("W2001", "initializer needs type context") }
+        annotation = value
+    } else { sem_require(value, annotation, "W2001") }
+    sem_declare(name, annotation, mutable)
+}
+fn sem_block(statement: bool) -> SemFlow {
+    sem_expect("LBRACE")
+    let saved_variables = sem_variables
+    sem_depth = sem_depth + 1
+    let mut tail = sem_unit
+    let mut terminates = false
+    while not sem_is("RBRACE") and not sem_is("EOF") {
+        if sem_is("LET") { sem_let() tail = sem_unit }
+        elif sem_match("RETURN") {
+            let previous = sem_expected
+            sem_expected = sem_return
+            let mut value = sem_unit
+            if not sem_is("RBRACE") and sem_at().line == sem_tokens[sem_pos - 1].line { value = sem_expression(0, true).type_id }
+            sem_expected = previous
+            sem_require(value, sem_return, "W2004")
+            sem_complete_constructor()
+            terminates = true
+            tail = sem_unit
+        } elif sem_match("WHILE") {
+            sem_require(sem_expression(0, false).type_id, sem_bool, "W2001")
+            sem_loop = sem_loop + 1
+            let initialized = sem_initialized
+            sem_block(true)
+            sem_initialized = initialized
+            sem_loop = sem_loop - 1
+            tail = sem_unit
+        } elif sem_match("FOR") {
+            let mut bindings: list[str] = [sem_expect("IDENT").val]
+            while sem_match("COMMA") { bindings.append(sem_expect("IDENT").val) }
+            sem_expect("IN")
+            let iterable = sem_expression(0, false).type_id
+            if sem_kind(iterable) != "list" { sem_error("W2001", "for requires list or range") }
+            let element = sem_types[iterable].args[0]
+            let variables = sem_variables
+            sem_depth = sem_depth + 1
+            if len(bindings) == 1 { sem_declare(bindings[0], element, false) }
+            else {
+                if sem_kind(element) != "tuple" or len(sem_types[element].args) != len(bindings) { sem_error("W2001", "for destructuring") }
+                for i in 0..len(bindings) { sem_declare(bindings[i], sem_types[element].args[i], false) }
+            }
+            sem_loop = sem_loop + 1
+            let initialized = sem_initialized
+            sem_block(true)
+            sem_initialized = initialized
+            sem_loop = sem_loop - 1
+            sem_depth = sem_depth - 1
+            sem_variables = variables
+            tail = sem_unit
+        } elif sem_match("BREAK") or sem_match("CONTINUE") {
+            if sem_loop == 0 { sem_error("W1004", "loop transfer outside loop") }
+            tail = sem_unit
+        } else {
+            sem_statement_context = statement or not sem_tail_expression()
+            let expression = sem_expression(0, true)
+            tail = expression.type_id
+            terminates = terminates or expression.terminates
+        }
+    }
+    sem_expect("RBRACE")
+    sem_depth = sem_depth - 1
+    sem_variables = saved_variables
+    return SemFlow { type_id: tail, terminates: terminates }
+}
+fn sem_check_function(function: SemFunction) {
+    if function.body < 0 { return }
+    let previous_position = sem_pos
+    let variables = sem_variables
+    let owner = sem_owner
+    let returned = sem_return
+    let initial = sem_initializing
+    let initialized = sem_initialized
+    let depth = sem_depth
+    sem_owner = function.owner
+    if len(sem_owner) > 0 { sem_owner = slice(sem_owner, 0, len(sem_owner) - 1) }
+    sem_pos = function.body
+    sem_depth = 1
+    let signature = sem_types[function.type_id].args
+    sem_return = signature[len(signature) - 1]
+    sem_initializing = sem_owner != "" and function.name == sem_owner + ".init"
+    let empty: list[str] = []
+    sem_initialized = empty
+    for i in 0..len(function.params) { sem_declare(function.params[i], signature[i], false) }
+    if sem_owner != "" { sem_declare("self", sem_named(sem_owner), false) }
+    if sem_initializing {
+        if sem_return != sem_unit { sem_error("W3004", "constructor must return unit") }
+        let mut parent = ""
+        for class_ in sem_classes { if class_.name == sem_owner { parent = class_.parent } }
+        if parent != "" and sem_method(parent, "init") >= 0 {
+            if sem_tokens[sem_pos + 1].kind != "SUPER" or sem_tokens[sem_pos + 2].kind != "DOT" or sem_tokens[sem_pos + 3].val != "init" { sem_error("W3004", "super.init must be first") }
+        }
+    }
+    let flow = sem_block(sem_return == sem_unit)
+    if sem_return != sem_unit and not flow.terminates { sem_require(flow.type_id, sem_return, "W2004") }
+    sem_complete_constructor()
+    sem_pos = previous_position
+    sem_variables = variables
+    sem_owner = owner
+    sem_return = returned
+    sem_initializing = initial
+    sem_initialized = initialized
+    sem_depth = depth
+}
+fn sem_reset(tokens: list[Token]) {
+    sem_tokens = tokens
+    sem_pos = 0
+    sem_token_offset = 0
+    sem_depth = 0
+    sem_owner = ""
+    sem_loop = 0
+    let empty_types: list[SemType] = []
+    let empty_variables: list[SemVar] = []
+    let empty_functions: list[SemFunction] = []
+    let empty_fields: list[SemField] = []
+    let empty_classes: list[SemClass] = []
+    let empty_names: list[str] = []
+    let empty_ids: list[int] = []
+    sem_types = empty_types
+    sem_variables = empty_variables
+    sem_functions = empty_functions
+    sem_fields = empty_fields
+    sem_classes = empty_classes
+    sem_variants = empty_names
+    sem_variant_types = empty_ids
+    sem_indirect_positions = empty_ids
+    sem_class_projection_positions = empty_ids
+    sem_collection_call_positions = empty_ids
+    let empty_lambdas: list[SemLambda] = []
+    sem_lambdas = empty_lambdas
+    sem_capture_names = empty_names
+    sem_capture_depth = -1
+    sem_initializing = false
+    sem_initialized = empty_names
+    sem_int = sem_simple("int")
+    sem_float = sem_simple("float")
+    sem_bool = sem_simple("bool")
+    sem_str = sem_simple("str")
+    sem_unit = sem_simple("unit")
+    sem_none = sem_simple("none")
+    sem_simple("empty")
+    sem_return = sem_unit
+    let empty: list[int] = []
+    sem_intern("struct", "IoError", empty)
+    sem_intern("struct", "NetError", empty)
+    sem_intern("opaque", "opaque", empty)
+    sem_fields.append(SemField { owner: "IoError", name: "message", type_id: sem_str, visible: true })
+    sem_fields.append(SemField { owner: "NetError", name: "message", type_id: sem_str, visible: true })
+    for i in 0..len(tokens) - 1 {
+        let kind = tokens[i].kind
+        if kind == "STRUCT" or kind == "CLASS" or kind == "INTERFACE" or kind == "ENUM" {
+            let name = tokens[i + 1].val
+            let mut tag = "struct"
+            if kind == "CLASS" { tag = "class" }
+            if kind == "INTERFACE" { tag = "interface" }
+            if kind == "ENUM" { tag = "enum" }
+            for type_ in sem_types { if type_.name == name { report_error("W1002", tokens[i + 1].line, tokens[i + 1].col, "duplicate type") } }
+            sem_intern(tag, name, empty)
+        }
+    }
+}
+fn sem_validate(tokens: list[Token]) {
+    let mut surrounded: list[Token] = [Token { kind: "LBRACE", val: "{", line: 1, col: 1 }]
+    for token in tokens {
+        if token.kind != "EOF" { surrounded.append(token) }
+    }
+    surrounded.append(Token { kind: "RBRACE", val: "}", line: 1, col: 1 })
+    surrounded.append(Token { kind: "EOF", val: "", line: 1, col: 1 })
+    sem_reset(surrounded)
+    sem_pos = 1
+    while not sem_is("EOF") {
+        sem_match("PUB")
+        if sem_match("EXTERN") {
+            if sem_expect("STR").val != "C" { sem_error("W2013", "only C ABI is supported") }
+            sem_collect_function("", true)
+            let signature = sem_types[sem_functions[len(sem_functions) - 1].type_id].args
+            for i in 0..len(signature) {
+                let kind = sem_kind(signature[i])
+                if kind != "int" and kind != "float" and kind != "bool" and kind != "opaque" and not (i == len(signature) - 1 and kind == "unit") { sem_error("W2001", "FFI accepts only scalars and opaque handles") }
+            }
+        }
+        elif sem_is("FN") and sem_tokens[sem_pos + 1].kind == "IDENT" { sem_collect_function("", true) }
+        elif sem_is("STRUCT") { sem_collect_record("struct") }
+        elif sem_is("CLASS") { sem_collect_record("class") }
+        elif sem_is("INTERFACE") { sem_collect_record("interface") }
+        elif sem_is("ENUM") { sem_collect_record("enum") }
+        else { sem_take() }
+    }
+    sem_validate_inheritance()
+    sem_pos = 1
+    while not sem_is("RBRACE") and not sem_is("EOF") {
+        sem_match("PUB")
+        let mut declaration = false
+        for function in sem_functions {
+            if function.body >= 0 and sem_pos < function.body and sem_is("FN") and sem_tokens[sem_pos + 1].val == function.name {
+                sem_check_function(function)
+                sem_pos = function.end
+                declaration = true
+                break
+            }
+        }
+        if not declaration {
+            if sem_match("EXTERN") {
+                sem_expect("STR")
+                sem_expect("FN")
+                let name = sem_expect("IDENT").val
+                let index = sem_function(name)
+                sem_pos = sem_functions[index].end
+            }
+            elif sem_is("STRUCT") or sem_is("CLASS") or sem_is("INTERFACE") or sem_is("ENUM") {
+                sem_take()
+                while not sem_is("LBRACE") and not sem_is("EOF") { sem_take() }
+                sem_skip_block()
+            } elif sem_is("LET") { sem_let() }
+            elif sem_is("FOR") or sem_is("WHILE") {
+                let beginning = sem_pos
+                while not sem_is("LBRACE") and not sem_is("EOF") { sem_take() }
+                let end = sem_skip_block()
+                let saved_tokens = sem_tokens
+                let mut block: list[Token] = [Token { kind: "LBRACE", val: "{", line: sem_tokens[beginning].line, col: 1 }]
+                for i in beginning..end { block.append(sem_tokens[i]) }
+                block.append(Token { kind: "RBRACE", val: "}", line: 1, col: 1 })
+                block.append(Token { kind: "EOF", val: "", line: 1, col: 1 })
+                let previous_offset = sem_token_offset
+                sem_token_offset = sem_token_offset + beginning - 1
+                sem_tokens = block
+                sem_pos = 0
+                sem_block(true)
+                sem_tokens = saved_tokens
+                sem_token_offset = previous_offset
+                sem_pos = end
+            }
+            elif sem_is("IMPORT") {
+                # Checked-module identity and dependency linking remain an explicit capability boundary.
+                sem_take()
+                sem_expect("STR")
+            } else { sem_statement_context = true sem_expression(0, true) }
+        }
+    }
+    for function in sem_functions {
+        if function.owner != "" { sem_check_function(function) }
+    }
+}
+
+fn sem_lambda() -> SemValue {
+    let position = sem_pos + sem_token_offset
+    let token = sem_expect("PIPE")
+    let expected = sem_expected
+    let previous_variables = sem_variables
+    let previous_depth = sem_depth
+    let previous_return = sem_return
+    let previous_loop = sem_loop
+    let previous_captures = sem_capture_names
+    let previous_capture_depth = sem_capture_depth
+    sem_depth = sem_depth + 1
+    sem_capture_depth = sem_depth
+    let empty_names: list[str] = []
+    sem_capture_names = empty_names
+    let mut params: list[str] = []
+    let mut types: list[int] = []
+    while not sem_is("PIPE") {
+        let name = sem_expect("IDENT").val
+        let mut type_id = -1
+        if sem_match("COLON") { type_id = sem_type() }
+        elif expected >= 0 and sem_kind(expected) == "function" and len(params) + 1 < len(sem_types[expected].args) { type_id = sem_types[expected].args[len(params)] }
+        else { sem_error("W2001", "lambda parameter needs type context") }
+        params.append(name)
+        types.append(type_id)
+        sem_declare(name, type_id, false)
+        if not sem_match("COMMA") { break }
+    }
+    sem_expect("PIPE")
+    let mut returned = -1
+    if sem_match("ARROW") { returned = sem_type() }
+    elif expected >= 0 and sem_kind(expected) == "function" { returned = sem_types[expected].args[len(sem_types[expected].args) - 1] }
+    sem_return = returned
+    sem_loop = 0
+    if sem_match("FAT_ARROW") {
+        sem_expected = returned
+        let actual = sem_expression(0, true).type_id
+        if returned < 0 { returned = actual } else { sem_require(actual, returned, "W2004") }
+    } else {
+        if returned < 0 { sem_error("W2001", "block lambda needs return type context") }
+        let flow = sem_block(sem_return == sem_unit)
+        if returned != sem_unit and not flow.terminates { sem_require(flow.type_id, returned, "W2004") }
+    }
+    types.append(returned)
+    let signature = sem_intern("function", "", types)
+    if expected >= 0 { sem_require(signature, expected, "W2001") }
+    let captures = sem_capture_names
+    sem_lambdas.append(SemLambda { position: position, line: token.line, col: token.col, params: params, captures: captures, type_id: signature })
+    sem_variables = previous_variables
+    sem_depth = previous_depth
+    sem_return = previous_return
+    sem_loop = previous_loop
+    sem_expected = expected
+    sem_capture_names = previous_captures
+    sem_capture_depth = previous_capture_depth
+    for name in captures {
+        let variable = sem_lookup(name)
+        if variable >= 0 and sem_capture_depth >= 0 and sem_variables[variable].depth < sem_capture_depth and not module_contains(sem_capture_names, name) { sem_capture_names.append(name) }
+    }
+    return sem_value(signature)
+}
+
+fn sem_tail_expression() -> bool {
+    let mut position = sem_pos
+    let mut depth = 0
+    while position < len(sem_tokens) {
+        let kind = sem_tokens[position].kind
+        if kind == "LBRACE" { depth = depth + 1 }
+        elif kind == "RBRACE" {
+            if depth == 0 { return true }
+            depth = depth - 1
+            if depth == 0 {
+                let next = sem_tokens[position + 1].kind
+                if next != "ELSE" and next != "ELIF" { return next == "RBRACE" }
+            }
+        }
+        if depth == 0 and (kind == "LET" or kind == "RETURN") and position > sem_pos { return false }
+        position = position + 1
+    }
+    return false
+}
+fn sem_compatible_override(actual: int, expected: int) -> bool {
+    let a = sem_types[actual].args
+    let b = sem_types[expected].args
+    if len(a) != len(b) { return false }
+    for i in 0..len(a) - 1 { if a[i] != b[i] { return false } }
+    return sem_assignable(a[len(a) - 1], b[len(b) - 1])
+}
+fn sem_validate_inheritance() {
+    for class_ in sem_classes {
+        let mut current = class_.parent
+        let mut visited: list[str] = [class_.name]
+        while current != "" {
+            if module_contains(visited, current) { sem_error("W3003", "inheritance cycle") }
+            visited.append(current)
+            if sem_kind(sem_named(current)) != "class" { sem_error("W3003", "base must be a class") }
+            let mut next = ""
+            for parent in sem_classes { if parent.name == current { next = parent.parent } }
+            current = next
+        }
+        for field in sem_fields {
+            if field.owner == class_.name and sem_field(class_.parent, field.name) >= 0 { sem_error("W3003", "inherited field cannot be redeclared") }
+        }
+        for method in sem_functions {
+            if method.owner == class_.name + "." and method.name != class_.name + ".init" {
+                let name = slice(method.name, len(method.owner), len(method.name))
+                let inherited = sem_method(class_.parent, name)
+                if inherited >= 0 {
+                    let parent = sem_functions[inherited]
+                    if not parent.visible or not method.visible { sem_error("W3002", "invalid override visibility") }
+                    if not sem_compatible_override(method.type_id, parent.type_id) { sem_error("W3003", "incompatible override") }
+                }
+            }
+        }
+        for interface_ in class_.interfaces {
+            if sem_kind(sem_named(interface_)) != "interface" { sem_error("W3003", "implements requires interface") }
+            for requirement in sem_functions {
+                if requirement.owner == interface_ + "." {
+                    let name = slice(requirement.name, len(requirement.owner), len(requirement.name))
+                    let implementation = sem_method(class_.name, name)
+                    if implementation < 0 { sem_error("W3003", "missing interface method") }
+                    let method = sem_functions[implementation]
+                    if not method.visible or not sem_compatible_override(method.type_id, requirement.type_id) { sem_error("W3003", "incompatible interface implementation") }
+                }
+            }
+        }
+    }
+}

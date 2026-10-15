@@ -1,7 +1,7 @@
 from itertools import count
 from typing import Any, Dict, List, Optional, Set, Tuple, Union
 from checker.WType import (
-    WType, PrimitiveType, IntType, FloatType, BoolType, StrType, UnitType, NoneType,
+    OpaqueType, WType, PrimitiveType, IntType, FloatType, BoolType, StrType, UnitType, NoneType,
     OptionalType, WeakType, ListType, DictType, TupleType, StructType, EnumType,
     InterfaceType, ClassFieldInfo, ClassMethodInfo, ClassType,
     ResultType, FunctionType, ModuleType, AnyType
@@ -332,8 +332,8 @@ class TypeInterner:
     def mk_function(self, params: Tuple[int, ...], ret: int, is_mutating: bool = False) -> int:
         key = ("function", params, ret, is_mutating)
         caps = TypeCapabilities(
-            needs_retain=False,
-            needs_release=False,
+            needs_retain=True,
+            needs_release=True,
             is_value=True,
             is_reference=False,
             is_comparable=False,
@@ -670,6 +670,10 @@ class TypeInterner:
                 return TYPE_UNIT
             elif wtype.name == "none":
                 return TYPE_NONE
+            if wtype.name == "opaque":
+                type_id = self._intern(("primitive", "opaque"), TypeEntry("primitive", "opaque"), TypeCapabilities())
+                self._id_to_wtype[type_id] = OpaqueType
+                return type_id
             return TYPE_ERROR
         elif isinstance(wtype, WeakType):
             return self.mk_weak(self.from_wtype(wtype.target))
@@ -768,7 +772,7 @@ class TypeInterner:
             elif pname == "unit":
                 res = UnitType
             elif pname == "none":
-                res = NoneType
+                res = OpaqueType if entry.data == "opaque" else NoneType
         elif entry.tag == "weak":
             res = WeakType(self.to_wtype(entry.data))
         elif entry.tag == "optional":

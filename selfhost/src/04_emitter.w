@@ -171,3 +171,40 @@ fn snapshot_value(value: str) -> str {
     }
     return bind_call("w_clone(" + value + ")").val
 }
+
+fn is_bound_variable(value: str) -> bool {
+    for name in g_borrowed_vars { if name == value { return true } }
+    for name in g_globals { if name == value { return true } }
+    for scope in g_scope_stack { for name in scope.vars { if name == value { return true } } }
+    return false
+}
+fn emit_indirect_call(callee: str, args: list[str]) -> ExprRes {
+    let mut joined = ""
+    for i in 0..len(args) {
+        if i > 0 { joined = joined + ", " }
+        joined = joined + args[i]
+    }
+    if len(args) == 0 { return bind_call("w_call(" + callee + ", 0, NULL)") }
+    let array = new_aux("_call_args")
+    emit_line("WVal " + array + "[" + str(len(args)) + "] = { " + joined + " };")
+    return bind_call("w_call(" + callee + ", " + str(len(args)) + ", " + array + ")")
+}
+
+fn emit_function_value(name: str) -> ExprRes {
+    let index = sem_function(name)
+    let arity = len(sem_functions[index].params)
+    let adapter = "w_adapter_" + name
+    let prototype = "static WVal " + adapter + "(WVal, int32_t, const WVal*);"
+    let mut exists = false
+    for declaration in g_protos { if declaration == prototype { exists = true } }
+    if not exists {
+        g_protos.append(prototype)
+        let mut arguments = ""
+        for i in 0..arity {
+            if i > 0 { arguments = arguments + ", " }
+            arguments = arguments + "argv[" + str(i) + "]"
+        }
+        g_fn_defs.append("static WVal " + adapter + "(WVal environment, int32_t argc, const WVal* argv) { (void)environment; if (argc != " + str(arity) + ") (fprintf(stderr, \"[W4003] RuntimeError: Call arity mismatch\\n\"), exit(1)); return " + c_fn_name(name) + "(" + arguments + "); }")
+    }
+    return bind_call("w_function_new(" + adapter + ", w_unit())")
+}

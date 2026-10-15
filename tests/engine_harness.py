@@ -13,6 +13,18 @@ from error.Error import DIAGNOSTIC_CODES
 ROOT = Path(__file__).resolve().parents[1]
 ENGINES = ('interpreter', 'ast', 'hir', 'w1')
 PROFILES = json.loads((ROOT / 'tests/engine_profiles.json').read_text())
+EXPANSION_DIRS = {'regressions', 'functions', 'ffi', 'stdlib', 'generic_oop'}
+
+
+def corpus_paths():
+    """Phase D public corpus. Expansion fixtures live under dedicated directories."""
+    positives = sorted((ROOT / 'tests/runtime').glob('*.w')) + sorted((ROOT / 'examples').glob('*.w'))
+    positives += sorted((ROOT / 'tests/modules').glob('*/main.w'))
+    support_files = PROFILES.get('support_files', {})
+    positives = [path for path in positives if str(path.relative_to(ROOT)) not in support_files]
+    negatives = sorted((ROOT / 'tests').glob('*/invalid/*.w')) + sorted((ROOT / 'tests/errors').glob('invalid_*.w'))
+    negatives = [path for path in negatives if not EXPANSION_DIRS.intersection(path.parts)]
+    return positives, negatives
 
 
 def feature_for(label):

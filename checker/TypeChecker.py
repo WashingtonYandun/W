@@ -1,8 +1,9 @@
+from checker.OopGenerics import GenericOopTemplate, specialize as specialize_oop
 import copy
 from enum import Enum
 from typing import Any, Dict, List, Optional, Set, Tuple, NamedTuple, Sequence
 from node.NodeType import (
-    Node, Program, Stmt, Expr, TypeNode, Pattern, Block,
+    ExternFnDecl, LambdaExpr, FunctionType as AstFunctionType, Node, Program, Stmt, Expr, TypeNode, Pattern, Block,
     NamedType, OptionalType as AstOptionalType, ListType as AstListType,
     DictType as AstDictType, TupleType as AstTupleType, ResultType as AstResultType,
     GenericType, TypeParam,
@@ -177,10 +178,13 @@ class TypeChecker:
         self.current_fn_ret_type: Optional[WType] = None
         self.expected_type: Optional[WType] = None
         self.current_class: Optional[ClassType] = None
+        self.scope_spans = []
+        self.closure_counter = 0
         self.loop_depth: int = 0
         from compiler.CompilationSession import CompilationSession
         self.session = session or CompilationSession()
         self.interner: TypeInterner = self.session.interner
+        self.monomorphized_oop_decls = []
         self.generic_struct_templates: Dict[str, GenericStructTemplate] = {}
         self.generic_fn_templates: Dict[str, GenericFnTemplate] = {}
         self.generic_enum_templates: Dict[str, GenericEnumTemplate] = {}
@@ -255,12 +259,13 @@ class TypeChecker:
         # Filter out uninstantiated generic templates and insert monomorphized declarations
         filtered_body: List[Stmt] = []
         for stmt in program.body:
-            if isinstance(stmt, (StructDecl, FnDecl, EnumDecl)) and stmt.type_params:
+            if isinstance(stmt, (StructDecl, FnDecl, EnumDecl, ClassDecl, InterfaceDecl)) and stmt.type_params:
                 continue
             filtered_body.append(stmt)
 
         sorted_structs, sorted_enums, sorted_fns = self._sort_monomorphized_decls()
         final_body: List[Stmt] = []
+        final_body.extend(self.monomorphized_oop_decls)
         final_body.extend(sorted_structs)
         final_body.extend(sorted_enums)
         final_body.extend(sorted_fns)
@@ -322,7 +327,7 @@ class TypeChecker:
     def _pass1_collect_declarations(self, program: Program) -> None:
         # Reject user declarations starting with reserved compiler prefixes
         for stmt in program.body:
-            if hasattr(stmt, "name") and isinstance(stmt.name, str):
+            if hasattr(stmt, "name") and isinstance(stmt.name, str) and not hasattr(stmt, "specialization_shell"):
                 if stmt.name.startswith("_W_") or stmt.name.startswith("__w_"):
                     raise TypeError(
                         message=f"Identifier '{stmt.name}' is reserved for internal compiler use",
@@ -360,10 +365,20 @@ class TypeChecker:
                 self.global_scope.define_type(stmt.name, enum_type, line=stmt.line, col=stmt.col, file=self.file)
 
             elif isinstance(stmt, InterfaceDecl):
+                if stmt.type_params:
+                    self.global_scope.define_type(stmt.name, GenericOopTemplate(stmt, self), file=self.file)
+                    continue
+                if hasattr(stmt, 'specialization_shell'):
+                    continue
                 intf_type = InterfaceType(name=stmt.name, methods={})
                 self.global_scope.define_type(stmt.name, intf_type, line=stmt.line, col=stmt.col, file=self.file)
 
             elif isinstance(stmt, ClassDecl):
+                if stmt.type_params:
+                    self.global_scope.define_type(stmt.name, GenericOopTemplate(stmt, self), file=self.file)
+                    continue
+                if hasattr(stmt, 'specialization_shell'):
+                    continue
                 cls_type = ClassType(name=stmt.name)
                 self.global_scope.define_type(stmt.name, cls_type, line=stmt.line, col=stmt.col, file=self.file)
 
@@ -425,6 +440,8 @@ class TypeChecker:
                 self.interner.from_wtype(struct_type)
 
             elif isinstance(stmt, InterfaceDecl):
+                if stmt.type_params:
+                    continue
                 intf_type = self.global_scope.lookup_type(stmt.name)
                 assert isinstance(intf_type, InterfaceType)
                 for m in stmt.methods:
@@ -441,6 +458,12 @@ class TypeChecker:
                     intf_type.methods[m.name] = FunctionType(params=p_types, ret=r_type)
 
             elif isinstance(stmt, ClassDecl):
+                if stmt.type_params:
+                    continue
+                if isinstance(stmt.superclass, TypeNode):
+                    stmt.superclass = self._resolve_type_node(stmt.superclass).name
+                stmt.interfaces = [self._resolve_type_node(interface).name if isinstance(interface, TypeNode) else interface
+                                   for interface in stmt.interfaces]
                 class_decls.append(stmt)
                 cls_type = self.global_scope.lookup_type(stmt.name)
                 assert isinstance(cls_type, ClassType)
@@ -552,6 +575,9 @@ class TypeChecker:
 
             # Apply subclass own fields and methods (checking override compatibility)
             for fname, finfo in cls_type.fields.items():
+                if fname in merged_fields and finfo.owner_class == cls_type.name:
+                    raise TypeError(f"Inherited field '{fname}' cannot be redeclared", file=self.file,
+                                    line=stmt.line, col=stmt.col, code="W3003")
                 merged_fields[fname] = finfo
             for mname, minfo in cls_type.methods.items():
                 if mname in merged_methods:
@@ -564,6 +590,9 @@ class TypeChecker:
                             file=self.file,
                             code="W3002"
                         )
+                    if base_m.is_public and not minfo.is_public:
+                        raise TypeError(f"Public method '{mname}' cannot become private", file=self.file,
+                                        line=stmt.line, col=stmt.col, code="W3002")
                     if minfo.fn_type.params != base_m.fn_type.params or not is_assignable(minfo.fn_type.ret, base_m.fn_type.ret):
                         raise TypeError(
                             message=f"Method '{mname}' in class '{stmt.name}' has incompatible override signature with superclass '{base_m.owner_class}'",
@@ -620,6 +649,8 @@ class TypeChecker:
             return  # Handled in Pass 1
 
         elif isinstance(stmt, ClassDecl):
+            if stmt.type_params:
+                return
             self._check_class_decl(stmt)
 
         elif isinstance(stmt, FnDecl):
@@ -650,7 +681,7 @@ class TypeChecker:
             self._check_for_stmt(stmt)
 
         elif isinstance(stmt, ReturnStmt):
-            val_t = self._check_expr(stmt.value) if stmt.value else UnitType
+            val_t = self._check_payload(stmt.value, self.current_fn_ret_type) if stmt.value else UnitType
             if self.current_fn_ret_type is None:
                 raise TypeError(
                     message="Return statement outside of function",
@@ -704,96 +735,8 @@ class TypeChecker:
                 code="W3004"
             )
 
-        # 2. Super constructor invocation validation
-        sup_has_init = False
-        curr_s = cls_type.superclass
-        while curr_s is not None:
-            if curr_s.init_type is not None:
-                sup_has_init = True
-                break
-            curr_s = curr_s.superclass
-
-        def _get_block_exprs(block: Block) -> List[Expr]:
-            res: List[Expr] = []
-            for s in block.statements:
-                if isinstance(s, ExprStmt):
-                    res.append(s.expr)
-            if block.tail_expr is not None:
-                res.append(block.tail_expr)
-            return res
-
-        block_exprs = _get_block_exprs(m.body)
-
-        def _is_super_init_call(expr: Expr) -> bool:
-            if isinstance(expr, CallExpr):
-                callee = expr.callee
-                if isinstance(callee, MemberExpr) and isinstance(callee.object, SuperExpr) and callee.property == "init":
-                    return True
-            return False
-
-        def _contains_super_init(expr: Expr) -> bool:
-            if _is_super_init_call(expr):
-                return True
-            if isinstance(expr, CallExpr):
-                for a in getattr(expr, "arguments", getattr(expr, "args", [])):
-                    if _contains_super_init(a):
-                        return True
-            return False
-
-        super_init_calls: List[Tuple[int, Expr]] = []
-        for idx, expr in enumerate(block_exprs):
-            if _is_super_init_call(expr) or _contains_super_init(expr):
-                super_init_calls.append((idx, expr))
-
-        if sup_has_init:
-            if not super_init_calls:
-                raise TypeError(
-                    message=f"Constructor of derived class '{stmt.name}' must call 'super.init'",
-                    line=m.line,
-                    col=m.col,
-                    file=self.file,
-                    code="W3004"
-                )
-            first_idx, first_expr = super_init_calls[0]
-            if first_idx != 0:
-                raise TypeError(
-                    message=f"Call to 'super.init' must be the first statement in constructor of class '{stmt.name}'",
-                    line=first_expr.line,
-                    col=first_expr.col,
-                    file=self.file,
-                    code="W3004"
-                )
-            if len(super_init_calls) > 1:
-                second_idx, second_expr = super_init_calls[1]
-                raise TypeError(
-                    message=f"Multiple calls to 'super.init' in constructor of class '{stmt.name}'",
-                    line=second_expr.line,
-                    col=second_expr.col,
-                    file=self.file,
-                    code="W3004"
-                )
-
-        # 3. Strict field initialization validation
-        own_field_names = {f.name for f in stmt.fields}
-        if own_field_names:
-            assigned_fields: Set[str] = set()
-            for expr in block_exprs:
-                if isinstance(expr, AssignmentExpr):
-                    target = expr.target
-                    if isinstance(target, MemberExpr):
-                        if isinstance(target.object, ThisExpr) or (isinstance(target.object, IdentExpr) and target.object.name == "self"):
-                            if target.property in own_field_names:
-                                assigned_fields.add(target.property)
-
-            for f in stmt.fields:
-                if f.name not in assigned_fields:
-                    raise TypeError(
-                        message=f"Field '{f.name}' of class '{stmt.name}' is not initialized in constructor",
-                        line=m.line,
-                        col=m.col,
-                        file=self.file,
-                        code="W3004"
-                    )
+        from checker.ConstructorFlow import check_constructor
+        check_constructor(stmt, cls_type, m, self.file)
 
     def _check_class_decl(self, stmt: ClassDecl) -> None:
         cls_type = self.global_scope.lookup_type(stmt.name)
@@ -846,6 +789,13 @@ class TypeChecker:
             self.current_class = old_class
 
     def _check_fn_decl(self, stmt: FnDecl) -> None:
+        if isinstance(stmt, ExternFnDecl):
+            allowed = {"int", "int32", "int64", "float", "double", "bool", "opaque"}
+            if (not all(isinstance(p.type_ann, NamedType) and p.type_ann.name in allowed for p in stmt.params)
+                    or not isinstance(stmt.return_type, NamedType) or stmt.return_type.name not in allowed | {"unit"}):
+                raise TypeError("C FFI accepts only scalar and opaque ABI types", file=self.file,
+                                line=stmt.line, col=stmt.col, code="W2001")
+            return
         sym = self.global_scope.lookup_symbol(stmt.name)
         assert sym is not None and isinstance(sym.type, FunctionType)
         fn_type: FunctionType = sym.type
@@ -985,6 +935,8 @@ class TypeChecker:
                 )
         old_scope = self.current_scope
         self.current_scope = block_scope
+        self.scope_spans.append(((block.line, block.col),
+                                 (getattr(block, 'end_line', block.line), getattr(block, 'end_col', block.col)), block_scope))
 
         try:
             for s in block.statements:
@@ -1172,11 +1124,16 @@ class TypeChecker:
         if isinstance(wtype, ModuleType) and not allow_module:
             raise TypeError("Module namespaces cannot be used as runtime values", file=self.file,
                             line=expr.line, col=expr.col, code="W2003")
+        if isinstance(expr, MemberExpr) and isinstance(wtype, FunctionType) and not getattr(expr, 'is_callee', False) and not hasattr(expr, 'function_reference') and not isinstance(getattr(expr.object, 'inferred_type', None), StructType) and not (isinstance(getattr(expr.object, 'inferred_type', None), ClassType) and expr.property in expr.object.inferred_type.fields):
+            raise TypeError("Bound method values require an explicit lambda adapter", file=self.file, line=expr.line, col=expr.col, code="W2013")
         expr.inferred_type = wtype
         expr.inferred_type_id = self.interner.from_wtype(wtype)
         return wtype
 
     def _check_expr_impl(self, expr: Expr, is_statement_context: bool = False) -> WType:
+        if isinstance(expr, LambdaExpr):
+            from checker.ClosureConversion import convert_lambda
+            return convert_lambda(self, expr)
         if isinstance(expr, IntLiteral):
             if expr.value > 9223372036854775807 or expr.value < -9223372036854775808:
                 raise TypeError(
@@ -1198,15 +1155,29 @@ class TypeChecker:
                 return NoneType
             sym = self.current_scope.lookup_symbol(expr.name)
             if sym is not None:
+                if sym.kind == 'builtin' and not getattr(expr, 'is_callee', False):
+                    raise TypeError("Builtin function values require an explicit lambda adapter", file=self.file, line=expr.line, col=expr.col, code="W2013")
+                expr.resolved_symbol = sym
+                if sym.kind == "fn" and isinstance(sym.type, FunctionType):
+                    expr.function_reference = sym.name
                 return sym.type
             # Check if referencing an Enum type
             enum_type = self.current_scope.lookup_type(expr.name)
             if enum_type is not None and isinstance(enum_type, EnumType):
                 return enum_type
             # Check if referencing an unqualified enum variant
-            for t in self.global_scope.types.values():
-                if isinstance(t, EnumType) and expr.name in t.variants:
-                    return t
+            candidates = [t for t in self.global_scope.types.values()
+                          if isinstance(t, EnumType) and expr.name in t.variants]
+            if len(candidates) > 1:
+                raise TypeError(f"Ambiguous enum variant '{expr.name}'; qualify its enum", file=self.file,
+                                line=expr.line, col=expr.col, code="W1001")
+            if candidates:
+                enum_type = candidates[0]
+                if enum_type.variant_payloads.get(expr.name):
+                    raise TypeError(f"Variant '{expr.name}' requires a payload", file=self.file,
+                                    line=expr.line, col=expr.col, code="W2005")
+                expr.resolved_enum_name = enum_type.name
+                return enum_type
             for tmpl in self.generic_enum_templates.values():
                 var_names = [v.name if hasattr(v, "name") else str(v) for v in tmpl.ast_decl.variants]
                 if expr.name in var_names:
@@ -1290,6 +1261,23 @@ class TypeChecker:
                 )
 
             if op in ("==", "!="):
+                def contains_function(type_, seen):
+                    if id(type_) in seen:
+                        return False
+                    seen.add(id(type_))
+                    if isinstance(type_, FunctionType):
+                        return True
+                    children = []
+                    if isinstance(type_, ListType): children = [type_.element]
+                    elif isinstance(type_, DictType): children = [type_.key, type_.value]
+                    elif isinstance(type_, TupleType): children = type_.elements
+                    elif isinstance(type_, OptionalType): children = [type_.inner]
+                    elif isinstance(type_, ResultType): children = [type_.ok, type_.err]
+                    elif isinstance(type_, StructType): children = list(type_.fields.values())
+                    elif isinstance(type_, EnumType): children = [p for payload in type_.variant_payloads.values() for p in payload]
+                    return any(contains_function(child, seen) for child in children)
+                if contains_function(lhs_t, set()) or contains_function(rhs_t, set()):
+                    raise TypeError("Function values do not support equality", file=self.file, line=expr.line, col=expr.col, code="W2001")
                 if not is_assignable(lhs_t, rhs_t) and not is_assignable(rhs_t, lhs_t):
                     raise TypeError(
                         message=f"Cannot compare equality of different types '{lhs_t}' and '{rhs_t}'",
@@ -1502,6 +1490,12 @@ class TypeChecker:
             return self.current_class.superclass
 
         if isinstance(expr, NewExpr):
+            if "." in expr.class_name and not getattr(expr, "type_args", None):
+                expr.class_name = self._resolve_type_node(NamedType(expr.class_name, expr.line, expr.col)).name
+            if getattr(expr, 'type_args', None):
+                expression_type = self._resolve_type_node(GenericType(expr.class_name, expr.type_args, expr.line, expr.col))
+                expr.class_name = expression_type.name
+                expr.type_args = None
             class_t = self.current_scope.lookup_type(expr.class_name)
             if class_t is None or not isinstance(class_t, ClassType):
                 raise TypeError(
@@ -1710,6 +1704,9 @@ class TypeChecker:
                             file=self.file,
                             code="T001"
                         )
+                    if enum_t.variant_payloads.get(expr.property):
+                        raise TypeError(f"Variant '{expr.property}' requires a payload", file=self.file,
+                                        line=expr.line, col=expr.col, code="W2005")
                     return enum_t
                 if expr.object.name in self.generic_enum_templates:
                     tmpl = self.generic_enum_templates[expr.object.name]
@@ -1817,6 +1814,9 @@ class TypeChecker:
                 sym = obj_t.scope.lookup_symbol(expr.property)
                 if sym is not None:
                     expr.resolved_module_member = sym.name
+                    expr.resolved_symbol = sym
+                    if sym.kind == 'fn' and isinstance(sym.type, FunctionType):
+                        expr.function_reference = sym.name
                     return sym.type
                 t_def = obj_t.scope.lookup_type(expr.property)
                 if t_def is not None:
@@ -1884,11 +1884,38 @@ class TypeChecker:
             )
 
         if isinstance(expr, CallExpr):
+            expr.callee.is_callee = True
+            if isinstance(expr.callee, IdentExpr) and expr.type_args:
+                template = self.current_scope.lookup_type(expr.callee.name)
+                if isinstance(template, GenericOopTemplate):
+                    type_ = specialize_oop(template, [self._resolve_type_node(a) for a in expr.type_args], expr.line, expr.col)
+                    expr.callee.name = type_.name
+                    expr.type_args = None
+            if isinstance(expr.callee, IdentExpr) and self.current_scope.lookup_symbol(expr.callee.name) is None:
+                variants = [t for t in self.global_scope.types.values()
+                            if isinstance(t, EnumType) and not getattr(t, "template_name", None)
+                            and expr.callee.name in t.variants]
+                if len(variants) > 1:
+                    raise TypeError("Ambiguous enum constructor; qualify its enum", file=self.file,
+                                    line=expr.line, col=expr.col, code="W1001")
+                if variants:
+                    expr.callee = MemberExpr(IdentExpr(variants[0].name, expr.line, expr.col),
+                                             expr.callee.name, expr.line, expr.col)
             # Support generic function calls and generic struct constructors
             callee_t: Optional[WType] = None
             if isinstance(expr.callee, MemberExpr):
                 module_type = self._module_receiver(expr.callee.object)
                 if isinstance(module_type, ModuleType):
+                    type_template = module_type.scope.lookup_type(expr.callee.property)
+                    if isinstance(type_template, GenericOopTemplate):
+                        if not expr.type_args:
+                            raise TypeError("Generic class constructor needs explicit type arguments", file=self.file, line=expr.line, col=expr.col, code="W2001")
+                        specialized = specialize_oop(type_template, [self._resolve_type_node(a) for a in expr.type_args], expr.line, expr.col)
+                        if self.global_scope.lookup_type(specialized.name) is None:
+                            self.global_scope.define_type(specialized.name, specialized, file=self.file)
+                        expr.callee = IdentExpr(specialized.name, expr.line, expr.col)
+                        expr.type_args = None
+                        return self._check_expr(expr)
                     symbol = module_type.scope.lookup_symbol(expr.callee.property)
                     if symbol and isinstance(symbol.type, GenericFnTemplate):
                         template = symbol.type
@@ -2113,6 +2140,13 @@ class TypeChecker:
                         return enum_t
 
                     if expr.type_args:
+                        symbol = self.current_scope.lookup_symbol(callee_name)
+                        alternative = getattr(expr, 'index_alternative', None)
+                        if symbol and isinstance(symbol.type, (ListType, DictType)) and alternative is not None:
+                            expr.callee = IndexExpr(expr.callee, alternative, expr.line, expr.col)
+                            expr.type_args = None
+                            expr.index_alternative = None
+                            return self._check_expr(expr)
                         raise TypeError(
                             message=f"Symbol '{callee_name}' is not a generic function or struct",
                             line=expr.line,
@@ -2263,6 +2297,12 @@ class TypeChecker:
                 return AnyType()
 
             if not isinstance(callee_t, FunctionType):
+                alternative = getattr(expr, 'index_alternative', None)
+                if alternative is not None and isinstance(callee_t, (ListType, DictType)):
+                    expr.callee = IndexExpr(expr.callee, alternative, expr.line, expr.col)
+                    expr.type_args = None
+                    expr.index_alternative = None
+                    return self._check_expr(expr)
                 raise TypeError(
                     message=f"Cannot call non-function of type '{callee_t}'",
                     line=expr.line,
@@ -2271,6 +2311,17 @@ class TypeChecker:
                     code="T015"
                 )
 
+
+            if not isinstance(expr.callee, (IdentExpr, MemberExpr)):
+                expr.indirect_call = True
+            elif isinstance(expr.callee, IdentExpr):
+                symbol = self.current_scope.lookup_symbol(expr.callee.name)
+                expr.indirect_call = symbol is not None and symbol.kind not in ("fn", "builtin")
+
+            if isinstance(expr.callee, MemberExpr):
+                receiver_type = getattr(expr.callee.object, 'inferred_type', None)
+                if isinstance(receiver_type, StructType) or (isinstance(receiver_type, ClassType) and expr.callee.property in receiver_type.fields):
+                    expr.indirect_call = True
 
             # Special built-in checks
             if isinstance(expr.callee, IdentExpr):
@@ -2344,7 +2395,7 @@ class TypeChecker:
                 )
 
             for i, (a_expr, p_type) in enumerate(zip(expr.args, callee_t.params)):
-                a_type = self._check_expr(a_expr)
+                a_type = self._check_payload(a_expr, p_type)
                 if not is_assignable(a_type, p_type):
                     raise TypeError(
                         message=f"Argument {i + 1} type mismatch: expected '{p_type}', found '{a_type}'",
@@ -2899,11 +2950,16 @@ class TypeChecker:
             return AstTupleType([self._wtype_to_type_node(e) for e in t.elements])
         if isinstance(t, ResultType):
             return AstResultType(self._wtype_to_type_node(t.ok), self._wtype_to_type_node(t.err))
+        if isinstance(t, FunctionType):
+            return AstFunctionType([self._wtype_to_type_node(p) for p in t.params], self._wtype_to_type_node(t.ret))
         if isinstance(t, TypeParamType):
             return NamedType(t.name)
         return NamedType(str(t))
 
     def _substitute_type_node(self, node: TypeNode, subst: Dict[str, WType]) -> TypeNode:
+        if isinstance(node, AstFunctionType):
+            return AstFunctionType([self._substitute_type_node(p, subst) for p in node.params],
+                                   self._substitute_type_node(node.return_type, subst), node.line, node.col)
         if isinstance(node, NamedType):
             if node.name in subst:
                 return self._wtype_to_type_node(subst[node.name])
@@ -2936,7 +2992,19 @@ class TypeChecker:
     def _substitute_ast_types(self, node: Any, subst: Dict[str, WType]) -> None:
         if node is None:
             return
-        if isinstance(node, LetDecl):
+        if isinstance(node, LambdaExpr):
+            for parameter in node.params:
+                if parameter.type_ann is not None:
+                    parameter.type_ann = self._substitute_type_node(parameter.type_ann, subst)
+            if node.return_type is not None:
+                node.return_type = self._substitute_type_node(node.return_type, subst)
+            self._substitute_ast_types(node.body, subst)
+        elif isinstance(node, NewExpr):
+            if getattr(node, 'type_args', None):
+                node.type_args = [self._substitute_type_node(a, subst) for a in node.type_args]
+            for argument in node.args:
+                self._substitute_ast_types(argument, subst)
+        elif isinstance(node, LetDecl):
             if node.type_ann is not None:
                 node.type_ann = self._substitute_type_node(node.type_ann, subst)
             init_val = getattr(node, "initializer", getattr(node, "init", None))
@@ -3036,6 +3104,12 @@ class TypeChecker:
             bindings[p_name] = arg_wtype
             return True
 
+        if isinstance(param_type_node, AstFunctionType) and isinstance(arg_wtype, FunctionType):
+            return (len(param_type_node.params) == len(arg_wtype.params) and
+                    all(self._unify_type(p, a, type_params, bindings)
+                        for p, a in zip(param_type_node.params, arg_wtype.params)) and
+                    self._unify_type(param_type_node.return_type, arg_wtype.ret, type_params, bindings))
+
         if isinstance(param_type_node, AstOptionalType) and isinstance(arg_wtype, OptionalType):
             return self._unify_type(param_type_node.inner, arg_wtype.inner, type_params, bindings)
 
@@ -3056,7 +3130,7 @@ class TypeChecker:
             return (self._unify_type(param_type_node.ok_type, arg_wtype.ok, type_params, bindings) and
                     self._unify_type(param_type_node.err_type, arg_wtype.err, type_params, bindings))
 
-        if isinstance(param_type_node, GenericType) and isinstance(arg_wtype, (StructType, EnumType)):
+        if isinstance(param_type_node, GenericType) and isinstance(arg_wtype, (StructType, EnumType, ClassType, InterfaceType)):
             tmpl_name = getattr(arg_wtype, "template_name", None)
             tmpl_args = getattr(arg_wtype, "type_args", None)
             if tmpl_name == param_type_node.name and tmpl_args and len(tmpl_args) == len(param_type_node.type_args):
@@ -3470,7 +3544,8 @@ class TypeChecker:
         if t in (IntType, StrType, BoolType):
             return True
         if isinstance(t, EnumType):
-            return True
+            return all(self._is_valid_dict_key_type(payload)
+                       for payloads in t.variant_payloads.values() for payload in payloads)
         return False
 
     def _resolve_type_node(self, node: TypeNode) -> WType:
@@ -3485,11 +3560,25 @@ class TypeChecker:
             node.resolved_type_id = self.interner.from_wtype(resolved)
         return resolved
 
+    def _lookup_type_name(self, name):
+        if '.' not in name:
+            return self.current_scope.lookup_type(name)
+        parts = name.split('.')
+        symbol = self.current_scope.lookup_symbol(parts[0])
+        module = symbol.type if symbol else None
+        for part in parts[1:-1]:
+            symbol = module.scope.lookup_symbol(part) if isinstance(module, ModuleType) else None
+            module = symbol.type if symbol else None
+        return module.scope.lookup_type(parts[-1]) if isinstance(module, ModuleType) else None
+
     def _resolve_type_node_impl(self, node: TypeNode) -> WType:
+        if isinstance(node, AstFunctionType):
+            return FunctionType([self._resolve_type_node(p) for p in node.params],
+                                self._resolve_type_node(node.return_type))
         if isinstance(node, NamedType):
             if node.name == "any":
                 return AnyType()
-            resolved = self.current_scope.lookup_type(node.name)
+            resolved = self._lookup_type_name(node.name)
             if resolved is None:
                 if node.name in self.generic_enum_templates:
                     raise TypeError(
@@ -3506,7 +3595,7 @@ class TypeChecker:
                     file=self.file,
                     code="T002"
                 )
-            if isinstance(resolved, (GenericStructTemplate, GenericEnumTemplate)):
+            if isinstance(resolved, (GenericStructTemplate, GenericEnumTemplate, GenericOopTemplate)):
                 raise TypeError(
                     message=f"Generic type '{node.name}' requires type arguments",
                     line=node.line,
@@ -3526,11 +3615,16 @@ class TypeChecker:
                     raise TypeError("Weak target must be a concrete class", line=node.line,
                                     col=node.col, file=self.file, code="W2003")
                 return WeakType(target)
-            lookup = self.current_scope.lookup_type(node.name)
+            lookup = self._lookup_type_name(node.name)
             if lookup is None:
                 lookup = self.generic_struct_templates.get(node.name)
             if lookup is None:
                 lookup = self.generic_enum_templates.get(node.name)
+            if isinstance(lookup, GenericOopTemplate):
+                specialized = specialize_oop(lookup, [self._resolve_type_node(a) for a in node.type_args], node.line, node.col)
+                if self.global_scope.lookup_type(specialized.name) is None:
+                    self.global_scope.define_type(specialized.name, specialized, file=self.file)
+                return specialized
             if isinstance(lookup, GenericStructTemplate):
                 resolved_args = [self._resolve_type_node(a) for a in node.type_args]
                 return self._monomorphize_struct(lookup, resolved_args, node.line, node.col)

@@ -5,7 +5,7 @@ old value:new value
 old receiver
 temporary receiver
 ["index value!"] 1
-["new value"] new value:index
+["new value"] new value
 ["new value", "new value"]
 self assignment
 local field local index

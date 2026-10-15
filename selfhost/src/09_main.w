@@ -14,5 +14,6 @@ fn run_compiler() -> unit ! IoError {
 }
 
 let res = run_compiler() else err {
-    print("W1 Error:", err.message)
+    eprint("[W4003] W1 I/O error:", err.message)
+    exit(1)
 }
