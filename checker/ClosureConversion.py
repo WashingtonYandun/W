@@ -49,8 +49,20 @@ def convert_lambda(checker, expression):
                         line=expression.line, col=expression.col, code='W2001')
     captures = {}
     body = copy.deepcopy(expression.body)
-    checker.closure_counter += 1
-    name = '_W_Closure_' + str(checker.closure_counter)
+    # The counter lives on the compilation session, not on the checker. A checker is
+    # created per module, so a per-checker counter restarted at 1 in every module and
+    # two importing modules each holding one lambda both produced `_W_Closure_1_Env`.
+    # The linked program then had two structs under that name with different fields,
+    # which the interpreter reported as an uncaught KeyError and the C backend as an
+    # unresolved HIR field. Keeping one counter per compilation makes it unique.
+    session = getattr(checker, 'session', None)
+    if session is not None and hasattr(session, 'closure_counter'):
+        session.closure_counter += 1
+        serial = session.closure_counter
+    else:
+        checker.closure_counter += 1
+        serial = checker.closure_counter
+    name = '_W_Closure_' + str(serial)
     environment_name = name + '_Env'
     environment_parameter = '__w_environment'
 

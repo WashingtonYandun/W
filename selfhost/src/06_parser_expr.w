@@ -535,11 +535,20 @@ fn parse_prefix_expr(allow_struct: bool) -> ExprRes {
         return ExprRes { val: "v_" + name, lref: "&v_" + name }
     }
     if match_kind("MINUS") {
-        let op_r = parse_expr(8, allow_struct)
+        # SPEC 5 puts unary at level 3, tighter than multiplicative (level 4), so the
+        # operand stops below `* / %`. A literal operand folds into a negative constant
+        # so negated whole-number literals emit identically to W0's C99 backend, which
+        # is what keeps the three-stage bootstrap hash a fixed point.
+        if check_kind("INT") {
+            let mut lit = advance_tok().val
+            let digits = slice(lit, 0, len(lit))
+            return ExprRes { val: "w_int(-" + digits + "LL)", lref: "" }
+        }
+        let op_r = parse_expr(9, allow_struct)
         return ExprRes { val: "w_neg(" + op_r.val + ")", lref: "" }
     }
     if match_kind("NOT") {
-        let op_r = parse_expr(8, allow_struct)
+        let op_r = parse_expr(9, allow_struct)
         return ExprRes { val: "w_bool(!(" + op_r.val + ").as.b)", lref: "" }
     }
     if match_kind("LPAREN") {

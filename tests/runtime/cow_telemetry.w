@@ -50,8 +50,8 @@ fn test_dict_of_lists() -> unit {
     eprint("__COW_CHECKPOINT__:dict_aliased")
     registry["primes"] = [2, 3, 5, 7, 11]
     eprint("__COW_CHECKPOINT__:dict_write")
-    let p1 = registry["primes"] ?? []
-    let p2 = reg_snap["primes"] ?? []
+    let p1 = registry["primes"]
+    let p2 = reg_snap["primes"]
     print(len(p1))
     print(len(p2))
 }

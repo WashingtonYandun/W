@@ -54,12 +54,24 @@ fn compile_source(src: str) -> str {
             parse_for_stmt()
         } else {
             has_top_stmts = true
+            # A bare `main()` line at top level returns the entrypoint Result. Its value
+            # must be inspected like the implicit form below, or a program whose main
+            # returns Err would exit 0 with no output.
+            let is_entry_call = check_kind("IDENT") and at_tok().val == "main" and peek_tok(1).kind == "LPAREN"
             let expr_r = parse_expr(0, true)
-            emit_line("(void)" + expr_r.val + ";")
+            if is_entry_call {
+                emit_line("WVal _t_main = " + expr_r.val + ";")
+                emit_line("if (_t_main.tag == W_ERR) { w_report_entrypoint_error(_t_main.as.box->val); w_release(_t_main); w_runtime_cleanup(); return 1; }")
+                emit_line("w_release(_t_main);")
+            } else {
+                emit_line("(void)" + expr_r.val + ";")
+            }
         }
     }
     if not has_top_stmts and has_main_fn {
-        emit_line("w_release(w_fn_main());")
+        emit_line("WVal _t_main = w_fn_main();")
+        emit_line("if (_t_main.tag == W_ERR) { w_report_entrypoint_error(_t_main.as.box->val); w_release(_t_main); w_runtime_cleanup(); return 1; }")
+        emit_line("w_release(_t_main);")
     }
     pop_scope()
     emit_oop_dispatchers()
@@ -140,7 +152,7 @@ fn check_delimiters(tokens: list[Token]) -> unit {
             }
             let top = delim_kinds[dl - 1]
             if top == "LPAREN" {
-                report_error("W0001", tok.line, tok.col, "expected ')' before '}'")
+                report_error("W0006", tok.line, tok.col, "expected ')' before '}'")
             }
             if top != "LBRACE" {
                 report_error("W0006", tok.line, tok.col, "mismatched delimiter '}'")
@@ -156,7 +168,7 @@ fn check_delimiters(tokens: list[Token]) -> unit {
         if top_k == "LBRACE" {
             report_error("W0006", delim_lines[top_idx], delim_cols[top_idx], "unclosed delimiter '{'")
         } elif top_k == "LPAREN" {
-            report_error("W0001", delim_lines[top_idx], delim_cols[top_idx], "unclosed delimiter '('")
+            report_error("W0006", delim_lines[top_idx], delim_cols[top_idx], "unclosed delimiter '('")
         } elif top_k == "LBRACKET" {
             report_error("W0006", delim_lines[top_idx], delim_cols[top_idx], "unclosed delimiter '['")
         }

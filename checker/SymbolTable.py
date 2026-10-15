@@ -98,7 +98,9 @@ def create_global_scope() -> Scope:
     scope.define_symbol(Symbol("bytes", FunctionType([StrType], ListType(IntType)), kind="builtin"))
     scope.define_symbol(Symbol("ord", FunctionType([StrType], IntType), kind="builtin"))
     scope.define_symbol(Symbol("chr", FunctionType([IntType], StrType), kind="builtin"))
-    scope.define_symbol(Symbol("slice", FunctionType([StrType, IntType, IntType], StrType), kind="builtin"))
+    # slice() is polymorphic over str and list[T]; the checker validates each case and
+    # computes the result type, so this entry only has to make the name resolvable.
+    scope.define_symbol(Symbol("slice", FunctionType([AnyType(), IntType, IntType], AnyType()), kind="builtin"))
 
     # File I/O & CLI
     io_err = scope.lookup_type("IoError")

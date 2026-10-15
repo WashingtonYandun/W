@@ -22,19 +22,46 @@ def get_repo_root() -> str:
     return os.path.dirname(os.path.realpath(__file__))
 
 
+# Every input that can change the bytes of the stage-2 W1 binary. The hand-written
+# runtime header and the W1 sources are the obvious ones; the W0 frontend, checker
+# and C emitter are just as load-bearing because stage 1 is produced by them, and a
+# stale binary silently invalidates every `--backend=selfhost` comparison.
+SELFHOST_BOOTSTRAP_INPUTS = (
+    "selfhost/w1.w",
+    "runtime/w_runtime.h",
+    "lexer/Lexer.py",
+    "parser/Parser.py",
+    "node/NodeType.py",
+    "checker/TypeChecker.py",
+    "checker/WType.py",
+    "checker/TypeInterner.py",
+    "checker/SymbolTable.py",
+    "codegen/CCodeGen.py",
+    "codegen/ForeignAbi.py",
+    "codegen/VirtualDispatch.py",
+    "common/constants.py",
+)
+
+
+def _bootstrap_source_mtime(repo_root: str) -> float:
+    """Newest modification time across every input to the W1 bootstrap."""
+    newest = 0.0
+    for relative in SELFHOST_BOOTSTRAP_INPUTS:
+        path = os.path.join(repo_root, relative)
+        if os.path.exists(path):
+            newest = max(newest, os.path.getmtime(path))
+    return newest
+
+
 def ensure_selfhost_w1_binary(repo_root: str) -> str:
     cache_dir = os.path.join(repo_root, ".w_cache")
     os.makedirs(cache_dir, exist_ok=True)
     w1_bin = os.path.join(cache_dir, "w1_stage2")
     w1_src_path = os.path.join(repo_root, "selfhost", "w1.w")
-    rt_hdr_path = os.path.join(repo_root, "runtime", "w_runtime.h")
 
     needs_rebuild = not os.path.exists(w1_bin)
-    if not needs_rebuild:
-        bin_mtime = os.path.getmtime(w1_bin)
-        src_mtime = max(os.path.getmtime(w1_src_path), os.path.getmtime(rt_hdr_path))
-        if src_mtime > bin_mtime:
-            needs_rebuild = True
+    if not needs_rebuild and _bootstrap_source_mtime(repo_root) > os.path.getmtime(w1_bin):
+        needs_rebuild = True
 
     if not os.path.isfile(w1_src_path):
         from error.Error import TypeError
@@ -374,7 +401,7 @@ def print_help() -> None:
     print(f"W Language Compiler & Toolchain v{W_VERSION}")
     print("Usage:")
     print("  w lsp                                       # LSP over stdio")
-    print("  w                                           # Start interactive REPL")
+    print("  w repl                                    # Start interactive REPL")
     print("  w [run] [--stats] <file.w>                  # Execute W source file (W0 interpreter)")
     print("  w check [--json] [--stats] <file.w>         # Static typecheck without execution")
     print("  w fmt [--write] <file.w>                    # Canonical deterministic formatter")
@@ -410,7 +437,7 @@ def main() -> None:
     sanitize = False
     link_libraries = []
 
-    if args and args[0] in ("run", "check", "fmt", "ast", "tokens", "emit-c", "build", "test", "bench", "version"):
+    if args and args[0] in ("run", "check", "fmt", "ast", "tokens", "emit-c", "build", "test", "bench", "version", "repl"):
         subcmd = args[0]
         args = args[1:]
         if subcmd == "bench":
@@ -581,8 +608,17 @@ def main() -> None:
             link_libraries=link_libraries,
         )
         sys.exit(code)
-    else:
+
+    # No file argument. Dropping into the REPL silently made `w check` in a Makefile exit
+    # 0 without checking anything, so the REPL now needs to be asked for explicitly and
+    # every other subcommand is a usage error.
+    if subcmd is None or subcmd == "repl":
         repl(show_tokens=show_tokens, show_ast=show_ast)
+        return
+    print(f"w {subcmd}: no input file given", file=sys.stderr)
+    print("usage: w " + subcmd + " <file.w> [options]", file=sys.stderr)
+    print("       w repl        # start the interactive REPL", file=sys.stderr)
+    sys.exit(2)
 
 
 if __name__ == "__main__":

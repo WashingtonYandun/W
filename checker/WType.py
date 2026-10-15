@@ -318,9 +318,18 @@ def is_assignable(source: WType, target: WType) -> bool:
     - A non-optional T rejects none.
     - Subclass is assignable to Superclass or implemented Interface.
     - Canonical Option[T] <-> T? and Result[T, E] <-> T ! E equivalence.
+
+    `any` is one-directional on purpose. It exists only so that variadic builtin
+    signatures (`print`, `len`, `enumerate`, ...) can declare a wildcard parameter,
+    and so that internal inference can pass a placeholder. Nothing may be *assigned
+    to* an `any` target, because that is the operation that lets a value escape the
+    type system (a program could declare `fn f() -> int`, store a `str` in an `any`
+    local and return it, unobserved).
     """
-    if isinstance(target, AnyType) or isinstance(source, AnyType):
+    if isinstance(source, AnyType):
         return True
+    if isinstance(target, AnyType):
+        return isinstance(source, AnyType)
 
     if source == target:
         return True

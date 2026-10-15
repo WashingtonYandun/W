@@ -4,7 +4,7 @@ from checker.WType import (
     OpaqueType, WType, PrimitiveType, IntType, FloatType, BoolType, StrType, UnitType, NoneType,
     OptionalType, WeakType, ListType, DictType, TupleType, StructType, EnumType,
     InterfaceType, ClassFieldInfo, ClassMethodInfo, ClassType,
-    ResultType, FunctionType, ModuleType, AnyType
+    ResultType, FunctionType, ModuleType, AnyType, TypeParamType
 )
 
 _ARENA_IDS = count(1)
@@ -557,10 +557,12 @@ class TypeInterner:
         Fast canonical assignability check between TypeIds: src <: dst.
         Rules:
         - O(1) identity check.
-        - TYPE_ERROR / Any is compatible with everything.
+        - `any` is assignable *to* anything (builtin wildcard params, inference
+          placeholders) but nothing is assignable *to* `any`; see
+          checker/WType.py:is_assignable for the rationale.
         - Optional T? accepts T, none, and S? if S <: T.
         - Result T ! E accepts T.
-        - Covariant List subtyping for list literals/collections.
+        - Invariant list/dict subtyping (list[S] -> list[T] iff S == T).
         - OOP subtyping: Class -> Superclass, Class -> Interface.
         """
         if src_id == dst_id:
@@ -572,8 +574,10 @@ class TypeInterner:
         src_entry = self.get_entry(src_id)
         dst_entry = self.get_entry(dst_id)
 
-        if src_entry.tag == "any" or dst_entry.tag == "any":
+        if src_entry.tag == "any":
             return True
+        if dst_entry.tag == "any":
+            return False
 
         # OOP Subtyping: Class -> Superclass
         if src_entry.tag == "class" and dst_entry.tag == "class":
@@ -745,7 +749,10 @@ class TypeInterner:
             return self.mk_class(wtype.name, superclass=sup_id, interfaces=intf_ids, fields=fields, methods=methods, init_sig=init_sig)
         elif isinstance(wtype, ModuleType):
             return self.mk_module(wtype.name)
-        elif isinstance(wtype, AnyType):
+        elif isinstance(wtype, (AnyType, TypeParamType)):
+            # `any` is the wildcard type identity; an unbound type parameter has no
+            # concrete identity yet, so it shares that representation instead of
+            # tripping the TYPE_ERROR fallthrough. See _concrete_type_args.
             return self.mk_any()
         return TYPE_ERROR
 
