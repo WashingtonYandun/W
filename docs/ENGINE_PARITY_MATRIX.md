@@ -34,14 +34,32 @@ flowchart TD
 
 ## 2. Feature Parity Matrix
 
-The following table summarizes compiler support across the 107 fixtures of the Phase D public corpus. Closures, FFI, generic OOP, stdlib and the LSP live in a separate expansion suite; see [EXPANSION.md](EXPANSION.md).
+The following table summarizes compiler support across the fixtures of the Phase D public corpus. The counts are regenerated from `summary.json` by `tools/ci_conformance.py --matrix`, which reports measurements from the last verified run rather than restating `tests/engine_profiles.json`. Closures, FFI, generic OOP, stdlib and the LSP live in a separate expansion suite; see [EXPANSION.md](EXPANSION.md).
 
-| Feature Category | Fixtures | W0 Interpreter | W0 AST C99 | W0 Typed HIR (Default) | W1 Self-Hosted C99 | Status / Tracking |
+<!-- GENERATED TABLE START -->
+
+| Feature Category | Fixtures | W0 Interpreter | W0 AST C99 | W0 Typed HIR (Default) | W1 Self-Hosted C99 | Status / Milestone |
 | :--- | :---: | :---: | :---: | :---: | :---: | :--- |
-| **`core`** | 91 | ✅ 91/91 | ✅ 91/91 | ✅ 91/91 | ✅ 91/91 | Stable &bull; 100% Parity |
-| **`generics`** | 15 | ✅ 15/15 | ✅ 15/15 | ✅ 15/15 | ⏳ 0/15 | Pending Milestone D02 |
-| **`checked_modules`** | 1 | ✅ 1/1 | ✅ 1/1 | ✅ 1/1 | ⏳ 0/1 | Pending Milestone D02 |
-| **Total Corpus** | **107** | **107/107 (100%)** | **107/107 (100%)** | **107/107 (100%)** | **91/107 (85.0%)** | **Full W0 Parity &bull; Core W1 Subset** |
+| **`core`** | 97 | ✅ 97/97 | ✅ 97/97 | ✅ 97/97 | ✅ 97/97 | Declared supported |
+| **`generics`** | 15 | ✅ 15/15 | ✅ 15/15 | ✅ 15/15 | ⏳ 0/15 (15 declared unsupported) | Pending D02 |
+| **`checked_modules`** | 1 | ✅ 1/1 | ✅ 1/1 | ✅ 1/1 | ⏳ 0/1 (1 declared unsupported) | Pending D02 |
+| **Total Verified** | **113** | **113/113 (100.0%)** | **113/113 (100.0%)** | **113/113 (100.0%)** | **97/113 (85.8%)** | _measured_ |
+
+Regenerate with `python3 tools/ci_conformance.py --matrix`, which reads `summary.json`
+from an actual run of `python3 tools/ci_conformance.py` over the corpus. These are
+measurements of the four engines, not a restatement of `tests/engine_profiles.json`;
+`--matrix` reports `STALE` if the summary no longer covers the current corpus.
+
+The `core` category includes five fixtures that pin runtime **panic** behaviour
+(`panic_division`, `panic_modulo`, `panic_index`, `panic_dict_key`,
+`panic_entrypoint_error`). Those declare the diagnostic they must raise with a
+`# RUNTIME_PANIC: Wxxxx` marker instead of expected stdout, and every engine must report
+that exact code and terminate non-zero. They exist because panic behaviour was the one
+axis no fixture covered, which is how the interpreter and the two C backends were able to
+disagree on it without any test noticing. `assignment_expression` covers the opposite
+gap: a construct the checker accepted while the HIR backend rejected it.
+
+<!-- GENERATED TABLE END -->
 
 ---
 
@@ -119,13 +137,13 @@ It is critical to distinguish between two distinct compiler guarantees:
 The compiler test harness (`tools/ci_conformance.py`) enforces strict behavioral quality gates:
 
 ### 5.1 Integration Profile (`--profile=integration`)
-- Evaluates all 102 corpus fixtures across all engines.
+- Evaluates all 112 corpus fixtures across all engines.
 - Skips unsupported features on specific engines based strictly on `tests/engine_profiles.json`.
 - **Requirement:** Every unsupported feature must carry an explicit, non-empty tracking reason pointing to its roadmap milestone.
-- **Result:** Passes (102/102) if and only if all supported features pass without failure, while accurately reporting unsupported counts.
+- **Result:** Passes (112/112) if and only if all supported features pass without failure, while accurately reporting unsupported counts.
 
 ### 5.2 Release Profile (`--profile=release`)
-- Evaluates all 102 corpus fixtures across all engines without allowing any unsupported exclusions.
+- Evaluates all 112 corpus fixtures across all engines without allowing any unsupported exclusions.
 - **Requirement:** Every engine must pass 100% of all fixtures.
 - **Result:** Intentionally fails as long as W1 has unsupported features (`generics`, `checked_modules`), preventing deceptive releases that claim full self-hosting before D02 is complete.
 

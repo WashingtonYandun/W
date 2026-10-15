@@ -1682,11 +1682,20 @@ fn parse_prefix_expr(allow_struct: bool) -> ExprRes {
         return ExprRes { val: "v_" + name, lref: "&v_" + name }
     }
     if match_kind("MINUS") {
-        let op_r = parse_expr(8, allow_struct)
+        # SPEC 5 puts unary at level 3, tighter than multiplicative (level 4), so the
+        # operand stops below `* / %`. A literal operand folds into a negative constant
+        # so negated whole-number literals emit identically to W0's C99 backend, which
+        # is what keeps the three-stage bootstrap hash a fixed point.
+        if check_kind("INT") {
+            let mut lit = advance_tok().val
+            let digits = slice(lit, 0, len(lit))
+            return ExprRes { val: "w_int(-" + digits + "LL)", lref: "" }
+        }
+        let op_r = parse_expr(9, allow_struct)
         return ExprRes { val: "w_neg(" + op_r.val + ")", lref: "" }
     }
     if match_kind("NOT") {
-        let op_r = parse_expr(8, allow_struct)
+        let op_r = parse_expr(9, allow_struct)
         return ExprRes { val: "w_bool(!(" + op_r.val + ").as.b)", lref: "" }
     }
     if match_kind("LPAREN") {
@@ -2767,12 +2776,24 @@ fn compile_source(src: str) -> str {
             parse_for_stmt()
         } else {
             has_top_stmts = true
+            # A bare `main()` line at top level returns the entrypoint Result. Its value
+            # must be inspected like the implicit form below, or a program whose main
+            # returns Err would exit 0 with no output.
+            let is_entry_call = check_kind("IDENT") and at_tok().val == "main" and peek_tok(1).kind == "LPAREN"
             let expr_r = parse_expr(0, true)
-            emit_line("(void)" + expr_r.val + ";")
+            if is_entry_call {
+                emit_line("WVal _t_main = " + expr_r.val + ";")
+                emit_line("if (_t_main.tag == W_ERR) { w_report_entrypoint_error(_t_main.as.box->val); w_release(_t_main); w_runtime_cleanup(); return 1; }")
+                emit_line("w_release(_t_main);")
+            } else {
+                emit_line("(void)" + expr_r.val + ";")
+            }
         }
     }
     if not has_top_stmts and has_main_fn {
-        emit_line("w_release(w_fn_main());")
+        emit_line("WVal _t_main = w_fn_main();")
+        emit_line("if (_t_main.tag == W_ERR) { w_report_entrypoint_error(_t_main.as.box->val); w_release(_t_main); w_runtime_cleanup(); return 1; }")
+        emit_line("w_release(_t_main);")
     }
     pop_scope()
     emit_oop_dispatchers()
@@ -3189,15 +3210,21 @@ fn sem_call_builtin(name: str, args: list[int]) -> int {
         if name == "chr" { return sem_str }
         return sem_unit
     }
-    if name == "ord" or name == "bytes" or name == "slice" or name == "read_file" or name == "write_file" {
+    if name == "slice" {
+        # SPEC 11.1: slice() is polymorphic over str and list[T] and preserves the
+        # container kind.
+        let first_type = sem_types[first]
+        sem_require(args[1], sem_int, "W2001")
+        sem_require(args[2], sem_int, "W2001")
+        if first == sem_str { return sem_str }
+        if first_type.kind == "list" { return first }
+        sem_error("W2001", "slice expects str or list")
+        return sem_str
+    }
+    if name == "ord" or name == "bytes" or name == "read_file" or name == "write_file" {
         sem_require(first, sem_str, "W2001")
         if name == "ord" { return sem_int }
         if name == "bytes" { return sem_wrap("list", sem_int) }
-        if name == "slice" {
-            sem_require(args[1], sem_int, "W2001")
-            sem_require(args[2], sem_int, "W2001")
-            return sem_str
-        }
         let io = sem_named("IoError")
         if name == "read_file" { return sem_intern("result", "", [sem_str, io]) }
         sem_require(args[1], sem_str, "W2001")
@@ -3481,8 +3508,10 @@ fn sem_expression(minimum: int, allow_struct: bool) -> SemValue {
                 sem_require(index, sem_int, "W2001")
                 left = SemValue { type_id: type_.args[0], root: left.root, writable: type_.args[0], terminates: false }
             } elif type_.kind == "dict" {
+                # `d[k]` yields V and panics with W4002 when the key is absent; the
+                # optional form is `d.get(k)`. See SPEC 10.2.
                 sem_require(index, type_.args[0], "W2001")
-                left = SemValue { type_id: sem_wrap("optional", type_.args[1]), root: left.root, writable: type_.args[1], terminates: false }
+                left = SemValue { type_id: type_.args[1], root: left.root, writable: type_.args[1], terminates: false }
             } elif left.type_id == sem_str {
                 sem_require(index, sem_int, "W2001")
                 left = sem_value(sem_str)

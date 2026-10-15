@@ -101,7 +101,23 @@ def test_ci_matrix_generation_tooling():
     assert "| **`core`** |" in out, "Output must contain core row"
     assert "| **`generics`** |" in out, "Output must contain generics row"
     assert "| **Total Verified** |" in out, "Output must contain total row"
-    assert "91/107" in out, "Output must accurately report 91/107 for W1"
+    # The matrix must report measured per-engine numbers, not a restatement of the
+    # declaration file. Previously this test asserted the literal strings "91/91" and
+    # "0/15", which passed even when no compiler was ever executed.
+    import re as _re
+    from tests.engine_harness import corpus_paths
+    assert "measurements, not a" in out, "Matrix must state that counts are measured"
+    totals = _re.search(r"\| \*\*Total Verified\*\* \| \*\*(\d+)\*\* \|(.+)\|", out)
+    assert totals, "Matrix must contain a parseable total row"
+    corpus = int(totals.group(1))
+    assert corpus == len(corpus_paths()[0]) + len(corpus_paths()[1]), \
+        f"Matrix corpus size {corpus} does not match the real corpus"
+    header = out.splitlines()[2]
+    for column in ("W0 Interpreter", "W0 AST C99", "W0 Typed HIR (Default)", "W1 Self-Hosted C99"):
+        assert column in header, f"Matrix header is missing the '{column}' column"
+    if "\u2014" in totals.group(2):
+        # No verified run available in this workspace; that is reported, not faked.
+        assert "no verified run" in out, "Missing run must be reported explicitly"
 
 
 def test_documentation_consistency():
@@ -111,8 +127,16 @@ def test_documentation_consistency():
     assert doc_path.exists(), "docs/ENGINE_PARITY_MATRIX.md must exist"
     content = doc_path.read_text()
 
-    assert "91/91" in content, "Doc must mention 91/91 core parity"
-    assert "0/15" in content, "Doc must mention 0/15 generics limitation in W1"
+    # The doc is a report, so the check is that it stays internally consistent rather
+    # than that it repeats a number copied into this test.
+    from tests.engine_harness import corpus_paths
+    import re as _re
+    corpus_size = len(corpus_paths()[0]) + len(corpus_paths()[1])
+    total_row = _re.search(r"\| \*\*Total Verified\*\* \| \*\*(\d+)\*\*", content)
+    assert total_row, "Doc must contain a generated Total Verified row"
+    assert int(total_row.group(1)) == corpus_size, (
+        f"Doc reports a corpus of {total_row.group(1)} but the real corpus is {corpus_size}; "
+        f"rerun: python3 tools/ci_conformance.py --matrix")
     assert "Milestone D02" in content, "Doc must reference D02 remediation milestone"
     assert "Bootstrap Fixed-Point vs. Full Language Parity" in content, (
         "Doc must clearly contrast bootstrap fixed-point with full language parity"

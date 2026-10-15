@@ -4,6 +4,15 @@ from common.constants import KEYWORDS
 from error.Error import LexerError
 from typing import List, Optional
 
+# Tokens that can end an expression. A '-' immediately after one of these is
+# binary subtraction; anywhere else it is prefix negation.
+_VALUE_END_TOKENS = frozenset({
+    TokenType.INT, TokenType.FLOAT, TokenType.STR,
+    TokenType.TRUE, TokenType.FALSE, TokenType.NONE,
+    TokenType.IDENTIFIER, TokenType.THIS, TokenType.SUPER,
+    TokenType.RPAREN, TokenType.RBRACKET, TokenType.RBRACE,
+})
+
 class Lexer:
     """
     Lexical analyzer for W Language conforming to SPEC.md v0.1.
@@ -68,9 +77,24 @@ class Lexer:
                     code="E002"
                 )
 
+            # Negative integer literals. `-9223372036854775808` is representable as
+            # int64 but its magnitude is not, so the sign has to be part of the
+            # literal when the minus is in prefix position. Deciding on the previous
+            # token (rather than on a later parser look-back) keeps this correct for
+            # binary subtraction: in `0 - 9223372036854775808` the minus follows a
+            # value, so the literal is rejected as out of range.
+            if (ch == '-' and self._minus_is_prefix(tokens)
+                    and self.peek(1) is not None and self.peek(1).isascii() and self.peek(1).isdigit()):
+                self.advance()  # consume '-'
+                tokens.append(self._lex_number(start_line, start_col, negated=True))
+                tokens[-1].value = -tokens[-1].value
+                tokens[-1].start_offset = token_start
+                self._stamp(tokens[-1], token_start)
+                continue
+
             # Numbers (Integers & Floats)
             if ch.isascii() and ch.isdigit():
-                tokens.append(self._lex_number(start_line, start_col, prev_token=tokens[-1] if tokens else None))
+                tokens.append(self._lex_number(start_line, start_col))
                 self._stamp(tokens[-1], token_start)
                 continue
 
@@ -94,13 +118,23 @@ class Lexer:
         tokens.append(Token(value=None, type=TokenType.EOF, line=self.line, col=self.col))
         return tokens
 
+    def _minus_is_prefix(self, tokens: List[Token]) -> bool:
+        """True when a '-' at the current position negates rather than subtracts.
+
+        A minus is prefix when nothing can end an expression precedes it: the start
+        of the file, or any token that is not a literal, identifier, `)` or `]`.
+        """
+        if not tokens:
+            return True
+        return tokens[-1].type not in _VALUE_END_TOKENS
+
     def _stamp(self, token, start):
         token.start_offset = start
         token.end_offset = self.pos
         token.end_line = self.line
         token.end_col = self.col
 
-    def _lex_number(self, start_line: int, start_col: int, prev_token: Optional[Token] = None) -> Token:
+    def _lex_number(self, start_line: int, start_col: int, negated: bool = False) -> Token:
         num_str = ""
         is_float = False
         prev_was_underscore = False
@@ -183,18 +217,35 @@ class Lexer:
             )
 
         clean_str = num_str.replace("_", "")
+
+        # A literal immediately followed by an identifier character is malformed:
+        # W has no hex, binary, octal or exponent notation, so `0x10` and `1e5` used
+        # to lex as `0`/`1` plus the identifiers `x10`/`e5`, which surfaced later as a
+        # bogus "unknown identifier" instead of a numeric-literal error.
+        trailing = self.peek()
+        if trailing is not None and ((trailing.isascii() and trailing.isalnum()) or trailing == '_'):
+            raise LexerError(
+                message=f"Malformed numeric literal '{num_str}{trailing}'",
+                line=start_line,
+                col=start_col,
+                file=self.file,
+                code="W0002",
+            )
         try:
             if is_float:
-                return Token(value=float(clean_str), type=TokenType.FLOAT, line=start_line, col=start_col)
+                value = float(clean_str)
+                if value in (float("inf"), float("-inf")) and "inf" not in clean_str.lower():
+                    raise ValueError("Floating-point literal overflows binary64")
+                return Token(value=value, type=TokenType.FLOAT, line=start_line, col=start_col)
             else:
                 if len(clean_str) > 20:
                     raise ValueError("Integer literal exceeds 64-bit range")
                 ival = int(clean_str)
-                if ival > 9223372036854775807:
-                    if ival == 9223372036854775808 and prev_token is not None and prev_token.type == TokenType.MINUS:
-                        pass
-                    else:
-                        raise ValueError("Integer literal exceeds 64-bit range")
+                # A negated literal may reach 2^63, which int64 can represent as
+                # INT64_MIN even though its magnitude is not representable.
+                limit = 9223372036854775808 if negated else 9223372036854775807
+                if ival > limit:
+                    raise ValueError("Integer literal exceeds 64-bit range")
                 return Token(value=ival, type=TokenType.INT, line=start_line, col=start_col)
         except (ValueError, OverflowError):
             raise LexerError(

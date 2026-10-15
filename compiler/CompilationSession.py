@@ -62,6 +62,10 @@ class CompilationSession:
         self.generation = 0
         self.parse_counts = {}
         self.check_counts = {}
+        # One closure-name counter per compilation: a per-module counter restarts at 1
+        # in every module, so two modules each holding a lambda produced the same
+        # `_W_Closure_N_Env` and `_W_Closure_N`, and the linked program broke.
+        self.closure_counter = 0
         self.root_path = None
         self._options_key = self.options_key()
 

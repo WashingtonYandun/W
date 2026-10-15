@@ -174,7 +174,8 @@ class CCodeGen:
         # If there are no top-level executable statements and main() exists in W, call it
         non_decls = [s for s in program.body if not isinstance(s, (FnDecl, StructDecl, EnumDecl, InterfaceDecl, ClassDecl, ImportDecl))]
         if getattr(program, "call_entrypoint", not non_decls) and "w_fn_main" in self.fallible_fns:
-            main_stmts.append("w_release(w_fn_main());")
+            main_stmts.append("WVal _t_main = w_fn_main();")
+            self._emit_entrypoint_guard(main_stmts)
 
         self._pop_scope(main_stmts)
         self._emit_oop_dispatchers()
@@ -407,6 +408,11 @@ class CCodeGen:
                     else:
                         val_expr = self.emit_expr(stmt.initializer, out_main_stmts)
                     out_main_stmts.append(f"w_assign(&{gv_name}, {self._own_expr(val_expr)});")
+                elif ns == "" and self._is_entrypoint_call(stmt):
+                    # The module calls main() explicitly at top level. Its Result must
+                    # not be discarded, or a failed program would exit 0 silently.
+                    out_main_stmts.append("WVal _t_main = " + self.emit_expr(stmt.expr, out_main_stmts) + ";")
+                    self._emit_entrypoint_guard(out_main_stmts)
                 else:
                     self.emit_stmt(stmt, out_main_stmts)
 
@@ -471,6 +477,27 @@ class CCodeGen:
             out.append(f"    {line}")
         out.append("}")
         return res_var
+
+    def _is_entrypoint_call(self, stmt: Stmt) -> bool:
+        """True when `stmt` is the bare `main()` line that closes a W program."""
+        return (isinstance(stmt, ExprStmt)
+                and isinstance(stmt.expr, CallExpr)
+                and isinstance(stmt.expr.callee, IdentExpr)
+                and stmt.expr.callee.name == "main"
+                and not getattr(stmt.expr, "args", []))
+
+    def _emit_entrypoint_guard(self, out: List[str]) -> None:
+        """Emits the entrypoint Result check and the mandatory release of `_t_main`.
+
+        W has no stack unwinding: a fallible entrypoint returns its error as a
+        value. Discarding it would make a failing program exit 0 with no output,
+        which is indistinguishable from success for make/CI/shell.
+        """
+        out.append(
+            "if (_t_main.tag == W_ERR) { w_report_entrypoint_error(_t_main.as.box->val); "
+            "w_release(_t_main); w_runtime_cleanup(); return 1; }"
+        )
+        out.append("w_release(_t_main);")
 
     def emit_stmt(self, stmt: Stmt, out: List[str]) -> None:
         if isinstance(stmt, ExprStmt):

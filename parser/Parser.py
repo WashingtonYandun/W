@@ -42,6 +42,20 @@ PRECEDENCE = {
     TokenType.PERCENT: 9,            # '%'
 }
 
+# Token types that can begin an expression. Used to decide whether `return` has a
+# value and to detect missing statement separators.
+_EXPRESSION_STARTERS = frozenset({
+    TokenType.INT, TokenType.FLOAT, TokenType.STR, TokenType.TRUE, TokenType.FALSE,
+    TokenType.NONE, TokenType.IDENTIFIER, TokenType.THIS, TokenType.SUPER, TokenType.NEW,
+    TokenType.MINUS, TokenType.NOT, TokenType.LPAREN, TokenType.LBRACKET, TokenType.LBRACE,
+    TokenType.PIPE, TokenType.IF, TokenType.MATCH,
+})
+
+# Token types that can legally follow a complete expression statement. Anything
+# else on the same line means the author wrote two expressions without an operator
+# between them (`let x = 1 2`), which the language does not allow.
+_STATEMENT_END_TOKENS = frozenset({TokenType.RBRACE, TokenType.EOF})
+
 class Parser:
     """
     Recursive Descent + Pratt Parser for W Language v0.1.
@@ -362,6 +376,45 @@ class Parser:
         expr = self.parse_expr()
         return ExprStmt(expr=expr, line=expr.line, col=expr.col)
 
+    def _require_statement_end(self) -> None:
+        """Rejects a second expression where a statement separator is required.
+
+        W has no statement terminator, so a statement ends at a line break, `}`, or
+        EOF. Without this check a typo such as `0x10` silently becomes the identifier
+        `x10`, which then surfaces as a bogus name-resolution error instead of a
+        syntax error.
+
+        This is applied to declarations, not to bare expression statements: a block
+        body is a sequence of expressions and the language permits several on one
+        line (`else err { report_error(...) "" }` appears in the standard library).
+        Tightening that is a separate language decision.
+        """
+        token = self.at()
+        if token.type in _STATEMENT_END_TOKENS:
+            return
+        previous = self.tokens[self.pos - 1] if self.pos > 0 else token
+        if token.line > previous.end_line:
+            return
+        # A literal or an opening delimiter here can only be a second, unterminated
+        # expression: the expression parser already consumed every postfix operator,
+        # binary operator and member access, so nothing can legitimately follow a
+        # completed initializer on the same line. An identifier is deliberately allowed
+        # through, because a block body is a statement sequence and
+        # `else { let a = f() b = 2 }` is accepted W; tightening that is a separate
+        # language decision recorded in docs/KNOWN_LIMITS.md.
+        if token.type not in (TokenType.INT, TokenType.FLOAT, TokenType.STR,
+                              TokenType.TRUE, TokenType.FALSE, TokenType.NONE,
+                              TokenType.LPAREN, TokenType.LBRACKET):
+            return
+        raise ParserError(
+            message=f"Unexpected '{token.type.name}' after a complete expression; "
+                    f"statements must be separated by a line break",
+            line=token.line,
+            col=token.col,
+            file=self.file,
+            code="W0006",
+        )
+
     def _parse_param_list(self, allow_receiver: bool = False) -> List[Param]:
         params: List[Param] = []
         if not self.check(TokenType.RPAREN):
@@ -531,6 +584,7 @@ class Parser:
         self.expect(TokenType.ASSIGN, code="P004", msg="Expected '=' after variable declaration")
         initializer = self.parse_expr()
 
+        self._require_statement_end()
         return LetDecl(name=name_tok.value, is_mut=is_mut, type_ann=type_ann, initializer=initializer, line=start_tok.line, col=start_tok.col)
 
     def parse_struct_decl(self) -> StructDecl:
@@ -610,9 +664,29 @@ class Parser:
         body = self.parse_block()
         return ForStmt(pattern=pattern, iterable=iterable, body=body, line=start_tok.line, col=start_tok.col)
 
+    # Tokens that can never begin an expression. `return` followed by one of these
+    # is a bare return; anything else is the returned expression. Deciding on token
+    # identity (rather than on line numbers) is what keeps `return` free of
+    # whitespace ambiguity: `return` newline `a + b` still returns `a + b`, and a
+    # bare `return` is still a bare return because the next token is `}` or EOF.
+    _EXPRESSION_TERMINATORS = frozenset({
+        TokenType.RBRACE, TokenType.RPAREN, TokenType.RBRACKET, TokenType.COMMA,
+        TokenType.ELSE, TokenType.ELIF,
+    })
+
+    def _starts_expression(self) -> bool:
+        token = self.at()
+        if token.type in self._EXPRESSION_TERMINATORS:
+            return False
+        if token.type == TokenType.EOF:
+            return False
+        # `return` immediately followed by a token that cannot open an expression
+        # belongs to the enclosing construct (e.g. the next statement's keyword).
+        return token.type in _EXPRESSION_STARTERS
+
     def parse_return_stmt(self) -> ReturnStmt:
         start_tok = self.expect(TokenType.RETURN, code="P004", msg="Expected 'return'")
-        if self.check(TokenType.RBRACE) or self.is_at_end() or self.at().line > start_tok.line:
+        if not self._starts_expression():
             return ReturnStmt(value=None, line=start_tok.line, col=start_tok.col)
         val = self.parse_expr()
         return ReturnStmt(value=val, line=start_tok.line, col=start_tok.col)
@@ -695,7 +769,7 @@ class Parser:
                     q_tok = self.advance()
                     left = PostfixTryExpr(operand=left, line=q_tok.line, col=q_tok.col)
 
-                elif self.check(TokenType.ELSE):
+                elif self.check(TokenType.ELSE) and not self._begins_match_arm():
                     # In-place error/optional handling: expr else err { ... } or expr else { ... }
                     else_tok = self.advance()
                     err_name: Optional[str] = None
@@ -785,6 +859,27 @@ class Parser:
         except ParserError:
             self.pos = saved_pos
             return None
+
+    def _begins_match_arm(self) -> bool:
+        """Decides whether a `else` token starts a match arm rather than the postfix
+        error-recovery operator.
+
+        The two uses overlap on a single token. From here we see `else` at the head:
+          `else => ...`          wildcard arm, nothing may consume it
+          `else name => ...`     binding arm, nothing may consume it
+          `else { ... }`         error recovery without a bound error name
+          `else name { ... }`    error recovery binding the error to `name`
+
+        Only the block forms are the operator, so the lookahead is exact and needs no
+        context flag. Without this, `match x { 1 => 10 else => 30 }` swallows the
+        `else` of the arm and reports "expected '{' to start block".
+        """
+        after = self.peek(1)
+        if after.type == TokenType.LBRACE:
+            return False
+        if after.type == TokenType.IDENTIFIER and self.peek(2).type == TokenType.LBRACE:
+            return False
+        return True
 
     def parse_prefix_expr(self, allow_struct_init: bool = True) -> Expr:
         token = self.at()
@@ -895,11 +990,24 @@ class Parser:
 
             return IdentExpr(name=ident_name, line=token.line, col=token.col)
 
-        # Unary operations: '-' and 'not'
+        # Unary operations: '-' and 'not'.
+        # SPEC 5 puts unary at level 3, tighter than multiplicative (level 4), so the
+        # operand stops below `* / %`. Passing 8 here let `*` bind inside the unary
+        # operator, which made `not a == b` mean `(not a) == b` and broke the int64
+        # minimum literal in `-9223372036854775808 * 1`.
         if self.match(TokenType.MINUS, TokenType.NOT):
-            operand = self.parse_expr(min_prec=8, allow_struct_init=allow_struct_init)
-            if token.value == "-" and isinstance(operand, IntLiteral) and operand.value == 9223372036854775808:
-                return IntLiteral(value=-9223372036854775808, line=token.line, col=token.col)
+            operand = self.parse_expr(min_prec=9, allow_struct_init=allow_struct_init)
+            if token.value == "-" and isinstance(operand, IntLiteral):
+                if operand.value == 9223372036854775808:
+                    return IntLiteral(value=-9223372036854775808, line=token.line, col=token.col)
+                if operand.value > 9223372036854775807:
+                    raise ParserError(
+                        message=f"Integer literal '-{operand.value}' is below the int64 minimum",
+                        line=token.line,
+                        col=token.col,
+                        file=self.file,
+                        code="W0002",
+                    )
             return UnaryExpr(op=token.value, operand=operand, line=token.line, col=token.col)
 
         # Parenthesized expressions & Tuples

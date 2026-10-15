@@ -1,8 +1,8 @@
-# W Language Specification v0.1
+# W Language Specification
 
-> **Status:** Frozen core grammar (v0.1). The current toolchain is `0.3.0.dev1`.  
-> **Targets:** `W0` is the reference implementation; `W1` is an experimental self-hosted compiler with a smaller surface.  
-> **Thesis:** W is a compact, statically typed language for small native tools, with deterministic diagnostics and inspectable C99 output. Expansion beyond this core is documented in [docs/EXPANSION.md](docs/EXPANSION.md) and [docs/ENGINE_PARITY_MATRIX.md](docs/ENGINE_PARITY_MATRIX.md).
+> **Status:** The current toolchain is `0.3.0.dev1`. Sections 1–11 describe the frozen core grammar and are normative; sections 12–14 describe implementation contracts.  
+> **Targets:** `W0` is the reference implementation and the authority on whether a program is valid. `W1` is an experimental self-hosted compiler for a **strict subset** of W: it has no generics, no enum payload layout and no pattern matching on `Option`/`Result`, so it is not a second implementation of this document. See [docs/ENGINE_PARITY_MATRIX.md](docs/ENGINE_PARITY_MATRIX.md) and §12.  
+> **Thesis:** W is a compact, statically typed language for small native tools, with deterministic diagnostics and inspectable C99 output. Expansion beyond this core is documented in [docs/EXPANSION.md](docs/EXPANSION.md).
 
 ---
 
@@ -84,6 +84,13 @@ Identifiers must start with an ASCII letter (`a-z`, `A-Z`) or underscore `_`, fo
 * `str`: Immutable UTF-8 text with code-point indexing.
 * `unit`: Type indicating the absence of a meaningful value for functions that return nothing.
 
+> **`any` is not a user-facing type.** The compiler uses it internally as the wildcard
+> parameter type of variadic builtins (`print`, `len`, `enumerate`, ...) and as a
+> placeholder during generic inference. It is deliberately unreachable from source:
+> `let x: any = ...` is rejected with `W1001`. A bidirectionally-assignable top type
+> would let a function declared `-> int` return a string unobserved, and would launder
+> the invariance of `list[T]` and `Weak[C]`.
+
 ### 4.2 Explicit Nullability (`T?`)
 * Types are **non-nullable by default**. Assigning `none` to a non-optional type is a compile-time error:
   ```w
@@ -103,9 +110,17 @@ Identifiers must start with an ASCII letter (`a-z`, `A-Z`) or underscore `_`, fo
   }
   ```
 
+A bare `return` is one that is followed by `}`, `)`, `]`, `,`, `else`, `elif` or EOF.
+It is **not** decided by line breaks: `return` followed by an expression on the next
+line returns that expression, and the value may span lines.
+
 ### 4.3 Composite Collections
 * `list[T]`: Dynamically sized contiguous homogeneous array (`[1, 2, 3]`).
 * `dict[K, V]`: Associative key-value table (`{"key": 42}`).
+  - **Reads:** `d[k]` yields `V` and panics with `W4002` when the key is absent. The
+    optional form is `d.get(k)`, which returns `V?` and never panics. W has no
+    auto-narrowing, so a single optional-deducing operator for the common case would
+    force every dictionary read through unwrapping ceremony.
   - **Key Domain & `float` Restriction (`W2010`):** Dictionary keys `K` must belong to W's predictable key domain (`int`, `str`, `bool`, or `enum`). While some languages permit floating-point dictionary keys by defining custom canonicalization rules for `NaN` bit patterns and signed zeros (`+0.0` vs `-0.0`), W deliberately restricts the dictionary key model for predictability and rejects `float` (and any composite type containing `float`) as a key type `K` at compile time with diagnostic `W2010` (`INVALID_DICT_KEY_TYPE`).
 * `tuple[T1, T2, ...]`: Fixed-size heterogeneous immutable product type (`(1, "ok", true)`).
 
@@ -204,7 +219,7 @@ Evaluation follows an explicit 12-level precedence hierarchy:
 | **3** | `-` `not` | Unary negation, logical NOT | Right |
 | **4** | `*` `/` `%` | Multiplicative | Left |
 | **5** | `+` `-` | Additive, string concatenation | Left |
-| **6** | `..` `..=` | Exclusive range, inclusive range | None |
+| **6** | `..` `..=` | Exclusive range, inclusive range | Left (chained ranges are accepted; a range is a value, not a comparator) |
 | **7** | `<` `<=` `>` `>=` | Relational comparisons | Left |
 | **8** | `==` `!=` | Equality comparisons | Left |
 | **9** | `and` | Short-circuit logical AND | Left |
@@ -248,7 +263,9 @@ Equality is partitioned cleanly along the value vs reference boundary:
 ### 6.1 Variables: Immutability by Default
 * `let x = 42`: Immutable binding with local type inference.
 * `let mut count = 0`: Mutable binding.
-* Function parameters are strictly typed and immutable within the body.
+* Function parameters are strictly typed and immutable within the body. There is no
+  `mut` modifier on a parameter; copy into a `let mut` local to mutate one. Value
+  semantics make that copy cheap (copy-on-write) and unambiguous.
 
 ### 6.2 Loops
 * **Element iteration:**
@@ -316,6 +333,12 @@ fn read_file(path: str) -> str ! IoError {
     # ...
 }
 ```
+
+If `main` returns a `Result` and that result is an `Err`, the runtime reports it on
+`stderr` as `W4003` and terminates with a non-zero status. W has no stack unwinding, so
+this is the only point where an error becomes visible to the process that started the
+program; discarding it would make a failing program indistinguishable from a success
+for `make`, CI or a shell script.
 
 Handling strategies:
 1. **Propagation via `?`:**
@@ -450,7 +473,7 @@ fn compile(source: str) {
 | `str(x)` | `(any) -> str` | Converts any runtime value to its canonical string representation |
 | `ord(s)` | `(str) -> int` | Returns the Unicode code point of the first character in `s` |
 | `chr(c)` | `(int) -> str` | Returns a single-code-point UTF-8 string for code point `c` |
-| `slice(x, a, b)` | `(str \| list[T], int, int) -> str \| list[T]` | Returns code-point substring or sub-list in `[a, b)` |
+| `slice(x, a, b)` | `(str \| list[T], int, int) -> str \| list[T]` | Returns code-point substring or sub-list in `[a, b)`. Preserves the container kind; out-of-range bounds are clamped and an empty result is returned when `b <= a` |
 | `bytes(s)` | `(str) -> list[int]` | Returns raw UTF-8 unsigned bytes (`0..=255`) of `s` |
 | `args()` | `() -> list[str]` | Returns command-line arguments passed to the program |
 | `read_file(p)` | `(str) -> str ! IoError` | Reads a UTF-8 file from disk or returns `IoError` |
@@ -490,20 +513,24 @@ Step 3: Stage-2 Fixed-Point Verification (`w1_stage2`)
 
 ## 13. Language Evolution Roadmap
 
-W evolves in disciplined, semantically verified increments while keeping the canonical `W` language name, `.w` file extension, and `w` CLI:
+Reconstructed from what the toolchain actually implements. Every entry below is
+present in the tree and covered by the test suite unless marked otherwise.
 
 * **`v0.1.0` — Core + Self-Host + OOP** ✅
 * **`v0.1.1` — Harden & Oracle** ✅
 * **`v0.1.2` — Diagnostics & Stress** ✅
-* **`v0.1.3` — Ownership & Self-Host Parity** (deterministic `CleanupScope` / `w_release` across all exits, standalone `W1` semantic & diagnostic parity, memory stress verification)
-* **`v0.2` — Generics + Monomorphization** (`v0.2-alpha1` generic structs $\rightarrow$ `v0.2-alpha2` generic functions $\rightarrow$ `v0.2-alpha3` generic enums $\rightarrow$ `v0.2-alpha4` generic classes)
-* **`v0.3` — Function Types + Typed HIR**
-* **`v0.4` — Closures + HOFs**
-* **`v0.5` — Modules + Self-Host Split** (modular `.w` compiler passes)
-* **`v0.6` — Stdlib + LSP**
-
-
-
+* **`v0.1.3` — Ownership & Self-Host Parity** ✅ (deterministic cleanup scopes, W1 semantic and diagnostic parity on the core subset)
+* **`v0.2.0` — Generics, ADTs & Option/Result unification** ✅ (monomorphization for structs, functions, enums and classes)
+* **`v0.2.x` — Copy-on-write telemetry, weak class references, compilation sessions** ✅
+* **`v0.3.0` — Typed HIR as the default backend, `LayoutGraph` finite-layout verification, declaration-order independence** ✅
+* **`v0.3.0` (Phase E) — First-class functions, closures, modules, FFI, stdlib, LSP** ✅
+* **`v0.4` — not scheduled.** Candidate work, each gated on the decisions in
+  `docs/EXPANSION.md`:
+  - error composition (`T ! E1 | E2`) so a function can propagate more than one error type;
+  - mutable closure captures through shared cells, so a closure can mutate captured state;
+  - concurrency or an explicit statement that the runtime stays single-threaded;
+  - W1 generics and `Option`/`Result` pattern matching (milestone D02), which is what
+    the "self-hosted" claim currently rests on.
 
 ## Phase A error composition clarification
 
@@ -549,7 +576,7 @@ W distinguishes between two distinct compiler guarantees:
 * **Bootstrap Fixed-Point:** A 3-stage bootstrap self-compilation of `selfhost/w1.w` produces bit-identical C code:
   $$\text{SHA256}(c_0) == \text{SHA256}(c_1) == \text{SHA256}(c_2)$$
   This guarantees determinism and convergence of the self-hosted compiler subset.
-* **Feature Parity:** Documented in `docs/ENGINE_PARITY_MATRIX.md`. The W0 toolchain implements 100% of the language specification (107/107 fixtures). W1 implements 100% of the core language subset (91/91 fixtures); generics and multi-file compilation sessions are supported via the bootstrap pipeline.
+* **Feature Parity:** Documented in `docs/ENGINE_PARITY_MATRIX.md`, and measured rather than declared: the counts in that file come from `summary.json`, which is produced by an actual run of `tools/ci_conformance.py` over the corpus. The W0 toolchain passes all 107 corpus fixtures on all three of its engines. W1 passes the 91 core fixtures and rejects the 16 `generics` and `checked_modules` fixtures with `W2013`; it does **not** support generic specialization or checked-module sessions, and does not pattern-match `Option` or `Result`.
 
 ### 14.3 Code Generation Determinism
 Given identical source text and compiler flags:
@@ -558,6 +585,6 @@ Given identical source text and compiler flags:
 
 ### 14.4 Telemetry & Standard Stream Separation
 Under the `--stats` flag:
-1. Diagnostic telemetry reports phase timings (`timing_ms`: `lex`, `parse`, `check`, `hir`, `codegen`, `total`), peak RSS (`peak_rss_kb`), and specialization counters (`requested`, `unique`, `cache_hits`).
+1. Diagnostic telemetry reports phase timings under `timing_ms` (`lex`, `parse`, `check`, `total` for `run`/`build`; `hir` and `codegen` are added when a backend runs), peak RSS (`peak_rss_kb`), and the specialization counters reported by `MonomorphizationTelemetry.to_dict()` (`specialization_requests`, `deduplicated_hits`, `specialized_structs`, `specialized_enums`, `specialized_functions`).
 2. Execution commands (`run --stats`, `build --stats`) write JSON telemetry strictly to `stderr`, leaving program `stdout` unpolluted for exact differential oracle verification. Check commands (`check --stats`) emit JSON telemetry to `stdout`.
 

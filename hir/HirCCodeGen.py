@@ -255,14 +255,23 @@ class HirCCodeGen:
         self.symbol_names.clear()
         self.declared_names.clear()
         self.declared_names.update(self.global_vars)
-        for stmt in module.top_level_stmts:
+        top_stmts = list(module.top_level_stmts)
+        entry_call = top_stmts[-1] if top_stmts and self._is_entrypoint_call(top_stmts[-1]) else None
+        for stmt in top_stmts:
             if isinstance(stmt, HirLet) and stmt.symbol_id is not None:
                 self.symbol_names[stmt.symbol_id.id] = f"v_{stmt.name}"
-            self.emit_stmt(stmt, main_stmts)
+            if stmt is entry_call:
+                # The module calls main() explicitly at top level. Its Result must
+                # not be discarded, or a failed program would exit 0 silently.
+                main_stmts.append("WVal _t_main = " + self.emit_expr(stmt.expr, main_stmts) + ";")
+                self._emit_entrypoint_guard(main_stmts)
+            else:
+                self.emit_stmt(stmt, main_stmts)
         self.is_top_level = False
 
         if getattr(module, "call_entrypoint", not module.top_level_stmts) and "w_fn_main" in self.fallible_fns:
-            main_stmts.append("w_release(w_fn_main());")
+            main_stmts.append("WVal _t_main = w_fn_main();")
+            self._emit_entrypoint_guard(main_stmts)
 
         self._pop_scope(main_stmts)
         self._emit_oop_dispatchers()
@@ -498,7 +507,12 @@ class HirCCodeGen:
 
         if isinstance(stmt, HirBindTemp):
             val = self.emit_expr(stmt.init_expr, out)
-            self._declare_owned_var(stmt.temp_name, self._own_expr(val), out)
+            # Must go through c_var_decl, which is what registers the symbol-to-C-name
+            # mapping. Declaring the raw temp_name here made the emitted variable
+            # `v_<temp>` while every later HirLocalRef resolved to `v_v_<temp>`, and the
+            # C compiler rejected the result with "use of undeclared identifier".
+            self._declare_owned_var(self.c_var_decl(stmt.temp_name, stmt.symbol_id),
+                                    self._own_expr(val), out)
             return
 
         if isinstance(stmt, HirAssign):
@@ -642,6 +656,30 @@ class HirCCodeGen:
         values = [self.emit_value(argument, out) for argument in args]
         array = "(WVal[]){ " + ", ".join(values) + " }" if values else "NULL"
         return self._bind_call(f"w_call({function}, {len(values)}, {array})", out)
+
+    def _is_entrypoint_call(self, stmt) -> bool:
+        """True when `stmt` is a direct top-level call whose Result is consumed.
+
+        Such calls return the value of `main` (the `main()` line that closes a W
+        program) and their Result must be inspected rather than discarded.
+        """
+        if not isinstance(stmt, HirExprStmt):
+            return False
+        expr = stmt.expr
+        return isinstance(expr, HirDirectCall) and expr.fn_name == "main"
+
+    def _emit_entrypoint_guard(self, main_stmts: List[str]) -> None:
+        """Emits the entrypoint Result check and the mandatory release of `_t_main`.
+
+        W has no stack unwinding: a fallible entrypoint returns its error as a
+        value. Discarding it would make a failing program exit 0 with no output,
+        which is indistinguishable from success for make/CI/shell.
+        """
+        main_stmts.append(
+            "if (_t_main.tag == W_ERR) { w_report_entrypoint_error(_t_main.as.box->val); "
+            "w_release(_t_main); w_runtime_cleanup(); return 1; }"
+        )
+        main_stmts.append("w_release(_t_main);")
 
     def emit_expr(self, expr: HirExpr, out: List[str]) -> str:
         if isinstance(expr, HirClosure):

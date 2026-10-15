@@ -1,3 +1,4 @@
+# TOKENS: STR STR STR STR STR STR STR STR EOF
 "hello\nworld"
 "carriage\rreturn"
 "tab\ttab"

@@ -7,6 +7,7 @@
 #include <stdbool.h>
 #include <string.h>
 #include <inttypes.h>
+#include <float.h>
 #include <math.h>
 #include <errno.h>
 #include <ctype.h>
@@ -421,14 +422,78 @@ static inline WVal w_clone(WVal v) {
     return v;
 }
 
+/*
+ * Releasing a deeply nested value must not recurse: a 100k-deep list, tuple, enum
+ * payload chain or struct overflowed the C stack and died with SIGSEGV while
+ * freeing the program's result. `w_release` therefore frees one container and
+ * defers its children onto an explicit work list (w_release_deferred), which is
+ * drained iteratively in w_release.
+ */
+static WVal* w_release_deferred(WVal* slot, int32_t* produced);
+
 static inline void w_release(WVal v) {
+    WVal stack_work[64];
+    WVal* work = stack_work;
+    int32_t count = 0;
+    int32_t capacity = 64;
+    bool heap_work = false;
+
+    work[count++] = v;
+    while (count > 0) {
+        WVal current = work[--count];
+        int32_t produced = 0;
+        WVal* children = w_release_deferred(&current, &produced);
+        if (produced > 0) {
+            if (count + produced > capacity) {
+                int32_t new_capacity = capacity;
+                while (new_capacity < count + produced) new_capacity *= 2;
+                WVal* grown = (WVal*)malloc(sizeof(WVal) * (size_t)new_capacity);
+                if (!grown) { fprintf(stderr, "[W4003] RuntimeError: out of memory\n"); exit(1); }
+                memcpy(grown, work, sizeof(WVal) * (size_t)count);
+                if (heap_work) free(work);
+                work = grown;
+                capacity = new_capacity;
+                heap_work = true;
+            }
+            for (int32_t i = 0; i < produced; i++) work[count + i] = children[i];
+            count += produced;
+            free(children);
+        }
+    }
+    if (heap_work) free(work);
+}
+
+/*
+ * Frees one container level and returns a malloc'd array of the children that still
+ * need releasing. The array is drained by the caller's work list, so no C stack is
+ * consumed per nesting level.
+ */
+static WVal* w_release_deferred(WVal* slot, int32_t* produced) {
+    /*
+     * Frees exactly one container level and returns a malloc'd array of the children
+     * that still have to be released, draining nothing itself. Callers append those to
+     * their work list, which is what keeps `w_release` off the C stack: without this a
+     * 100k-deep list, tuple, enum payload chain or struct overflowed the stack and
+     * died with SIGSEGV while freeing the program result.
+     *
+     * `produced` is the number of entries written to the returned array.
+     */
+    WVal v = *slot;
+    *produced = 0;
     if (v.tag == W_FUNCTION) {
         w_check_refcount(v.as.function->refcount, "release/function");
         w_g_release_count++;
         if (--v.as.function->refcount == 0) {
-            w_release(v.as.function->environment);
+            WVal environment = v.as.function->environment;
             free(v.as.function);
             w_mem_on_free();
+            if (environment.tag != W_UNIT) {
+                WVal* out = (WVal*)malloc(sizeof(WVal));
+                if (!out) { fprintf(stderr, "[W4003] RuntimeError: out of memory\n"); exit(1); }
+                out[0] = environment;
+                *produced = 1;
+                return out;
+            }
         }
     } else if (v.tag == W_STR && v.string_owner) {
         WStringBuf* buffer = v.string_owner;
@@ -447,12 +512,15 @@ static inline void w_release(WVal v) {
         b->refcount--;
         if (b->refcount == 0) {
             b->refcount = -1;
-            for (int32_t i = 0; i < b->len; i++) {
-                w_release(b->data[i]);
-            }
+            WVal* out = b->len > 0 ? (WVal*)malloc(sizeof(WVal) * (size_t)b->len) : NULL;
+            int32_t len = b->len;
+            if (len > 0 && !out) { fprintf(stderr, "[W4003] RuntimeError: out of memory\n"); exit(1); }
+            for (int32_t i = 0; i < len; i++) out[i] = b->data[i];
             free(b->data);
             free(b);
             w_mem_on_free();
+            *produced = len;
+            return out;
         }
     } else if (v.tag == W_DICT && v.as.dict) {
         WDictBuf* d = v.as.dict;
@@ -461,15 +529,20 @@ static inline void w_release(WVal v) {
         d->refcount--;
         if (d->refcount == 0) {
             d->refcount = -1;
+            int32_t total = d->len * 2;
+            WVal* out = total > 0 ? (WVal*)malloc(sizeof(WVal) * (size_t)total) : NULL;
+            if (total > 0 && !out) { fprintf(stderr, "[W4003] RuntimeError: out of memory\n"); exit(1); }
             for (int32_t i = 0; i < d->len; i++) {
-                w_release(d->keys[i]);
-                w_release(d->vals[i]);
+                out[i * 2] = d->keys[i];
+                out[i * 2 + 1] = d->vals[i];
             }
             free(d->keys);
             free(d->vals);
             free(d->buckets);
             free(d);
             w_mem_on_free();
+            *produced = total;
+            return out;
         }
     } else if (v.tag == W_WEAK && v.as.weak) {
         WWeakControl* control = v.as.weak;
@@ -486,7 +559,10 @@ static inline void w_release(WVal v) {
         w_g_release_count++;
         if (--control->strong == 0) {
             control->object = NULL;
-            for (int32_t i = 0; i < object->len; i++) w_release(object->vals[i]);
+            int32_t len = object->len;
+            WVal* out = len > 0 ? (WVal*)malloc(sizeof(WVal) * (size_t)len) : NULL;
+            if (len > 0 && !out) { fprintf(stderr, "[W4003] RuntimeError: out of memory\n"); exit(1); }
+            for (int32_t i = 0; i < len; i++) out[i] = object->vals[i];
             free(object->keys);
             free(object->vals);
             free(object);
@@ -495,6 +571,8 @@ static inline void w_release(WVal v) {
                 free(control);
                 w_mem_on_free();
             }
+            *produced = len;
+            return out;
         }
     } else if (v.tag == W_STRUCT && v.as.st) {
         WStructBuf* st = v.as.st;
@@ -503,13 +581,16 @@ static inline void w_release(WVal v) {
         st->refcount--;
         if (st->refcount == 0) {
             st->refcount = -1;
-            for (int32_t i = 0; i < st->len; i++) {
-                w_release(st->vals[i]);
-            }
+            int32_t len = st->len;
+            WVal* out = len > 0 ? (WVal*)malloc(sizeof(WVal) * (size_t)len) : NULL;
+            if (len > 0 && !out) { fprintf(stderr, "[W4003] RuntimeError: out of memory\n"); exit(1); }
+            for (int32_t i = 0; i < len; i++) out[i] = st->vals[i];
             free(st->keys);
             free(st->vals);
             free(st);
             w_mem_on_free();
+            *produced = len;
+            return out;
         }
     } else if (v.tag == W_TUPLE && v.as.tuple) {
         WTupleBuf* t = v.as.tuple;
@@ -518,12 +599,15 @@ static inline void w_release(WVal v) {
         t->refcount--;
         if (t->refcount == 0) {
             t->refcount = -1;
-            for (int32_t i = 0; i < t->len; i++) {
-                w_release(t->items[i]);
-            }
+            int32_t len = t->len;
+            WVal* out = len > 0 ? (WVal*)malloc(sizeof(WVal) * (size_t)len) : NULL;
+            if (len > 0 && !out) { fprintf(stderr, "[W4003] RuntimeError: out of memory\n"); exit(1); }
+            for (int32_t i = 0; i < len; i++) out[i] = t->items[i];
             free(t->items);
             free(t);
             w_mem_on_free();
+            *produced = len;
+            return out;
         }
     } else if ((v.tag == W_OK || v.tag == W_ERR) && v.as.box) {
         WBoxBuf* bx = v.as.box;
@@ -532,9 +616,14 @@ static inline void w_release(WVal v) {
         bx->refcount--;
         if (bx->refcount == 0) {
             bx->refcount = -1;
-            w_release(bx->val);
+            WVal inner = bx->val;
             free(bx);
             w_mem_on_free();
+            WVal* out = (WVal*)malloc(sizeof(WVal));
+            if (!out) { fprintf(stderr, "[W4003] RuntimeError: out of memory\n"); exit(1); }
+            out[0] = inner;
+            *produced = 1;
+            return out;
         }
     } else if (v.tag == W_ENUM && v.as.en.box) {
         WBoxBuf* bx = v.as.en.box;
@@ -543,11 +632,17 @@ static inline void w_release(WVal v) {
         bx->refcount--;
         if (bx->refcount == 0) {
             bx->refcount = -1;
-            w_release(bx->val);
+            WVal inner = bx->val;
             free(bx);
             w_mem_on_free();
+            WVal* out = (WVal*)malloc(sizeof(WVal));
+            if (!out) { fprintf(stderr, "[W4003] RuntimeError: out of memory\n"); exit(1); }
+            out[0] = inner;
+            *produced = 1;
+            return out;
         }
     }
+    return NULL;
 }
 
 /* Consumes the environment; invocation borrows function, environment and arguments. */
@@ -1178,17 +1273,18 @@ static inline WVal w_index_get(WVal obj, WVal idx) {
     }
     if (obj.tag == W_DICT) {
         int32_t index = w_dict_find(obj.as.dict, idx);
-        return index >= 0 ? obj.as.dict->vals[index] : w_none();
+        if (index < 0) {
+            /* SPEC 10.2: a missing key is W4002. `d.get(k)` is the optional form. */
+            fprintf(stderr, "[W4002] RuntimeError: Dictionary key not found\n");
+            exit(1);
+        }
+        return obj.as.dict->vals[index];
     }
     fprintf(stderr, "[W4003] RuntimeError: Cannot index object of tag %d\n", obj.tag);
     exit(1);
 }
 
 static inline WVal w_index_get_owned(WVal object, WVal index) {
-    if (object.tag == W_DICT) {
-        int32_t found = w_dict_find(object.as.dict, index);
-        return found >= 0 ? w_enum_payload("Option", "Some", w_clone(object.as.dict->vals[found])) : w_none();
-    }
     WVal value = w_index_get(object, index);
     return object.tag == W_STR ? value : w_clone(value);
 }
@@ -1290,7 +1386,11 @@ static inline WVal w_list_clear(WVal* list_val) {
 }
 
 static inline WVal w_dict_get(WVal dict_val, WVal key) {
-    return w_index_get_owned(dict_val, key);
+    /* The optional lookup: unlike `d[k]`, an absent key is `none`, not W4002. */
+    if (dict_val.tag != W_DICT) return w_none();
+    int32_t found = w_dict_find(dict_val.as.dict, key);
+    if (found < 0) return w_none();
+    return w_enum_payload("Option", "Some", w_clone(dict_val.as.dict->vals[found]));
 }
 
 static inline WVal w_dict_keys(WVal dict_val) {
@@ -1397,6 +1497,126 @@ static inline WVal w_ge(WVal a, WVal b) {
     exit(1);
 }
 
+/*
+ * Shortest round-trip formatting for binary64, matching Python's `repr(float)`.
+ *
+ * The previous implementation used "%g" (six significant digits) plus a ".0"
+ * heuristic, so `0.1 + 0.2` printed `0.3` and `1.0 / 3.0` printed `0.333333` in
+ * compiled programs while the interpreter printed `0.30000000000000004` and
+ * `0.3333333333333333`. Two engines disagreeing on how they print a float is a
+ * language-level bug, not a cosmetic one.
+ *
+ * The digits are found by trying precisions 1..17 and keeping the first whose
+ * value reads back as the same double; 17 significant digits always suffice.
+ * Python's presentation rule is then applied: fixed notation while the decimal
+ * exponent is in [-4, 15], scientific notation outside it, and a ".0" suffix for
+ * an integral value so that floats stay distinguishable from ints. Infinities and
+ * NaN print as `inf`, `-inf` and `nan`.
+ */
+static inline char* w_format_float(double value) {
+    char* buf = (char*)w_alloc_safe(40);
+    if (value != value) { strcpy(buf, "nan"); return buf; }
+    if (value > DBL_MAX) { strcpy(buf, "inf"); return buf; }
+    if (value < -DBL_MAX) { strcpy(buf, "-inf"); return buf; }
+    if (value == 0.0) {
+        strcpy(buf, signbit(value) ? "-0.0" : "0.0");
+        return buf;
+    }
+
+    char digits[32];
+    int exponent = 0;
+    int length = 0;
+    for (int precision = 1; precision <= 17; precision++) {
+        char candidate[48];
+        snprintf(candidate, sizeof(candidate), "%.*e", precision - 1, value);
+        if (strtod(candidate, NULL) == value) {
+            const char* mantissa = candidate;
+            bool negative = (*mantissa == '-');
+            if (negative) mantissa++;
+            int written = 0;
+            for (const char* p = mantissa; *p && *p != 'e' && *p != 'E'; p++) {
+                if (*p == '.') continue;
+                if (written < (int)sizeof(digits) - 1) digits[written++] = *p;
+            }
+            digits[written] = 0;
+            const char* e = strchr(mantissa, 'e');
+            exponent = e ? (int)strtol(e + 1, NULL, 10) : 0;
+            length = written;
+            while (length > 1 && digits[length - 1] == '0') length--;
+            if (negative) {
+                /* Re-attach the sign by shifting the digit buffer. */
+                memmove(digits + 1, digits, (size_t)length);
+                digits[0] = '-';
+                length++;
+            }
+            break;
+        }
+    }
+    if (length == 0) {
+        /* Unreachable: 17 significant digits always round-trip. */
+        snprintf(buf, 40, "%.17g", value);
+        if (!strchr(buf, '.') && !strchr(buf, 'e')) strcat(buf, ".0");
+        return buf;
+    }
+
+    bool negative = digits[0] == '-';
+    const char* body = negative ? digits + 1 : digits;
+    int digit_count = negative ? length - 1 : length;
+
+    if (exponent < -4 || exponent >= 16) {
+        char* out = buf;
+        if (negative) *out++ = '-';
+        *out++ = body[0];
+        /* Python does not pad the mantissa: `1e-05`, not `1.0e-05`. */
+        if (digit_count > 1) {
+            *out++ = '.';
+            memcpy(out, body + 1, (size_t)(digit_count - 1));
+            out += digit_count - 1;
+        }
+        *out++ = 'e';
+        int written = snprintf(out, 8, "%+03d", exponent);
+        (void)written;
+        return buf;
+    }
+
+    if (exponent >= digit_count - 1) {
+        /* Integral value: digits then trailing zeros, then ".0". */
+        char* out = buf;
+        if (negative) *out++ = '-';
+        memcpy(out, body, (size_t)digit_count);
+        out += digit_count;
+        for (int i = 0; i < exponent - (digit_count - 1); i++) *out++ = '0';
+        *out++ = '.';
+        *out++ = '0';
+        *out = 0;
+        return buf;
+    }
+
+    if (exponent >= 0) {
+        char* out = buf;
+        if (negative) *out++ = '-';
+        memcpy(out, body, (size_t)(exponent + 1));
+        out += exponent + 1;
+        *out++ = '.';
+        memcpy(out, body + exponent + 1, (size_t)(digit_count - exponent - 1));
+        out += digit_count - exponent - 1;
+        *out = 0;
+        return buf;
+    }
+
+    {
+        char* out = buf;
+        if (negative) *out++ = '-';
+        *out++ = '0';
+        *out++ = '.';
+        for (int i = 0; i < -exponent - 1; i++) *out++ = '0';
+        memcpy(out, body, (size_t)digit_count);
+        out += digit_count;
+        *out = 0;
+        return buf;
+    }
+}
+
 /* Formatting & String Conversion (matching W0 Values.__str__ exactly) */
 /* Internal module identity is retained for equality/dispatch, not display. */
 static inline const char* w_nominal_display_name(const char* name) {
@@ -1433,14 +1653,8 @@ static inline char* w_to_cstr(WVal v, bool quote_str) {
             buf = (char*)w_alloc_safe(32);
             snprintf(buf, 32, "%" PRId64, v.as.i);
             return buf;
-        case W_FLOAT: {
-            buf = (char*)w_alloc_safe(64);
-            snprintf(buf, 64, "%g", v.as.f);
-            if (!strchr(buf, '.') && !strchr(buf, 'e') && !strchr(buf, 'E')) {
-                strcat(buf, ".0");
-            }
-            return buf;
-        }
+        case W_FLOAT:
+            return w_format_float(v.as.f);
         case W_BOOL:
             buf = (char*)w_alloc_safe(6);
             strcpy(buf, v.as.b ? "true" : "false");
@@ -1765,6 +1979,18 @@ static inline WVal w_builtin_chr(WVal v) {
 }
 
 static inline WVal w_builtin_slice(WVal s, WVal start, WVal end) {
+    if (s.tag == W_LIST) {
+        /* SPEC 11.1: slice() is polymorphic over str and list[T]. */
+        WListBuf* b = s.as.list;
+        int64_t st = start.as.i < 0 ? 0 : start.as.i;
+        int64_t en = end.as.i > b->len ? b->len : end.as.i;
+        if (en <= st) return w_make_list(0, NULL);
+        return w_make_list((int32_t)(en - st), b->data + st);
+    }
+    if (s.tag != W_STR) {
+        fprintf(stderr, "[W4003] RuntimeError: slice() expects str or list\n");
+        exit(1);
+    }
     int64_t total_cp = w_utf8_cp_len_n(s.as.s, s.string_length);
     int64_t st = start.as.i < 0 ? 0 : start.as.i;
     int64_t en = end.as.i > total_cp ? total_cp : end.as.i;
@@ -1888,6 +2114,37 @@ static inline WVal w_builtin_write_file(WVal path, WVal content) {
 
 static int w_g_argc = 0;
 static char** w_g_argv = NULL;
+
+/*
+ * Propagates an unhandled `Err` out of the program entrypoint.
+ *
+ * W has no stack unwinding, so a fallible `main` returns its error as a value.
+ * Discarding that value would make a failed program indistinguishable from a
+ * successful one (exit code 0, no output) to make/CI/shell. The entrypoint
+ * therefore reports the error on stderr and signals failure to the caller,
+ * which terminates with a non-zero status.
+ *
+ * Error structs that expose a `message: str` field print that field; anything
+ * else prints through the ordinary value formatter.
+ */
+static inline void w_report_entrypoint_error(WVal error) {
+    const char* message = NULL;
+    if (error.tag == W_STRUCT && strcmp(error.as.st->name, "IoError") == 0) {
+        for (int32_t i = 0; i < error.as.st->len; i++) {
+            if (strcmp(error.as.st->keys[i], "message") == 0 && error.as.st->vals[i].tag == W_STR) {
+                message = error.as.st->vals[i].as.s;
+                break;
+            }
+        }
+    }
+    if (message) {
+        fprintf(stderr, "[W4003] RuntimeError: %s\n", message);
+        return;
+    }
+    char* rendered = w_to_cstr(error, false);
+    fprintf(stderr, "[W4003] RuntimeError: unhandled error returned by main: %s\n", rendered);
+    free(rendered);
+}
 
 static inline void w_init_args(int argc, char** argv) {
     w_g_argc = argc;

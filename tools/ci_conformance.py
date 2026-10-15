@@ -13,9 +13,29 @@ sys.path.insert(0, str(ROOT))
 from tests.engine_harness import ENGINES, PROFILES, corpus_paths, execute, verify_case
 
 
-def generate_markdown_matrix() -> str:
+def _measured_summary():
+    """Reads the per-engine results produced by the last verified run.
+
+    The matrix used to be printed straight from `engine_profiles.json`: it never ran a
+    compiler and emitted `✅ n/n` unconditionally, so the published parity table could
+    not disagree with the declaration file it was derived from. It now reports only
+    measured results, and says so explicitly when no run is available.
+    """
+    summary_path = Path(os.environ.get('W_CI_ARTIFACTS', ROOT / '.w_cache/ci-artifacts')) / 'summary.json'
+    if not summary_path.exists():
+        return None
+    try:
+        return json.loads(summary_path.read_text())
+    except (OSError, ValueError):
+        return None
+
+
+def generate_markdown_matrix(measured=None) -> str:
     positives, negatives = corpus_paths()
     fixtures = positives + negatives
+    if measured is None:
+        measured = _measured_summary()
+    coverage = (measured or {}).get('coverage') or {}
 
     by_feature = {}
     for path in fixtures:
@@ -35,25 +55,70 @@ def generate_markdown_matrix() -> str:
     w0_hir_tot = 0
     w1_tot = 0
 
+    engine_columns = ('interpreter', 'ast', 'hir', 'w1')
+    labels = {'interpreter': 'W0 Interpreter', 'ast': 'W0 AST C99',
+              'hir': 'W0 Typed HIR (Default)', 'w1': 'W1 Self-Hosted C99'}
+
+    def cell(engine, feature, count):
+        stats = (coverage.get(engine) or {})
+        if feature is not None:
+            stats = ((measured or {}).get('features') or {}).get(feature, {}).get(engine) or {}
+        passed = stats.get('passed')
+        unsupported = stats.get('unsupported', 0)
+        failed = stats.get('failed', 0)
+        if passed is None:
+            return '—'
+        mark = '✅' if failed == 0 else '❌'
+        if unsupported:
+            return f"⏳ {passed}/{count} ({unsupported} declared unsupported)"
+        return f"{mark} {passed}/{count}"
+
     feature_order = ['core', 'generics', 'checked_modules']
     for feat in feature_order:
         items = by_feature.get(feat, [])
         count = len(items)
         unsupported_w1 = PROFILES.get('features', {}).get(feat, {}).get('w1', '')
-        w0_interp_tot += count
-        w0_ast_tot += count
-        w0_hir_tot += count
-        if unsupported_w1:
-            w1_status = f"⏳ 0/{count} (Unsupported)"
-            note = f"Pending {unsupported_w1.split(':')[0].strip()}"
+        note = f"Pending {unsupported_w1.split(':')[0].strip()}" if unsupported_w1 else "Declared supported"
+        cells = [cell(engine, feat, count) for engine in engine_columns]
+        rows.append(f"| **`{feat}`** | {count} | " + " | ".join(cells) + f" | {note} |")
+        for engine in engine_columns:
+            stats = ((measured or {}).get('features') or {}).get(feat, {}).get(engine) or {}
+            if stats.get('passed'):
+                if engine == 'w1':
+                    w1_tot += stats['passed']
+                else:
+                    pass
+
+    totals = []
+    for engine in engine_columns:
+        stats = coverage.get(engine) or {}
+        passed = stats.get('passed')
+        if passed is None:
+            totals.append('—')
         else:
-            w1_tot += count
-            w1_status = f"✅ {count}/{count} (Supported)"
-            note = "Stable (100% Parity)"
-
-        rows.append(f"| **`{feat}`** | {count} | ✅ {count}/{count} | ✅ {count}/{count} | ✅ {count}/{count} | {w1_status} | {note} |")
-
-    rows.append(f"| **Total Verified** | **{tot_fixtures}** | **{w0_interp_tot}/{tot_fixtures} (100%)** | **{w0_ast_tot}/{tot_fixtures} (100%)** | **{w0_hir_tot}/{tot_fixtures} (100%)** | **{w1_tot}/{tot_fixtures} ({w1_tot/tot_fixtures*100:.1f}%)** | **Full W0 Parity &bull; W1 Core Subset** |")
+            totals.append(f"**{passed}/{tot_fixtures} ({passed / tot_fixtures * 100:.1f}%)**")
+    stale_warning = False
+    measured_labels = set((measured or {}).get('corpus') or [])
+    current_labels = {str(path.relative_to(ROOT)) for path in fixtures}
+    if measured and measured_labels != current_labels:
+        missing = sorted(current_labels - measured_labels)[:3]
+        stale = sorted(measured_labels - current_labels)[:3]
+        verdict = (f'STALE: summary.json covers a different corpus '
+                   f'(missing {missing}, no longer present {stale}); rerun ci_conformance.py')
+        stale_warning = True
+    elif measured:
+        verdict = 'measured'
+    else:
+        verdict = 'no verified run in this workspace; run ci_conformance.py first'
+    rows.append(f"| **Total Verified** | **{tot_fixtures}** | " + " | ".join(totals) + f" | _{verdict}_ |")
+    if stale_warning:
+        rows.append("")
+        rows.append(f"> **Warning:** {verdict}")
+    rows.append("")
+    rows.append("")
+    rows.append("Counts above come from `summary.json`, produced by an actual run of "
+                "`tools/ci_conformance.py` over the corpus. They are measurements, not a "
+                "restatement of `tests/engine_profiles.json`.")
     rows.append("")
     rows.append("### Engine Definitions")
     rows.append("- **W0 Interpreter (`runtime/Interpreter.py`):** Canonical reference AST tree-walking interpreter.")
@@ -123,7 +188,8 @@ def main():
                 feature_rows[engine][state] += 1
             print(f"  [{'PASS' if ok else 'FAIL'}] {label}" + ('' if ok else ': ' + detail), flush=True)
     summary = {'profile': profile, 'passed_cases': passed, 'total_cases': len(fixtures),
-               'coverage': coverage, 'features': feature_coverage, 'support_files': support_files}
+               'coverage': coverage, 'features': feature_coverage, 'support_files': support_files,
+               'corpus': sorted(labels)}
     (artifacts / 'summary.json').write_text(json.dumps(summary, indent=2))
     print(json.dumps(summary, indent=2))
     return 0 if passed == len(fixtures) else 1
