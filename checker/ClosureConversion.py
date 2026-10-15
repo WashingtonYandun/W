@@ -1,0 +1,136 @@
+"""Convert lexical lambdas into explicit snapshot environments and free functions."""
+import copy
+from node import NodeType as A
+from checker.WType import FunctionType, StructType
+from checker.SymbolTable import Scope, Symbol
+from error.Error import TypeError
+
+
+def convert_lambda(checker, expression):
+    if hasattr(expression, 'function_name') and hasattr(expression, 'inferred_type'):
+        checker._check_expr(expression.environment)
+        return expression.inferred_type
+    expected = checker.expected_type if isinstance(checker.expected_type, FunctionType) else None
+    if expected and len(expected.params) != len(expression.params):
+        raise TypeError('Lambda arity does not match expected signature', file=checker.file,
+                        line=expression.line, col=expression.col, code='W2005')
+    parameter_types = []
+    for index, parameter in enumerate(expression.params):
+        if parameter.type_ann is not None:
+            type_ = checker._resolve_type_node(parameter.type_ann)
+        elif expected:
+            type_ = expected.params[index]
+            parameter.type_ann = checker._wtype_to_type_node(type_)
+        else:
+            raise TypeError('Lambda parameters require annotations or a function type context', file=checker.file,
+                            line=parameter.line, col=parameter.col, code='W2001')
+        parameter_types.append(type_)
+    returned = checker._resolve_type_node(expression.return_type) if expression.return_type else expected.ret if expected else None
+    outer = checker.current_scope
+    scope = Scope(parent=outer, is_function_scope=True)
+    for parameter, type_ in zip(expression.params, parameter_types):
+        scope.define_symbol(Symbol(parameter.name, type_, kind='param'), file=checker.file)
+    previous_expected = checker.expected_type
+    previous_ret, previous_depth = checker.current_fn_ret_type, checker.loop_depth
+    checker.current_scope, checker.current_fn_ret_type, checker.loop_depth = scope, returned, 0
+    checker.expected_type = returned
+    try:
+        inferred = checker._check_block(expression.body)
+        returned = returned or inferred
+        if returned is None:
+            raise TypeError('Block lambda needs an explicit return type', file=checker.file,
+                            line=expression.line, col=expression.col, code='W2001')
+    finally:
+        checker.current_scope, checker.current_fn_ret_type, checker.loop_depth = outer, previous_ret, previous_depth
+        checker.expected_type = previous_expected
+    signature = FunctionType(parameter_types, returned)
+    if expected and signature != expected:
+        raise TypeError('Lambda signature must match exactly', file=checker.file,
+                        line=expression.line, col=expression.col, code='W2001')
+    captures = {}
+    body = copy.deepcopy(expression.body)
+    checker.closure_counter += 1
+    name = '_W_Closure_' + str(checker.closure_counter)
+    environment_name = name + '_Env'
+    environment_parameter = '__w_environment'
+
+    def rewrite(node, bound):
+        if isinstance(node, A.LambdaExpr) and hasattr(node, 'environment'):
+            node.environment = rewrite(node.environment, bound)
+            return node
+        if isinstance(node, A.ThisExpr) or isinstance(node, A.SuperExpr):
+            raise TypeError('Capture this through an explicit local binding', file=checker.file,
+                            line=node.line, col=node.col, code='W2001')
+        if isinstance(node, A.IdentExpr) and node.name not in bound:
+            symbol = outer.lookup_symbol(node.name)
+            if symbol and symbol.kind in ('var', 'param'):
+                captures[node.name] = symbol.type
+                return A.MemberExpr(A.IdentExpr(environment_parameter, node.line, node.col),
+                                    node.name, node.line, node.col)
+        if isinstance(node, A.Block):
+            local = set(bound)
+            for index, statement in enumerate(node.statements):
+                node.statements[index] = rewrite(statement, local)
+                if isinstance(statement, A.LetDecl):
+                    local.add(statement.name)
+            node.tail_expr = rewrite(node.tail_expr, local)
+            return node
+        if isinstance(node, A.ForStmt):
+            node.iterable = rewrite(node.iterable, bound)
+            names = pattern_names(node.pattern)
+            node.body = rewrite(node.body, bound | names)
+            return node
+        if isinstance(node, A.MatchArm):
+            local = bound | pattern_names(node.pattern)
+            node.guard = rewrite(node.guard, local)
+            node.body = rewrite(node.body, local)
+            return node
+        if isinstance(node, A.Node):
+            for field, child in list(vars(node).items()):
+                if isinstance(child, A.Node):
+                    setattr(node, field, rewrite(child, bound))
+                elif isinstance(child, list):
+                    setattr(node, field, [rewrite(item, bound) for item in child])
+        return node
+
+    def pattern_names(pattern):
+        if isinstance(pattern, A.IdentifierPattern):
+            return {pattern.name}
+        names = set()
+        for field in ('elements', 'args'):
+            for child in getattr(pattern, field, []):
+                names |= pattern_names(child)
+        return names
+
+    body = rewrite(body, {p.name for p in expression.params})
+    environment_type = StructType(environment_name, captures)
+    checker.global_scope.define_type(environment_name, environment_type, file=checker.file)
+    checker.interner.from_wtype(environment_type)
+    fields = [A.StructField(key, checker._wtype_to_type_node(type_)) for key, type_ in captures.items()]
+    environment_decl = A.StructDecl(environment_name, fields)
+    # Resolve field syntax metadata before lowering synthetic declarations.
+    for field in fields:
+        checker._resolve_type_node(field.type_ann)
+    checker.monomorphized_struct_decls.append(environment_decl)
+    environment_annotation = checker._wtype_to_type_node(environment_type)
+    parameters = [A.Param(environment_parameter, environment_annotation)] + expression.params
+    return_annotation = checker._wtype_to_type_node(returned)
+    checker._resolve_type_node(return_annotation)
+    declaration = A.FnDecl(name, parameters, return_annotation, body)
+    checker.global_scope.define_symbol(Symbol(name, FunctionType([environment_type] + parameter_types, returned), kind='fn'), file=checker.file)
+    checker.monomorphized_fn_decls.append(declaration)
+    checker.current_scope = checker.global_scope
+    try:
+        checker._check_fn_decl(declaration)
+    finally:
+        checker.current_scope = outer
+    initializers = []
+    for key in captures:
+        value = A.IdentExpr(key, expression.line, expression.col)
+        checker._check_expr(value)
+        initializers.append(A.FieldInit(key, value))
+    environment = A.StructInitExpr(environment_name, initializers, line=expression.line, col=expression.col)
+    checker._check_expr(environment)
+    expression.function_name = name
+    expression.environment = environment
+    return signature

@@ -494,6 +494,19 @@ class HirLocalRef(HirExpr):
         self.symbol_id = symbol_id or SymbolId(0, name)
 
 
+class HirFunctionRef(HirExpr):
+    def __init__(self, name, type_id, span):
+        super().__init__(type_id, span)
+        self.name = name
+
+
+class HirIndirectCall(HirExpr):
+    def __init__(self, callee, args, type_id, span):
+        super().__init__(type_id, span)
+        self.callee = callee
+        self.args = args
+
+
 class HirThisRef(HirExpr):
     def __init__(self, type_id: int, span: Span):
         super().__init__(type_id, span)
@@ -716,3 +729,10 @@ class HirMatch(HirExpr):
         super().__init__(type_id, span)
         self.subject = subject
         self.arms = arms
+
+
+class HirClosure(HirExpr):
+    def __init__(self, name, environment, type_id, span):
+        super().__init__(type_id, span)
+        self.name = name
+        self.environment = environment

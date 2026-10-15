@@ -50,6 +50,17 @@ class GenericType(TypeNode):
         args_str = ", ".join(str(a) for a in self.type_args)
         return f"{self.name}[{args_str}]"
 
+class FunctionType(TypeNode):
+    def __init__(self, params, return_type, line=1, col=1):
+        super().__init__(line, col)
+        self.params = params
+        self.return_type = return_type
+
+    def to_dict(self):
+        return {"kind": "FunctionType", "params": [p.to_dict() for p in self.params],
+                "return_type": self.return_type.to_dict(), "line": self.line, "col": self.col}
+
+
 class TypeParam(Node):
     def __init__(self, name: str, constraint: Optional[TypeNode] = None, line: int = 1, col: int = 1):
         super().__init__(line, col)
@@ -371,15 +382,17 @@ class InterfaceMethod(Node):
         }
 
 class InterfaceDecl(Stmt):
-    def __init__(self, name: str, methods: List[InterfaceMethod], line: int = 1, col: int = 1):
+    def __init__(self, name: str, methods: List[InterfaceMethod], line: int = 1, col: int = 1, type_params=None):
         super().__init__(line, col)
         self.name = name
         self.methods = methods
+        self.type_params = type_params or []
 
     def to_dict(self) -> dict:
         return {
             "kind": "InterfaceDecl",
             "name": self.name,
+            "type_params": [p.to_dict() for p in self.type_params],
             "methods": [m.to_dict() for m in self.methods],
             "line": self.line,
             "col": self.col
@@ -432,7 +445,8 @@ class ClassDecl(Stmt):
         fields: List[ClassField],
         methods: List[MethodDecl],
         line: int = 1,
-        col: int = 1
+        col: int = 1,
+        type_params=None
     ):
         super().__init__(line, col)
         self.name = name
@@ -440,13 +454,15 @@ class ClassDecl(Stmt):
         self.interfaces = interfaces
         self.fields = fields
         self.methods = methods
+        self.type_params = type_params or []
 
     def to_dict(self) -> dict:
         return {
             "kind": "ClassDecl",
             "name": self.name,
-            "superclass": self.superclass,
-            "interfaces": self.interfaces,
+            "superclass": self.superclass.to_dict() if isinstance(self.superclass, TypeNode) else self.superclass,
+            "interfaces": [t.to_dict() if isinstance(t, TypeNode) else t for t in self.interfaces],
+            "type_params": [p.to_dict() for p in self.type_params],
             "fields": [f.to_dict() for f in self.fields],
             "methods": [m.to_dict() for m in self.methods],
             "line": self.line,
@@ -939,3 +955,28 @@ class Program(Node):
     @property
     def kind(self) -> str:
         return "Program"
+
+class LambdaExpr(Expr):
+    def __init__(self, params, body, return_type=None, line=1, col=1):
+        super().__init__(line, col)
+        self.params = params
+        self.body = body
+        self.return_type = return_type
+
+    def to_dict(self):
+        return {"kind": "LambdaExpr", "params": [p.to_dict() for p in self.params],
+                "body": self.body.to_dict(), "return_type": self.return_type.to_dict() if self.return_type else None,
+                "line": self.line, "col": self.col}
+
+
+class ExternFnDecl(FnDecl):
+    def __init__(self, name, params, return_type, line=1, col=1):
+        super().__init__(name, params, return_type, Block([]), line=line, col=col)
+        self.extern_abi = "C"
+
+    def to_dict(self):
+        value = super().to_dict()
+        value["kind"] = "ExternFnDecl"
+        value["abi"] = self.extern_abi
+        value.pop("body", None)
+        return value

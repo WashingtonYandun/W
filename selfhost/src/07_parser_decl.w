@@ -28,8 +28,8 @@ fn parse_let_stmt(is_global: bool) -> unit {
 }
 
 fn parse_return_stmt() -> unit {
-    expect_kind("RETURN")
-    if check_kind("RBRACE") or is_eof() {
+    let return_token = expect_kind("RETURN")
+    if check_kind("RBRACE") or is_eof() or at_tok().line > return_token.line {
         emit_cleanup_until_fn()
         if g_fn_fallible {
             emit_line("return w_ok(w_unit());")
@@ -249,7 +249,7 @@ fn parse_class_decl() -> unit {
             m_arities.append(len(p_names))
             if mname == "init" {
                 init_p = p_names
-            } elif is_pub {
+            } else {
                 register_dispatch(mname, len(p_names))
             }
             let mut m_sig = "WVal v_self"
@@ -338,6 +338,7 @@ fn parse_class_decl() -> unit {
             init_call_args = init_call_args + ", v_" + eff_init_p[idx]
         }
     }
+    g_protos.append("static const WClassVTable w_vtable_" + cls_name + ";")
     g_protos.append("static WVal w_new_" + cls_name + "(" + new_sig + ");")
     let mut new_str = "static WVal w_new_" + cls_name + "(" + new_sig + ") {\n"
     if len(all_fnames) > 0 {
@@ -359,6 +360,7 @@ fn parse_class_decl() -> unit {
     } else {
         new_str = new_str + "    WVal v_self = w_make_object(\"" + cls_name + "\", 0, NULL, NULL);\n"
     }
+    new_str = new_str + "    v_self.as.st->vtable = &w_vtable_" + cls_name + ";\n"
     if init_owner != "" {
         new_str = new_str + "    w_release(w_method_" + init_owner + "__init(" + init_call_args + "));\n"
     }
@@ -367,26 +369,46 @@ fn parse_class_decl() -> unit {
 }
 
 fn emit_oop_dispatchers() -> unit {
-    for di in 0..len(g_dispatch_names) {
-        let mname = g_dispatch_names[di]
-        let arity = g_dispatch_arities[di]
-        let mut sig = "WVal v_self"
-        let mut call_args = "v_self"
-        for ai in 0..arity {
-            sig = sig + ", WVal _a" + str(ai)
-            call_args = call_args + ", _a" + str(ai)
-        }
-        let mut d_str = "static WVal w_dispatch__" + mname + "__" + str(arity) + "(" + sig + ") {\n"
-        for ci in 0..len(g_classes) {
-            let cname = g_classes[ci].name
-            let owner = find_class_method_owner(cname, mname)
-            let m_arity = find_class_method_arity(cname, mname)
-            if owner != "" and m_arity == arity {
-                d_str = d_str + "    if (v_self.tag == W_OBJECT && strcmp(v_self.as.st->name, \"" + cname + "\") == 0) return w_method_" + owner + "__" + mname + "(" + call_args + ");\n"
+    let mut adapters: list[str] = []
+    let mut tables: list[str] = []
+    for class_ in g_classes {
+        let mut slots: list[str] = []
+        for di in 0..len(g_dispatch_names) {
+            let name = g_dispatch_names[di]
+            let arity = g_dispatch_arities[di]
+            let owner = find_class_method_owner(class_.name, name)
+            if owner == "" or find_class_method_arity(class_.name, name) != arity { slots.append("NULL") }
+            else {
+                let adapter = "w_vinvoke_" + owner + "__" + name
+                slots.append(adapter)
+                if not module_contains(adapters, adapter) {
+                    adapters.append(adapter)
+                    let mut arguments = "receiver"
+                    for i in 0..arity { arguments = arguments + ", argv[" + str(i) + "]" }
+                    g_fn_defs.append("static WVal " + adapter + "(WVal receiver, int32_t argc, const WVal* argv) { (void)argc; (void)argv; return w_method_" + owner + "__" + name + "(" + arguments + "); }")
+                }
             }
         }
-        d_str = d_str + "    return w_none();\n}"
-        g_fn_defs.append(d_str)
+        if len(slots) > 0 {
+            let mut joined = ""
+            for i in 0..len(slots) { if i > 0 { joined = joined + ", " } joined = joined + slots[i] }
+            tables.append("static const WInvoke w_slots_" + class_.name + "[" + str(len(slots)) + "] = { " + joined + " };")
+            tables.append("static const WClassVTable w_vtable_" + class_.name + " = { " + str(len(slots)) + ", w_slots_" + class_.name + " };")
+        } else { tables.append("static const WClassVTable w_vtable_" + class_.name + " = { 0, NULL };") }
+    }
+    for table in tables { g_fn_defs.append(table) }
+    for di in 0..len(g_dispatch_names) {
+        let name = g_dispatch_names[di]
+        let arity = g_dispatch_arities[di]
+        let mut signature = "WVal v_self"
+        let mut arguments = ""
+        for i in 0..arity {
+            signature = signature + ", WVal _a" + str(i)
+            if i > 0 { arguments = arguments + ", " }
+            arguments = arguments + "_a" + str(i)
+        }
+        if arity == 0 { arguments = "NULL" } else { arguments = "(WVal[]){ " + arguments + " }" }
+        g_fn_defs.append("static WVal w_dispatch__" + name + "__" + str(arity) + "(" + signature + ") { return w_virtual_call(v_self, " + str(di) + ", " + str(arity) + ", " + arguments + "); }")
     }
 }
 
@@ -411,6 +433,7 @@ fn parse_import_decl() -> unit {
     g_pos = 0
     g_ns = ns
     while not is_eof() {
+        if match_kind("PUB") { continue }
         if check_kind("STRUCT") {
             parse_struct_decl()
         } elif check_kind("ENUM") {
@@ -476,6 +499,10 @@ fn parse_fn_decl() -> unit {
     let saved = g_cur_stmts
     let empty: list[str] = []
     g_cur_stmts = empty
+    let previous_bindings = g_borrowed_vars
+    let mut borrowed: list[str] = []
+    for parameter in param_names { borrowed.append("v_" + parameter) }
+    g_borrowed_vars = borrowed
     push_scope("fn")
     let ret_v = parse_block_expr()
     let ret_hold = new_aux("_ret")
@@ -488,6 +515,7 @@ fn parse_fn_decl() -> unit {
     }
     let body_lines = g_cur_stmts
     g_cur_stmts = saved
+    g_borrowed_vars = previous_bindings
     g_fn_fallible = prev_fallible
     g_cur_err_type = prev_err
     let mut fn_str = "static WVal " + c_name + "(" + sig + ") {\n"
@@ -498,3 +526,60 @@ fn parse_fn_decl() -> unit {
     g_fn_defs.append(fn_str)
 }
 
+fn ffi_c_type(name: str, returned: bool) -> str {
+    if name == "int32" { return "int32_t" }
+    if name == "int" or name == "int64" { return "int64_t" }
+    if name == "float" or name == "double" { return "double" }
+    if name == "bool" { return "bool" }
+    if name == "opaque" { return "void*" }
+    if name == "unit" and returned { return "void" }
+    report_error("W2001", at_tok().line, at_tok().col, "unsupported C ABI type")
+    return "void"
+}
+fn parse_extern_decl() {
+    expect_kind("EXTERN")
+    if expect_kind("STR").val != "C" { report_error("W2013", at_tok().line, at_tok().col, "only C ABI is supported") }
+    expect_kind("FN")
+    let name = expect_kind("IDENT").val
+    expect_kind("LPAREN")
+    let mut types: list[str] = []
+    while not check_kind("RPAREN") {
+        expect_kind("IDENT")
+        expect_kind("COLON")
+        types.append(expect_kind("IDENT").val)
+        if not match_kind("COMMA") { break }
+    }
+    expect_kind("RPAREN")
+    expect_kind("ARROW")
+    let returned = expect_kind("IDENT").val
+    let mut native_name = name
+    if len(name) > 6 and slice(name, 0, 6) == "__w1_m" {
+        for i in 6..len(name) - 1 { if slice(name, i, i + 2) == "__" { native_name = slice(name, i + 2, len(name)) break } }
+    }
+    let mut native_params = ""
+    let mut wrapped_params = ""
+    let mut arguments = ""
+    for i in 0..len(types) {
+        if i > 0 { native_params = native_params + ", " wrapped_params = wrapped_params + ", " arguments = arguments + ", " }
+        native_params = native_params + ffi_c_type(types[i], false)
+        let variable = "v_" + str(i)
+        wrapped_params = wrapped_params + "WVal " + variable
+        if types[i] == "int32" { arguments = arguments + "w_ffi_int32(" + variable + ")" }
+        elif types[i] == "int" or types[i] == "int64" { arguments = arguments + variable + ".as.i" }
+        elif types[i] == "float" or types[i] == "double" { arguments = arguments + variable + ".as.f" }
+        elif types[i] == "bool" { arguments = arguments + variable + ".as.b" }
+        else { arguments = arguments + variable + ".as.pointer" }
+    }
+    if len(types) == 0 { native_params = "void" wrapped_params = "void" }
+    let c_name = c_fn_name(name)
+    g_protos.append("extern " + ffi_c_type(returned, true) + " " + native_name + "(" + native_params + ");")
+    g_protos.append("static WVal " + c_name + "(" + wrapped_params + ");")
+    let call = native_name + "(" + arguments + ")"
+    let mut result = ""
+    if returned == "unit" { result = call + "; return w_unit();" }
+    elif returned == "int" or returned == "int32" or returned == "int64" { result = "return w_int(" + call + ");" }
+    elif returned == "float" or returned == "double" { result = "return w_float(" + call + ");" }
+    elif returned == "bool" { result = "return w_bool(" + call + ");" }
+    else { result = "return w_pointer(" + call + ");" }
+    g_fn_defs.append("static WVal " + c_name + "(" + wrapped_params + ") { " + result + " }")
+}

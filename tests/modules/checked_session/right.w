@@ -1,9 +1,9 @@
 import "shared.w"
 
-struct Item {
+pub struct Item {
     value: str,
 }
 
-fn make() -> Item {
+pub fn make() -> Item {
     return Item { value: "right" }
 }

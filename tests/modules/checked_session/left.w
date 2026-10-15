@@ -1,9 +1,9 @@
-import "shared.w"
+pub import "shared.w"
 
-struct Item {
+pub struct Item {
     value: int,
 }
 
-fn make() -> Item {
+pub fn make() -> Item {
     return Item { value: shared.value() }
 }

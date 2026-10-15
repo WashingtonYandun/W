@@ -1,6 +1,8 @@
-from token.TokenType import TokenType
+from wtokens.TokenType import TokenType
 
 KEYWORDS = {
+    "pub": TokenType.PUB,
+    "extern": TokenType.EXTERN,
     # Declarations (6)
     "fn": TokenType.FN,
     "let": TokenType.LET,

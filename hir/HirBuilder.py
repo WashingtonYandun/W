@@ -1,7 +1,7 @@
 from error.Error import WError
 from typing import Any, Dict, List, Optional, Tuple, Set
 from node.NodeType import (
-    Program, Stmt, Expr, TypeNode, ResultType as AstResultType,
+    ExternFnDecl, LambdaExpr, Program, Stmt, Expr, TypeNode, ResultType as AstResultType,
     NamedType, OptionalType as AstOptionalType, ListType as AstListType, DictType as AstDictType,
     GenericType,
     Pattern, IdentifierPattern, TuplePattern, EnumPattern, LiteralPattern, WildcardPattern,
@@ -18,7 +18,7 @@ from checker.TypeInterner import (
     TypeInterner, TYPE_ERROR, TYPE_UNIT, TYPE_BOOL, TYPE_INT, TYPE_FLOAT, TYPE_STR, TYPE_NONE
 )
 from hir.HirNodes import (
-    Span, HirNode, HirExpr, HirStmt, HirParam, HirBlock, HirFieldDef,
+    HirClosure, HirFunctionRef, HirIndirectCall, Span, HirNode, HirExpr, HirStmt, HirParam, HirBlock, HirFieldDef,
     HirFnDecl, HirStructDecl, HirEnumDecl, HirInterfaceDecl, HirClassDecl, HirModule,
     HirLet, HirBindTemp, HirAssign, HirWhile, HirForList, HirReturn, HirBreak, HirContinue, HirExprStmt,
     HirConstInt, HirConstFloat, HirConstBool, HirConstStr, HirConstNone, HirConstUnit,
@@ -297,6 +297,16 @@ class HirBuilder:
         )
 
     def _lower_fn_decl(self, decl: FnDecl) -> HirFnDecl:
+        if isinstance(decl, ExternFnDecl):
+            self._push_scope()
+            params = [HirParam(p.name, self._get_type_id_from_node(p.type_ann), self._span(p),
+                               symbol_id=self._declare_symbol(p.name)) for p in decl.params]
+            self._pop_scope()
+            fn = HirFnDecl(decl.name, params, self._get_type_id_from_node(decl.return_type),
+                           HirBlock([], self._span(decl.body)), span=self._span(decl))
+            fn.extern_types = ([p.type_ann.name for p in decl.params], decl.return_type.name)
+            fn.extern_name = getattr(decl, "source_name", decl.name)
+            return fn
         self._push_scope()
         params = [
             HirParam(
@@ -465,6 +475,10 @@ class HirBuilder:
         span = self._span(expr)
         tid = self._get_expr_type_id(expr)
 
+        if hasattr(expr, "function_reference"):
+            return HirFunctionRef(expr.function_reference, tid, span)
+        if isinstance(expr, LambdaExpr):
+            return HirClosure(expr.function_name, self._lower_expr(expr.environment), tid, span)
         if isinstance(expr, IntLiteral):
             return HirConstInt(expr.value, tid or TYPE_INT, span)
         elif isinstance(expr, FloatLiteral):
@@ -476,10 +490,12 @@ class HirBuilder:
         elif isinstance(expr, NoneLiteral):
             return HirConstNone(tid or TYPE_NONE, span)
         elif isinstance(expr, IdentExpr):
+            if hasattr(expr, "function_reference"):
+                return HirFunctionRef(expr.function_reference, tid, span)
             if expr.name in ("None", "none"):
                 return HirConstNone(tid or TYPE_NONE, span)
             if expr.name in self.enum_variants:
-                en_name = self.enum_variants[expr.name]
+                en_name = getattr(expr, "resolved_enum_name", self.enum_variants[expr.name])
                 return self._construct_enum(en_name, expr.name, 0, tid or self.interner.mk_enum(en_name), span)
             sym = self._resolve_symbol(expr.name)
             return HirLocalRef(expr.name, tid, span, symbol_id=sym)
@@ -521,6 +537,9 @@ class HirBuilder:
             elem_tids = [e.type_id for e in elems_hir]
             return HirConstructTuple(elem_tids, elems_hir, tid or self.interner.mk_tuple(tuple(elem_tids)), span)
         elif isinstance(expr, CallExpr):
+            if getattr(expr, "indirect_call", False):
+                return HirIndirectCall(self._lower_expr(expr.callee),
+                                       [self._lower_expr(a) for a in expr.args], tid, span)
             raw_args = getattr(expr, "args", getattr(expr, "arguments", []))
             decl_id = getattr(expr.callee, "decl_id", None)
             # Check if this call is an unqualified Enum variant constructor

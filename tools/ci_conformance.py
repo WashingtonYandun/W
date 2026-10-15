@@ -10,15 +10,11 @@ import tempfile
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
-from tests.engine_harness import ENGINES, PROFILES, execute, verify_case
+from tests.engine_harness import ENGINES, PROFILES, corpus_paths, execute, verify_case
 
 
 def generate_markdown_matrix() -> str:
-    positives = sorted((ROOT / 'tests/runtime').glob('*.w')) + sorted((ROOT / 'examples').glob('*.w'))
-    positives += sorted((ROOT / 'tests/modules').glob('*/main.w'))
-    support_files = PROFILES.get('support_files', {})
-    positives = [path for path in positives if str(path.relative_to(ROOT)) not in support_files]
-    negatives = sorted((ROOT / 'tests').glob('*/invalid/*.w')) + sorted((ROOT / 'tests/errors').glob('invalid_*.w'))
+    positives, negatives = corpus_paths()
     fixtures = positives + negatives
 
     by_feature = {}
@@ -97,11 +93,8 @@ def main():
         print(bootstrap['stderr'])
         return 1
     w1 = ROOT / '.w_cache/w1_stage2'
-    positives = sorted((ROOT / 'tests/runtime').glob('*.w')) + sorted((ROOT / 'examples').glob('*.w'))
-    positives += sorted((ROOT / 'tests/modules').glob('*/main.w'))
     support_files = PROFILES['support_files']
-    positives = [path for path in positives if str(path.relative_to(ROOT)) not in support_files]
-    negatives = sorted((ROOT / 'tests').glob('*/invalid/*.w')) + sorted((ROOT / 'tests/errors').glob('invalid_*.w'))
+    positives, negatives = corpus_paths()
     fixtures = positives + negatives
     labels = {str(path.relative_to(ROOT)) for path in fixtures}
     stale = set(PROFILES['fixtures']) - labels

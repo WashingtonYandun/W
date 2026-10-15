@@ -34,7 +34,7 @@ flowchart TD
 
 ## 2. Feature Parity Matrix
 
-The following table summarizes current compiler support across all 107 test fixtures in the repository corpus:
+The following table summarizes compiler support across the 107 fixtures of the Phase D public corpus. Closures, FFI, generic OOP, stdlib and the LSP live in a separate expansion suite; see [EXPANSION.md](EXPANSION.md).
 
 | Feature Category | Fixtures | W0 Interpreter | W0 AST C99 | W0 Typed HIR (Default) | W1 Self-Hosted C99 | Status / Tracking |
 | :--- | :---: | :---: | :---: | :---: | :---: | :--- |

@@ -15,7 +15,7 @@ from hir.HirBuilder import HirBuilder
 from hir.HirCCodeGen import HirCCodeGen
 from error.Error import WError
 
-W_VERSION = "0.2.4"
+from common.Version import W_VERSION
 
 
 def get_repo_root() -> str:
@@ -36,6 +36,9 @@ def ensure_selfhost_w1_binary(repo_root: str) -> str:
         if src_mtime > bin_mtime:
             needs_rebuild = True
 
+    if not os.path.isfile(w1_src_path):
+        from error.Error import TypeError
+        raise TypeError("W1 bootstrap requires a source checkout", file=w1_src_path, code="W2013")
     if needs_rebuild:
         with open(w1_src_path, "r", encoding="utf-8") as wf:
             w1_src = wf.read()
@@ -92,6 +95,7 @@ def run_pipeline(
     use_hir: Optional[bool] = None,
     sanitize: bool = False,
     show_stats: bool = False,
+    link_libraries=(),
 ) -> int:
     try:
         # Resolve legacy flags if passed explicitly
@@ -106,23 +110,40 @@ def run_pipeline(
         import time
 
         t_start = time.perf_counter()
+        lex_ms = parse_ms = check_ms = 0.0
+        ast = None
+        checker = None
+        selfhost_direct = (
+            backend == "selfhost"
+            and (emit_c_path is not None or build_bin_path is not None)
+            and file_name != "<stdin>"
+            and not show_tokens
+            and not show_ast
+            and not fmt_only
+            and not check_only
+        )
 
-        # 1. Lexing
-        t_lex0 = time.perf_counter()
-        lexer = Lexer(source_code, file=file_name)
-        tokens = lexer.tokenize()
-        lex_ms = (time.perf_counter() - t_lex0) * 1000.0
+        if selfhost_direct:
+            lexer = None
+            tokens = []
+        else:
+            # 1. Lexing
+            t_lex0 = time.perf_counter()
+            lexer = Lexer(source_code, file=file_name)
+            tokens = lexer.tokenize()
+            lex_ms = (time.perf_counter() - t_lex0) * 1000.0
         if show_tokens:
             for t in tokens:
                 print(f"  {t}")
             if not show_ast and not check_only and emit_c_path is None and build_bin_path is None:
                 return 0
 
-        # 2. Parsing
-        t_parse0 = time.perf_counter()
-        parser = Parser(file=file_name)
-        ast = parser.parse(source_code)
-        parse_ms = (time.perf_counter() - t_parse0) * 1000.0
+        if not selfhost_direct:
+            # 2. Parsing
+            t_parse0 = time.perf_counter()
+            parser = Parser(file=file_name)
+            ast = parser.parse(source_code)
+            parse_ms = (time.perf_counter() - t_parse0) * 1000.0
         if show_ast:
             print(json.dumps(ast.to_dict(), indent=2))
             if not check_only and emit_c_path is None and build_bin_path is None:
@@ -137,11 +158,12 @@ def run_pipeline(
                 print(formatted, end="")
             return 0
 
-        # 3. Static Type Checking
-        t_check0 = time.perf_counter()
-        checker = TypeChecker(file=file_name)
-        checker.check(ast)
-        check_ms = (time.perf_counter() - t_check0) * 1000.0
+        if not selfhost_direct:
+            # 3. Static Type Checking
+            t_check0 = time.perf_counter()
+            checker = TypeChecker(file=file_name)
+            checker.check(ast)
+            check_ms = (time.perf_counter() - t_check0) * 1000.0
 
         if check_only:
             if show_stats:
@@ -219,7 +241,7 @@ def run_pipeline(
                     "status": "ok",
                     "file": file_name,
                     "telemetry": {
-                        "monomorphization": checker.telemetry.to_dict(),
+                        "monomorphization": checker.telemetry.to_dict() if checker is not None else None,
                         "codegen": codegen_inst.telemetry.to_dict() if codegen_inst else None,
                         "timing_ms": {
                             "lex": round(lex_ms, 2),
@@ -246,7 +268,7 @@ def run_pipeline(
                     tmp_c_path = tmp_c.name
                 try:
                     san_flags = ["-fsanitize=address,undefined", "-fno-omit-frame-pointer"] if sanitize else []
-                    cmd = [os.environ.get("CC", "cc"), "-std=c99", "-O2", f"-I{repo_root}"] + san_flags + [tmp_c_path, "-o", build_bin_path]
+                    cmd = [os.environ.get("CC", "cc"), "-std=c99", "-O2", f"-I{repo_root}"] + san_flags + [tmp_c_path, "-o", build_bin_path] + [flag for library in link_libraries for flag in [library if "/" in library else "-l" + library]]
                     proc = subprocess.run(cmd, capture_output=True, text=True)
                     if proc.returncode != 0:
                         print(f"[C Compiler Error]\n{proc.stderr}", file=sys.stderr)
@@ -275,6 +297,7 @@ def run_pipeline(
                 }
             }, indent=2), file=sys.stderr)
         interp = Interpreter(file=file_name)
+        interp.foreign_libraries = link_libraries
         res = interp.interpret(ast)
 
         if not isinstance(res, WUnit) and file_name == "<stdin>":
@@ -350,6 +373,7 @@ def repl(show_tokens: bool = False, show_ast: bool = False) -> None:
 def print_help() -> None:
     print(f"W Language Compiler & Toolchain v{W_VERSION}")
     print("Usage:")
+    print("  w lsp                                       # LSP over stdio")
     print("  w                                           # Start interactive REPL")
     print("  w [run] [--stats] <file.w>                  # Execute W source file (W0 interpreter)")
     print("  w check [--json] [--stats] <file.w>         # Static typecheck without execution")
@@ -365,6 +389,10 @@ def print_help() -> None:
 
 def main() -> None:
     args = sys.argv[1:]
+    if args == ["lsp"]:
+        from tooling.LanguageServer import serve
+        serve()
+        return
     show_tokens = False
     show_ast = False
     check_only = False
@@ -380,6 +408,7 @@ def main() -> None:
     subcmd: Optional[str] = None
     file_to_run: Optional[str] = None
     sanitize = False
+    link_libraries = []
 
     if args and args[0] in ("run", "check", "fmt", "ast", "tokens", "emit-c", "build", "test", "bench", "version"):
         subcmd = args[0]
@@ -392,6 +421,9 @@ def main() -> None:
             ok = run_benchmark_suite(repo_root, w1_bin, update_baseline=update_baseline)
             sys.exit(0 if ok else 1)
         elif subcmd == "test":
+            if not os.path.isdir(os.path.join(get_repo_root(), "tests", "unit")):
+                print("w test requires a source checkout", file=sys.stderr)
+                sys.exit(1)
             if args and args[0] == "--differential":
                 gen_count = 25
                 base_seed = 1000
@@ -502,6 +534,12 @@ def main() -> None:
                     build_bin_path = args[i]
                 else:
                     build_bin_path = args[i]
+        elif arg == "--link-lib":
+            i += 1
+            if i >= len(args):
+                print("--link-lib requires a library name or path", file=sys.stderr)
+                sys.exit(1)
+            link_libraries.append(args[i])
         elif arg in ("--sanitize", "-s"):
             sanitize = True
         elif arg in ("--help", "-h"):
@@ -540,6 +578,7 @@ def main() -> None:
             use_hir=use_hir,
             sanitize=sanitize,
             show_stats=show_stats,
+            link_libraries=link_libraries,
         )
         sys.exit(code)
     else:

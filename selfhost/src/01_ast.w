@@ -46,3 +46,51 @@ let mut g_aux_id: int = 0
 let mut g_cur_err_type: str = ""
 let mut g_in_path: str = ""
 
+
+let mut g_borrowed_vars: list[str] = []
+
+# Standalone semantic parsing. Types are interned structures, never fixture names.
+struct SemType { kind: str, name: str, args: list[int] }
+struct SemVar { name: str, type_id: int, mutable: bool, depth: int }
+struct SemFunction { name: str, params: list[str], type_id: int, body: int, end: int, owner: str, visible: bool }
+struct SemField { owner: str, name: str, type_id: int, visible: bool }
+struct SemClass { name: str, parent: str, interfaces: list[str] }
+struct SemValue { type_id: int, root: str, writable: int, terminates: bool }
+struct SemFlow { type_id: int, terminates: bool }
+let mut sem_tokens: list[Token] = []
+let mut sem_pos = 0
+let mut sem_types: list[SemType] = []
+let mut sem_variables: list[SemVar] = []
+let mut sem_functions: list[SemFunction] = []
+let mut sem_fields: list[SemField] = []
+let mut sem_classes: list[SemClass] = []
+let mut sem_variants: list[str] = []
+let mut sem_variant_types: list[int] = []
+let mut sem_depth = 0
+let mut sem_return = 0
+let mut sem_owner = ""
+let mut sem_loop = 0
+let mut sem_int = 0
+let mut sem_float = 0
+let mut sem_bool = 0
+let mut sem_str = 0
+let mut sem_unit = 0
+let mut sem_none = 0
+let mut sem_initializing = false
+let mut sem_initialized: list[str] = []
+
+
+struct SemLambda { position: int, line: int, col: int, params: list[str], captures: list[str], type_id: int }
+let mut sem_lambdas: list[SemLambda] = []
+let mut sem_capture_names: list[str] = []
+let mut sem_capture_depth = -1
+
+let mut sem_statement_context = false
+
+let mut sem_token_offset = 0
+
+let mut sem_indirect_positions: list[int] = []
+
+let mut sem_class_projection_positions: list[int] = []
+
+let mut sem_collection_call_positions: list[int] = []

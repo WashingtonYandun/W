@@ -42,7 +42,7 @@ class ModuleNames:
             return node
         if isinstance(node, (A.NamedType, A.GenericType)) and node.name not in types:
             node.name = self.names.get(node.name, node.name)
-        if isinstance(node, (A.FnDecl, A.MethodDecl)):
+        if isinstance(node, (A.FnDecl, A.MethodDecl, A.LambdaExpr)):
             type_scope = types | {parameter.name for parameter in getattr(node, 'type_params', [])}
             for parameter in getattr(node, 'type_params', []):
                 self.visit(parameter.constraint, values, type_scope)
@@ -51,11 +51,11 @@ class ModuleNames:
             self.visit(node.return_type, values, type_scope)
             self.visit(node.body, values | {parameter.name for parameter in node.params}, type_scope)
             return node
-        if isinstance(node, (A.StructDecl, A.EnumDecl)):
+        if isinstance(node, (A.StructDecl, A.EnumDecl, A.ClassDecl, A.InterfaceDecl)):
             types = types | {parameter.name for parameter in node.type_params}
         if isinstance(node, A.ClassDecl):
-            node.superclass = self.names.get(node.superclass, node.superclass)
-            node.interfaces = [self.names.get(name, name) for name in node.interfaces]
+            node.superclass = self.names.get(node.superclass, node.superclass) if isinstance(node.superclass, str) else self.visit(node.superclass, values, types)
+            node.interfaces = [self.names.get(name, name) if isinstance(name, str) else self.visit(name, values, types) for name in node.interfaces]
         if isinstance(node, A.StructInitExpr):
             node.struct_name = self.names.get(node.struct_name, node.struct_name)
         if isinstance(node, A.NewExpr):

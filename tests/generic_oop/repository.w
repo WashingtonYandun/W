@@ -1,0 +1,11 @@
+interface Collection[T] {
+    fn get() -> T
+}
+class Repository[T] implements Collection[T] {
+    private value: T
+    fn init(value: T) { this.value = value }
+    public fn get() -> T { return this.value }
+}
+let repository: Collection[int] = new Repository[int](42)
+let text = Repository[str]("hello")
+print(repository.get(), text.get())

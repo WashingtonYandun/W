@@ -1,6 +1,8 @@
+from decimal import Decimal
+import math
 from typing import List, Optional
 from node.NodeType import (
-    Program, Stmt, Expr, TypeNode, NamedType, GenericType, TypeParam, OptionalType, ListType, DictType, TupleType, ResultType,
+    ExternFnDecl, LambdaExpr, FunctionType as AstFunctionType, Program, Stmt, Expr, TypeNode, NamedType, GenericType, TypeParam, OptionalType, ListType, DictType, TupleType, ResultType,
     Pattern, IdentifierPattern, TuplePattern, EnumPattern, LiteralPattern, WildcardPattern,
     Block, ExprStmt, Param, FnDecl, StructField, StructDecl, EnumDecl,
     InterfaceMethod, InterfaceDecl, ClassField, MethodDecl, ClassDecl,
@@ -19,8 +21,8 @@ PRECEDENCE_MAP = {
     "??": 2,
     "or": 3,
     "and": 4,
-    "==": 6,
-    "!=": 6,
+    "==": 5,
+    "!=": 5,
     "<": 6,
     "<=": 6,
     ">": 6,
@@ -55,20 +57,24 @@ class Formatter:
                 lines.append("")
             lines.append(self.format_stmt(stmt, 0))
             prev_was_decl = is_decl
-        return "\n".join(lines) + "\n"
+        formatted = "\n".join(lines) + "\n"
+        from formatter.Trivia import preserve_comments
+        return preserve_comments(getattr(program, "source_text", ""), formatted)
 
     # ==========================================
     # Type Formatting
     # ==========================================
 
     def format_type(self, t: TypeNode) -> str:
+        if isinstance(t, AstFunctionType):
+            return "fn(" + ", ".join(self.format_type(p) for p in t.params) + ") -> " + self.format_type(t.return_type)
         if isinstance(t, NamedType):
             return t.name
         if isinstance(t, GenericType):
             args = ", ".join([self.format_type(e) for e in t.type_args])
             return f"{t.name}[{args}]"
         if isinstance(t, OptionalType):
-            return f"({self.format_type(t.inner)})?" if isinstance(t.inner, (ResultType, OptionalType)) else f"{self.format_type(t.inner)}?"
+            return f"({self.format_type(t.inner)})?" if isinstance(t.inner, (ResultType, OptionalType, AstFunctionType)) else f"{self.format_type(t.inner)}?"
         if isinstance(t, ListType):
             return f"list[{self.format_type(t.element_type)}]"
         if isinstance(t, DictType):
@@ -108,10 +114,23 @@ class Formatter:
     # ==========================================
 
     def format_stmt(self, stmt: Stmt, level: int) -> str:
+        rendered = self._format_stmt(stmt, level)
+        if getattr(stmt, "is_exported", False):
+            indent = self._indent(level)
+            rendered = indent + "pub " + rendered[len(indent):]
+        return rendered
+
+    def _format_stmt(self, stmt: Stmt, level: int) -> str:
         ind = self._indent(level)
+        if isinstance(stmt, ExternFnDecl):
+            params = ", ".join(p.name + ": " + self.format_type(p.type_ann) for p in stmt.params)
+            return ind + 'extern "C" fn ' + stmt.name + "(" + params + ") -> " + self.format_type(stmt.return_type)
 
         if isinstance(stmt, ImportDecl):
-            return f'{ind}import {self._escape_str(stmt.path)}'
+            import os
+            default = os.path.basename(stmt.path).split(".")[0]
+            alias = " as " + stmt.namespace if stmt.namespace != default else ""
+            return f'{ind}import {self._escape_str(stmt.path)}{alias}'
 
         if isinstance(stmt, EnumDecl):
             tparams = f"[{', '.join(str(p) for p in stmt.type_params)}]" if stmt.type_params else ""
@@ -138,22 +157,24 @@ class Formatter:
             return f"{ind}struct {stmt.name}{tparams} {{\n{body}\n{ind}}}"
 
         if isinstance(stmt, InterfaceDecl):
+            tparams = f"[{', '.join(str(p) for p in stmt.type_params)}]" if stmt.type_params else ""
             if not stmt.methods:
-                return f"{ind}interface {stmt.name} {{}}"
+                return f"{ind}interface {stmt.name}{tparams} {{}}"
             method_lines: List[str] = []
             for m in stmt.methods:
                 params_str = ", ".join([f"{p.name}: {self.format_type(p.type_ann)}" for p in m.params])
                 ret_str = self.format_type(m.return_type)
                 method_lines.append(f"{self._indent(level + 1)}fn {m.name}({params_str}) -> {ret_str}")
             body = "\n".join(method_lines)
-            return f"{ind}interface {stmt.name} {{\n{body}\n{ind}}}"
+            return f"{ind}interface {stmt.name}{tparams} {{\n{body}\n{ind}}}"
 
         if isinstance(stmt, ClassDecl):
-            header = f"{ind}class {stmt.name}"
+            tparams = f"[{', '.join(str(p) for p in stmt.type_params)}]" if stmt.type_params else ""
+            header = f"{ind}class {stmt.name}{tparams}"
             if stmt.superclass:
                 header += f" extends {stmt.superclass}"
             if stmt.interfaces:
-                header += f" implements {', '.join(stmt.interfaces)}"
+                header += f" implements {', '.join(str(interface) for interface in stmt.interfaces)}"
             if not stmt.fields and not stmt.methods:
                 return f"{header} {{}}"
             member_lines: List[str] = []
@@ -258,14 +279,19 @@ class Formatter:
         return 20
 
     def format_expr(self, expr: Expr, level: int, parent_prec: int = 0) -> str:
+        if isinstance(expr, LambdaExpr):
+            params = ", ".join(p.name + (": " + self.format_type(p.type_ann) if p.type_ann else "") for p in expr.params)
+            returned = " -> " + self.format_type(expr.return_type) if expr.return_type else ""
+            result = "|" + params + "|" + returned + " " + self.format_block(expr.body, level)
+            return "(" + result + ")" if parent_prec else result
         if isinstance(expr, IntLiteral):
             return str(expr.value)
 
         if isinstance(expr, FloatLiteral):
-            s = str(expr.value)
-            if "." not in s and "e" not in s and "E" not in s:
-                s += ".0"
-            return s
+            if not math.isfinite(expr.value):
+                return 'float("' + str(expr.value) + '")'
+            s = format(Decimal(str(expr.value)), "f")
+            return s if "." in s else s + ".0"
 
         if isinstance(expr, StringLiteral):
             return self._escape_str(expr.value)
@@ -287,7 +313,8 @@ class Formatter:
 
         if isinstance(expr, NewExpr):
             args_str = ", ".join([self.format_expr(a, level) for a in expr.args])
-            return f"new {expr.class_name}({args_str})"
+            tparams = "[" + ", ".join(self.format_type(t) for t in expr.type_args) + "]" if getattr(expr, "type_args", None) else ""
+            return f"new {expr.class_name}{tparams}({args_str})"
 
         if isinstance(expr, UnaryExpr):
             inner = self.format_expr(expr.operand, level, parent_prec=10)
@@ -320,9 +347,10 @@ class Formatter:
             return f"({res})" if my_prec < parent_prec else res
 
         if isinstance(expr, AssignmentExpr):
-            target_str = self.format_expr(expr.target, level)
-            val_str = self.format_expr(expr.value, level)
-            return f"{target_str} = {val_str}"
+            target_str = self.format_expr(expr.target, level, parent_prec=2)
+            val_str = self.format_expr(expr.value, level, parent_prec=1)
+            result = f"{target_str} = {val_str}"
+            return f"({result})" if parent_prec > 1 else result
 
         if isinstance(expr, PostfixTryExpr):
             return f"{self.format_expr(expr.operand, level, parent_prec=15)}?"
@@ -367,7 +395,7 @@ class Formatter:
 
         if isinstance(expr, TupleExpr):
             elems_str = ", ".join([self.format_expr(e, level) for e in expr.elements])
-            return f"({elems_str})"
+            return f"({elems_str}{',' if len(expr.elements) == 1 else ''})"
 
         if isinstance(expr, IfExpr):
             cond_str = self.format_expr(expr.condition, level)

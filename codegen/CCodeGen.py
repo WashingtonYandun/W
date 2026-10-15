@@ -1,6 +1,6 @@
 from typing import Dict, List, Optional, Set, Tuple
 from node.NodeType import (
-    Program, Stmt, Expr, TypeNode, ResultType,
+    LambdaExpr, Program, Stmt, Expr, TypeNode, ResultType,
     GenericType, NamedType, OptionalType as AstOptionalType, ListType as AstListType, DictType as AstDictType,
     Pattern, IdentifierPattern, TuplePattern, EnumPattern, LiteralPattern, WildcardPattern,
     Block, ExprStmt, Param, FnDecl, StructDecl, EnumDecl, ImportDecl,
@@ -31,6 +31,7 @@ class CCodeGen:
     """
     def __init__(self, file: str = "<stdin>"):
         self.file = file
+        self.function_adapters = set()
         self.temp_counter = 0
         self.aux_counter = 0
         self.enum_names: Set[str] = {"Option", "Result"}
@@ -152,7 +153,7 @@ class CCodeGen:
             elif code == 9:
                 out.append("\\t")
             elif code == 0:
-                out.append("\\0")
+                out.append("\\000")
             else:
                 out.append(ch)
         out.append('"')
@@ -230,7 +231,7 @@ class CCodeGen:
                     self.classes[stmt.name] = stmt
                     self.class_order.append(stmt.name)
                 for m in stmt.methods:
-                    if m.name != "init" and m.is_public:
+                    if m.name != "init":
                         key = (m.name, len(m.params))
                         if key not in self.dispatch_methods:
                             self.dispatch_methods.append(key)
@@ -298,6 +299,7 @@ class CCodeGen:
     def _prepare_oop_prototypes(self) -> None:
         for cls_name in self.class_order:
             cdecl = self.classes[cls_name]
+            self.fn_Prototypes.append(f"static const WClassVTable w_vtable_{cls_name};")
             for m in cdecl.methods:
                 params = ["WVal v_self"] + [f"WVal v_{p.name}" for p in m.params]
                 self.fn_Prototypes.append(f"static WVal w_method_{cls_name}__{m.name}({', '.join(params)});")
@@ -370,6 +372,7 @@ class CCodeGen:
                 new_lines.append(f"    w_release_array({len(all_fields)}, _v);")
             else:
                 new_lines.append(f'    WVal v_self = w_make_object("{stmt.name}", 0, NULL, NULL);')
+            new_lines.append(f"    v_self.as.st->vtable = &w_vtable_{stmt.name};")
             if init_m is not None:
                 new_lines.append(f"    w_release(w_method_{init_cls}__init({', '.join(init_args)}));")
             new_lines.append("    return v_self;")
@@ -379,22 +382,8 @@ class CCodeGen:
             self.current_class = prev_cls
 
     def _emit_oop_dispatchers(self) -> None:
-        for mname, arity in self.dispatch_methods:
-            params = ["WVal v_self"] + [f"WVal _a{i}" for i in range(arity)]
-            call_args = ["v_self"] + [f"_a{i}" for i in range(arity)]
-            d_lines = [f"static WVal w_dispatch__{mname}__{arity}({', '.join(params)}) {{"]
-            for cls_name in self.class_order:
-                resolved = self._find_class_method(cls_name, mname)
-                if resolved is not None:
-                    def_cls, m_decl = resolved
-                    if len(m_decl.params) == arity and m_decl.is_public:
-                        d_lines.append(
-                            f'    if (v_self.tag == W_OBJECT && strcmp(v_self.as.st->name, "{cls_name}") == 0) '
-                            f'return w_method_{def_cls}__{mname}({", ".join(call_args)});'
-                        )
-            d_lines.append("    return w_none();")
-            d_lines.append("}")
-            self.fn_Definitions.append("\n".join(d_lines))
+        from codegen.VirtualDispatch import emit_vtables
+        self.fn_Definitions.extend(emit_vtables(self.class_order, self.dispatch_methods, self._find_class_method))
 
     def _emit_module_body(self, program: Program, ns: str, out_main_stmts: List[str]) -> None:
         prev_ns = self.current_ns
@@ -429,6 +418,13 @@ class CCodeGen:
                      line=stmt.line, col=stmt.col, code="W9999", stage="module-linking")
 
     def _emit_fn_decl(self, stmt: FnDecl, ns: str) -> None:
+        if hasattr(stmt, "extern_abi"):
+            from codegen.ForeignAbi import foreign_wrapper
+            signature = ([p.type_ann.name for p in stmt.params], stmt.return_type.name)
+            prototype, wrapper = foreign_wrapper(self.c_fn(stmt.name, ns=ns), getattr(stmt, "source_name", stmt.name), signature)
+            self.fn_Prototypes.append(prototype)
+            self.fn_Definitions.append(wrapper)
+            return
         c_name = self.c_fn(stmt.name, ns=ns)
         params_sig = ", ".join([f"WVal v_{p.name}" for p in stmt.params]) if stmt.params else "void"
         prev_fallible = self.current_fn_fallible
@@ -674,6 +670,20 @@ class CCodeGen:
     # Expression Emission
     # ==========================================
 
+    def prepare_assignment_ref(self, target, out):
+        if isinstance(target, IndexExpr):
+            parent = self.prepare_assignment_ref(target.object, out)
+            index = self.emit_value(target.index, out)
+            return f"w_index_ref({parent}, {index})"
+        if isinstance(target, MemberExpr):
+            from checker.WType import ClassType
+            if isinstance(getattr(target.object, 'inferred_type', None), ClassType):
+                parent = '&' + self.emit_value(target.object, out)
+            else:
+                parent = self.prepare_assignment_ref(target.object, out)
+            return f'w_member_ref({parent}, "{target.property}")'
+        return self.emit_lvalue_ref(target, out)
+
     def emit_lvalue_ref(self, target: Expr, out: List[str]) -> str:
         if isinstance(target, ThisExpr):
             return "&v_self"
@@ -706,6 +716,25 @@ class CCodeGen:
                 return "Option" if entry.tag == "optional" else "Result"
         return fallback
 
+    def function_value(self, name, arity, out, environment="w_unit()", captured=False):
+        adapter = "w_adapter_" + name
+        if adapter not in self.function_adapters:
+            self.function_adapters.add(adapter)
+            self.fn_Prototypes.append(f"static WVal {adapter}(WVal environment, int32_t argc, const WVal* argv);")
+            args = ", ".join((["environment"] if captured else []) + [f"argv[{i}]" for i in range(arity)])
+            body = f"static WVal {adapter}(WVal environment, int32_t argc, const WVal* argv) {{\n"
+            body += "    (void)environment; (void)argv;\n"
+            body += f'    if (argc != {arity}) {{ fprintf(stderr, "[W4003] RuntimeError: Call arity mismatch\\n"); exit(1); }}\n'
+            body += f"    return w_fn_{name}({args});\n}}"
+            self.fn_Definitions.append(body)
+        return self._bind_call(f"w_function_new({adapter}, {environment})", out)
+
+    def indirect_call(self, callee, args, out):
+        function = self.emit_value(callee, out)
+        values = [self.emit_value(argument, out) for argument in args]
+        array = "(WVal[]){ " + ", ".join(values) + " }" if values else "NULL"
+        return self._bind_call(f"w_call({function}, {len(values)}, {array})", out)
+
     def emit_expr(self, expr: Expr, out: List[str]) -> str:
         value = self._emit_expr_impl(expr, out)
         if hasattr(expr, "force_result_wrap_id"):
@@ -713,6 +742,11 @@ class CCodeGen:
         return value
 
     def _emit_expr_impl(self, expr: Expr, out: List[str]) -> str:
+        if hasattr(expr, "function_reference"):
+            return self.function_value(expr.function_reference, len(expr.inferred_type.params), out)
+        if isinstance(expr, LambdaExpr):
+            environment = self.emit_expr(expr.environment, out)
+            return self.function_value(expr.function_name, len(expr.inferred_type.params), out, self._own_expr(environment), True)
         if isinstance(expr, IntLiteral):
             if expr.value == -9223372036854775808:
                 return "w_int((-9223372036854775807LL - 1LL))"
@@ -723,7 +757,7 @@ class CCodeGen:
             return f"w_float({s})"
 
         if isinstance(expr, StringLiteral):
-            return f"w_str({self.escape_c_str(expr.value)})"
+            return f"w_str_n({self.escape_c_str(expr.value)}, {len(expr.value.encode('utf-8'))})"
 
         if isinstance(expr, BoolLiteral):
             return "w_bool(true)" if expr.value else "w_bool(false)"
@@ -739,10 +773,12 @@ class CCodeGen:
             return self._bind_call(f"w_new_{expr.class_name}({', '.join(arg_vals)})", out)
 
         if isinstance(expr, IdentExpr):
+            if hasattr(expr, "function_reference"):
+                return self.function_value(expr.function_reference, len(expr.inferred_type.params), out)
             if expr.name in ("None", "none"):
                 return "w_none()"
             if expr.name in self.enum_variants and not self._is_local_var(f"v_{expr.name}"):
-                en_name = self.enum_variants[expr.name]
+                en_name = getattr(expr, "resolved_enum_name", self.enum_variants[expr.name])
                 return f'w_enum("{en_name}", "{expr.name}")'
             return self.c_var(expr.name)
 
@@ -879,6 +915,7 @@ class CCodeGen:
             return res
 
         if isinstance(expr, AssignmentExpr):
+            lref = self.prepare_assignment_ref(expr.target, out)
             val = self.emit_expr(expr.value, out)
             rhs_hold = self.new_aux("_rhs")
             self._declare_owned_var(rhs_hold, self._own_expr(val), out)
@@ -886,7 +923,6 @@ class CCodeGen:
                 c_target = self.c_var(expr.target.name)
                 out.append(f"w_assign(&{c_target}, w_move(&{rhs_hold}));")
                 return c_target
-            lref = self.emit_lvalue_ref(expr.target, out)
             out.append(f"w_assign({lref}, w_move(&{rhs_hold}));")
             return "w_unit()"
 
@@ -910,6 +946,8 @@ class CCodeGen:
             return self._bind_call(f"w_index_get_owned({obj_val}, {idx_val})", out)
 
         if isinstance(expr, CallExpr):
+            if getattr(expr, "indirect_call", False):
+                return self.indirect_call(expr.callee, expr.args, out)
             # 1. Built-in or top-level function call
             if isinstance(expr.callee, IdentExpr):
                 fn_name = expr.callee.name
@@ -1031,24 +1069,26 @@ class CCodeGen:
                         return self._bind_call(f"{mod_fn}({', '.join(arg_vals)})", out)
 
                 # Collection methods
-                if method == "append":
+                from checker.WType import ListType, DictType
+                receiver_type = getattr(obj_expr, "inferred_type", None)
+                if method == "append" and isinstance(receiver_type, ListType):
                     lref = self.emit_lvalue_ref(obj_expr, out)
                     arg_v = self.emit_value(expr.args[0], out)
                     return self._bind_call(f"w_list_append({lref}, {arg_v})", out)
-                if method == "pop":
+                if method == "pop" and isinstance(receiver_type, ListType):
                     lref = self.emit_lvalue_ref(obj_expr, out)
                     return self._bind_call(f"w_list_pop({lref})", out)
-                if method == "clear":
+                if method == "clear" and isinstance(receiver_type, ListType):
                     lref = self.emit_lvalue_ref(obj_expr, out)
                     return self._bind_call(f"w_list_clear({lref})", out)
-                if method == "get":
+                if method == "get" and isinstance(receiver_type, DictType):
                     obj_v = self.emit_value(obj_expr, out)
                     arg_v = self.emit_value(expr.args[0], out)
                     return self._bind_call(f"w_dict_get({obj_v}, {arg_v})", out)
-                if method == "keys":
+                if method == "keys" and isinstance(receiver_type, DictType):
                     obj_v = self.emit_value(obj_expr, out)
                     return self._bind_call(f"w_dict_keys({obj_v})", out)
-                if method == "values":
+                if method == "values" and isinstance(receiver_type, DictType):
                     obj_v = self.emit_value(obj_expr, out)
                     return self._bind_call(f"w_dict_values({obj_v})", out)
 

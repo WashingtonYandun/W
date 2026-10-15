@@ -40,7 +40,7 @@ fn escape_c_str(s: str) -> str {
         } elif code == 9 {
             out = out + "\\t"
         } elif code == 0 {
-            out = out + "\\0"
+            out = out + "\\000"
         } else {
             out = out + ch
         }
@@ -51,6 +51,16 @@ fn escape_c_str(s: str) -> str {
 
 fn parse_type_ann() -> bool {
     let mut is_fallible = false
+    if match_kind("FN") {
+        expect_kind("LPAREN")
+        if not check_kind("RPAREN") {
+            parse_type_ann()
+            while match_kind("COMMA") { parse_type_ann() }
+        }
+        expect_kind("RPAREN")
+        expect_kind("ARROW")
+        return parse_type_ann()
+    }
     if match_kind("LPAREN") {
         is_fallible = parse_type_ann()
         expect_kind("RPAREN")

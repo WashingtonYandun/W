@@ -21,7 +21,7 @@ ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from tests.engine_harness import asdict, run_engine, unsupported_reason
+from tests.engine_harness import asdict, compare, run_engine, unsupported_reason
 
 
 def generate_typed_program(seed: int) -> str:
@@ -143,6 +143,29 @@ def generate_typed_program(seed: int) -> str:
         "}",
         "",
     ]
+    def arithmetic(depth):
+        if depth == 0 or rng.random() < 0.3:
+            return rng.choice(["value", str(rng.randint(-20, 20))])
+        operator = rng.choice(["+", "-", "*"])
+        return "(" + arithmetic(depth - 1) + " " + operator + " " + arithmetic(depth - 1) + ")"
+
+    expression = arithmetic(rng.randint(1, 5))
+    generated = ["fn generated_transform(value: int) -> int { return " + expression + " }"]
+    insertion = lines.index("fn main() -> unit {")
+    lines[insertion:insertion] = generated + [""]
+    body = ["    let mut generated_values = [a, b, c]", "    let generated_snapshot = generated_values"]
+    for _ in range(rng.randint(1, 6)):
+        shape = rng.randrange(3)
+        if shape == 0:
+            body.append("    generated_values.append(generated_transform(" + str(rng.randint(-5, 5)) + "))")
+        elif shape == 1:
+            body.extend(["    if flag {", "        generated_values[0] = generated_transform(generated_values[0])",
+                         "    } else {", "        generated_values.append(c)", "    }"])
+        else:
+            body.extend(["    for generated_index in 0.." + str(rng.randint(0, 5)) + " {",
+                         "        generated_values.append(generated_transform(generated_index))", "    }"])
+    body.append('    print("generated:", generated_values, generated_snapshot)')
+    lines[-3:-3] = body
     return "\n".join(lines)
 
 
@@ -398,11 +421,10 @@ def run_semantic_fuzz_suite(
                 res = run_engine(eng, source, label, w1_bin, work_dir, sanitize=False)
                 results.append(res)
 
-            ref = results[0]
-            for r in results[1:]:
-                if r.exit_code != ref.exit_code or r.stdout != ref.stdout:
-                    diverged = True
-                    break
+            equivalent, _ = compare(results)
+            diverged = not equivalent or any(
+                not result.compile_ok or not result.runtime_ok or result.exit_code != 0
+                for result in results)
 
             if diverged:
                 # Failure reduction

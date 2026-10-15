@@ -1,5 +1,5 @@
-from token.Token import Token
-from token.TokenType import TokenType
+from wtokens.Token import Token
+from wtokens.TokenType import TokenType
 from common.constants import KEYWORDS
 from error.Error import LexerError
 from typing import List, Optional
@@ -54,6 +54,7 @@ class Lexer:
                     self.advance()
                 continue
 
+            token_start = self.pos
             start_line = self.line
             start_col = self.col
 
@@ -70,24 +71,34 @@ class Lexer:
             # Numbers (Integers & Floats)
             if ch.isascii() and ch.isdigit():
                 tokens.append(self._lex_number(start_line, start_col, prev_token=tokens[-1] if tokens else None))
+                self._stamp(tokens[-1], token_start)
                 continue
 
             # Strings
             if ch == '"':
                 tokens.append(self._lex_string(start_line, start_col))
+                self._stamp(tokens[-1], token_start)
                 continue
 
             # Identifiers and Keywords
             if (ch.isascii() and ch.isalpha()) or ch == '_':
                 tokens.append(self._lex_identifier(start_line, start_col))
+                self._stamp(tokens[-1], token_start)
                 continue
 
             # Multi-character & single-character operators
             tokens.append(self._lex_operator(start_line, start_col))
+            self._stamp(tokens[-1], token_start)
 
         # Append EOF token
         tokens.append(Token(value=None, type=TokenType.EOF, line=self.line, col=self.col))
         return tokens
+
+    def _stamp(self, token, start):
+        token.start_offset = start
+        token.end_offset = self.pos
+        token.end_line = self.line
+        token.end_col = self.col
 
     def _lex_number(self, start_line: int, start_col: int, prev_token: Optional[Token] = None) -> Token:
         num_str = ""
@@ -411,6 +422,7 @@ class Lexer:
 
         # Single character operators & delimiters
         single_ops = {
+            '|': TokenType.PIPE,
             '+': TokenType.PLUS,
             '*': TokenType.STAR,
             '/': TokenType.SLASH,

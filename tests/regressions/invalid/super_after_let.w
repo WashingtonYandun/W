@@ -1,0 +1,11 @@
+class A {
+ public x: int
+ fn init() { this.x = 1 }
+}
+class B extends A {
+ fn init() {
+  let before = print("before")
+  super.init()
+ }
+}
+let b = B()

@@ -205,7 +205,7 @@ a fresh empty list stored directly into a global can transfer without a temporar
 
 ### Reproducible acceptance
 
-`python3 test_ownership_control_flow.py` compares the interpreter with AST C, HIR C
+`python3 -m tests.unit.test_ownership_control_flow` compares the interpreter with AST C, HIR C
 and standalone W1 emission. All three native binaries run under ASan/UBSan and
 W_MEM_CHECK; Linux additionally enables LSan. The fixture covers retained fields
 across later mutation, argument/collection order, local field/index returns,

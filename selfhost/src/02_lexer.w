@@ -33,6 +33,9 @@ fn hex_val(c: int) -> int {
 }
 
 fn keyword_kind(word: str) -> str {
+    if word == "as" { return "AS" }
+    if word == "pub" { return "PUB" }
+    if word == "extern" { return "EXTERN" }
     if word == "fn" {
         return "FN"
     }
@@ -339,7 +342,8 @@ fn tokenize(src: str) -> list[Token] {
                 col = col + 2
             } else {
                 let mut kind = "OP"
-                if ch == "(" {
+                if ch == "|" { kind = "PIPE"
+                } elif ch == "(" {
                     kind = "LPAREN"
                 } elif ch == ")" {
                     kind = "RPAREN"
