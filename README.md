@@ -1,14 +1,20 @@
-# W
+# W Programming Language
 
 [![CI](https://github.com/WashingtonYandun/W/actions/workflows/ci.yml/badge.svg)](https://github.com/WashingtonYandun/W/actions/workflows/ci.yml)
 
-W es un lenguaje experimental con tipos estáticos, compilación a C99 y memoria mediante ARC y copy-on-write. Su objetivo es escribir herramientas y aplicaciones nativas pequeñas con semántica de valores predecible, errores explícitos y acceso controlado a bibliotecas C.
+<p align="center">
+  <img src="assets/wawi.jpg" alt="Wawi, the mascot of the W programming language" width="180">
+</p>
 
-La versión de desarrollo es `0.3.0.dev1`. El lenguaje cambia; no existe todavía una garantía de compatibilidad para producción. El compilador de referencia W0 es la autoridad sobre si un programa es válido; W1 es un compilador escrito en W para un subconjunto estricto (sin genéricos, sin payloads de enum y sin pattern matching sobre `Option`/`Result`). Consulta [la matriz de motores](docs/ENGINE_PARITY_MATRIX.md), [el estado de la expansión](docs/EXPANSION.md) y [los límites conocidos](docs/KNOWN_LIMITS.md).
+**W** is an experimental, statically typed language for small native tools and applications. It compiles to portable C99 and combines predictable value semantics, copy-on-write (CoW), deterministic reference counting (ARC), explicit errors, and controlled access to C libraries.
 
-## Uso
+Wawi, W's mascot, is inspired by Ecuador's bioluminescent click beetle, the Ninacuro (*Pyrophorus noctilucus*).
 
-Requiere Python 3.10 o posterior y un compilador C99 para generar ejecutables.
+The current development version is `0.3.0.dev1`. W is under active development and does not yet guarantee production stability. W0 is the reference compiler; W1 is a self-hosted compiler with a narrower supported profile. See the [engine parity matrix](docs/ENGINE_PARITY_MATRIX.md), [expansion status](docs/EXPANSION.md), and [known limits](docs/KNOWN_LIMITS.md) for the current boundaries.
+
+## Getting started
+
+You need Python 3.10 or later and a C99 compiler to build native executables.
 
 ```sh
 git clone https://github.com/WashingtonYandun/W.git
@@ -19,22 +25,27 @@ cd W
 ./w test
 ```
 
-También se puede instalar W0 con `pip install .`. La distribución incluye el frontend, HIR, runtime C, stdlib y LSP. El bootstrap de W1 y la suite de desarrollo requieren el checkout del repositorio.
+You can also install W0 with `pip install .`. The package includes the frontend, HIR, C runtime, standard library, and LSP. Building the W1 bootstrap and running the development suite require a repository checkout.
+
+## Language at a glance
+
+Functions are values, and closures capture values from their surrounding scope:
 
 ```w
 fn apply(transform: fn(int) -> int, value: int) -> int {
     return transform(value)
 }
+
 let offset = 10
 let add: fn(int) -> int = |value| => value + offset
 print(apply(add, 5))
 ```
 
-Las closures capturan por valor: conservan snapshots de listas, diccionarios y structs, y no pueden mutar lo capturado. Las clases mantienen identidad y referencias fuertes; los ciclos fuertes requieren referencias débiles explícitas. Las limitaciones conocidas y las decisiones aplazadas están en [docs/KNOWN_LIMITS.md](docs/KNOWN_LIMITS.md).
+Closures capture by value: lists, dictionaries, and structs retain independent copy-on-write snapshots, and captured bindings cannot be mutated through the closure. Classes preserve identity and use strong references; use weak references to break strong cycles. See [known limits](docs/KNOWN_LIMITS.md) for current constraints and deferred decisions.
 
-## Módulos y C
+## Modules and C interoperability
 
-Un módulo exporta únicamente declaraciones `pub`:
+Modules expose only declarations marked `pub`:
 
 ```w
 pub fn double(value: int) -> int { return value * 2 }
@@ -43,41 +54,40 @@ pub fn double(value: int) -> int { return value * 2 }
 ```w
 import "math.w" as math
 print(math.double(3))
+
 extern "C" fn sqrt(value: double) -> double
 print(sqrt(81.0))
 ```
 
-La FFI inicial acepta escalares y handles `opaque`. `int32` se comprueba al entrar en C; `int` e `int64` usan enteros de 64 bits. `float` y `double` corresponden a C `double`. Usa `--link-lib m` cuando tu plataforma requiera enlazar libm. Los handles no transfieren ownership de memoria de W.
+The initial FFI supports scalar values and opaque handles. `int32` is checked at the C boundary; `int` and `int64` use 64-bit integers. W's `float` and `double` map to C `double`. Use `--link-lib m` when your platform requires linking libm. Opaque handles do not transfer ownership of W-managed memory.
 
-La stdlib se importa como `import "std/text" as text`. Incluye módulos `io`, `text`, `bytes` y `algorithms`; sus contratos y límites están en [stdlib](docs/STDLIB.md).
+Import standard library modules with `import "std/text" as text`. The library includes `io`, `text`, `bytes`, and `algorithms`; see the [standard library guide](docs/STDLIB.md) for their contracts and limits.
 
-## Herramientas
+## Tooling
 
-- `./w fmt archivo.w`: formato conservando comentarios.
-- `./w emit-c archivo.w -o programa.c`: inspección del C generado; HIR es el backend predeterminado.
-- `./w build archivo.w -o programa --sanitize`: ejecución instrumentada con ASan/UBSan.
-- `./w lsp`: servidor LSP por stdio, compartiendo el checker y los snapshots de fuentes.
-- `./w test --differential 25 --seed 1000`: comparación de motores.
+- `./w fmt path.w`: format source while preserving comments.
+- `./w emit-c path.w -o program.c`: inspect generated C. Typed HIR is the default backend.
+- `./w build path.w -o program --sanitize`: build with ASan and UBSan instrumentation.
+- `./w lsp`: start the stdio Language Server Protocol server, which shares source snapshots and the type checker.
+- `./w test --differential 25 --seed 1000`: compare execution engines.
 
-Un `Err` devuelto por `main` se informa por `stderr` como `W4003` y termina el proceso con
-un código distinto de cero, para que un programa que falla no sea indistinguible de uno
-que tuvo éxito.
+If `main` returns an `Err`, W writes diagnostic `W4003` to `stderr` and exits with a non-zero status, so a failed program is distinguishable from a successful one.
 
-## Estructura
+## Repository layout
 
-- `lexer/`, `parser/`, `node/`, `wtokens/`: frontend y sintaxis.
-- `checker/`, `compiler/`: tipos, sesiones, módulos y especializaciones.
-- `hir/`, `codegen/`, `runtime/`: representación intermedia, emisión C y ejecución de referencia.
-- `selfhost/src/`: fuentes modulares de W1; `selfhost/w1.w` se genera con `python3 tools/bundle_w1.py`.
-- `stdlib/`, `tooling/`, `editors/`: biblioteca y herramientas de edición.
-- `tests/unit/`, `tests/runtime/`, `tests/types/`, `tests/fuzz/`: contratos, fixtures y fuzzing.
-- `examples/`, `bench/`, `tools/`: ejemplos, medición y utilidades.
-- `docs/adr/`: decisiones técnicas; `docs/history/`: informes históricos; `docs/KNOWN_LIMITS.md`: lo que W no hace y por qué.
+- `lexer/`, `parser/`, `node/`, `wtokens/`: frontend and syntax.
+- `checker/`, `compiler/`: types, compilation sessions, modules, and specialization.
+- `hir/`, `codegen/`, `runtime/`: intermediate representation, C generation, and runtime.
+- `selfhost/src/`: modular W1 sources; `selfhost/w1.w` is generated by `python3 tools/bundle_w1.py`.
+- `stdlib/`, `tooling/`, `editors/`: standard library and editor tooling.
+- `tests/unit/`, `tests/runtime/`, `tests/types/`, `tests/fuzz/`: contracts, fixtures, and fuzz tests.
+- `examples/`, `bench/`, `tools/`: examples, benchmarks, and utilities.
+- `docs/adr/`, `docs/history/`: architecture decisions and historical reports.
 
-La [especificación](SPEC.md) define el lenguaje. Los informes de hitos describen resultados de su fecha y no reemplazan los contratos actuales.
+The [language specification](SPEC.md) defines W's syntax and semantics. Milestone reports describe the state at the time they were written; current behavior is defined by the specification and tests.
 
-## Límites conocidos
+## Known limits
 
-W1 aún no implementa toda la especialización genérica de W0. El runtime usa ARC de un solo hilo; no ofrece concurrencia de memoria compartida. Los rangos producen listas materializadas y comprueban su tamaño antes de reservar. La FFI no ofrece callbacks C, aritmética de punteros ni transferencia automática de allocators.
+W1 does not yet implement all of W0's generic specialization. The ARC runtime is single-threaded and does not support shared-memory concurrency. Ranges materialize lists and check their size before allocation. The FFI does not support C callbacks, pointer arithmetic, or automatic allocator transfer.
 
-El proyecto está bajo [licencia MIT](LICENSE). Para contribuir, consulta [CONTRIBUTING.md](CONTRIBUTING.md).
+W is licensed under the [MIT License](LICENSE). See [CONTRIBUTING.md](CONTRIBUTING.md) to contribute.
