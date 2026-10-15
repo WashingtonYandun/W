@@ -644,7 +644,7 @@ class CCodeGen:
 
             conds: List[str] = [f"(({val_expr}).tag == W_ENUM && strcmp(({val_expr}).as.en.variant, \"{pattern.variant}\") == 0)"]
             if pattern.enum_name:
-                conds.append(f"(strcmp(({val_expr}).as.en.enum_name, \"{pattern.enum_name}\") == 0)")
+                conds.append(f"(w_builtin_name(({val_expr}).as.en.enum_name, \"{pattern.enum_name}\"))")
             if not pattern.args:
                 return "(" + " && ".join(conds) + ")"
 
@@ -896,6 +896,9 @@ class CCodeGen:
                     if expr.object.name == "Option" and expr.property in ("None", "none"):
                         return "w_none()"
                     return f'w_enum("{self._enum_name(expr, expr.object.name)}", "{expr.property}")'
+                if expr.property in self.enum_variants:
+                    en_name = self.enum_variants[expr.property]
+                    return f'w_enum("{en_name}", "{expr.property}")'
                 if f"v_{expr.object.name}_{expr.property}" in self.global_vars:
                     return f"v_{expr.object.name}_{expr.property}"
             obj_val = self.emit_expr(expr.object, out)

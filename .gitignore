@@ -19,3 +19,6 @@ build/
 *.o
 *.out
 
+# Test runtime scratch files
+tests/runtime/temp_file.txt
+
