@@ -1,0 +1,21 @@
+class Base {
+    private fn pin() -> int {
+        return 42
+    }
+
+    fn init() {}
+}
+
+class Derived extends Base {
+    fn init() {
+        super.init()
+    }
+
+    public fn pin() -> int {
+        return 99
+    }
+}
+
+fn main() {
+    let d = new Derived()
+}

@@ -104,7 +104,7 @@ def test_ci_matrix_generation_tooling():
     assert "| **`core`** |" in out, "Output must contain core row"
     assert "| **`generics`** |" in out, "Output must contain generics row"
     assert "| **Total Verified** |" in out, "Output must contain total row"
-    assert "86/102" in out, "Output must accurately report 86/102 for W1"
+    assert "91/107" in out, "Output must accurately report 91/107 for W1"
 
 
 def test_documentation_consistency():
@@ -114,7 +114,7 @@ def test_documentation_consistency():
     assert doc_path.exists(), "docs/ENGINE_PARITY_MATRIX.md must exist"
     content = doc_path.read_text()
 
-    assert "86/86" in content, "Doc must mention 86/86 core parity"
+    assert "91/91" in content, "Doc must mention 91/91 core parity"
     assert "0/15" in content, "Doc must mention 0/15 generics limitation in W1"
     assert "Milestone D02" in content, "Doc must reference D02 remediation milestone"
     assert "Bootstrap Fixed-Point vs. Full Language Parity" in content, (

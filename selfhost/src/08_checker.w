@@ -121,9 +121,14 @@ struct CheckerInterface {
 
 struct CheckerClass {
     name: str,
+    super_name: str,
     interfaces: list[str],
+    fields: list[str],
     methods: list[str],
     privates: list[str],
+    private_methods: list[str],
+    decl_line: int,
+    decl_col: int,
 }
 
 struct CheckerFn {
@@ -349,10 +354,13 @@ fn check_tokens_semantics(tokens: list[Token]) -> unit {
             interfaces.append(CheckerInterface { name: iname, methods: imethods })
         } elif t.kind == "CLASS" and i + 1 < n and tokens[i + 1].kind == "IDENT" {
             let cname = tokens[i + 1].val
+            let mut supname = ""
             let mut cintfs: list[str] = []
             let mut j = i + 2
             while j < n and tokens[j].kind != "LBRACE" {
-                if tokens[j].kind == "IMPLEMENTS" {
+                if tokens[j].kind == "EXTENDS" and j + 1 < n and tokens[j + 1].kind == "IDENT" {
+                    supname = tokens[j + 1].val
+                } elif tokens[j].kind == "IMPLEMENTS" {
                     let mut k = j + 1
                     while k < n and tokens[k].kind == "IDENT" {
                         cintfs.append(tokens[k].val)
@@ -362,8 +370,17 @@ fn check_tokens_semantics(tokens: list[Token]) -> unit {
                 }
                 j = j + 1
             }
+            let mut cfields: list[str] = []
             let mut cmethods: list[str] = []
             let mut cprivates: list[str] = []
+            let mut cpriv_methods: list[str] = []
+            let mut has_init = false
+            let mut init_has_super = false
+            let mut init_super_first = true
+            let mut init_super_count = 0
+            let mut init_fields: list[str] = []
+            let mut init_line = t.line
+            let mut init_col = t.col
             if j < n and tokens[j].kind == "LBRACE" {
                 let mut k = j + 1
                 let mut depth = 1
@@ -380,17 +397,95 @@ fn check_tokens_semantics(tokens: list[Token]) -> unit {
                     } elif depth == 1 and tokens[k].kind == "FN" and k + 1 < n and tokens[k + 1].kind == "IDENT" {
                         let mname = tokens[k + 1].val
                         cmethods.append(mname)
-                        if is_priv { cprivates.append(mname) }
+                        if is_priv {
+                            cprivates.append(mname)
+                            cpriv_methods.append(mname)
+                        }
                         is_priv = false
+                        let is_init_m = (mname == "init")
+                        if is_init_m {
+                            has_init = true
+                            init_line = tokens[k + 1].line
+                            init_col = tokens[k + 1].col
+                        }
+                        let mut scan_j = k + 2
+                        while scan_j < n and tokens[scan_j].kind != "LBRACE" and tokens[scan_j].kind != "FN" and tokens[scan_j].kind != "RBRACE" {
+                            scan_j = scan_j + 1
+                        }
+                        if scan_j < n and tokens[scan_j].kind == "LBRACE" {
+                            let mut ib_depth = 1
+                            let mut ib_k = scan_j + 1
+                            let mut seen_stmt = false
+                            while ib_k < n and ib_depth > 0 {
+                                if tokens[ib_k].kind == "LBRACE" {
+                                    ib_depth = ib_depth + 1
+                                } elif tokens[ib_k].kind == "RBRACE" {
+                                    ib_depth = ib_depth - 1
+                                } elif ib_depth == 1 and is_init_m {
+                                    if tokens[ib_k].kind == "SUPER" and ib_k + 2 < n and tokens[ib_k + 1].kind == "DOT" and tokens[ib_k + 2].val == "init" {
+                                        init_has_super = true
+                                        init_super_count = init_super_count + 1
+                                        if seen_stmt {
+                                            init_super_first = false
+                                        }
+                                    } elif tokens[ib_k].kind == "THIS" or (tokens[ib_k].kind == "IDENT" and tokens[ib_k].val == "self") {
+                                        if ib_k + 3 < n and tokens[ib_k + 1].kind == "DOT" and tokens[ib_k + 2].kind == "IDENT" and tokens[ib_k + 3].kind == "ASSIGN" {
+                                            init_fields.append(tokens[ib_k + 2].val)
+                                        }
+                                        if not init_has_super {
+                                            seen_stmt = true
+                                        }
+                                    } elif tokens[ib_k].kind == "LET" or tokens[ib_k].kind == "IDENT" {
+                                        if not init_has_super {
+                                            seen_stmt = true
+                                        }
+                                    }
+                                }
+                                ib_k = ib_k + 1
+                            }
+                            k = ib_k - 1
+                        }
                     } elif depth == 1 and tokens[k].kind == "IDENT" and k + 1 < n and tokens[k + 1].kind == "COLON" {
                         let fname = tokens[k].val
+                        cfields.append(fname)
                         if is_priv { cprivates.append(fname) }
                         is_priv = false
                     }
                     k = k + 1
                 }
             }
-            classes.append(CheckerClass { name: cname, interfaces: cintfs, methods: cmethods, privates: cprivates })
+            if has_init {
+                if supname != "" {
+                    let mut sup_has_init = false
+                    for sc in classes {
+                        if sc.name == supname {
+                            for sm in sc.methods {
+                                if sm == "init" { sup_has_init = true }
+                            }
+                        }
+                    }
+                    if sup_has_init {
+                        if not init_has_super {
+                            report_error("W3004", init_line, init_col, "constructor of derived class '" + cname + "' must call 'super.init'")
+                        } elif not init_super_first {
+                            report_error("W3004", init_line, init_col, "call to 'super.init' must be the first statement in constructor of class '" + cname + "'")
+                        } elif init_super_count > 1 {
+                            report_error("W3004", init_line, init_col, "multiple calls to 'super.init' in constructor of class '" + cname + "'")
+                        }
+                    }
+                }
+                for fi in 0..len(cfields) {
+                    let f = cfields[fi]
+                    let mut found_f = false
+                    for ifi in 0..len(init_fields) {
+                        if init_fields[ifi] == f { found_f = true }
+                    }
+                    if not found_f {
+                        report_error("W3004", init_line, init_col, "field '" + f + "' of class '" + cname + "' is not initialized in constructor")
+                    }
+                }
+            }
+            classes.append(CheckerClass { name: cname, super_name: supname, interfaces: cintfs, fields: cfields, methods: cmethods, privates: cprivates, private_methods: cpriv_methods, decl_line: t.line, decl_col: t.col })
         } elif t.kind == "FN" and i + 1 < n and tokens[i + 1].kind == "IDENT" {
             let fname = tokens[i + 1].val
             let mut ret_t = "unit"
@@ -443,15 +538,42 @@ fn check_tokens_semantics(tokens: list[Token]) -> unit {
         }
     }
 
+    for cls in classes {
+        if cls.super_name != "" {
+            let mut cur_super_name = cls.super_name
+            while cur_super_name != "" {
+                let mut next_super_name = ""
+                for sup in classes {
+                    if sup.name == cur_super_name {
+                        for m in cls.methods {
+                            if m != "init" {
+                                for pm in sup.private_methods {
+                                    if m == pm {
+                                        report_error("W3002", cls.decl_line, cls.decl_col, "Cannot override private method '" + m + "' of superclass '" + sup.name + "'")
+                                    }
+                                }
+                            }
+                        }
+                        next_super_name = sup.super_name
+                    }
+                }
+                cur_super_name = next_super_name
+            }
+        }
+    }
+
     let mut vars: list[CheckerVar] = []
     let mut scope_lvl = 0
     let mut cur_fn_ret = "unit"
     let mut cur_fn_err = ""
     let mut cur_fn_name = ""
+    let mut cur_class = ""
 
     for i in 0..n {
         let tok = tokens[i]
-        if tok.kind == "FN" and i + 1 < n and tokens[i + 1].kind == "IDENT" {
+        if tok.kind == "CLASS" and i + 1 < n and tokens[i + 1].kind == "IDENT" {
+            cur_class = tokens[i + 1].val
+        } elif tok.kind == "FN" and i + 1 < n and tokens[i + 1].kind == "IDENT" {
             cur_fn_name = tokens[i + 1].val
             for f in fns {
                 if f.name == cur_fn_name {
@@ -473,6 +595,9 @@ fn check_tokens_semantics(tokens: list[Token]) -> unit {
         } elif tok.kind == "LBRACE" {
             scope_lvl = scope_lvl + 1
         } elif tok.kind == "RBRACE" {
+            if scope_lvl == 1 and cur_class != "" {
+                cur_class = ""
+            }
             let mut v_keep: list[CheckerVar] = []
             for v in vars {
                 if v.scope_lvl < scope_lvl {
@@ -576,8 +701,8 @@ fn check_tokens_semantics(tokens: list[Token]) -> unit {
                     }
                 }
             }
-        } elif tok.kind == "IDENT" and i + 1 < n and tokens[i + 1].kind == "DOT" {
-            if i + 2 < n and tokens[i + 2].val == "append" {
+        } elif (tok.kind == "IDENT" or tok.kind == "THIS" or tok.kind == "SUPER") and i + 1 < n and tokens[i + 1].kind == "DOT" {
+            if tok.kind == "IDENT" and i + 2 < n and tokens[i + 2].val == "append" {
                 let vname = tok.val
                 let mut vi = len(vars) - 1
                 while vi >= 0 {
@@ -590,7 +715,7 @@ fn check_tokens_semantics(tokens: list[Token]) -> unit {
                         vi = vi - 1
                     }
                 }
-            } elif i + 4 < n and tokens[i + 3].kind == "DOT" and tokens[i + 4].val == "append" {
+            } elif tok.kind == "IDENT" and i + 4 < n and tokens[i + 3].kind == "DOT" and tokens[i + 4].val == "append" {
                 let vname = tok.val
                 let mut vi = len(vars) - 1
                 while vi >= 0 {
@@ -615,7 +740,9 @@ fn check_tokens_semantics(tokens: list[Token]) -> unit {
                 for cls in classes {
                     for pm in cls.privates {
                         if pm == mem {
-                            report_error("W3002", tokens[i + 2].line, tokens[i + 2].col, "private member access violation")
+                            if cur_class != cls.name {
+                                report_error("W3002", tokens[i + 2].line, tokens[i + 2].col, "Cannot access private member '" + mem + "' of class '" + cls.name + "'")
+                            }
                         }
                     }
                 }

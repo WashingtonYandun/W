@@ -201,7 +201,7 @@ class HirCCodeGen:
                 self.classes[cl.name] = cl
                 self.class_order.append(cl.name)
             for m in cl.methods:
-                if m.name != "init":
+                if m.name != "init" and m.is_public:
                     key = (m.name, len(m.params))
                     if key not in self.dispatch_methods:
                         self.dispatch_methods.append(key)
@@ -427,7 +427,7 @@ class HirCCodeGen:
                 resolved = self._find_class_method(cls_name, mname)
                 if resolved is not None:
                     def_cls, m_decl = resolved
-                    if len(m_decl.params) == arity:
+                    if len(m_decl.params) == arity and m_decl.is_public:
                         d_lines.append(
                             f'    if (v_self.tag == W_OBJECT && strcmp(v_self.as.st->name, "{cls_name}") == 0) '
                             f'return w_method_{def_cls}__{mname}({", ".join(call_args)});'

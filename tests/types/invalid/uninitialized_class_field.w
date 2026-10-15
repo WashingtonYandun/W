@@ -1,0 +1,12 @@
+class Person {
+    public name: str
+    public age: int
+
+    fn init(name: str) {
+        this.name = name
+    }
+}
+
+fn main() {
+    let p = new Person("Alice")
+}

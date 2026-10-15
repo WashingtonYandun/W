@@ -34,14 +34,14 @@ flowchart TD
 
 ## 2. Feature Parity Matrix
 
-The following table summarizes current compiler support across all 102 test fixtures in the repository corpus:
+The following table summarizes current compiler support across all 107 test fixtures in the repository corpus:
 
 | Feature Category | Fixtures | W0 Interpreter | W0 AST C99 | W0 Typed HIR (Default) | W1 Self-Hosted C99 | Status / Tracking |
 | :--- | :---: | :---: | :---: | :---: | :---: | :--- |
-| **`core`** | 86 | ✅ 86/86 | ✅ 86/86 | ✅ 86/86 | ✅ 86/86 | Stable &bull; 100% Parity |
+| **`core`** | 91 | ✅ 91/91 | ✅ 91/91 | ✅ 91/91 | ✅ 91/91 | Stable &bull; 100% Parity |
 | **`generics`** | 15 | ✅ 15/15 | ✅ 15/15 | ✅ 15/15 | ⏳ 0/15 | Pending Milestone D02 |
 | **`checked_modules`** | 1 | ✅ 1/1 | ✅ 1/1 | ✅ 1/1 | ⏳ 0/1 | Pending Milestone D02 |
-| **Total Corpus** | **102** | **102/102 (100%)** | **102/102 (100%)** | **102/102 (100%)** | **86/102 (84.3%)** | **Full W0 Parity &bull; Core W1 Subset** |
+| **Total Corpus** | **107** | **107/107 (100%)** | **107/107 (100%)** | **107/107 (100%)** | **91/107 (85.0%)** | **Full W0 Parity &bull; Core W1 Subset** |
 
 ---
 
@@ -49,7 +49,7 @@ The following table summarizes current compiler support across all 102 test fixt
 
 ### 3.1 Core Language & Control Flow (`core`)
 - **Status:** **100% Parity** across all 4 engines.
-- **Coverage:** 86 fixtures (positive runtime fixtures, control flow, functions, recursion, and error diagnostics).
+- **Coverage:** 91 fixtures (positive runtime fixtures, control flow, functions, OOP contracts, recursion, and error diagnostics).
 - **Features Included:**
   - Arithmetic, logic, bitwise, and comparison expressions.
   - While loops, range loops (`for i in 0..10`), break, continue, and scope cleanup.

@@ -1,0 +1,20 @@
+class Animal {
+    public name: str
+
+    fn init(name: str) {
+        this.name = name
+    }
+}
+
+class Dog extends Animal {
+    public breed: str
+
+    fn init(name: str, breed: str) {
+        this.breed = breed
+        super.init(name)
+    }
+}
+
+fn main() {
+    let d = new Dog("Rex", "Husky")
+}
