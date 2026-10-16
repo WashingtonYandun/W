@@ -27,7 +27,7 @@ flowchart TD
 ```
 
 1. **W0 Interpreter (`runtime/Interpreter.py`):** Canonical reference AST tree-walking interpreter.
-2. **W0 Typed HIR (`hir/HirCCodeGen.py`):** Entrada principal; ADR-018 baja HIR a MIR verificado antes de emitir C99.
+2. **W0 Typed HIR (`hir/HirCCodeGen.py`):** Entrada principal; MIR baja HIR a MIR verificado antes de emitir C99.
 3. **W0 AST C99 (`codegen/CCodeGen.py`):** Secondary C99 oracle retained for differential fuzzing and cross-engine verification.
 4. **W1 Self-Hosted (`selfhost/w1.w`):** Native Stage-2 standalone compiler binary compiled via 3-stage bootstrap fixed-point.
 
@@ -35,7 +35,7 @@ flowchart TD
 
 ## 2. Feature Parity Matrix
 
-The following table summarizes compiler support across the public core corpus. The counts are regenerated from `summary.json` by `tools/ci_conformance.py --matrix`, which reports measurements from the last verified run rather than restating `tests/engine_profiles.json`. Closures, FFI, generic OOP, stdlib and the LSP live in a separate expansion suite; see [EXPANSION.md](EXPANSION.md). Current project status and follow-up work are in [ROADMAP.md](ROADMAP.md).
+The following table summarizes compiler support across the public core corpus. The counts are regenerated from `summary.json` by `tools/ci_conformance.py --matrix`, which reports measurements from the last verified run rather than restating `tests/engine_profiles.json`. Closures, FFI, generic OOP, stdlib and the LSP live in a separate expansion suite; see [EXPANSION.md](EXPANSION.md). The matrix describes measured corpus support, not universal language parity.
 
 <!-- GENERATED TABLE START -->
 
