@@ -1,6 +1,6 @@
 # W Language Specification
 
-> **Status:** The current toolchain is `0.3.0.dev1`. Sections 1–11 describe the frozen core grammar and are normative; sections 12–14 describe implementation contracts.
+> **Status:** The current alpha toolchain is `0.4.0a1`. Sections 1–11 describe the frozen core grammar and are normative; sections 12–14 describe implementation contracts.
 >
 > **Targets:** `W0` is the reference implementation and the authority on whether a program is valid. `W1` is an experimental self-hosted compiler whose supported subset is measured by the public release corpus. That corpus now includes generic fixtures, checked modules, `Option`/`Result` patterns and F03 error unions; passing it does not establish universal parity. See [docs/ENGINE_PARITY_MATRIX.md](docs/ENGINE_PARITY_MATRIX.md) and §12.
 >
@@ -580,6 +580,7 @@ present in the tree and covered by the test suite unless marked otherwise.
 * **`v0.2.x` — Copy-on-write telemetry, weak class references, compilation sessions** ✅
 * **`v0.3.0` — Typed HIR as the default backend, `LayoutGraph` finite-layout verification, declaration-order independence** ✅
 * **`v0.3.0` (Phase E) — First-class functions, closures, modules, FFI, stdlib, LSP** ✅
+* **`v0.4.0a1` — first alpha release.** Adds verified MIR with scalar execution and closes the current audit remediation set.
 * **`v0.4` — roadmap in progress.** Candidate work, each gated on the decisions in
   `docs/EXPANSION.md`:
   - F03 error composition (`T ! E1 | E2`) is implemented and measured in the four-engine

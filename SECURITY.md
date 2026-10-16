@@ -8,8 +8,9 @@ Only the latest minor release line receives security updates and backports.
 
 | Version | Supported          | Security Status |
 | ------- | ------------------ | --------------- |
-| 0.3.0.dev1 | :white_check_mark: | Desarrollo experimental; sin perfil de producción aprobado |
-| 0.2.x | :x: | Sustituida por la línea de desarrollo 0.3 |
+| 0.4.0a1 | :white_check_mark: | Experimental alpha; no production profile approved |
+| 0.3.0.dev1 | :x: | Superseded by the W 0.4.0 alpha line |
+| 0.2.x | :x: | Superseded by W 0.3.0 |
 | 0.1.x   | :x:                | Unsupported historical release |
 | < 0.1.0 | :x:                | Unsupported experimental releases |
 

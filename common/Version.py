@@ -1,1 +1,1 @@
-W_VERSION = "0.3.0.dev1"
+W_VERSION = "0.4.0a1"

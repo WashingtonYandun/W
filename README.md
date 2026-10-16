@@ -10,7 +10,7 @@
 
 Wawi, W's mascot, is inspired by Ecuador's bioluminescent click beetle, the Ninacuro (*Pyrophorus noctilucus*).
 
-The current development version is `0.3.0.dev1`. W is under active development and does not yet guarantee production stability. W0 is the reference compiler; W1 is a self-hosted compiler with a narrower supported profile. See the [engine parity matrix](docs/ENGINE_PARITY_MATRIX.md), [expansion status](docs/EXPANSION.md), and [known limits](docs/KNOWN_LIMITS.md) for the current boundaries.
+The current alpha version is `0.4.0a1`. W is under active development and does not yet guarantee production stability. W0 is the reference compiler; W1 is a self-hosted compiler with a narrower supported profile. See the [engine parity matrix](docs/ENGINE_PARITY_MATRIX.md), [expansion status](docs/EXPANSION.md), and [known limits](docs/KNOWN_LIMITS.md) for the current boundaries.
 
 ## Getting started
 
