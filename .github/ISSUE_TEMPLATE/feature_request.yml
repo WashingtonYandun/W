@@ -6,7 +6,7 @@ body:
   - type: markdown
     attributes:
       value: |
-        Thank you for helping shape the future of W! Before proposing new syntax or features, please check our [Language Specification](SPEC.md) and existing [ADRs](docs/adr/).
+        Thank you for helping shape the future of W! Before proposing new syntax or features, please check the Language Specification and current public documentation.
   - type: textarea
     id: problem
     attributes:
