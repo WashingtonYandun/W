@@ -234,8 +234,7 @@ class Lowering:
             self.bind(parameter, slot)
         value = self.block(declaration.body)
         if self.current is not None:
-            returned = self.interner.get_entry(declaration.return_type_id)
-            if declaration.return_type_id == TYPE_UNIT or returned.tag == 'result' and returned.data[0] == TYPE_UNIT:
+            if declaration.return_type_id == TYPE_UNIT:
                 value = self.constant(None, TYPE_UNIT, declaration)
             self.return_value(value, declaration)
         self.finish()

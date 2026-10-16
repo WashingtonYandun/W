@@ -64,14 +64,33 @@ Tres fixtures prueban límites, overflow y un rango de 100 millones con salida i
 en los cuatro motores. El bootstrap compara C0, C1 y C2; CI incluye GCC/Clang en Linux,
 Clang en macOS y ASan/UBSan, con LSan en Linux.
 
-En el importador de 10.000 filas, cinco muestras calientes con Clang `-O2` en arm64 dan
-62,651 ms y 2,297 MiB para el backend MIR; C independiente da 8,182 ms y 2,078 MiB.
+La primera implementación MIR de ADR-018 registró, para 10.000 filas y cinco muestras
+calientes con Clang `-O2` en arm64, 62,651 ms y 2,297 MiB para el backend MIR; C independiente da 8,182 ms y 2,078 MiB.
 La fase anterior midió 87,776 ms y 27,109 MiB con tres muestras: aproximadamente 29 %
 menos tiempo y 91,5 % menos RSS. Son ejecuciones distintas; no atribuyen cada mejora a
 un cambio aislado ni representan todos los programas W. El binario MIR mide 99.568 bytes
-frente a 37.120 en C. La diferencia de CPU sigue siendo 7,7×.
+frente a 37.120 en C. En esa ejecución, la diferencia de tiempo fue 7,7×.
 
 La evidencia está en `docs/evidence/mir-2026-10-16/`. El siguiente trabajo debe perfilar
 parsing, strings y fronteras runtime/FFI antes de decidir especializar contenedores.
 LLVM sigue sin una justificación medida: el MIR habilita un experimento futuro, pero
 cambiar el emitter no elimina los costes de representación y de los helpers.
+
+## Cierre posterior (ADR-019)
+
+El perfil de buffers identifica asignaciones por caracteres ASCII. Indexación y chr
+reutilizan 128 strings estáticos inmutables, incluido NUL; Unicode conserva ownership.
+10.000 filas y cinco muestras calientes, sin suites concurrentes: MIR 41,972 ms y
+2,250 MiB; C 7,539 ms y 2,078 MiB. La ejecución previa con el mismo runner midió MIR
+63,305 ms. Los buffers administrados bajan de 526.688 a 60.007 (88,6 %); no son
+contadores de todos los malloc. El tiempo baja aproximadamente 33,7 %, pero C también
+varía entre corridas; no atribuir una diferencia temporal exacta a un cambio aislado.
+La diferencia residual de tiempo es 5,57×.
+
+El tokenizer mide 23,026/44,388/86,232 ms para 52/104/208 KB; duplicar entrada en ese
+tramo cuesta aproximadamente 1,93–1,94×. Las entradas pequeñas incluyen un coste fijo
+de proceso. Evidencia: `docs/evidence/audit-completion-2026-10-16/`.
+
+También se corrige el tail Result[unit, E]: MIR debe conservar Err, mientras que el
+tail implícito de una función unit se evalúa y descarta. El fixture unit_tail_values
+verifica ese límite junto a funciones, métodos, closures, opcionales y cleanup.

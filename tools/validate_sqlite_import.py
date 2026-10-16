@@ -5,6 +5,7 @@ from contextlib import closing
 import json
 import os
 from pathlib import Path
+import re
 import shlex
 import shutil
 import sqlite3
@@ -27,15 +28,27 @@ def snapshot(path):
         return connection.execute('SELECT id, value FROM measurements ORDER BY id').fetchall()
 
 
-def measured(binary, source, database, sanitize):
+def measured(binary, source, database, sanitize, allocation_profile=False):
     environment = dict(os.environ, W_SQLITE_DB=str(database), W_MEM_CHECK='1')
+    environment.pop('W_MEM_STATS', None)
+    if allocation_profile:
+        environment['W_MEM_STATS'] = '1'
     if sanitize:
         environment['ASAN_OPTIONS'] = 'detect_leaks=' + ('1' if sys.platform.startswith('linux') else '0')
         environment['UBSAN_OPTIONS'] = 'halt_on_error=1:print_stacktrace=1'
     result = execute([sys.executable, str(ROOT / 'tools/measure_process.py'), '--',
                       str(binary), str(source)], environment)
     record = json.loads(result.stdout)
-    assert not record['stderr'], record
+    if allocation_profile:
+        match = re.fullmatch(r'\[W_MEM_STATS\] alloc=(\d+) free=(\d+) retain=(\d+) release=(\d+) live=(\d+)\n',
+                             record['stderr'])
+        assert match, record
+        record['runtime_memory'] = dict(zip(('alloc', 'free', 'retain', 'release', 'live'),
+                                             map(int, match.groups())))
+        assert record['runtime_memory']['alloc'] == record['runtime_memory']['free'], record
+        assert record['runtime_memory']['live'] == 0, record
+    else:
+        assert not record['stderr'], record
     assert record['peak_memory_bytes'] > 0, record
     return record
 
@@ -78,6 +91,11 @@ def validate(rows=10000, samples=3, sanitize=False):
             build_seconds = time.perf_counter() - started
             version = measured(binary, "--version", directory / "unused.sqlite", sanitize)
             assert version["exit_code"] == 0, version
+            allocation = None
+            if backend != 'c':
+                profile_database = directory / (backend + '-allocations.sqlite')
+                allocation = measured(binary, csv, profile_database, sanitize, allocation_profile=True)
+                assert allocation['exit_code'] == 0 and snapshot(profile_database) == values, allocation
             runs = []
             for sample in range(samples + 1):
                 database = directory / f'{backend}-{sample}.sqlite'
@@ -130,6 +148,9 @@ def validate(rows=10000, samples=3, sanitize=False):
                 'sqlite_version_number': int(version['stdout']),
                 'build_seconds': build_seconds, 'run_seconds': durations,
                 'median_run_seconds': statistics.median(durations),
+                'user_seconds': [run['user_seconds'] for run in runs],
+                'system_seconds': [run['system_seconds'] for run in runs],
+                'runtime_memory': allocation['runtime_memory'] if allocation else None,
                 'peak_memory_bytes': memory, 'median_peak_memory_bytes': statistics.median(memory),
                 'binary_bytes': binary.stat().st_size, 'input_bytes': csv.stat().st_size,
                 'persisted_rows': rows, 'persisted_total': total, 'live_adapter_resources': 0,

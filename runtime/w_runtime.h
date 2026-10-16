@@ -321,6 +321,21 @@ static inline WVal w_str(const char* s) {
     return w_str_n(s, s ? strlen(s) : 0);
 }
 
+/* Immutable ASCII scalars have static lifetime, including the one-byte NUL string. */
+static inline WVal w_ascii_string(uint8_t codepoint) {
+    static const char scalars[] =
+        "\000\000\001\000\002\000\003\000\004\000\005\000\006\000\007\000\010\000\011\000\012\000\013\000\014\000\015\000\016\000\017\000"
+        "\020\000\021\000\022\000\023\000\024\000\025\000\026\000\027\000\030\000\031\000\032\000\033\000\034\000\035\000\036\000\037\000"
+        "\040\000\041\000\042\000\043\000\044\000\045\000\046\000\047\000\050\000\051\000\052\000\053\000\054\000\055\000\056\000\057\000"
+        "\060\000\061\000\062\000\063\000\064\000\065\000\066\000\067\000\070\000\071\000\072\000\073\000\074\000\075\000\076\000\077\000"
+        "\100\000\101\000\102\000\103\000\104\000\105\000\106\000\107\000\110\000\111\000\112\000\113\000\114\000\115\000\116\000\117\000"
+        "\120\000\121\000\122\000\123\000\124\000\125\000\126\000\127\000\130\000\131\000\132\000\133\000\134\000\135\000\136\000\137\000"
+        "\140\000\141\000\142\000\143\000\144\000\145\000\146\000\147\000\150\000\151\000\152\000\153\000\154\000\155\000\156\000\157\000"
+        "\160\000\161\000\162\000\163\000\164\000\165\000\166\000\167\000\170\000\171\000\172\000\173\000\174\000\175\000\176\000\177\000";
+    if (codepoint >= 128) w_runtime_fail("W4003", "ASCII scalar out of bounds");
+    return w_str_n(scalars + (size_t)codepoint * 2, 1);
+}
+
 /* Takes ownership of a terminated buffer; length includes embedded NUL bytes. */
 static inline WVal w_owned_str_n(char* data, size_t length) {
     WStringBuf* buffer = (WStringBuf*)w_alloc_safe(sizeof(WStringBuf));
@@ -1451,6 +1466,8 @@ static inline WVal w_index_get(WVal obj, WVal idx) {
         if (!w_string_offset(obj, idx.as.i, &off, &blen) || blen == 0) {
             w_runtime_fail("W4002", "String index out of bounds");
         }
+        if (blen == 1 && (unsigned char)obj.as.s[off] < 128)
+            return w_ascii_string((uint8_t)obj.as.s[off]);
         char* buf = (char*)w_alloc_safe(blen + 1);
         memcpy(buf, obj.as.s + off, blen);
         buf[blen] = '\0';
@@ -2280,11 +2297,9 @@ static inline WVal w_builtin_chr(WVal v) {
         fprintf(stderr, "[W4003] RuntimeError: chr() arg not in valid Unicode scalar range: %" PRId64 "\n", cp);
         exit(1);
     }
+    if (cp < 0x80) return w_ascii_string((uint8_t)cp);
     char* buf = (char*)w_alloc_safe(5);
-    if (cp < 0x80) {
-        buf[0] = (char)cp;
-        buf[1] = '\0';
-    } else if (cp < 0x800) {
+    if (cp < 0x800) {
         buf[0] = (char)(0xC0 | (cp >> 6));
         buf[1] = (char)(0x80 | (cp & 0x3F));
         buf[2] = '\0';
@@ -2300,7 +2315,7 @@ static inline WVal w_builtin_chr(WVal v) {
         buf[3] = (char)(0x80 | (cp & 0x3F));
         buf[4] = '\0';
     }
-    return w_owned_str_n(buf, cp < 0x80 ? 1 : cp < 0x800 ? 2 : cp < 0x10000 ? 3 : 4);
+    return w_owned_str_n(buf, cp < 0x800 ? 2 : cp < 0x10000 ? 3 : 4);
 }
 
 static inline WVal w_builtin_slice(WVal s, WVal start, WVal end) {

@@ -797,6 +797,8 @@ class Interpreter:
 
     def _wrap_result_value(self, ret_val: WValue, ret_type: Any) -> WValue:
         from node.NodeType import ResultType as AstResultType
+        if ret_type is None or isinstance(ret_type, NamedType) and ret_type.name == 'unit':
+            return WUnit()
         if not isinstance(ret_type, AstResultType) or isinstance(ret_val, WResult):
             return ret_val
         return WOk(ret_val)

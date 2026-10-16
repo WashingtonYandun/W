@@ -86,7 +86,7 @@ cada nueva categoría, especialmente clases con herencia y tipos genéricos mono
 
 **What happens.** `selfhost/w1.w` (bundled from `selfhost/src/*.w`) is a compiler with
 its own lexer, recursive-descent parser, token-driven semantic pass with type interning,
-and direct-to-C emitter. It compiles all 161 fixtures in the public corpus, including
+and direct-to-C emitter. It compiles all 168 fixtures in the public corpus, including
 eight F03 error-union fixtures, 15 generic fixtures and the checked-module fixture. Its
 support outside those tested programs is not guaranteed to match W0:
 
@@ -113,7 +113,7 @@ because a bug in the semantics is reproduced identically at every stage.
 **State.** F01 closed with 114/114 fixtures on 2026-10-15. F03 extended that corpus to
 121/121 cases on all four engines, with zero unsupported fixtures. The H01–H03 critical
 regressions expanded the corpus to 129 cases; the dedicated F03 ownership regression
-now brings measured coverage to 130/130 cases. The three-stage bootstrap
+at that point brought coverage to 130/130 cases. ADR-017–ADR-019 extend the current corpus to 168 cases. The three-stage bootstrap
 also reaches an identical C output hash at every stage. These checks prove the recorded
 corpus and deterministic self-hosting contract; they do not prove universal language
 parity or semantic correctness outside the tested programs.
@@ -139,7 +139,7 @@ one user expression. The interpreter continues to report its existing source spa
 
 ## 5. Strong reference cycles leak unless detected explicitly
 
-**What happens.** An acyclic value subgraph cannot be built, because a value container can
+**What happens.** An acyclic heap cannot be guaranteed, because a value container can
 hold a class reference and the class can hold that same container:
 
 ```w
@@ -193,7 +193,7 @@ gains either atomics or a "no shared state" discipline with a runtime that enfor
 | :--- | :--- |
 | Asignación encadenada | HIR usa `HirAssignment`; se conserva el valor y cada índice se evalúa una vez. El límite artificial de profundidad fue eliminado. |
 | Parser error recovery | None. The first syntax error aborts the parse, so one diagnostic per run is the maximum. `--json` reports a single object, not an array. |
-| `w fmt` coverage | Idempotence is verified on `tests/formatter` and `tests/runtime`; `selfhost/` and `examples/` are not in that gate (they were verified by hand and formatting `selfhost/w1.w` produces byte-identical C). |
+| `w fmt` coverage | El gate verifica idempotencia y AST preservado en fixtures, runtime, ejemplos recursivos, stdlib y selfhost; también ejecuta árboles generados antes y después del formato. |
 | LSP | `initialize`, `didOpen/didChange/didClose`, `definition`, `completion` and `publishDiagnostics`. No hover, references, rename, formatting, signature help, semantic tokens or incremental sync. |
 | Dictionary keys | `int`, `str`, `bool`, `enum` only; `float` and composites containing it are rejected with `W2010`. |
 | `NetError` | Declared in the prelude (`checker/SymbolTable.py`) and referenced by a parser fixture, but nothing produces one. Either implement a network module or remove the type. |
@@ -212,7 +212,12 @@ las asignaciones. El backend principal consume MIR verificado y especializa loca
 parámetros y retornos `int`, `float` y `bool`. Los contenedores siguen usando `WVal`;
 no existe un backend LLVM directo. Véase `MIR_DESIGN.md` y ADR-018.
 
-El nuevo corpus tiene 161 fixtures, incluidos 28 casos de la auditoría. La paridad
+El nuevo corpus tiene 168 fixtures, incluidos 28 casos de la auditoría. La paridad
 medida no cubre todas las combinaciones del lenguaje. Los recursos FFI `opaque` siguen
 requiriendo disciplina manual y SQLite del sistema no se recompila con sanitizers.
 Véase ADR-017 y `docs/AUDIT_REMEDIATION.md`.
+
+Los strings ASCII de un carácter producidos por indexación y chr usan almacenamiento
+inmutable estático, incluido NUL. El resto conserva ownership administrado. Los contadores
+W_MEM_STATS miden buffers lógicos; no todos los malloc ni sus bytes. El runner SQLite
+recoge ese perfil en una ejecución separada de las muestras temporizadas.

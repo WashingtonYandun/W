@@ -9,7 +9,6 @@ from lexer.Lexer import Lexer
 from parser.Parser import Parser
 from checker.TypeChecker import TypeChecker
 from runtime.Interpreter import Interpreter
-from formatter.Formatter import Formatter
 from codegen.CCodeGen import CCodeGen
 from hir.HirBuilder import HirBuilder
 from hir.HirNodes import HirModule
@@ -265,25 +264,14 @@ def _run_suite_in_repo(repo_root: str) -> None:
     print(f"Error handling:      {err_passed}/{len(err_files)}")
 
     # 5. Formatter Idempotence Tests
-    fmt_files = sorted(glob.glob("tests/formatter/*.w") + glob.glob("tests/runtime/*.w"))
+    from tests.formatter_contract import formatter_paths, verify_formatting
+    fmt_files = formatter_paths()
     fmt_passed = 0
-    fmt = Formatter()
     for path in fmt_files:
         with open(path, "r", encoding="utf-8") as stream:
             code = stream.read()
         try:
-            ast1 = Parser(file=path).parse(code)
-            out1 = fmt.format(ast1)
-            ast2 = Parser(file=path).parse(out1)
-            out2 = fmt.format(ast2)
-            assert out1 == out2
-            # Idempotence alone is satisfied by a formatter that deletes everything, so
-            # the output must stay parseable and keep the program's text.
-            assert out1.strip(), "formatter produced empty output"
-            source_names = {t.value for t in Lexer(code, file=path).tokenize() if t.type == TokenType.IDENTIFIER}
-            formatted_names = {t.value for t in Lexer(out1, file=path).tokenize() if t.type == TokenType.IDENTIFIER}
-            missing = source_names - formatted_names
-            assert not missing, f"formatter dropped identifiers: {sorted(missing)[:5]}"
+            verify_formatting(code, str(path))
             fmt_passed += 1
         except Exception as e:
             print(f"  [FORMATTER FAIL] {path}: {e}")
@@ -542,6 +530,8 @@ def _run_suite_in_repo(repo_root: str) -> None:
     audit_ok = run_audit_tests()
     from tests.unit.test_mir import run_mir_tests
     mir_ok = run_mir_tests()
+    from tests.unit.test_audit_completion import run_completion_tests
+    completion_ok = run_completion_tests()
 
     if os.path.exists(temp_file):
         try:
@@ -598,6 +588,7 @@ def _run_suite_in_repo(repo_root: str) -> None:
         and expansion_ok
         and audit_ok
         and mir_ok
+        and completion_ok
         and examples_passed == len(example_files)
         and bootstrap_ok
     )
@@ -607,7 +598,7 @@ def _run_suite_in_repo(repo_root: str) -> None:
             v_lex_passed + i_lex_passed + v_parse_passed + i_parse_passed +
             v_type_passed + i_type_passed + err_passed + fmt_passed + hir_passed +
             runtime_passed + c99_passed + hir_c99_passed + w1_runtime_passed +
-            examples_passed + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1
+            examples_passed + 17
         )
         print(f"ALL {total}/{total} CONFORMANCE, EXAMPLES & SELF-HOSTING TESTS PASSED (100%).")
         sys.exit(0)

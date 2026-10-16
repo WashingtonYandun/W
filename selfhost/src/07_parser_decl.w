@@ -29,8 +29,8 @@ fn parse_let_stmt(is_global: bool) -> unit {
 }
 
 fn parse_return_stmt() -> unit {
-    let return_token = expect_kind("RETURN")
-    if check_kind("RBRACE") or is_eof() or at_tok().line > return_token.line {
+    expect_kind("RETURN")
+    if not expression_starter(at_tok().kind) {
         emit_cleanup_until_fn()
         if g_fn_fallible {
             emit_line("return w_ok(w_unit());")
@@ -316,8 +316,11 @@ fn parse_class_decl() -> unit {
             }
             expect_kind("RPAREN")
             let mut fallible = false
+            let mut unit_return = true
             if match_kind("ARROW") {
+                let type_start = g_pos
                 fallible = parse_type_ann()
+                unit_return = parsed_unit_return(type_start)
             }
             m_names.append(mname)
             m_arities.append(len(p_names))
@@ -339,7 +342,8 @@ fn parse_class_decl() -> unit {
             let empty: list[str] = []
             g_cur_stmts = empty
             push_scope("fn")
-            let ret_v = parse_block_expr()
+            let mut ret_v = parse_block_expr()
+            if unit_return { ret_v = "w_unit()" }
             let ret_hold = new_aux("_ret")
             emit_line("WVal " + ret_hold + " = " + own_expr(ret_v) + ";")
             pop_scope()
@@ -560,8 +564,11 @@ fn parse_fn_decl() -> unit {
     }
     expect_kind("RPAREN")
     let mut fallible = false
+    let mut unit_return = true
     if match_kind("ARROW") {
+        let type_start = g_pos
         fallible = parse_type_ann()
+        unit_return = parsed_unit_return(type_start)
     }
     let mut sig = "void"
     if len(param_names) > 0 {
@@ -586,7 +593,8 @@ fn parse_fn_decl() -> unit {
     for parameter in param_names { borrowed.append("v_" + parameter) }
     g_borrowed_vars = borrowed
     push_scope("fn")
-    let ret_v = parse_block_expr()
+    let mut ret_v = parse_block_expr()
+    if unit_return { ret_v = "w_unit()" }
     let ret_hold = new_aux("_ret")
     emit_line("WVal " + ret_hold + " = " + own_expr(ret_v) + ";")
     pop_scope()

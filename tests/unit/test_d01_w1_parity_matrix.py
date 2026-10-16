@@ -143,6 +143,13 @@ def test_documentation_consistency():
     assert int(total_row.group(1)) == corpus_size, (
         f"Doc reports a corpus of {total_row.group(1)} but the real corpus is {corpus_size}; "
         f"rerun: python3 tools/ci_conformance.py --matrix")
+    from collections import Counter
+    from tests.engine_harness import feature_for
+    expected_counts = Counter(feature_for(str(path.relative_to(ROOT)))
+                              for group in corpus_paths() for path in group)
+    documented_counts = {name: int(count) for name, count in _re.findall(
+        r'\| \*\*`([^`]+)`\*\* \| (\d+) \|', content)}
+    assert documented_counts == dict(expected_counts), 'Feature rows must match the current corpus, not only its total'
     assert "F01 is complete" in content, "Doc must record F01 completion"
     assert f"{corpus_size}/{corpus_size} (100.0%)" in content, "Doc must record current measured W1 corpus parity"
     assert "error_unions" in content and "F03" in content, "Doc must record F03 error-union parity"

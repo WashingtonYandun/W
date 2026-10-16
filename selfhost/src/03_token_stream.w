@@ -48,3 +48,7 @@ fn expect_kind(k: str) -> Token {
     return tok
 }
 
+fn expression_starter(kind: str) -> bool {
+    return kind == "INT" or kind == "FLOAT" or kind == "STR" or kind == "TRUE" or kind == "FALSE" or kind == "NONE" or kind == "IDENT" or kind == "THIS" or kind == "SUPER" or kind == "NEW" or kind == "MINUS" or kind == "NOT" or kind == "LPAREN" or kind == "LBRACKET" or kind == "LBRACE" or kind == "PIPE" or kind == "IF" or kind == "MATCH"
+}
+
