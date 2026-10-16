@@ -102,6 +102,11 @@ In `runtime/w_runtime.h`, all heap-allocated runtime payloads (`WListBuf`, `WDic
 1. **Refcount Underflow / Double-Free Detection:** Both `w_clone` and `w_release` assert `refcount > 0`. Upon deallocation, `refcount` is poisoned to `-1` before `free()`. Any subsequent `w_clone` or `w_release` on a freed buffer immediately aborts with `[W4003] Runtime error: memory safety violation (refcount underflow / double free)`.
 2. **Zero-Leak Exit Verification (`W_MEM_CHECK=1`):** At the end of `main()`, after releasing top-level and global bindings, `w_runtime_cleanup()` checks `getenv("W_MEM_CHECK")`. When set to `"1"`, if `w_g_live_objects != 0` or `w_g_alloc_count != w_g_free_count`, the process aborts with `[W4003]` and prints exact allocation/free/live counters.
 
+This check is intentionally opt-in. It reports logical W runtime buffers only, runs during
+normal cleanup, and does not collect strong cycles. A runtime panic calls `exit()` and
+does not reach this check. Development and CI use ASan/LSan separately for byte-level
+memory diagnostics; `W_MEM_CHECK` is not a substitute for those tools.
+
 ---
 
 ## 6. Forward Compatibility with `v0.3` Typed HIR
