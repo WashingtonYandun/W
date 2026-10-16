@@ -8,6 +8,8 @@ PREFIX = '__wm_'
 def pattern_names(pattern):
     if isinstance(pattern, A.IdentifierPattern):
         return {pattern.name} - {'None', 'none'}
+    if isinstance(pattern, A.ErrorTypePattern):
+        return pattern_names(pattern.binding)
     children = getattr(pattern, 'elements', getattr(pattern, 'args', []))
     return set().union(*(pattern_names(child) for child in children)) if children else set()
 
@@ -16,6 +18,7 @@ class ModuleNames:
     def __init__(self, program, module_id):
         prefix = PREFIX + str(module_id).encode('utf-8').hex() + '__'
         self.names = {node.name: prefix + node.name for node in program.body if isinstance(node, DECLARATIONS)}
+        self.nominal_types = {node.name for node in program.body if isinstance(node, (A.StructDecl, A.EnumDecl))}
         self.variants = {variant.name: declaration.name for declaration in program.body
                          if isinstance(declaration, A.EnumDecl) for variant in declaration.variants}
 
@@ -62,7 +65,11 @@ class ModuleNames:
             node.class_name = self.names.get(node.class_name, node.class_name)
         if isinstance(node, A.EnumPattern):
             name = node.enum_name or self.variants.get(node.variant)
-            node.enum_name = self.names.get(name, name)
+            if name is None and node.variant in self.nominal_types:
+                node.source_name = node.variant
+                node.variant = self.names[node.variant]
+            else:
+                node.enum_name = self.names.get(name, name)
         if isinstance(node, A.Block):
             local = set(values)
             for statement in node.statements:

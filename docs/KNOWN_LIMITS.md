@@ -5,7 +5,7 @@ Everything here is a deliberate deferral with a stated cost, not an oversight. I
 marked *open decision* change the language surface and therefore need an explicit call
 before any implementation work.
 
-Last reviewed: `2026-10-15`.
+Last reviewed: `2026-10-16`.
 
 ---
 
@@ -86,15 +86,15 @@ cada nueva categoría, especialmente clases con herencia y tipos genéricos mono
 
 **What happens.** `selfhost/w1.w` (bundled from `selfhost/src/*.w`) is a compiler with
 its own lexer, recursive-descent parser, token-driven semantic pass with type interning,
-and direct-to-C emitter. It compiles all 129 fixtures in the public corpus, including
-seven F03 error-union fixtures, 15 generic fixtures and the checked-module fixture. Its
+and direct-to-C emitter. It compiles all 130 fixtures in the public corpus, including
+eight F03 error-union fixtures, 15 generic fixtures and the checked-module fixture. Its
 support outside those tested programs is not guaranteed to match W0:
 
 | Area | Verified | Remaining boundary |
 | :--- | :--- | :--- |
 | Generic functions, structs, enums, recursive ADTs and cycle diagnostics | 15/15 core corpus fixtures across all engines | This is fixture coverage, not exhaustive equivalence for every generic program or constraint. |
 | Imports with generic specialization | `checked_modules` fixture passes in W1 | W1 expands modules into tokens; it does not share W0's typed-module cache or canonical declaration arena. |
-| Closed error unions | All 7 release fixtures pass on the four engines: one runtime case and six negative cases | Only primitive, non-generic struct and non-generic enum alternatives are supported. |
+| Closed error unions | All 8 release fixtures pass on the four engines: two runtime cases and six negative cases | Only primitive, non-generic struct and non-generic enum alternatives are supported. |
 | Closures, FFI, generic OOP, stdlib and LSP | Separate expansion-suite coverage | No claim of W1 parity; see [EXPANSION.md](EXPANSION.md). |
 
 W1 expands imports into a token stream, qualifies module names, enforces `pub` exports,
@@ -112,7 +112,8 @@ because a bug in the semantics is reproduced identically at every stage.
 
 **State.** F01 closed with 114/114 fixtures on 2026-10-15. F03 extended that corpus to
 121/121 cases on all four engines, with zero unsupported fixtures. The H01–H03 critical
-regressions then expanded the measured corpus to 129/129 cases. The three-stage bootstrap
+regressions expanded the corpus to 129 cases; the dedicated F03 ownership regression
+now brings measured coverage to 130/130 cases. The three-stage bootstrap
 also reaches an identical C output hash at every stage. These checks prove the recorded
 corpus and deterministic self-hosting contract; they do not prove universal language
 parity or semantic correctness outside the tested programs.

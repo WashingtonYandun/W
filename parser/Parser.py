@@ -255,7 +255,8 @@ class Parser:
             if first_name == "_":
                 return WildcardPattern(line=token.line, col=token.col)
 
-            # Check for EnumPattern: EnumName.Variant(args...)
+            # Constructor-shaped syntax is resolved by the checker. Error-union
+            # alternatives become ErrorTypePattern once the subject type is known.
             if self.match(TokenType.DOT):
                 variant_tok = self.expect(TokenType.IDENTIFIER, code="W0001", msg="Expected enum variant name after '.'")
                 payload_args: List[Pattern] = []

@@ -3,7 +3,7 @@ import math
 from typing import List, Optional
 from node.NodeType import (
     ExternFnDecl, LambdaExpr, FunctionType as AstFunctionType, Program, Stmt, Expr, TypeNode, NamedType, GenericType, TypeParam, OptionalType, ListType, DictType, TupleType, ResultType, ErrorUnionType,
-    Pattern, IdentifierPattern, TuplePattern, EnumPattern, LiteralPattern, WildcardPattern,
+    Pattern, IdentifierPattern, TuplePattern, EnumPattern, ErrorTypePattern, LiteralPattern, WildcardPattern,
     Block, ExprStmt, Param, FnDecl, StructField, StructDecl, EnumDecl,
     InterfaceMethod, InterfaceDecl, ClassField, MethodDecl, ClassDecl,
     ImportDecl, LetDecl, WhileStmt, ForStmt, ReturnStmt, BreakStmt, ContinueStmt,
@@ -97,9 +97,11 @@ class Formatter:
 
     def format_pattern(self, p: Pattern) -> str:
         if isinstance(p, WildcardPattern):
-            return "else"
+            return "_"
         if isinstance(p, IdentifierPattern):
             return p.name
+        if isinstance(p, ErrorTypePattern):
+            return f"{p.type_name}({self.format_pattern(p.binding)})"
         if isinstance(p, EnumPattern):
             args_str = f"({', '.join([self.format_pattern(a) for a in p.args])})" if p.args else ""
             if p.enum_name:
@@ -416,7 +418,7 @@ class Formatter:
             subj_str = self.format_expr(expr.subject, level)
             lines: List[str] = [f"match {subj_str} {{"]
             for arm in expr.arms:
-                pat_str = self.format_pattern(arm.pattern)
+                pat_str = "else" if isinstance(arm.pattern, WildcardPattern) else self.format_pattern(arm.pattern)
                 # If single tail_expr with no statements, can format inline or block
                 if not arm.body.statements and arm.body.tail_expr is not None:
                     arm_expr_str = self.format_expr(arm.body.tail_expr, level + 1)

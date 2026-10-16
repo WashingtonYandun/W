@@ -145,6 +145,17 @@ Every `HirExpr` contains `{ kind: HirExprKind, type_id: TypeId, span: Span }`:
 
 ---
 
+### 3.5 Patrones resueltos de error
+
+`HirErrorTypePattern(error_type_id, binding, type_id, span, type_name)` representa una
+alternativa de una unión de errores. El TypeId de la alternativa gobierna la comparación
+runtime y el binding recibe ese mismo tipo. `type_name` conserva el texto de fuente
+para el dump; no interviene en la identidad nominal.
+
+`HirEnumPattern` representa variantes enum y constructores Option/Result. No puede
+representar alternativas de una unión de errores. El verificador rechaza mezclas de
+esas representaciones antes de emitir C; ADR-015 registra el contrato.
+
 ## 4. Explicit Copy-on-Write (`HirCowPath`) Lowering
 
 One of W's defining semantic guarantees is that **mutating a nested value container never mutates aliased value bindings**, whereas mutating a field through a `class` instance mutates the shared reference object.
