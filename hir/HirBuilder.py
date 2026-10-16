@@ -356,7 +356,7 @@ class HirBuilder:
         err_type_name = ""
         if decl.return_type and isinstance(decl.return_type, AstResultType):
             is_fallible = True
-            err_type_name = decl.return_type.err_type.name if hasattr(decl.return_type.err_type, "name") else "Error"
+            err_type_name = self._get_type_name_from_node(decl.return_type.err_type)
 
         return HirFnDecl(
             name=decl.name,
@@ -395,7 +395,7 @@ class HirBuilder:
         err_type_name = ""
         if decl.return_type and isinstance(decl.return_type, AstResultType):
             is_fallible = True
-            err_type_name = decl.return_type.err_type.name if hasattr(decl.return_type.err_type, "name") else "Error"
+            err_type_name = self._get_type_name_from_node(decl.return_type.err_type)
 
         return HirFnDecl(
             name=decl.name,
@@ -860,6 +860,8 @@ class HirBuilder:
     def _get_type_name_from_node(self, node: TypeNode) -> str:
         if isinstance(node, NamedType):
             return node.name
+        if isinstance(node, AstErrorUnionType):
+            return " | ".join(self._get_type_name_from_node(member) for member in node.error_types)
         if isinstance(node, GenericType):
             args = "__".join(self._get_type_name_from_node(a) for a in node.type_args)
             return f"_W_G_{len(node.name)}_{node.name}__{args}"

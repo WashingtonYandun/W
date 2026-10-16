@@ -3303,6 +3303,19 @@ fn sem_method(owner: str, name: str) -> int {
     }
     return -1
 }
+fn sem_error_channel_assignable(source: int, target: int) -> bool {
+    if source == target { return true }
+    let s = sem_types[source]
+    let t = sem_types[target]
+    let source_members = if s.kind == "error_union" { s.args } else { [source] }
+    let target_members = if t.kind == "error_union" { t.args } else { [target] }
+    for source_member in source_members {
+        let mut covered = false
+        for target_member in target_members { if source_member == target_member { covered = true } }
+        if not covered { return false }
+    }
+    return true
+}
 fn sem_assignable(source: int, target: int) -> bool {
     if source == target { return true }
     let s = sem_types[source]
@@ -3314,21 +3327,16 @@ fn sem_assignable(source: int, target: int) -> bool {
         return sem_assignable(source, t.args[0])
     }
     if t.kind == "result" {
+        if s.kind == "result" {
+            if s.args[0] == t.args[0] and sem_error_channel_assignable(s.args[1], t.args[1]) { return true }
+            return sem_assignable(source, t.args[0])
+        }
         if s.kind == "ok" { return sem_assignable(s.args[0], t.args[0]) }
-        if s.kind == "err" { return sem_assignable(s.args[0], t.args[1]) }
+        if s.kind == "err" { return sem_error_channel_assignable(s.args[0], t.args[1]) }
         return sem_assignable(source, t.args[0])
     }
     if t.kind == "error_union" {
-        if s.kind == "error_union" {
-            for source_member in s.args {
-                let mut covered = false
-                for target_member in t.args { if source_member == target_member { covered = true } }
-                if not covered { return false }
-            }
-            return true
-        }
-        for target_member in t.args { if source == target_member { return true } }
-        return false
+        return sem_error_channel_assignable(source, target)
     }
     if s.kind == "class" and (t.kind == "class" or t.kind == "interface") {
         let mut current = s.name
@@ -3352,6 +3360,11 @@ fn sem_require(source: int, target: int, code: str) {
     if not sem_assignable(source, target) { sem_error(code, "incompatible types") }
 }
 fn sem_mark_result_lift(position: int, source: int, target: int) {
+    if target >= 0 and sem_kind(source) == "result" and sem_kind(target) == "result" {
+        let source_type = sem_types[source]
+        let target_type = sem_types[target]
+        if source_type.args[0] == target_type.args[0] and sem_error_channel_assignable(source_type.args[1], target_type.args[1]) { return }
+    }
     if target < 0 or sem_kind(target) != "result" or sem_kind(source) == "ok" or sem_kind(source) == "err" or source == target or not sem_assignable(source, target) { return }
     for existing in sem_result_lift_positions { if existing == position { return } }
     sem_result_lift_positions.append(position)
@@ -4189,7 +4202,7 @@ fn sem_expression(minimum: int, allow_struct: bool) -> SemValue {
             let returned = sem_types[sem_return]
             if type_.kind != "optional" and type_.kind != "result" { sem_error("W2006", "propagation operand") }
             if returned.kind != type_.kind { sem_error("W2006", "propagation return channel") }
-            if type_.kind == "result" and not sem_assignable(type_.args[1], returned.args[1]) { sem_error("W2006", "propagation error channel") }
+            if type_.kind == "result" and not sem_error_channel_assignable(type_.args[1], returned.args[1]) { sem_error("W2006", "propagation error channel") }
             left = sem_value(type_.args[0])
         } elif sem_match("ELSE") {
             let operand = sem_types[left.type_id]

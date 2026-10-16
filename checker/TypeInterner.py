@@ -601,7 +601,7 @@ class TypeInterner:
             src_members = src_entry.data if src_entry.tag == "error_union" else (src_id,)
             dst_members = dst_entry.data if dst_entry.tag == "error_union" else (dst_id,)
             return all(
-                any(self.is_assignable(src_member, dst_member) for dst_member in dst_members)
+                any(src_member == dst_member for dst_member in dst_members)
                 for src_member in src_members
             )
 
@@ -636,10 +636,27 @@ class TypeInterner:
         if dst_entry.tag == "result":
             ok_id, err_id = dst_entry.data
             if src_entry.tag == "result":
-                return self.is_assignable(src_entry.data[0], ok_id) and self.is_assignable(src_entry.data[1], err_id)
+                if src_entry.data[0] == ok_id and self.is_error_channel_assignable(src_entry.data[1], err_id):
+                    return True
             return self.is_assignable(src_id, ok_id)
 
         return False
+
+    def is_error_channel_assignable(self, src_id: int, dst_id: int) -> bool:
+        """Return whether every source error alternative exists in the target set.
+
+        Error channels are type positions: normal Result success-value injection
+        must not turn a scalar error into a nested Result error type.
+        """
+        if src_id == dst_id or src_id == TYPE_ERROR or dst_id == TYPE_ERROR:
+            return True
+
+        src_entry = self.get_entry(src_id)
+        dst_entry = self.get_entry(dst_id)
+        src_members = src_entry.data if src_entry.tag == "error_union" else (src_id,)
+        dst_members = dst_entry.data if dst_entry.tag == "error_union" else (dst_id,)
+        return all(any(src_member == dst_member for dst_member in dst_members)
+                   for src_member in src_members)
 
     def to_string(self, type_id: int) -> str:
         """User-friendly canonical string representation of a TypeId."""

@@ -25,7 +25,8 @@ from checker.WType import (
     OptionalType, WeakType, ListType, DictType, TupleType, StructType, EnumType,
     InterfaceType, ClassFieldInfo, ClassMethodInfo, ClassType,
     ResultType, ErrorUnionType, FunctionType, ModuleType, AnyType,
-    TypeParamType, GenericStructTemplate, GenericFnTemplate, GenericEnumTemplate, is_assignable
+    TypeParamType, GenericStructTemplate, GenericFnTemplate, GenericEnumTemplate,
+    is_assignable, is_error_channel_assignable
 )
 from checker.SymbolTable import Scope, Symbol, create_global_scope
 from checker.TypeInterner import TypeInterner
@@ -1166,7 +1167,7 @@ class TypeChecker:
             source_ok, source_error = source_entry.data
             target_ok, target_error = target_entry.data
             same_ok = source_ok == target_ok or self.interner.get_entry(source_ok).tag == "any" or self.interner.get_entry(target_ok).tag == "any"
-            same_error = self.interner.is_assignable(source_error, target_error)
+            same_error = self.interner.is_error_channel_assignable(source_error, target_error)
             if same_ok and same_error:
                 return
         if self.interner.get_entry(target_id).tag == "result" and expr.inferred_type_id != target_id:
@@ -1470,7 +1471,7 @@ class TypeChecker:
                         code="T010"
                     )
                 cur_err = self.current_fn_ret_type.err if isinstance(self.current_fn_ret_type, ResultType) else self.current_fn_ret_type.type_args[1]
-                if not is_assignable(res_err, cur_err):
+                if not is_error_channel_assignable(res_err, cur_err):
                     raise TypeError(
                         message=f"Error type mismatch in '?' propagation: '{res_err}' is not covered by declared '{cur_err}'",
                         line=expr.line,
