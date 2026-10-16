@@ -86,7 +86,7 @@ cada nueva categoría, especialmente clases con herencia y tipos genéricos mono
 
 **What happens.** `selfhost/w1.w` (bundled from `selfhost/src/*.w`) is a compiler with
 its own lexer, recursive-descent parser, token-driven semantic pass with type interning,
-and direct-to-C emitter. It compiles all 121 fixtures in the public corpus, including
+and direct-to-C emitter. It compiles all 129 fixtures in the public corpus, including
 seven F03 error-union fixtures, 15 generic fixtures and the checked-module fixture. Its
 support outside those tested programs is not guaranteed to match W0:
 
@@ -110,11 +110,12 @@ header", and it says nothing about the expressiveness of the language subset it 
 three-stage fixed point proves determinism and convergence; it cannot prove correctness,
 because a bug in the semantics is reproduced identically at every stage.
 
-**State.** F01 closed with 114/114 fixtures on 2026-10-15. F03 extends that corpus to
-121/121 cases on all four engines, with zero unsupported fixtures. The three-stage
-bootstrap also reaches an identical C output hash at every stage. These checks prove the
-recorded corpus and deterministic self-hosting contract; they do not prove universal
-language parity or semantic correctness outside the tested programs.
+**State.** F01 closed with 114/114 fixtures on 2026-10-15. F03 extended that corpus to
+121/121 cases on all four engines, with zero unsupported fixtures. The H01–H03 critical
+regressions then expanded the measured corpus to 129/129 cases. The three-stage bootstrap
+also reaches an identical C output hash at every stage. These checks prove the recorded
+corpus and deterministic self-hosting contract; they do not prove universal language
+parity or semantic correctness outside the tested programs.
 
 ---
 
