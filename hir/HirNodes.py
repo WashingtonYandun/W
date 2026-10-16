@@ -229,7 +229,8 @@ class HirEnumPattern(HirPattern):
         subpatterns: List[HirPattern],
         type_id: int,
         span: Span,
-        variant_id: Optional[VariantId] = None
+        variant_id: Optional[VariantId] = None,
+        error_type_id: Optional[int] = None
     ):
         super().__init__(type_id, span)
         self.enum_name = enum_name
@@ -237,6 +238,7 @@ class HirEnumPattern(HirPattern):
         self.variant_idx = variant_idx
         self.subpatterns = subpatterns
         self.variant_id = variant_id or VariantId(variant_idx, variant_name)
+        self.error_type_id = error_type_id
 
     @property
     def variant(self) -> str:

@@ -144,6 +144,20 @@ class ResultType(TypeNode):
             "col": self.col
         }
 
+class ErrorUnionType(TypeNode):
+    """Represents a closed set of error payload types inside a Result type."""
+    def __init__(self, error_types: List[TypeNode], line: int = 1, col: int = 1):
+        super().__init__(line, col)
+        self.error_types = error_types
+
+    def to_dict(self) -> dict:
+        return {
+            "kind": "ErrorUnionType",
+            "error_types": [t.to_dict() for t in self.error_types],
+            "line": self.line,
+            "col": self.col
+        }
+
 
 # ==========================================
 # Pattern Matching AST Nodes
@@ -179,6 +193,7 @@ class EnumPattern(Pattern):
         self.enum_name = enum_name
         self.variant = variant
         self.args = args or []
+        self.error_type_match = None
 
     def to_dict(self) -> dict:
         d = {
@@ -191,6 +206,8 @@ class EnumPattern(Pattern):
             d["enum_name"] = self.enum_name
         if self.args:
             d["args"] = [a.to_dict() for a in self.args]
+        if self.error_type_match is not None:
+            d["error_type_match"] = str(self.error_type_match)
         return d
 
 class LiteralPattern(Pattern):

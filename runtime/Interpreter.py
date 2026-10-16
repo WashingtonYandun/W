@@ -1,6 +1,7 @@
 import sys
 from typing import Any, Dict, List, Optional, TextIO, Tuple
 from error.Error import WRuntimeError
+from checker.WType import IntType, FloatType, BoolType, StrType, StructType, EnumType
 from node.NodeType import (
     LambdaExpr, Program, Stmt, Expr, ExprStmt, LetDecl, FnDecl, StructDecl, EnumDecl, ImportDecl,
     InterfaceDecl, ClassDecl, MethodDecl,
@@ -847,6 +848,12 @@ class Interpreter:
             return lit_val == value, {}
 
         if isinstance(pattern, EnumPattern):
+            if getattr(pattern, "error_type_match", None) is not None:
+                if not self._matches_error_type(value, pattern.error_type_match):
+                    return False, {}
+                if not pattern.args:
+                    return True, {}
+                return self.match_pattern(pattern.args[0], value)
             # 1. Option cases: None and Some
             if pattern.variant in ("None", "none") and (pattern.enum_name is None or pattern.enum_name.split("__", 1)[0] == "Option"):
                 if isinstance(value, WNone) or (
@@ -940,6 +947,22 @@ class Interpreter:
             return True, all_bindings
 
         return False, {}
+
+    @staticmethod
+    def _matches_error_type(value: WValue, error_type) -> bool:
+        if error_type == IntType:
+            return isinstance(value, WInt)
+        if error_type == FloatType:
+            return isinstance(value, WFloat)
+        if error_type == BoolType:
+            return isinstance(value, WBool)
+        if error_type == StrType:
+            return isinstance(value, WStr)
+        if isinstance(error_type, StructType):
+            return isinstance(value, WStructInstance) and value.struct_name == error_type.name
+        if isinstance(error_type, EnumType):
+            return isinstance(value, WEnumValue) and value.enum_name == error_type.name
+        return False
 
 
 # Backward compatibility helper

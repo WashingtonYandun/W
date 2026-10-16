@@ -598,7 +598,10 @@ class CCodeGen:
                 sub_expr = f"({val_expr}).as.tuple->items[{idx}]"
                 self._emit_pattern_bindings(elem_pat, sub_expr, out)
         elif isinstance(pattern, EnumPattern):
-            if pattern.variant in ("None", "none") and (pattern.enum_name is None or pattern.enum_name.split("__", 1)[0] == "Option"):
+            if getattr(pattern, "error_type_match", None) is not None:
+                if pattern.args:
+                    self._emit_pattern_bindings(pattern.args[0], val_expr, out)
+            elif pattern.variant in ("None", "none") and (pattern.enum_name is None or pattern.enum_name.split("__", 1)[0] == "Option"):
                 pass
             elif pattern.variant == "Some" and (pattern.enum_name is None or pattern.enum_name.split("__", 1)[0] == "Option"):
                 if pattern.args:
@@ -638,6 +641,9 @@ class CCodeGen:
             lit_v = self.emit_expr(pattern.literal, out)
             return f"w_eq({val_expr}, {lit_v})"
         if isinstance(pattern, EnumPattern):
+            if getattr(pattern, "error_type_match", None) is not None:
+                kind, name = self._error_type_descriptor(pattern.error_type_match)
+                return f"w_value_is_error_type({val_expr}, {self.escape_c_str(kind)}, {self.escape_c_str(name)})"
             if pattern.variant in ("None", "none") and (pattern.enum_name is None or pattern.enum_name.split("__", 1)[0] == "Option"):
                 return f"(({val_expr}).tag == W_NONE || (({val_expr}).tag == W_ENUM && strcmp(({val_expr}).as.en.enum_name, \"Option\") == 0 && strcmp(({val_expr}).as.en.variant, \"None\") == 0))"
             if pattern.variant == "Some" and (pattern.enum_name is None or pattern.enum_name.split("__", 1)[0] == "Option"):
@@ -692,6 +698,23 @@ class CCodeGen:
                     conds.append(sub_c)
             return "(" + " && ".join(conds) + ")"
         return "true"
+
+    @staticmethod
+    def _error_type_descriptor(error_type) -> Tuple[str, str]:
+        from checker.WType import IntType, FloatType, BoolType, StrType, StructType, EnumType
+        if error_type == IntType:
+            return "int", "int"
+        if error_type == FloatType:
+            return "float", "float"
+        if error_type == BoolType:
+            return "bool", "bool"
+        if error_type == StrType:
+            return "str", "str"
+        if isinstance(error_type, StructType):
+            return "struct", error_type.name
+        if isinstance(error_type, EnumType):
+            return "enum", error_type.name
+        raise ValueError(f"Unsupported error union pattern type: {error_type}")
 
     # ==========================================
     # Expression Emission

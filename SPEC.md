@@ -2,7 +2,7 @@
 
 > **Status:** The current toolchain is `0.3.0.dev1`. Sections 1–11 describe the frozen core grammar and are normative; sections 12–14 describe implementation contracts.
 >
-> **Targets:** `W0` is the reference implementation and the authority on whether a program is valid. `W1` is an experimental self-hosted compiler for a **strict subset** of W: it has no generics, no enum payload layout and no pattern matching on `Option`/`Result`, so it is not a second implementation of this document. See [docs/ENGINE_PARITY_MATRIX.md](docs/ENGINE_PARITY_MATRIX.md) and §12.
+> **Targets:** `W0` is the reference implementation and the authority on whether a program is valid. `W1` is an experimental self-hosted compiler whose supported subset is measured by the public release corpus. That corpus now includes generic fixtures, checked modules, `Option`/`Result` patterns and F03 error unions; passing it does not establish universal parity. See [docs/ENGINE_PARITY_MATRIX.md](docs/ENGINE_PARITY_MATRIX.md) and §12.
 >
 > **Thesis:** W is a compact, statically typed language for small native tools, with deterministic diagnostics and inspectable C99 output. Expansion beyond this core is documented in [docs/EXPANSION.md](docs/EXPANSION.md).
 
@@ -355,6 +355,33 @@ Handling strategies:
    }
    ```
 
+### Composición de errores
+
+Una firma puede declarar un conjunto cerrado de tipos de error después de `!`:
+
+```w
+fn parse() -> Config ! ParseError | IoError
+```
+
+La unión solo existe en el canal de error de `T ! E`; no es un tipo unión general.
+Debe contener al menos dos alternativas distintas. Se admiten `int`, `float`, `bool`,
+`str`, y tipos `struct` o `enum` no genéricos. Se rechazan clases, tipos genéricos y
+tipos compuestos cuya identidad concreta no puede distinguirse en el valor de runtime.
+Las alternativas repetidas se canonicalizan.
+
+`?` propaga el valor de error original sin conversión cuando todas las alternativas del
+origen están incluidas en el conjunto de destino. Así, un error `ParseError` puede
+propagarse a `ParseError | IoError`, pero una función que declara solo `ParseError` no
+puede propagar un resultado que también contenga `IoError`. No hay conversiones implícitas
+entre errores.
+
+`else err` asigna a `err` el conjunto estático del canal de error. Para un `match` que
+produzca un valor se deben cubrir todas las alternativas con patrones de tipo, por
+ejemplo `ParseError(problem) => ...` e `IoError(problem) => ...`. El patrón acepta un
+binding o `_`; el valor completo del error se conserva y se comprueba por su identidad
+de tipo runtime. Los nombres cualificados de módulos comprobados también son válidos en
+la firma y en el patrón, por ejemplo `storage.ParseError(problem)`.
+
 ---
 
 ## 8. Memory Model: Deterministic Reference Counting + Copy-on-Write
@@ -526,19 +553,19 @@ present in the tree and covered by the test suite unless marked otherwise.
 * **`v0.2.x` — Copy-on-write telemetry, weak class references, compilation sessions** ✅
 * **`v0.3.0` — Typed HIR as the default backend, `LayoutGraph` finite-layout verification, declaration-order independence** ✅
 * **`v0.3.0` (Phase E) — First-class functions, closures, modules, FFI, stdlib, LSP** ✅
-* **`v0.4` — not scheduled.** Candidate work, each gated on the decisions in
+* **`v0.4` — roadmap in progress.** Candidate work, each gated on the decisions in
   `docs/EXPANSION.md`:
-  - error composition (`T ! E1 | E2`) so a function can propagate more than one error type;
+  - F03 error composition (`T ! E1 | E2`) is implemented and measured in the four-engine
+    release corpus;
   - mutable closure captures through shared cells, so a closure can mutate captured state;
   - concurrency or an explicit statement that the runtime stays single-threaded;
-  - W1 generics and `Option`/`Result` pattern matching (milestone D02), which is what
-    the "self-hosted" claim currently rests on.
+  - W1 support for expansion-suite features beyond the measured core corpus.
 
 ## Phase A error composition clarification
 
 Parenthesized types group constructors: `(T?) ! E` is Result[Option[T],E], `(T ! E)?` is Option[Result[T,E]], and `(T ! E1) ! E2` is Result[Result[T,E1],E2]. Ungrouped `T ! E1 ! E2` associates to the right. Formatting preserves these distinctions.
 
-Postfix `?` handles exactly the outer constructor. A second `?` on an optional payload is invalid inside a function whose outer return type is Result; use an explicit branch/recovery value instead. Error types must match exactly. Returning an inner Result as a success payload requires preserving its outer success layer; Result construction never silently flattens it. Bare values denote success, including when success and error types coincide.
+Postfix `?` handles exactly the outer constructor. A second `?` on an optional payload is invalid inside a function whose outer return type is Result; use an explicit branch/recovery value instead. Error propagation requires the source error set to be a subset of the declared destination set; it never converts or flattens error payloads. A complete `Result[T, E1]` value can be assigned to or returned as `Result[T, E2]` only when `T` is identical and every `E1` alternative is present in `E2`; this preserves the tagged value without wrapping it in another `Ok`. Nested Result layers are never collapsed. Returning an inner Result as a success payload requires preserving its outer success layer. Bare values denote success, including when success and error types coincide.
 
 Optional/Option and fallible/Result spellings share canonical type identity. Optional display is payload-transparent; explicit Some values follow the same display policy as sugar. Some(None) differs from None. Implicit conversions do not add/remove nullable depth; use explicit Some for nested optionality. Guarded match arms do not contribute unconditional coverage. Nested variant payload cases must be exhaustive.
 
@@ -578,7 +605,7 @@ W distinguishes between two distinct compiler guarantees:
 * **Bootstrap Fixed-Point:** A 3-stage bootstrap self-compilation of `selfhost/w1.w` produces bit-identical C code:
   $$\text{SHA256}(c_0) == \text{SHA256}(c_1) == \text{SHA256}(c_2)$$
   This guarantees determinism and convergence of the self-hosted compiler subset.
-* **Feature Parity:** Documented in `docs/ENGINE_PARITY_MATRIX.md`, and measured rather than declared: the counts in that file come from `summary.json`, which is produced by an actual run of `tools/ci_conformance.py` over the corpus. The W0 toolchain passes all 107 corpus fixtures on all three of its engines. W1 passes the 91 core fixtures and rejects the 16 `generics` and `checked_modules` fixtures with `W2013`; it does **not** support generic specialization or checked-module sessions, and does not pattern-match `Option` or `Result`.
+* **Feature Parity:** Documented in `docs/ENGINE_PARITY_MATRIX.md` and measured rather than declared. The release profile passes all 121 fixtures on all four engines, with no unsupported cases. This is corpus evidence, not a claim of universal W0/W1 equivalence; see the feature breakdown and limits in the parity matrix.
 
 ### 14.3 Code Generation Determinism
 Given identical source text and compiler flags:

@@ -43,12 +43,18 @@ The following table summarizes compiler support across the public core corpus. T
 | **`core`** | 98 | ✅ 98/98 | ✅ 98/98 | ✅ 98/98 | ✅ 98/98 | Declared supported |
 | **`generics`** | 15 | ✅ 15/15 | ✅ 15/15 | ✅ 15/15 | ✅ 15/15 | Declared supported |
 | **`checked_modules`** | 1 | ✅ 1/1 | ✅ 1/1 | ✅ 1/1 | ✅ 1/1 | Declared supported |
-| **Total Verified** | **114** | **114/114 (100.0%)** | **114/114 (100.0%)** | **114/114 (100.0%)** | **114/114 (100.0%)** | _measured_ |
+| **`error_unions`** | 7 | ✅ 7/7 | ✅ 7/7 | ✅ 7/7 | ✅ 7/7 | Declared supported · F03 |
+| **Total Verified** | **121** | **121/121 (100.0%)** | **121/121 (100.0%)** | **121/121 (100.0%)** | **121/121 (100.0%)** | _measured_ |
 
 Regenerate with `python3 tools/ci_conformance.py --matrix`, which reads `summary.json`
 from an actual run of `python3 tools/ci_conformance.py` over the corpus. These are
 measurements of the four engines, not a restatement of `tests/engine_profiles.json`;
 `--matrix` reports `STALE` if the summary no longer covers the current corpus.
+
+The `error_unions` category exercises subset propagation, runtime identity checks for
+struct, enum and scalar errors, and exhaustive `else err` matching. Six negative fixtures
+cover invalid alternatives, missing alternatives, incompatible propagation and unsupported
+payload subpatterns. F03 passes all seven cases across the four engines.
 
 The `core` category includes five fixtures that pin runtime **panic** behaviour
 (`panic_division`, `panic_modulo`, `panic_index`, `panic_dict_key`,
@@ -111,6 +117,16 @@ gap: a construct the checker accepted while the HIR backend rejected it.
 - W0 implements whole-program `CompilationSession` with arena deduplication and diamond import caching.
 - W1 loads imports, enforces public names, qualifies module identities, and detects cycles before feeding a flattened token stream to its compiler. This passes the checked-module fixture, including imported generic specialization, but does not provide W0's shared typed declarations or specialization cache.
 
+### 3.7 Closed Error Unions (`error_unions`)
+- **Status:** **7/7 fixtures pass on all four engines**: one runtime fixture and six
+  invalid fixtures rejected consistently; F03 is complete.
+- `T ! E1 | E2` is restricted to the Result error channel. `?` widens an error only when
+  the source set is a subset of the declared target set. `else err` patterns check scalar
+  tags or exact nominal struct/enum identity, including module-qualified types, and
+  require exhaustive coverage.
+- Generic types, classes, collections, tuples, functions and other compound alternatives
+  remain outside the supported contract.
+
 ---
 
 ## 4. Bootstrap Fixed-Point vs. Core Corpus Parity
@@ -122,8 +138,8 @@ It is critical to distinguish between two distinct compiler guarantees:
    - It **does not** prove that W1 accepts all language constructs present in W0.
 
 2. **Core Corpus Parity:**
-   - Core corpus parity means every fixture in this 114-case public corpus passes on every engine, with no unsupported exclusions.
-   - It does not claim W1 parity for the separate E expansion suite or every possible source program. F01 closed the 16 exclusions that previously existed in this corpus.
+   - Corpus parity means every fixture in this 121-case public corpus passes on every engine, with no unsupported exclusions.
+   - It does not claim W1 parity for the separate E expansion suite or every possible source program. F01 closed the 16 exclusions that previously existed; F03 added measured error-union coverage.
 
 ---
 
@@ -132,15 +148,15 @@ It is critical to distinguish between two distinct compiler guarantees:
 The compiler test harness (`tools/ci_conformance.py`) enforces strict behavioral quality gates:
 
 ### 5.1 Integration Profile (`--profile=integration`)
-- Evaluates all 114 corpus fixtures across all engines.
+- Evaluates all 121 corpus fixtures across all engines.
 - Skips unsupported features on specific engines based strictly on `tests/engine_profiles.json`.
 - **Requirement:** Every unsupported feature must carry an explicit, non-empty tracking reason pointing to its roadmap milestone.
-- **Result:** Passes (114/114) if and only if all supported features pass without failure, while accurately reporting unsupported counts.
+- **Result:** Passes (121/121) if and only if all supported features pass without failure, while accurately reporting unsupported counts.
 
 ### 5.2 Release Profile (`--profile=release`)
-- Evaluates all 114 corpus fixtures across all engines without allowing any unsupported exclusions.
+- Evaluates all 121 corpus fixtures across all engines without allowing any unsupported exclusions.
 - **Requirement:** Every engine must pass 100% of all fixtures.
-- **Result:** Fails on any unsupported fixture or behavioral mismatch. It currently passes all 114 fixtures on all four engines with no exclusions; F01 is complete.
+- **Result:** Fails on any unsupported fixture or behavioral mismatch. It currently passes all 121 fixtures on all four engines with no exclusions; F03 is complete.
 
 ---
 

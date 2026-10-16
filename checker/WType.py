@@ -145,6 +145,34 @@ class ResultType(WType):
         return f"{self.ok} ! {self.err}"
 
 
+class ErrorUnionType(WType):
+    """A statically known, closed set of alternative error payload types."""
+    def __init__(self, alternatives: List[WType]):
+        unique: List[WType] = []
+        for alternative in alternatives:
+            if not any(alternative == existing for existing in unique):
+                unique.append(alternative)
+        self.alternatives = tuple(sorted(unique, key=str))
+
+    def __eq__(self, other: Any) -> bool:
+        return isinstance(other, ErrorUnionType) and self.alternatives == other.alternatives
+
+    def __str__(self) -> str:
+        return " | ".join(str(alternative) for alternative in self.alternatives)
+
+
+def is_error_channel_assignable(source: WType, target: WType) -> bool:
+    """Check closed error-set inclusion without applying value constructors.
+
+    In particular, a scalar error must not become compatible with a Result error
+    channel merely because Result normally accepts its success payload.
+    """
+    source_alternatives = source.alternatives if isinstance(source, ErrorUnionType) else (source,)
+    target_alternatives = target.alternatives if isinstance(target, ErrorUnionType) else (target,)
+    return all(any(source_member == target_member for target_member in target_alternatives)
+               for source_member in source_alternatives)
+
+
 class FunctionType(WType):
     def __init__(self, params: List[WType], ret: WType, is_mutating: bool = False):
         self.params = params
@@ -334,6 +362,14 @@ def is_assignable(source: WType, target: WType) -> bool:
     if source == target:
         return True
 
+    if isinstance(source, ErrorUnionType) or isinstance(target, ErrorUnionType):
+        source_alternatives = source.alternatives if isinstance(source, ErrorUnionType) else (source,)
+        target_alternatives = target.alternatives if isinstance(target, ErrorUnionType) else (target,)
+        return all(
+            any(source_alternative == target_alternative for target_alternative in target_alternatives)
+            for source_alternative in source_alternatives
+        )
+
     def optional_inner(value):
         if isinstance(value, OptionalType):
             return value.inner
@@ -363,14 +399,17 @@ def is_assignable(source: WType, target: WType) -> bool:
 
     # Canonical Result[T, E] <-> ResultType(T, E) assignability
     if isinstance(target, EnumType) and getattr(target, "template_name", None) == "Result" and getattr(target, "type_args", None) and len(target.type_args) == 2:
-        if is_assignable(source, target.type_args[0]):
-            return True
-        if isinstance(source, ResultType) and is_assignable(source.ok, target.type_args[0]) and is_assignable(source.err, target.type_args[1]):
+        if isinstance(source, ResultType) and source.ok == target.type_args[0] and is_error_channel_assignable(source.err, target.type_args[1]):
             return True
         if isinstance(source, EnumType) and getattr(source, "template_name", None) == "Result" and getattr(source, "type_args", None) and len(source.type_args) == 2:
-            return is_assignable(source.type_args[0], target.type_args[0]) and is_assignable(source.type_args[1], target.type_args[1])
+            if source.type_args[0] == target.type_args[0] and is_error_channel_assignable(source.type_args[1], target.type_args[1]):
+                return True
+        if is_assignable(source, target.type_args[0]):
+            return True
     if isinstance(source, EnumType) and getattr(source, "template_name", None) == "Result" and getattr(source, "type_args", None) and len(source.type_args) == 2 and isinstance(target, ResultType):
-        return is_assignable(source.type_args[0], target.ok) and is_assignable(source.type_args[1], target.err)
+        if source.type_args[0] == target.ok and is_error_channel_assignable(source.type_args[1], target.err):
+            return True
+        return is_assignable(source, target.ok)
 
     # OOP Subtyping: Class -> Superclass
     if isinstance(source, ClassType) and isinstance(target, ClassType):
@@ -406,6 +445,12 @@ def is_assignable(source: WType, target: WType) -> bool:
         if source == NoneType:
             return True
         return is_assignable(source, target.inner)
+
+    # A narrower Result error set can be assigned to a wider Result channel.
+    # This preserves the tagged value; it is not an Ok lift.
+    if isinstance(source, ResultType) and isinstance(target, ResultType):
+        if source.ok == target.ok and is_error_channel_assignable(source.err, target.err):
+            return True
 
     # A ResultType(ok, err) accepts ok value
     if isinstance(target, ResultType):

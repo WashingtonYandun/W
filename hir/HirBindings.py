@@ -166,7 +166,10 @@ class HirBindings:
         if isinstance(node, H.HirTryPropagate) and self.return_type is not None:
             returned = self.interner.get_entry(self.return_type)
             operand = self.interner.get_entry(node.operand.type_id)
-            if returned.tag != operand.tag or (operand.tag == "result" and returned.data[1] != operand.data[1]):
+            if returned.tag != operand.tag or (
+                operand.tag == "result"
+                and not self.interner.is_assignable(operand.data[1], returned.data[1])
+            ):
                 self.verifier._fail(node, "Propagation channel does not match function return type")
         if isinstance(node, H.HirBuiltinCall):
             from hir.HirBuilder import BUILTIN_NAMES
