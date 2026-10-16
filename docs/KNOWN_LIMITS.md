@@ -111,7 +111,7 @@ but it does **not** implement:
 | :--- | :--- |
 | Generic declarations, specialization | `W2013 W1 generic declarations are not implemented` |
 | Enum payload layout | `W2013 W1 enum payload layout is not implemented` |
-| Pattern matching on `Option` / `Result` | `W0001` / `W2001`, see below |
+| Nested payload patterns and generic enum payload layout in W1 | `W0001` / `W2013`, see below |
 | W0-equivalent checked-module sessions and imported generic specialization | declared unsupported under F01 |
 
 Basic imports are supported: W1 expands the module graph into a token stream, qualifies
@@ -120,17 +120,16 @@ This is not the same architecture as W0's `CompilationSession`: W1 does not main
 shared typed-module cache or canonical cross-module declaration identities. The single
 `checked_modules` corpus fixture also uses generic imports, which W1 cannot specialize.
 
-Pattern matching on `Option` and `Result` fails in **every** form:
+W1 supports one-level payload matches for the built-in `Option` and `Result` types:
 
 ```w
-match o { Some(v) => { ... } }        # unqualified: the match-arm scanner rejects '('
-match o { Option.Some(v) => { ... } } # qualified: "pattern enum identity"
+match option { Some(v) => { ... }, None => { ... } }
+match result { Ok(v) => { ... }, Err(e) => { ... } }
 ```
 
-`selfhost/src/*.w` contains zero occurrences of `Some(`, `Ok(` or `Err(`, so the bootstrap
-does not exercise the unsupported pattern forms. Separate W1 tests must carry those
-contracts; the expansion suite currently exercises closures and first-class calls on W1,
-but runs generic OOP, stdlib and C FFI cases only on W0 engines.
+Nested payload patterns such as `Some(Ok(v))` and payloads on user-defined generic enums
+remain unsupported in W1. The expansion suite has a four-engine regression for the basic
+forms; generic OOP, stdlib and C FFI cases still run only on W0 engines.
 
 **Why it is this way.** W1 is a bootstrap: its purpose is to prove the language can
 describe a compiler and reach a reproducible fixed point, not to duplicate W0.

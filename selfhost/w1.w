@@ -1284,6 +1284,9 @@ fn emit_call(callee: ExprRes, args_c: list[str], collection: bool) -> ExprRes {
         if fn_name == "Err" and len(args_c) == 1 {
             return bind_call("w_err(" + own_expr(args_c[0]) + ")")
         }
+        if fn_name == "Some" and len(args_c) == 1 {
+            return bind_call("w_enum_payload(\"Option\", \"Some\", " + own_expr(args_c[0]) + ")")
+        }
         if fn_name == "print" {
             if len(args_c) == 0 {
                 return bind_call("w_builtin_print(0, NULL)")
@@ -1519,6 +1522,7 @@ fn parse_match_expr() -> ExprRes {
 fn parse_match_arms(subj_tmp: str, res: str) -> unit {
     let mut cond_c = "true"
     let mut bind_lines: list[str] = []
+    let mut bind_names: list[str] = []
     if match_kind("ELSE") {
         cond_c = "true"
     } elif check_kind("IDENT") {
@@ -1526,11 +1530,43 @@ fn parse_match_arms(subj_tmp: str, res: str) -> unit {
         if match_kind("DOT") {
             let var_tok = expect_kind("IDENT")
             cond_c = "w_eq(" + subj_tmp + ", w_enum(\"" + id_tok.val + "\", \"" + var_tok.val + "\"))"
+        } elif match_kind("LPAREN") {
+            let payload_name = expect_kind("IDENT").val
+            expect_kind("RPAREN")
+            if id_tok.val == "Some" {
+                cond_c = "!w_is_none(" + subj_tmp + ")"
+                if payload_name != "_" {
+                    let mut binding = "WVal v_" + payload_name + " = w_clone(w_peek_optional("
+                    binding = binding + subj_tmp + "));"
+                    bind_lines.append(binding)
+                    bind_names.append("v_" + payload_name)
+                }
+            } elif id_tok.val == "Ok" {
+                cond_c = "(" + subj_tmp + ").tag == W_OK"
+                if payload_name != "_" {
+                    let mut binding = "WVal v_" + payload_name + " = w_clone(w_peek_ok("
+                    binding = binding + subj_tmp + "));"
+                    bind_lines.append(binding)
+                    bind_names.append("v_" + payload_name)
+                }
+            } elif id_tok.val == "Err" {
+                cond_c = "(" + subj_tmp + ").tag == W_ERR"
+                if payload_name != "_" {
+                    let mut binding = "WVal v_" + payload_name + " = w_clone(w_peek_err("
+                    binding = binding + subj_tmp + "));"
+                    bind_lines.append(binding)
+                    bind_names.append("v_" + payload_name)
+                }
+            } else {
+                report_error("W2013", at_tok().line, at_tok().col, "payload enum patterns are unsupported")
+            }
         } elif check_kind("COMMA") {
             let mut t_names: list[str] = [id_tok.val]
+            bind_names.append("v_" + id_tok.val)
             while match_kind("COMMA") {
                 let nt = expect_kind("IDENT")
                 t_names.append(nt.val)
+                bind_names.append("v_" + nt.val)
             }
             cond_c = "((" + subj_tmp + ").tag == W_TUPLE && (" + subj_tmp + ").as.tuple->len == " + str(len(t_names)) + ")"
             for ti in 0..len(t_names) {
@@ -1539,6 +1575,7 @@ fn parse_match_arms(subj_tmp: str, res: str) -> unit {
         } else {
             cond_c = "true"
             bind_lines.append("WVal v_" + id_tok.val + " = w_clone(" + subj_tmp + ");")
+            bind_names.append("v_" + id_tok.val)
         }
     } else {
         let lit_r = parse_prefix_expr(false)
@@ -1552,6 +1589,9 @@ fn parse_match_arms(subj_tmp: str, res: str) -> unit {
     g_cur_stmts = empty
     for bl in bind_lines {
         emit_line(bl)
+    }
+    for bind_name in bind_names {
+        register_var(bind_name)
     }
     if check_kind("LBRACE") {
         let arm_v = parse_block_expr()
