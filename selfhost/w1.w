@@ -1263,7 +1263,7 @@ fn projection_is_mutated() -> bool {
 }
 
 
-fn emit_call(callee: ExprRes, args_c: list[str], collection: bool) -> ExprRes {
+fn emit_call(callee: ExprRes, args_c: list[str], collection: bool, line: int, col: int) -> ExprRes {
     if len(callee.val) >= 6 and slice(callee.val, 0, 6) == "enum::" {
         let marker = slice(callee.val, 6, len(callee.val))
         let mut separator = -1
@@ -1356,7 +1356,7 @@ fn emit_call(callee: ExprRes, args_c: list[str], collection: bool) -> ExprRes {
             return bind_call("w_list_append(" + recv_lref + ", " + args_c[0] + ")")
         }
         if collection and method == "pop" {
-            return bind_call("w_list_pop(" + recv_lref + ")")
+            return bind_call("w_list_pop_at(" + recv_lref + ", " + escape_c_str(g_in_path) + ", " + str(line) + ", " + str(col) + ")")
         }
         if collection and method == "clear" {
             return bind_call("w_list_clear(" + recv_lref + ")")
@@ -2007,6 +2007,7 @@ fn parse_expr(min_prec: int, allow_struct: bool) -> ExprRes {
     while true {
         while true {
             if check_kind("LPAREN") {
+                let call_tok = at_tok()
                 let mut collection = false
                 for position in sem_collection_call_positions { if position == g_pos + 1 { collection = true } }
                 for position in sem_indirect_positions {
@@ -2027,7 +2028,7 @@ fn parse_expr(min_prec: int, allow_struct: bool) -> ExprRes {
                     }
                 }
                 expect_kind("RPAREN")
-                left = emit_call(left, args_c, collection)
+                left = emit_call(left, args_c, collection, call_tok.line, call_tok.col)
             } elif check_kind("DOT") {
                 let projection_position = g_pos + 1
                 advance_tok()
@@ -2064,6 +2065,7 @@ fn parse_expr(min_prec: int, allow_struct: bool) -> ExprRes {
                     left = ExprRes { val: bind_call("w_clone(" + left.val + ")").val, lref: left.lref }
                 }
             } elif check_kind("LBRACKET") {
+                let bracket_tok = at_tok()
                 let mutated = projection_is_mutated()
                 advance_tok()
                 let mut object_value = left.val
@@ -2075,11 +2077,12 @@ fn parse_expr(min_prec: int, allow_struct: bool) -> ExprRes {
                 if mutated {
                     idx_r = ExprRes { val: snapshot_value(idx_r.val), lref: idx_r.lref }
                 }
-                let index_lref = "w_index_ref(" + clean_lref(left.lref) + ", " + idx_r.val + ")"
+                let source_args = escape_c_str(g_in_path) + ", " + str(bracket_tok.line) + ", " + str(bracket_tok.col)
+                let index_lref = "w_index_ref_at(" + clean_lref(left.lref) + ", " + idx_r.val + ", " + source_args + ")"
                 if mutated {
-                    left = ExprRes { val: "w_index_get(" + left.val + ", " + idx_r.val + ")", lref: index_lref }
+                    left = ExprRes { val: "w_index_get_at(" + left.val + ", " + idx_r.val + ", " + source_args + ")", lref: index_lref }
                 } else {
-                    left = ExprRes { val: bind_call("w_index_get_owned(" + object_value + ", " + idx_r.val + ")").val, lref: index_lref }
+                    left = ExprRes { val: bind_call("w_index_get_owned_at(" + object_value + ", " + idx_r.val + ", " + source_args + ")").val, lref: index_lref }
                 }
             } elif check_kind("QUESTION") {
                 advance_tok()
@@ -2231,9 +2234,9 @@ fn parse_expr(min_prec: int, allow_struct: bool) -> ExprRes {
             } elif op_tok.kind == "STAR" {
                 left = ExprRes { val: "w_mul(" + left.val + ", " + right.val + ")", lref: "" }
             } elif op_tok.kind == "SLASH" {
-                left = ExprRes { val: "w_div(" + left.val + ", " + right.val + ")", lref: "" }
+                left = ExprRes { val: "w_div_at(" + left.val + ", " + right.val + ", " + escape_c_str(g_in_path) + ", " + str(op_tok.line) + ", " + str(op_tok.col) + ")", lref: "" }
             } elif op_tok.kind == "PERCENT" {
-                left = ExprRes { val: "w_mod(" + left.val + ", " + right.val + ")", lref: "" }
+                left = ExprRes { val: "w_mod_at(" + left.val + ", " + right.val + ", " + escape_c_str(g_in_path) + ", " + str(op_tok.line) + ", " + str(op_tok.col) + ")", lref: "" }
             } elif op_tok.kind == "LT" {
                 left = ExprRes { val: "w_lt(" + left.val + ", " + right.val + ")", lref: "" }
             } elif op_tok.kind == "LTE" {

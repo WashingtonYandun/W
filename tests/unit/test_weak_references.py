@@ -97,6 +97,13 @@ def run_weak_tests():
                     assert 'runtime error:' not in result.stderr, result.stderr
                     if sys.platform.startswith('linux'):
                         assert 'LeakSanitizer: detected memory leaks' in result.stderr, result.stderr
+                    opt_out_env = dict(process_env)
+                    opt_out_env.pop('W_MEM_CHECK', None)
+                    opt_out_env['ASAN_OPTIONS'] = 'detect_leaks=0'
+                    quiet = subprocess.run([str(binary)], cwd=root, env=opt_out_env,
+                                            capture_output=True, text=True, timeout=30)
+                    assert quiet.returncode == 0, quiet.stderr
+                    assert quiet.stderr == '', quiet.stderr
                 else:
                     assert result.returncode == 0, (name, backend, result.stderr)
                     assert result.stdout == expected, (name, backend, result.stdout)

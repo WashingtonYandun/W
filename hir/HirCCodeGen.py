@@ -132,6 +132,11 @@ class HirCCodeGen:
         self._declare_owned_var(tmp, c_call, out)
         return tmp
 
+    def _source_call(self, name: str, args: str, node: HirNode) -> str:
+        span = node.span
+        file = span.file_path or self.file_path
+        return f"{name}({args}, {self.escape_c_str(file)}, {span.line}, {span.col})"
+
     def _is_local_var(self, c_name: str) -> bool:
         for scope in reversed(self.scope_stack):
             if c_name in scope.vars:
@@ -610,7 +615,7 @@ class HirCCodeGen:
         if isinstance(target, HirIndexRead):
             parent = self.prepare_assignment_ref(target.object, out)
             index = self.emit_value(target.index, out)
-            return f"w_index_ref({parent}, {index})"
+            return self._source_call("w_index_ref_at", f"{parent}, {index}", target)
         if isinstance(target, HirFieldRead):
             if self.interner.get_entry(target.object.type_id).tag == 'class':
                 parent = '&' + self.emit_value(target.object, out)
@@ -627,7 +632,7 @@ class HirCCodeGen:
         if isinstance(target, HirIndexRead):
             obj_ref = self.emit_lvalue_ref(target.object, out)
             idx_val = self.emit_value(target.index, out)
-            return f"w_index_ref({obj_ref}, {idx_val})"
+            return self._source_call("w_index_ref_at", f"{obj_ref}, {idx_val}", target)
         if isinstance(target, HirFieldRead):
             obj_ref = self.emit_lvalue_ref(target.object, out)
             return f'w_member_ref({obj_ref}, "{target.field_name}")'
@@ -775,6 +780,10 @@ class HirCCodeGen:
             }
             if expr.op in op_map:
                 call = f"{op_map[expr.op]}({lhs}, {rhs})"
+                if expr.op == "/":
+                    return self._source_call("w_div_at", f"{lhs}, {rhs}", expr)
+                if expr.op == "%":
+                    return self._source_call("w_mod_at", f"{lhs}, {rhs}", expr)
                 return self._bind_call(call, out) if expr.op == "+" else call
             if expr.op == "==":
                 return f"w_bool(w_eq({lhs}, {rhs}))"
@@ -853,7 +862,8 @@ class HirCCodeGen:
         if isinstance(expr, HirIndexRead):
             obj_val = self.emit_value(expr.object, out)
             idx_val = self.emit_expr(expr.index, out)
-            return self._bind_call(f"w_index_get_owned({obj_val}, {idx_val})", out)
+            call = self._source_call("w_index_get_owned_at", f"{obj_val}, {idx_val}", expr)
+            return self._bind_call(call, out)
 
         if isinstance(expr, HirDirectCall):
             arg_vals = [self.emit_value(a, out) for a in expr.args]
@@ -921,7 +931,8 @@ class HirCCodeGen:
                 return self._bind_call(f"w_list_append({lref}, {arg_v})", out)
             if method == "pop" and len(expr.args) == 0:
                 lref = self.emit_lvalue_ref(expr.receiver, out)
-                return self._bind_call(f"w_list_pop({lref})", out)
+                call = self._source_call("w_list_pop_at", lref, expr)
+                return self._bind_call(call, out)
             if method == "clear" and len(expr.args) == 0:
                 lref = self.emit_lvalue_ref(expr.receiver, out)
                 return self._bind_call(f"w_list_clear({lref})", out)
