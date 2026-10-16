@@ -144,6 +144,8 @@ def create_global_environment(stdout: Optional[TextIO] = None) -> Environment:
             return WInt(len(arg))
         if isinstance(arg, WDict):
             return WInt(len(arg))
+        if isinstance(arg, WTuple):
+            return WInt(len(arg.elements))
         if isinstance(arg, WStr):
             return WInt(len(arg.value))
         raise WRuntimeError(f"len() not supported for '{type(arg).__name__}'")
@@ -176,6 +178,8 @@ def create_global_environment(stdout: Optional[TextIO] = None) -> Environment:
         if len(args) != 1:
             raise WRuntimeError("int() takes exactly 1 argument")
         arg = args[0]
+        if isinstance(arg, WBool):
+            return WInt(1 if arg.value else 0)
         if isinstance(arg, WInt):
             return arg
         if isinstance(arg, WFloat):
@@ -186,7 +190,10 @@ def create_global_environment(stdout: Optional[TextIO] = None) -> Environment:
             text = arg.value.strip(" \t\n\r\v\f")
             if re.fullmatch(r"[+-]?[0-9]+", text) is None:
                 raise WRuntimeError("Invalid int conversion", code="W4003")
-            value = int(text)
+            significant = text.lstrip('+-').lstrip('0') or '0'
+            if len(significant) > 19:
+                raise WRuntimeError("Invalid int conversion", code="W4003")
+            value = int(significant) * (-1 if text.startswith('-') else 1)
             if not -9223372036854775808 <= value <= 9223372036854775807:
                 raise WRuntimeError("Invalid int conversion", code="W4003")
             return WInt(value)
@@ -196,6 +203,8 @@ def create_global_environment(stdout: Optional[TextIO] = None) -> Environment:
         if len(args) != 1:
             raise WRuntimeError("float() takes exactly 1 argument")
         arg = args[0]
+        if isinstance(arg, WBool):
+            return WFloat(1.0 if arg.value else 0.0)
         if isinstance(arg, WFloat):
             return arg
         if isinstance(arg, WInt):
@@ -204,7 +213,11 @@ def create_global_environment(stdout: Optional[TextIO] = None) -> Environment:
             try:
                 if "\0" in arg.value or "_" in arg.value:
                     raise ValueError()
-                return WFloat(float(arg.value))
+                text = arg.value.strip(" \t\n\r\v\f")
+                grammar = r"[+-]?(?:(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)(?:[eE][+-]?[0-9]+)?|inf(?:inity)?|nan)"
+                if re.fullmatch(grammar, text, re.IGNORECASE | re.ASCII) is None:
+                    raise ValueError()
+                return WFloat(float(text))
             except ValueError:
                 raise WRuntimeError("Invalid float conversion", code="W4003")
         raise WRuntimeError(f"Cannot convert '{type(arg).__name__}' to float")
@@ -259,6 +272,13 @@ def create_global_environment(stdout: Optional[TextIO] = None) -> Environment:
             raise WRuntimeError("bytes() expects str argument")
         return WList(elements=[WInt(b) for b in arg.value.encode('utf-8')])
 
+    def join_strings_fn(args: List[WValue]) -> WValue:
+        parts, separator = args
+        strings = [part.value for part in parts.storage.data]
+        return WStr(separator.value.join(strings))
+
+    env.declare("join_strings", WNativeFunction("join_strings", join_strings_fn))
+
     # 6. File I/O
     def read_file_fn(args: List[WValue]) -> WValue:
         if len(args) != 1:
@@ -267,7 +287,7 @@ def create_global_environment(stdout: Optional[TextIO] = None) -> Environment:
         if not isinstance(arg, WStr):
             raise WRuntimeError("read_file() expects str path")
         try:
-            with open(arg.value, 'r', encoding='utf-8') as f:
+            with open(arg.value, 'r', encoding='utf-8', newline='') as f:
                 content = f.read()
             return WOk(WStr(content))
         except Exception as e:

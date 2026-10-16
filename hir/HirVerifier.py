@@ -93,6 +93,9 @@ class HirVerifier:
                 expected = TYPE_BOOL
             if expected is None or value.type_id != expected:
                 self._fail(value, 'Invalid binary operand/result types')
+        if isinstance(value, (H.HirAssign, H.HirAssignment)):
+            if not isinstance(value.target, (H.HirLocalRef, H.HirFieldRead, H.HirIndexRead)):
+                self._fail(value, 'Assignment requires an addressable destination')
         if isinstance(value, H.HirSequence):
             allowed = (H.HirAssign, H.HirBindTemp)
             if not isinstance(value.statements, list) or any(

@@ -166,7 +166,9 @@ def generate_typed_program(seed: int) -> str:
                          "        generated_values.append(generated_transform(generated_index))", "    }"])
     body.append('    print("generated:", generated_values, generated_snapshot)')
     lines[-3:-3] = body
-    return "\n".join(lines)
+    from tests.fuzz.semantic_properties import generate_properties
+    property_source, _ = generate_properties(seed)
+    return "\n".join(lines) + "\nmain()\n" + property_source
 
 
 def generate_mutated_negative(seed: int) -> Tuple[str, str]:
@@ -317,9 +319,9 @@ def reduce_failure(source: str, oracle_fn: Callable[[str], bool], max_steps: int
     changed = True
     while changed and step < max_steps:
         changed = False
-        step += 1
         i = 0
-        while i < len(lines):
+        while i < len(lines) and step < max_steps:
+            step += 1
             # Attempt to remove line i
             candidate_lines = lines[:i] + lines[i + 1:]
             candidate_code = "\n".join(candidate_lines) + "\n"
@@ -356,7 +358,7 @@ def check_c_determinism(source: str, repo_root: Path, work_dir: Path) -> Tuple[b
             "-o",
             str(out_c),
         ]
-        proc = subprocess.run(cmd, cwd=str(repo_root), env=env, capture_output=True, text=True)
+        proc = subprocess.run(cmd, cwd=str(repo_root), env=env, capture_output=True, text=True, timeout=120)
         if proc.returncode != 0:
             return False, "", f"Compilation error: {proc.stderr}"
 
@@ -427,12 +429,26 @@ def run_semantic_fuzz_suite(
                 for result in results)
 
             if diverged:
-                # Failure reduction
+                # Preserve the failing engines and acceptance class during reduction.
+                reference = results[0]
+                fields = ('compile_ok', 'runtime_ok', 'exit_code', 'stdout', 'diag_code')
+                other = next((result for result in results[1:] if any(
+                    getattr(result, field) != getattr(reference, field) for field in fields)), results[-1])
+                expected_acceptance = (reference.compile_ok, other.compile_ok)
+                mismatch_fields = tuple(field for field in fields
+                                        if getattr(reference, field) != getattr(other, field))
+                failing_engine = next((result.engine for result in results if result.infrastructure_error), None)
+
                 def oracle_diverges(candidate: str) -> bool:
                     try:
-                        r0 = run_engine("interpreter", candidate, label, w1_bin, work_dir, sanitize=False)
-                        r1 = run_engine("hir", candidate, label, w1_bin, work_dir, sanitize=False)
-                        return r0.stdout != r1.stdout or r0.exit_code != r1.exit_code
+                        if failing_engine:
+                            result = run_engine(failing_engine, candidate, label, w1_bin, work_dir, sanitize=False)
+                            return result.compile_ok and bool(result.infrastructure_error)
+                        left = run_engine(reference.engine, candidate, label, w1_bin, work_dir, sanitize=False)
+                        right = run_engine(other.engine, candidate, label, w1_bin, work_dir, sanitize=False)
+                        return ((left.compile_ok, right.compile_ok) == expected_acceptance
+                                and not left.infrastructure_error and not right.infrastructure_error
+                                and any(getattr(left, field) != getattr(right, field) for field in mismatch_fields))
                     except Exception:
                         return False
 

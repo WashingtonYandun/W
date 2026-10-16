@@ -801,7 +801,7 @@ class TypeChecker:
             )
 
         from checker.ConstructorFlow import check_constructor
-        check_constructor(stmt, cls_type, m, self.file)
+        check_constructor(stmt, cls_type, m, self.file, self._match_is_exhaustive)
 
     def _check_class_decl(self, stmt: ClassDecl) -> None:
         cls_type = self.global_scope.lookup_type(stmt.name)
@@ -810,8 +810,6 @@ class TypeChecker:
         self.current_class = cls_type
         try:
             for m in stmt.methods:
-                if m.name == "init":
-                    self._check_constructor_rules(stmt, cls_type, m)
                 fn_type = cls_type.init_type if m.name == "init" else cls_type.methods[m.name].fn_type
                 assert fn_type is not None
                 fn_scope = Scope(parent=self.current_scope, is_function_scope=True)
@@ -834,6 +832,8 @@ class TypeChecker:
                         )
                     is_unit_ret = (fn_type.ret == UnitType) or (isinstance(fn_type.ret, ResultType) and fn_type.ret.ok == UnitType)
                     body_ret = self._check_block(m.body, is_statement_context=is_unit_ret)
+                    if m.name == "init":
+                        self._check_constructor_rules(stmt, cls_type, m)
                     self._mark_result_lift(m.body.tail_expr, fn_type.ret)
                     if not is_unit_ret and not self._block_has_return(m.body):
                         if body_ret is not None and is_assignable(body_ret, fn_type.ret):
@@ -904,39 +904,16 @@ class TypeChecker:
             self.loop_depth = old_loop_depth
 
     def _expr_has_return(self, expr: Expr) -> bool:
-        if isinstance(expr, IfExpr):
-            if expr.else_branch is None:
-                return False
-            if not self._block_has_return(expr.then_branch):
-                return False
-            for eb in expr.elif_branches:
-                if not self._block_has_return(eb.body):
-                    return False
-            return self._block_has_return(expr.else_branch)
-        if isinstance(expr, MatchExpr):
-            if not expr.arms:
-                return False
-            for arm in expr.arms:
-                if not isinstance(arm.body, Block) or not self._block_has_return(arm.body):
-                    return False
-            return True
-        return False
+        from common.ControlFlow import exits, NORMAL, RETURN
+        outcomes = exits(expr, self._match_is_exhaustive)
+        return NORMAL not in outcomes and outcomes <= {RETURN}
 
     def _block_has_return(self, block: Block) -> bool:
-        for s in block.statements:
-            if isinstance(s, ReturnStmt):
-                return True
-            if isinstance(s, ExprStmt) and self._expr_has_return(s.expr):
-                return True
-        if block.tail_expr is not None and self._expr_has_return(block.tail_expr):
-            return True
-        return False
+        return self._expr_has_return(block)
 
     def _block_diverges(self, block: Block) -> bool:
-        for s in block.statements:
-            if isinstance(s, (ReturnStmt, BreakStmt, ContinueStmt)):
-                return True
-        return self._block_has_return(block)
+        from common.ControlFlow import exits, NORMAL
+        return NORMAL not in exits(block, self._match_is_exhaustive)
 
     # The synthetic parameter name introduced by closure conversion. Captured
     # variables are immutable snapshots today, so a mutation attempt is rejected -- but
@@ -1237,9 +1214,9 @@ class TypeChecker:
             return NoneType
 
         if isinstance(expr, IdentExpr):
-            if expr.name in ("None", "none"):
-                return NoneType
             sym = self.current_scope.lookup_symbol(expr.name)
+            if expr.name in ("None", "none") and sym is None:
+                return NoneType
             if sym is not None:
                 if sym.kind == 'builtin' and not getattr(expr, 'is_callee', False):
                     raise TypeError("Builtin function values require an explicit lambda adapter", file=self.file, line=expr.line, col=expr.col, code="W2013")
@@ -1595,25 +1572,6 @@ class TypeChecker:
             return self._check_class_instantiation(class_t, expr.args, expr.line, expr.col)
 
         if isinstance(expr, AssignmentExpr):
-            # W accepts assignment as an expression, which makes `a = b = c = 1` legal.
-            # The HIR has no assignment expression node, so the lowering synthesises a
-            # temporary per level; that is verified for one nested level, and deeper
-            # chains are rejected here rather than miscompiled.
-            depth = 1
-            inner = expr.value
-            while isinstance(inner, AssignmentExpr):
-                depth += 1
-                inner = inner.value
-            if depth > 2:
-                raise TypeError(
-                    message=f"Chained assignment nests {depth} levels; at most 2 are supported "
-                            f"(split it into separate statements)",
-                    line=expr.line,
-                    col=expr.col,
-                    file=self.file,
-                    code="W2013",
-                )
-
             # Target validation
             val_t = self._check_expr(expr.value)
 
@@ -1796,7 +1754,8 @@ class TypeChecker:
 
         if isinstance(expr, MemberExpr):
             # Enum variant access: Enum.Variant
-            if isinstance(expr.object, IdentExpr):
+            if (isinstance(expr.object, IdentExpr)
+                    and getattr(self.current_scope.lookup_symbol(expr.object.name), 'kind', None) not in ('var', 'param')):
                 if expr.object.name == "Option" and expr.property in ("None", "none"):
                     return NoneType
                 enum_t = self.current_scope.lookup_type(expr.object.name)
@@ -1994,7 +1953,8 @@ class TypeChecker:
 
         if isinstance(expr, CallExpr):
             expr.callee.is_callee = True
-            if isinstance(expr.callee, IdentExpr) and expr.type_args:
+            if (isinstance(expr.callee, IdentExpr) and expr.type_args
+                    and self.current_scope.lookup_symbol(expr.callee.name) is None):
                 template = self.current_scope.lookup_type(expr.callee.name)
                 if isinstance(template, GenericOopTemplate):
                     type_ = specialize_oop(template, [self._resolve_type_node(a) for a in expr.type_args], expr.line, expr.col)
@@ -2055,6 +2015,7 @@ class TypeChecker:
                     if len(expr.args) != 1 or expr.type_args:
                         raise TypeError(f"{callee_name} expects one argument and no type arguments",
                                         line=expr.line, col=expr.col, file=self.file, code="W2005")
+                    expr.callee.resolved_symbol = symbol
                     argument = self._check_expr(expr.args[0])
                     if callee_name == "weak" and isinstance(argument, ClassType):
                         return WeakType(argument)
@@ -2062,7 +2023,18 @@ class TypeChecker:
                         return OptionalType(argument.target)
                     raise TypeError(f"Invalid argument type '{argument}' for {callee_name}",
                                     line=expr.line, col=expr.col, file=self.file, code="W2003")
-                if callee_name in self.generic_fn_templates:
+                if symbol and symbol.kind in ("var", "param"):
+                    if expr.type_args:
+                        alternative = getattr(expr, 'index_alternative', None)
+                        if isinstance(symbol.type, (ListType, DictType)) and alternative is not None:
+                            expr.callee = IndexExpr(expr.callee, alternative, expr.line, expr.col)
+                            expr.type_args = None
+                            expr.index_alternative = None
+                            return self._check_expr(expr)
+                        raise TypeError(f"Symbol '{callee_name}' is not a generic function or struct",
+                                        file=self.file, line=expr.line, col=expr.col, code="W2001")
+                    callee_t = self._check_expr(expr.callee)
+                elif callee_name in self.generic_fn_templates:
                     template = self.generic_fn_templates[callee_name]
                     if expr.type_args:
                         concrete_args = [self._resolve_type_node(a) for a in expr.type_args]
@@ -2208,7 +2180,8 @@ class TypeChecker:
                 else:
                     found_tmpl = None
                     found_var = None
-                    for tmpl_name, tmpl in self.generic_enum_templates.items():
+                    for tmpl_name, tmpl in (self.generic_enum_templates.items()
+                                            if not symbol or symbol.kind not in ("var", "param") else []):
                         for v in tmpl.ast_decl.variants:
                             v_name = v.name if hasattr(v, "name") else str(v)
                             if v_name == callee_name:
@@ -2269,7 +2242,9 @@ class TypeChecker:
                         if isinstance(maybe_cls, ClassType):
                             return self._check_class_instantiation(maybe_cls, expr.args, expr.line, expr.col)
 
-            if isinstance(expr.callee, MemberExpr) and isinstance(expr.callee.object, IdentExpr) and expr.callee.object.name in self.generic_enum_templates:
+            if isinstance(expr.callee, MemberExpr) and isinstance(expr.callee.object, IdentExpr) and expr.callee.object.name in self.generic_enum_templates and not (
+                    (receiver_symbol := self.current_scope.lookup_symbol(expr.callee.object.name))
+                    and receiver_symbol.kind in ("var", "param")):
                 template = self.generic_enum_templates[expr.callee.object.name]
                 variant_name = expr.callee.property
                 var_decl = next((v for v in template.ast_decl.variants if (v.name if hasattr(v, "name") else str(v)) == variant_name), None)
@@ -2351,7 +2326,9 @@ class TypeChecker:
                 expr.type_args = []
                 return enum_t
 
-            if isinstance(expr.callee, MemberExpr) and isinstance(expr.callee.object, IdentExpr):
+            if (isinstance(expr.callee, MemberExpr) and isinstance(expr.callee.object, IdentExpr)
+                    and not ((receiver_symbol := self.current_scope.lookup_symbol(expr.callee.object.name))
+                             and receiver_symbol.kind in ("var", "param"))):
                 enum_t = self.current_scope.lookup_type(expr.callee.object.name)
                 if isinstance(enum_t, EnumType):
                     variant_name = expr.callee.property
@@ -2433,29 +2410,28 @@ class TypeChecker:
                     expr.indirect_call = True
 
             # Special built-in checks
-            if isinstance(expr.callee, IdentExpr):
+            if (isinstance(expr.callee, IdentExpr)
+                    and getattr(getattr(expr.callee, 'resolved_symbol', None), 'kind', None) == 'builtin'):
                 name = expr.callee.name
                 if name == "len":
                     if len(expr.args) != 1:
                         raise TypeError(message="len() takes exactly 1 argument", line=expr.line, col=expr.col, file=self.file, code="T015")
                     a_t = self._check_expr(expr.args[0])
-                    if not (isinstance(a_t, (ListType, DictType)) or a_t == StrType):
+                    if not (isinstance(a_t, (ListType, DictType, TupleType)) or a_t == StrType):
                         raise TypeError(message=f"len() expects list, dict, or str, found '{a_t}'", line=expr.line, col=expr.col, file=self.file, code="T003")
                     return IntType
 
                 if name == "str":
                     if len(expr.args) != 1:
                         raise TypeError(message="str() takes exactly 1 argument", line=expr.line, col=expr.col, file=self.file, code="T015")
-                    a_t = self._check_expr(expr.args[0])
-                    if a_t not in (IntType, FloatType, BoolType, StrType):
-                        raise TypeError(message=f"str() expects int, float, bool, or str, found '{a_t}'", line=expr.line, col=expr.col, file=self.file, code="T003")
+                    self._check_expr(expr.args[0])
                     return StrType
 
                 if name == "int":
                     if len(expr.args) != 1:
                         raise TypeError(message="int() takes exactly 1 argument", line=expr.line, col=expr.col, file=self.file, code="T015")
                     a_t = self._check_expr(expr.args[0])
-                    if a_t not in (IntType, FloatType, StrType):
+                    if a_t not in (IntType, FloatType, BoolType, StrType):
                         raise TypeError(message=f"int() expects int, float, or str, found '{a_t}'", line=expr.line, col=expr.col, file=self.file, code="T003")
                     return IntType
 
@@ -2463,7 +2439,7 @@ class TypeChecker:
                     if len(expr.args) != 1:
                         raise TypeError(message="float() takes exactly 1 argument", line=expr.line, col=expr.col, file=self.file, code="T015")
                     a_t = self._check_expr(expr.args[0])
-                    if a_t not in (IntType, FloatType, StrType):
+                    if a_t not in (IntType, FloatType, BoolType, StrType):
                         raise TypeError(message=f"float() expects int, float, or str, found '{a_t}'", line=expr.line, col=expr.col, file=self.file, code="T003")
                     return FloatType
 
@@ -2964,82 +2940,14 @@ class TypeChecker:
         return UnitType
 
     def _pattern_matrix_exhaustive(self, types: List[WType], rows: List[List[Any]]) -> bool:
-        if not types:
-            return bool(rows)
-        if not rows:
-            return False
-        from hir.HirNodes import (
-            HirWildcardPattern, HirBindingPattern, HirLiteralPattern, HirEnumPattern, HirErrorTypePattern, HirTuplePattern
+        from checker.PatternCoverage import pattern_matrix_exhaustive
+        return pattern_matrix_exhaustive(types, rows, self.interner)
+
+    def _match_is_exhaustive(self, expression) -> bool:
+        return self._pattern_matrix_exhaustive(
+            [expression.subject.inferred_type],
+            [[arm.pattern] for arm in expression.arms if arm.guard is None],
         )
-        def wildcard(pattern):
-            if isinstance(pattern, (WildcardPattern, HirWildcardPattern)):
-                return True
-            if isinstance(pattern, (IdentifierPattern, HirBindingPattern)) and pattern.name not in ("None", "none"):
-                return True
-            return False
-        defaults = [row[1:] for row in rows if wildcard(row[0])]
-        if defaults and self._pattern_matrix_exhaustive(types[1:], defaults):
-            return True
-        first = types[0]
-        optional = self._builtin_arguments(first, "Option")
-        result = self._builtin_arguments(first, "Result")
-        if optional:
-            constructors = {"Some": optional, "None": []}
-        elif result:
-            constructors = {"Ok": [result[0]], "Err": [result[1]]}
-        elif isinstance(first, ErrorUnionType):
-            constructors = {
-                self._error_pattern_name(member): [member]
-                for member in first.alternatives
-            }
-        elif isinstance(first, EnumType):
-            constructors = {name: first.variant_payloads.get(name, []) for name in first.variants}
-        elif isinstance(first, TupleType):
-            constructors = {"tuple": first.elements}
-        elif first == BoolType:
-            constructors = {"true": [], "false": []}
-        else:
-            return False
-        for name, payload in constructors.items():
-            specialized = []
-            for row in rows:
-                pattern = row[0]
-                if wildcard(pattern):
-                    specialized.append([WildcardPattern() for _ in payload] + row[1:])
-                elif (
-                    isinstance(first, ErrorUnionType)
-                    and isinstance(pattern, ErrorTypePattern)
-                    and self._error_pattern_name(pattern.matched_type) == name
-                ):
-                    specialized.append([pattern.binding] + row[1:])
-                elif (
-                    isinstance(first, ErrorUnionType)
-                    and isinstance(pattern, HirErrorTypePattern)
-                    and self._error_pattern_name(self.interner.to_wtype(pattern.error_type_id)) == name
-                ):
-                    specialized.append([pattern.binding] + row[1:])
-                elif isinstance(pattern, EnumPattern) and pattern.variant == name:
-                    specialized.append(pattern.args + row[1:])
-                elif isinstance(pattern, HirEnumPattern) and pattern.variant_name == name:
-                    specialized.append(pattern.subpatterns + row[1:])
-                elif isinstance(pattern, TuplePattern) and name == "tuple":
-                    specialized.append(pattern.elements + row[1:])
-                elif isinstance(pattern, HirTuplePattern) and name == "tuple":
-                    specialized.append(pattern.elements + row[1:])
-                elif name == "None" and (
-                    (isinstance(pattern, (IdentifierPattern, HirBindingPattern)) and pattern.name in ("None", "none")) or
-                    (isinstance(pattern, LiteralPattern) and isinstance(pattern.literal, NoneLiteral)) or
-                    (isinstance(pattern, HirLiteralPattern) and pattern.literal_kind == "none")
-                ):
-                    specialized.append(row[1:])
-                elif (
-                    (isinstance(pattern, LiteralPattern) and isinstance(pattern.literal, BoolLiteral) and name == ("true" if pattern.literal.value else "false")) or
-                    (isinstance(pattern, HirLiteralPattern) and pattern.literal_kind == "bool" and name == ("true" if pattern.value else "false"))
-                ):
-                    specialized.append(row[1:])
-            if not self._pattern_matrix_exhaustive(payload + types[1:], specialized):
-                return False
-        return True
 
     def _resolve_error_type_pattern(self, pattern: Pattern, subject: ErrorUnionType) -> ErrorTypePattern:
         if isinstance(pattern, ErrorTypePattern):

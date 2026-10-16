@@ -23,7 +23,8 @@ fn parse_let_stmt(is_global: bool) -> unit {
         g_globals.append(vname)
         emit_line("w_assign(&" + vname + ", " + own_expr(val_r.val) + ");")
     } else {
-        declare_owned_var(vname, own_expr(val_r.val))
+        let initial = snapshot_value(val_r.val)
+        declare_owned_var(vname, own_expr(initial))
     }
 }
 

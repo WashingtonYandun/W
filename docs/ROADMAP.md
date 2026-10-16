@@ -20,8 +20,8 @@ considera cerrado solo porque su informe histórico diga que terminó.
 expansión más amplia; W1 soporta subconjuntos medidos por fixture. La tabla del corpus
 principal está en [ENGINE_PARITY_MATRIX.md](ENGINE_PARITY_MATRIX.md).
 
-El corpus vigente contiene **130 fixtures** en los cuatro motores, sin exclusiones:
-106 de `core`, 15 de `generics`, 1 de `checked_modules` y 8 de `error_unions`.
+El corpus vigente contiene **158 fixtures** en los cuatro motores, sin exclusiones:
+134 de `core`, 15 de `generics`, 1 de `checked_modules` y 8 de `error_unions`.
 Las cifras de 114 y 121 que aparecen en los cierres F01/F03 de abajo son evidencia
 histórica de esos hitos; no representan el total vigente.
 
@@ -109,3 +109,15 @@ define el piloto y las condiciones de aceptación. El piloto técnico ya integra
 de mediciones en W0 AST/HIR y una referencia C; el lote sintético no valida todavía un
 flujo real ni una ventaja para usuarios. Faltan esa validación y la medición de memoria
 física antes de declarar un perfil de producción.
+
+## Corrección de auditoría de main · 2026-10-16
+
+ADR-017 fija llamadas resueltas, salidas normales explícitas, efectos únicos, layouts
+canónicos, capturas por identidad y contratos de I/O/conversión. Se añaden 28 fixtures,
+propiedades con oráculo independiente y el importador CSV → SQLite con referencia C.
+La evidencia reproducible y los costes que permanecen están en
+[AUDIT_REMEDIATION.md](AUDIT_REMEDIATION.md).
+
+El siguiente paso es medir uso real y consolidar una IR de efectos/ownership si esos
+costes bloquean el producto. LLVM queda condicionado a esa evidencia. Los layouts sin
+boxing, rangos lazy, capturas mutables, concurrencia y Windows son trabajos separados.

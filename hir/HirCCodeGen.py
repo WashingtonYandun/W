@@ -19,11 +19,11 @@ from hir.HirNodes import (
     HirFnDecl, HirStructDecl, HirEnumDecl, HirInterfaceDecl, HirClassDecl, HirModule,
     HirLet, HirBindTemp, HirAssign, HirWhile, HirForList, HirReturn, HirBreak, HirContinue, HirExprStmt,
     HirConstInt, HirConstFloat, HirConstBool, HirConstStr, HirConstNone, HirConstUnit,
-    HirLocalRef, HirThisRef, HirUnaryOp, HirBinaryOp, HirSequence,
+    HirLocalRef, HirThisRef, HirUnaryOp, HirBinaryOp, HirSequence, HirAssignment,
     HirConstructStruct, HirConstructEnum, HirConstructObject, HirConstructList, HirConstructDict, HirConstructTuple,
     HirDirectCall, HirBuiltinCall, HirMethodCall, HirFieldRead, HirIndexRead,
     HirTryPropagate, HirCoalesce, HirElseHandle, HirIf, HirMatch, HirMatchArm, HirRange, HirSuperRef,
-    SymbolId, FieldId, VariantId, CallTarget, DirectCallTarget, BuiltinCallTarget, VirtualCallTarget,
+    SymbolId, FieldId, VariantId, CallTarget, DirectCallTarget, BuiltinCallTarget, VirtualCallTarget, CollectionCallTarget,
     CowProjection, CowFieldProjection, CowIndexProjection, CowPath,
     HirPattern, HirWildcardPattern, HirBindingPattern, HirLiteralPattern, HirEnumPattern, HirErrorTypePattern, HirTuplePattern,
     HirCoerce
@@ -208,11 +208,8 @@ class HirCCodeGen:
             if cl.name not in self.classes:
                 self.classes[cl.name] = cl
                 self.class_order.append(cl.name)
-            for m in cl.methods:
-                if m.name != "init":
-                    key = (m.name, len(m.params))
-                    if key not in self.dispatch_methods:
-                        self.dispatch_methods.append(key)
+        from codegen.VirtualDispatch import hir_virtual_method_slots
+        self.dispatch_methods = hir_virtual_method_slots(module, self.interner)
 
         for fn in module.functions:
             c_name = f"w_fn_{fn.name}"
@@ -689,6 +686,13 @@ class HirCCodeGen:
         main_stmts.append("w_release(_t_main);")
 
     def emit_expr(self, expr: HirExpr, out: List[str]) -> str:
+        if isinstance(expr, HirAssignment):
+            reference = self.prepare_assignment_ref(expr.target, out)
+            value = self.emit_expr(expr.value, out)
+            held = self.new_aux("_rhs")
+            self._declare_owned_var(held, self._own_expr(value), out)
+            return self._bind_call(f"w_clone(w_assign({reference}, w_move(&{held})))", out)
+
         if isinstance(expr, HirSequence):
             for statement in expr.statements:
                 self.emit_stmt(statement, out)
@@ -800,8 +804,10 @@ class HirCCodeGen:
         if isinstance(expr, HirConstructStruct):
             if not expr.fields:
                 return self._bind_call(f'w_make_struct("{expr.struct_name}", 0, NULL, NULL)', out)
-            f_names = [f'"{fname}"' for fname, _ in expr.fields]
-            f_vals = [self.emit_value(fval, out) for _, fval in expr.fields]
+            evaluated = {name: self.emit_value(value, out) for name, value in expr.fields}
+            definition = self.interner.struct_defs[expr.struct_name]
+            f_names = [f'"{name}"' for name in definition.fields]
+            f_vals = [evaluated[name] for name in definition.fields]
             k_tmp = self.new_aux("_k")
             v_tmp = self.new_aux("_v")
             out.append(f"const char* {k_tmp}[{len(f_names)}] = {{ {', '.join(f_names)} }};")
@@ -910,6 +916,9 @@ class HirCCodeGen:
             if name == "args" and len(arg_vals) == 0:
                 return self._bind_call("w_builtin_args()", out)
 
+            if name == "join_strings" and len(arg_vals) == 2:
+                return self._bind_call(f"w_builtin_join_strings({arg_vals[0]}, {arg_vals[1]})", out)
+
             if name == "write_file" and len(arg_vals) == 2:
                 return self._bind_call(f"w_builtin_write_file({arg_vals[0]}, {arg_vals[1]})", out)
 
@@ -919,7 +928,8 @@ class HirCCodeGen:
             return self._bind_call(f"w_builtin_{name}({', '.join(arg_vals)})", out)
 
         if isinstance(expr, HirMethodCall):
-            method = expr.method_name
+            method = expr.target.method_name
+            collection = isinstance(expr.target, CollectionCallTarget)
             # super.init(...) or super.method(...)
             if isinstance(expr.receiver, HirSuperRef):
                 arg_vals = [self.emit_value(a, out) for a in expr.args]
@@ -932,33 +942,33 @@ class HirCCodeGen:
                 return "w_unit()"
 
             # List/Dict built-in methods
-            if method == "append" and len(expr.args) == 1:
-                lref = self.emit_lvalue_ref(expr.receiver, out)
+            if collection and method == "append" and len(expr.args) == 1:
+                lref = self.prepare_assignment_ref(expr.receiver, out)
                 arg_v = self.emit_value(expr.args[0], out)
                 return self._bind_call(f"w_list_append({lref}, {arg_v})", out)
-            if method == "pop" and len(expr.args) == 0:
-                lref = self.emit_lvalue_ref(expr.receiver, out)
+            if collection and method == "pop" and len(expr.args) == 0:
+                lref = self.prepare_assignment_ref(expr.receiver, out)
                 call = self._source_call("w_list_pop_at", lref, expr)
                 return self._bind_call(call, out)
-            if method == "clear" and len(expr.args) == 0:
-                lref = self.emit_lvalue_ref(expr.receiver, out)
+            if collection and method == "clear" and len(expr.args) == 0:
+                lref = self.prepare_assignment_ref(expr.receiver, out)
                 return self._bind_call(f"w_list_clear({lref})", out)
-            if method == "get" and len(expr.args) == 1:
+            if collection and method == "get" and len(expr.args) == 1:
                 obj_v = self.emit_value(expr.receiver, out)
                 arg_v = self.emit_value(expr.args[0], out)
                 return self._bind_call(f"w_dict_get({obj_v}, {arg_v})", out)
-            if method == "keys" and len(expr.args) == 0:
+            if collection and method == "keys" and len(expr.args) == 0:
                 obj_v = self.emit_value(expr.receiver, out)
                 return self._bind_call(f"w_dict_keys({obj_v})", out)
-            if method == "values" and len(expr.args) == 0:
+            if collection and method == "values" and len(expr.args) == 0:
                 obj_v = self.emit_value(expr.receiver, out)
                 return self._bind_call(f"w_dict_values({obj_v})", out)
 
             # Dynamic dispatch
             obj_v = self.emit_value(expr.receiver, out)
             arg_vals = [self.emit_value(a, out) for a in expr.args]
-            call_args = [obj_v] + arg_vals
-            return self._bind_call(f"w_dispatch__{method}__{len(arg_vals)}({', '.join(call_args)})", out)
+            arguments = '(WVal[]){ ' + ', '.join(arg_vals) + ' }' if arg_vals else 'NULL'
+            return self._bind_call(f"w_virtual_call({obj_v}, {expr.target.slot}, {len(arg_vals)}, {arguments})", out)
 
         if isinstance(expr, HirTryPropagate):
             op_val = self.emit_expr(expr.operand, out)

@@ -327,7 +327,7 @@ static inline WVal w_owned_str_n(char* data, size_t length) {
     buffer->refcount = 1;
     buffer->byte_length = length;
     buffer->codepoint_offsets = NULL;
-    buffer->codepoint_count = 0;
+    buffer->codepoint_count = SIZE_MAX;
     buffer->data = data;
     w_mem_on_alloc();
     WVal value = w_str_n(data, length);
@@ -1090,9 +1090,17 @@ static inline bool w_eq(WVal a, WVal b) {
                     equal = false;
                     break;
                 }
-                for (int32_t i = 0; i < left.as.st->len; i++) {
-                    w_eq_push(&items, &count, &capacity, &heap_items,
-                              left.as.st->vals[i], right.as.st->vals[i]);
+                for (int32_t i = 0; i < left.as.st->len && equal; i++) {
+                    int32_t found = i;
+                    if (strcmp(left.as.st->keys[i], right.as.st->keys[i]) != 0) {
+                        found = -1;
+                        for (int32_t j = 0; j < right.as.st->len; j++) {
+                            if (strcmp(left.as.st->keys[i], right.as.st->keys[j]) == 0) { found = j; break; }
+                        }
+                    }
+                    if (found < 0) equal = false;
+                    else w_eq_push(&items, &count, &capacity, &heap_items,
+                                   left.as.st->vals[i], right.as.st->vals[found]);
                 }
                 break;
             case W_WEAK:
@@ -1408,6 +1416,15 @@ static inline bool w_string_offset(WVal value, int64_t index, size_t* offset, si
     return *length != 0;
 }
 
+/* Owned strings cache counts independently of the lazy random-access index. */
+static inline int64_t w_string_length(WVal value) {
+    if (value.string_owner && value.string_owner->codepoint_count != SIZE_MAX)
+        return (int64_t)value.string_owner->codepoint_count;
+    int64_t count = w_utf8_cp_len_n(value.as.s, value.string_length);
+    if (value.string_owner) value.string_owner->codepoint_count = (size_t)count;
+    return count;
+}
+
 /* Indexing & Member Access */
 static inline WVal w_index_get(WVal obj, WVal idx) {
     if (obj.tag == W_LIST) {
@@ -1524,6 +1541,7 @@ static inline WVal* w_member_ref(WVal* obj, const char* prop) {
 
 /* Methods on List / Dict */
 static inline WVal w_list_append(WVal* list_val, WVal item) {
+    if (list_val->tag != W_LIST) w_runtime_fail("W4003", "List intrinsic requires list receiver");
     w_list_detach(list_val);
     WListBuf* b = list_val->as.list;
     if (b->len >= b->cap) {
@@ -1535,6 +1553,7 @@ static inline WVal w_list_append(WVal* list_val, WVal item) {
 }
 
 static inline WVal w_list_pop(WVal* list_val) {
+    if (list_val->tag != W_LIST) w_runtime_fail("W4003", "List intrinsic requires list receiver");
     w_list_detach(list_val);
     WListBuf* b = list_val->as.list;
     if (b->len == 0) {
@@ -1549,6 +1568,7 @@ static inline WVal w_list_pop_at(WVal* list_val, const char* file, int32_t line,
 }
 
 static inline WVal w_list_clear(WVal* list_val) {
+    if (list_val->tag != W_LIST) w_runtime_fail("W4003", "List intrinsic requires list receiver");
     w_list_detach(list_val);
     WListBuf* b = list_val->as.list;
     for (int32_t i = 0; i < b->len; i++) {
@@ -1567,11 +1587,13 @@ static inline WVal w_dict_get(WVal dict_val, WVal key) {
 }
 
 static inline WVal w_dict_keys(WVal dict_val) {
+    if (dict_val.tag != W_DICT) w_runtime_fail("W4003", "Dictionary intrinsic requires dict receiver");
     WDictBuf* d = dict_val.as.dict;
     return w_make_list(d->len, d->keys);
 }
 
 static inline WVal w_dict_values(WVal dict_val) {
+    if (dict_val.tag != W_DICT) w_runtime_fail("W4003", "Dictionary intrinsic requires dict receiver");
     WDictBuf* d = dict_val.as.dict;
     return w_make_list(d->len, d->vals);
 }
@@ -2114,7 +2136,8 @@ static inline WVal w_builtin_exit(WVal code) {
 static inline WVal w_builtin_len(WVal v) {
     if (v.tag == W_LIST) return w_int(v.as.list->len);
     if (v.tag == W_DICT) return w_int(v.as.dict->len);
-    if (v.tag == W_STR) return w_int(w_utf8_cp_len_n(v.as.s, v.string_length));
+    if (v.tag == W_TUPLE) return w_int(v.as.tuple->len);
+    if (v.tag == W_STR) return w_int(w_string_length(v));
     return w_int(0);
 }
 
@@ -2134,6 +2157,7 @@ static inline const char* w_conversion_end(const char* end) {
 }
 
 static inline WVal w_builtin_int(WVal v) {
+    if (v.tag == W_BOOL) return w_int(v.as.b ? 1 : 0);
     if (v.tag == W_INT) return v;
     if (v.tag == W_FLOAT) {
         if (!isfinite(v.as.f) || v.as.f < -9223372036854775808.0 || v.as.f >= 9223372036854775808.0)
@@ -2149,10 +2173,49 @@ static inline WVal w_builtin_int(WVal v) {
     return w_unit();
 }
 
+static inline bool w_ascii_space(unsigned char value) {
+    return value == ' ' || (value >= 9 && value <= 13);
+}
+
+/* Match Python's explicit ASCII grammar, including inf/infinity/nan, before strtod. */
+static inline bool w_float_text_valid(const char* text, size_t length) {
+    size_t begin = 0, end = length;
+    while (begin < end && w_ascii_space((unsigned char)text[begin])) begin++;
+    while (end > begin && w_ascii_space((unsigned char)text[end - 1])) end--;
+    if (begin < end && (text[begin] == '+' || text[begin] == '-')) begin++;
+    const char* words[] = { "inf", "infinity", "nan" };
+    for (size_t word = 0; word < 3; word++) {
+        if (end - begin != strlen(words[word])) continue;
+        bool same = true;
+        for (size_t i = begin; i < end; i++) {
+            unsigned char ch = (unsigned char)text[i];
+            if (ch >= 'A' && ch <= 'Z') ch += 'a' - 'A';
+            if (ch != (unsigned char)words[word][i - begin]) same = false;
+        }
+        if (same) return true;
+    }
+    size_t position = begin, digits = 0;
+    while (position < end && text[position] >= '0' && text[position] <= '9') { position++; digits++; }
+    if (position < end && text[position] == '.') {
+        position++;
+        while (position < end && text[position] >= '0' && text[position] <= '9') { position++; digits++; }
+    }
+    if (!digits) return false;
+    if (position < end && (text[position] == 'e' || text[position] == 'E')) {
+        position++;
+        if (position < end && (text[position] == '+' || text[position] == '-')) position++;
+        size_t exponent = position;
+        while (position < end && text[position] >= '0' && text[position] <= '9') position++;
+        if (position == exponent) return false;
+    }
+    return position == end;
+}
+
 static inline WVal w_builtin_float(WVal v) {
+    if (v.tag == W_BOOL) return w_float(v.as.b ? 1.0 : 0.0);
     if (v.tag == W_FLOAT) return v;
     if (v.tag == W_INT) return w_float((double)v.as.i);
-    if (v.tag == W_STR && !memchr(v.as.s, 0, v.string_length)) {
+    if (v.tag == W_STR && w_float_text_valid(v.as.s, v.string_length)) {
         char* end;
         double value = strtod(v.as.s, &end);
         if (end != v.as.s && *w_conversion_end(end) == 0 && !strstr(v.as.s, "0x") && !strstr(v.as.s, "0X"))
@@ -2222,7 +2285,7 @@ static inline WVal w_builtin_slice(WVal s, WVal start, WVal end) {
         fprintf(stderr, "[W4003] RuntimeError: slice() expects str or list\n");
         exit(1);
     }
-    int64_t total_cp = w_utf8_cp_len_n(s.as.s, s.string_length);
+    int64_t total_cp = w_string_length(s);
     int64_t st = start.as.i < 0 ? 0 : start.as.i;
     int64_t en = end.as.i > total_cp ? total_cp : end.as.i;
     if (en <= st || st >= total_cp) return w_str("");
@@ -2238,6 +2301,30 @@ static inline WVal w_builtin_slice(WVal s, WVal start, WVal end) {
     memcpy(buf, s.as.s + st_off, blen);
     buf[blen] = '\0';
     return w_owned_str_n(buf, blen);
+}
+
+/* A two-pass string builder: one allocation and one copy per input byte. */
+static inline WVal w_builtin_join_strings(WVal parts, WVal separator) {
+    if (parts.tag != W_LIST || separator.tag != W_STR)
+        w_runtime_fail("W4003", "join_strings requires list[str] and str");
+    size_t length = 0;
+    for (int32_t i = 0; i < parts.as.list->len; i++) {
+        WVal part = parts.as.list->data[i];
+        if (part.tag != W_STR) w_runtime_fail("W4003", "join_strings requires string elements");
+        size_t extra = i ? separator.string_length : 0;
+        if (part.string_length > SIZE_MAX - length - 1 || extra > SIZE_MAX - length - part.string_length - 1)
+            w_runtime_fail("W4003", "Joined string is too large");
+        length += extra + part.string_length;
+    }
+    char* data = (char*)w_alloc_safe(length + 1);
+    size_t offset = 0;
+    for (int32_t i = 0; i < parts.as.list->len; i++) {
+        if (i) { memcpy(data + offset, separator.as.s, separator.string_length); offset += separator.string_length; }
+        WVal part = parts.as.list->data[i];
+        memcpy(data + offset, part.as.s, part.string_length); offset += part.string_length;
+    }
+    data[length] = 0;
+    return w_owned_str_n(data, length);
 }
 
 static inline WVal w_builtin_bytes(WVal s) {

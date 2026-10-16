@@ -26,20 +26,12 @@ def get_repo_root() -> str:
 # runtime header and the W1 sources are the obvious ones; the W0 frontend, checker
 # and C emitter are just as load-bearing because stage 1 is produced by them, and a
 # stale binary silently invalidates every `--backend=selfhost` comparison.
-SELFHOST_BOOTSTRAP_INPUTS = (
-    "selfhost/w1.w",
-    "runtime/w_runtime.h",
-    "lexer/Lexer.py",
-    "parser/Parser.py",
-    "node/NodeType.py",
-    "checker/TypeChecker.py",
-    "checker/WType.py",
-    "checker/TypeInterner.py",
-    "checker/SymbolTable.py",
-    "codegen/CCodeGen.py",
-    "codegen/ForeignAbi.py",
-    "codegen/VirtualDispatch.py",
-    "common/constants.py",
+SELFHOST_BOOTSTRAP_INPUTS = ("selfhost/w1.w", "runtime/w_runtime.h", "main.py") + tuple(
+    os.path.relpath(os.path.join(directory, name), get_repo_root())
+    for package in ("lexer", "parser", "node", "checker", "compiler", "codegen", "common", "error", "hir", "wtokens")
+    for directory, _, names in os.walk(os.path.join(get_repo_root(), package))
+    for name in sorted(names)
+    if name.endswith(".py")
 )
 
 

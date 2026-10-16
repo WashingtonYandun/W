@@ -45,16 +45,29 @@ flowchart TD
     H --> J["C99 Backend (W0 & W1 Self-Hosted)"]
 ```
 
-### Core Invariants of Typed HIR
-1. **Total Type Decoration:** Every `HirExpr`, `HirPattern`, and `HirLocal` carries a non-null, interned `TypeId` and source `Span`.
-2. **Zero Unresolved Names:** Variable, parameter, function, and type references use canonical integer identifiers (`SymbolId`, `TypeId`, `FieldIndex`, `MethodSlot`) rather than raw strings.
-3. **Desugared Surface Syntax:**
-   - Both `User("Ada")` and legacy `new User("Ada")` lower to `HirConstructObject(class_type_id, args)`.
-   - Omitted `-> unit` return annotations and bare `return` statements are normalized to explicit `Unit` values.
-   - `expr?` (postfix propagation) and `expr else err { ... }` lower to explicit control-flow branching over `Optional` / `Result` payloads.
-4. **Explicit Evaluation Order & Value Detachment:**
-   - Call arguments and binary operands with side effects are hoisted into ordered `HirStmt::BindTemp` statements before the consuming operation.
-   - Mutating lvalue paths are represented explicitly as `HirCowPath` chains.
+### Contratos implementados y límite de la representación
+
+1. Cada expresión y patrón lleva un `TypeId` del arena comprobado y un `Span`.
+2. Los bindings léxicos llevan `SymbolId`; llamadas directas, builtins, colecciones y
+   métodos virtuales tienen targets distintos. Los slots virtuales se canonicalizan por
+   nombre y aridad, se verifican contra la firma y se consumen en la emisión. Las
+   proyecciones conservan nombres e información de campo: todavía no hay un layout
+   físico completamente bajado ni se eliminó toda resolución textual del backend.
+3. `HirAssignment(target, value, type_id, span)` produce el valor asignado y evita
+   reconstruir el target como lectura. El verificador exige un destino direccionable.
+   `HirAssign` sigue representando la sentencia. `HirSequence` conserva efectos ordenados
+   cuando hace falta; los temporales y el cleanup se materializan en la emisión C.
+4. `CollectionCallTarget` requiere receptor list/dict compatible. `VirtualCallTarget`
+   requiere método, firma, clase y slot coherentes; `super` usa despacho estático.
+5. `HirTryPropagate`, `HirCoalesce`, `HirElseHandle` y los nodos de control conservan
+   estructura de expresiones. No son bloques básicos ni terminadores MIR. El análisis
+   compartido de salidas comprueba fallthrough, incluido match parcial y ausencia de tail.
+6. `CowPath` conserva metadata de las proyecciones; la preparación de destinos del
+   emitter fija índices e identidad antes del RHS y resuelve slots después. El ownership
+   completo todavía no está representado como operaciones de una IR independiente.
+
+ADR-017 fija estos contratos. Las secciones de modelo siguientes contienen notación de
+diseño; las clases ejecutables canónicas son `hir/HirNodes.py`.
 
 ---
 

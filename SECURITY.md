@@ -8,8 +8,9 @@ Only the latest minor release line receives security updates and backports.
 
 | Version | Supported          | Security Status |
 | ------- | ------------------ | --------------- |
-| 0.2.x   | :white_check_mark: | Active support (current stable) |
-| 0.1.x   | :x:                | End of Life (upgrade to v0.2.x) |
+| 0.3.0.dev1 | :white_check_mark: | Desarrollo experimental; sin perfil de producción aprobado |
+| 0.2.x | :x: | Sustituida por la línea de desarrollo 0.3 |
+| 0.1.x   | :x:                | Unsupported historical release |
 | < 0.1.0 | :x:                | Unsupported experimental releases |
 
 ## Reporting a Vulnerability

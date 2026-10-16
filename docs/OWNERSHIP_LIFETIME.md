@@ -197,10 +197,11 @@ value immediately. Collection initialization evaluates key then value per entry.
 Already-owned temporaries are reused. These snapshots can increase RC/CoW traffic;
 B02 must measure that cost before optimizing lifetimes.
 
-Assignments evaluate and protect the RHS before evaluating the target, following
-the interpreter contract. The RHS hold is registered before any target computation
-that can propagate; successful assignment moves it into the slot. W1 replays target
-emission after RHS evaluation rather than emitting target effects prematurely.
+Las asignaciones evalúan índices y receptores de clase antes del RHS, una sola vez.
+Después protegen el RHS y resuelven el slot mutable: una lista puede realocarse durante
+el RHS y no debe dejar un puntero guardado a un elemento. Los receptores de clase se
+retienen antes del RHS y conservan identidad. El resultado es el valor asignado, también
+en rutas compuestas. AST, HIR y W1 siguen este contrato; véase ADR-017.
 
 Return and propagation protect the escaping value before LIFO cleanup. Break and
 continue clean through the nearest loop; the for iterable belongs to its outer

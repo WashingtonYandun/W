@@ -224,6 +224,10 @@ class Interpreter:
         value = self._eval_expr_impl(expr, env)
         return WOk(value) if hasattr(expr, "force_result_wrap_id") else value
 
+    def eval_value(self, expr: Expr, env: Environment) -> WValue:
+        """Freeze an evaluated value before later expressions can mutate its owner."""
+        return self.eval_expr(expr, env).clone_value()
+
     def _eval_expr_impl(self, expr: Expr, env: Environment) -> WValue:
         if isinstance(expr, LambdaExpr):
             original = self.global_env.lookup(expr.function_name)
@@ -291,8 +295,8 @@ class Interpreter:
                     raise WRuntimeError("Expected bool operand for 'or'", line=expr.line, col=expr.col, file=self.file)
                 return WBool(rhs.value)
 
-            lhs = self.eval_expr(expr.left, env)
-            rhs = self.eval_expr(expr.right, env)
+            lhs = self.eval_value(expr.left, env)
+            rhs = self.eval_value(expr.right, env)
 
             if expr.op == "+":
                 if isinstance(lhs, WInt) and isinstance(rhs, WInt):
@@ -378,7 +382,11 @@ class Interpreter:
             end_val = self.eval_expr(expr.end, env)
             if not isinstance(start_val, WInt) or not isinstance(end_val, WInt):
                 raise WRuntimeError("Range bounds must be integers", line=expr.line, col=expr.col, file=self.file)
+            if expr.inclusive and end_val.value == 9223372036854775807:
+                raise WRuntimeError('Range bound overflow at INT64_MAX', file=self.file, line=expr.line, col=expr.col)
             stop = end_val.value + 1 if expr.inclusive else end_val.value
+            if max(0, stop - start_val.value) > 100000000:
+                raise WRuntimeError('Range length exceeds maximum list capacity', file=self.file, line=expr.line, col=expr.col)
             return WList(elements=[WInt(i) for i in range(start_val.value, stop)])
 
         if isinstance(expr, PostfixTryExpr):
@@ -438,12 +446,12 @@ class Interpreter:
             return env.lookup("super")
 
         if isinstance(expr, NewExpr):
-            return self.instantiate_class(expr.class_name, [self.eval_expr(a, env) for a in expr.args], env, expr.line, expr.col)
+            return self.instantiate_class(expr.class_name, [self.eval_value(a, env) for a in expr.args], env, expr.line, expr.col)
 
         if isinstance(expr, AssignmentExpr):
             target = expr.target
             prepared, indices = self.prepare_assignment(target, env)
-            val = self.eval_expr(expr.value, env)
+            val = self.eval_value(expr.value, env)
             target_env = Environment(parent=env)
             for name, value in indices.items():
                 target_env.declare(name, value)
@@ -502,8 +510,8 @@ class Interpreter:
             raise WRuntimeError(f"Cannot access property '{expr.property}' on '{obj}'", line=expr.line, col=expr.col, file=self.file)
 
         if isinstance(expr, IndexExpr):
-            obj = self.eval_expr(expr.object, env)
-            idx = self.eval_expr(expr.index, env)
+            obj = self.eval_value(expr.object, env)
+            idx = self.eval_value(expr.index, env)
 
             if isinstance(obj, WList):
                 if not isinstance(idx, WInt):
@@ -532,8 +540,21 @@ class Interpreter:
             raise WRuntimeError(f"Cannot index type '{type(obj).__name__}'", line=expr.line, col=expr.col, file=self.file)
 
         if isinstance(expr, CallExpr):
-            callee = self.eval_expr(expr.callee, env)
-            args = [self.eval_expr(a, env) for a in expr.args]
+            from checker.WType import ListType
+            mutable_collection = (isinstance(expr.callee, MemberExpr)
+                                  and isinstance(getattr(expr.callee.object, 'inferred_type', None), ListType)
+                                  and expr.callee.property in ('append', 'pop', 'clear'))
+            if mutable_collection:
+                prepared, held = self.prepare_assignment(expr.callee.object, env)
+                target_env = Environment(parent=env)
+                for name, value in held.items():
+                    target_env.declare(name, value)
+                args = [self.eval_value(a, env) for a in expr.args]
+                receiver = self.eval_mutable_lvalue(prepared, target_env)
+                callee = WBoundMethod(receiver, expr.callee.property)
+            else:
+                callee = self.eval_expr(expr.callee, env)
+                args = [self.eval_value(a, env) for a in expr.args]
 
             if isinstance(callee, WEnumValue):
                 return WEnumValue(callee.enum_name, callee.variant, args)
@@ -551,23 +572,26 @@ class Interpreter:
         if isinstance(expr, StructInitExpr):
             field_dict = {}
             for f in expr.fields:
-                field_dict[f.name] = self.eval_expr(f.value, env)
-            return WStructInstance(expr.struct_name, fields=field_dict)
+                field_dict[f.name] = self.eval_value(f.value, env)
+            definition = getattr(expr, "inferred_type", None)
+            field_order = getattr(definition, "fields", field_dict)
+            ordered = {name: field_dict[name] for name in field_order}
+            return WStructInstance(expr.struct_name, fields=ordered)
 
         if isinstance(expr, ListExpr):
-            return WList(elements=[self.eval_expr(e, env) for e in expr.elements])
+            return WList(elements=[self.eval_value(e, env) for e in expr.elements])
 
         if isinstance(expr, DictExpr):
             pairs = {}
             for entry in expr.entries:
-                k = self.eval_expr(entry.key, env)
-                v = self.eval_expr(entry.value, env)
+                k = self.eval_value(entry.key, env)
+                v = self.eval_value(entry.value, env)
                 key_raw = k
                 pairs[key_raw] = v
             return WDict(pairs=pairs)
 
         if isinstance(expr, TupleExpr):
-            return WTuple(elements=[self.eval_expr(e, env) for e in expr.elements])
+            return WTuple(elements=[self.eval_value(e, env) for e in expr.elements])
 
         if isinstance(expr, IfExpr):
             cond_val = self.eval_expr(expr.condition, env)
