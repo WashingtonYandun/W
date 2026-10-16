@@ -7,7 +7,7 @@ import tempfile
 from parser.Parser import Parser
 from checker.TypeChecker import TypeChecker
 from codegen.CCodeGen import CCodeGen
-from tests.engine_harness import unsupported_reason
+from tests.engine_harness import EngineResult, compare, diagnostic, unsupported_reason
 
 
 def sha256_file(path: str) -> str:
@@ -118,8 +118,13 @@ def run_bootstrap_test() -> bool:
                 print(f"  [FAIL W1 CC] {base}.c failed: {r_cc.stderr}")
                 return False
             r_run = subprocess.run([out_bin], timeout=30, capture_output=True, text=True, cwd=repo_root)
-            if r_run.returncode != 0 or r_run.stdout != expected:
-                print(f"  [FAIL W1 RUN] {base}.w mismatch: got {r_run.stdout!r}, expected {expected!r}")
+            result = EngineResult(
+                'w1', stdout=r_run.stdout, stderr=r_run.stderr, exit_code=r_run.returncode,
+                runtime_ok=r_run.returncode == 0, diag_code=diagnostic(r_run.stderr),
+            )
+            ok, detail = compare([result], expected)
+            if not ok:
+                print(f"  [FAIL W1 RUN] {base}.w mismatch: {detail}")
                 return False
             w1_passed += 1
 
