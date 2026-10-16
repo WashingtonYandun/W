@@ -130,6 +130,14 @@ fn parse_for_stmt() -> unit {
 fn parse_struct_decl() -> unit {
     expect_kind("STRUCT")
     expect_kind("IDENT")
+    if match_kind("LBRACKET") {
+        while not check_kind("RBRACKET") and not is_eof() {
+            expect_kind("IDENT")
+            if match_kind("COLON") { parse_type_ann() }
+            if not match_kind("COMMA") { break }
+        }
+        expect_kind("RBRACKET")
+    }
     expect_kind("LBRACE")
     while not check_kind("RBRACE") and not is_eof() {
         expect_kind("IDENT")
@@ -147,9 +155,33 @@ fn parse_enum_decl() -> unit {
     expect_kind("ENUM")
     let name_tok = expect_kind("IDENT")
     g_enums.append(name_tok.val)
+    if match_kind("LBRACKET") {
+        while not check_kind("RBRACKET") and not is_eof() {
+            expect_kind("IDENT")
+            if match_kind("COLON") { expect_kind("IDENT") }
+            if not match_kind("COMMA") { break }
+        }
+        expect_kind("RBRACKET")
+    }
     expect_kind("LBRACE")
     while not check_kind("RBRACE") and not is_eof() {
-        expect_kind("IDENT")
+        let variant = expect_kind("IDENT")
+        let mut arity = 0
+        if match_kind("LPAREN") {
+            if not check_kind("RPAREN") {
+                parse_type_ann()
+                arity = 1
+                while match_kind("COMMA") {
+                    if check_kind("RPAREN") { break }
+                    parse_type_ann()
+                    arity = arity + 1
+                }
+            }
+            expect_kind("RPAREN")
+        }
+        g_enum_variant_names.append(variant.val)
+        g_enum_variant_owners.append(name_tok.val)
+        g_enum_variant_arities.append(arity)
         match_kind("COMMA")
     }
     expect_kind("RBRACE")
@@ -459,6 +491,14 @@ fn parse_import_decl() -> unit {
 fn parse_fn_decl() -> unit {
     expect_kind("FN")
     let name_tok = expect_kind("IDENT")
+    if match_kind("LBRACKET") {
+        while not check_kind("RBRACKET") and not is_eof() {
+            expect_kind("IDENT")
+            if match_kind("COLON") { parse_type_ann() }
+            if not match_kind("COMMA") { break }
+        }
+        expect_kind("RBRACKET")
+    }
     expect_kind("LPAREN")
     let mut param_names: list[str] = []
     if not check_kind("RPAREN") {

@@ -3,6 +3,10 @@ let mut module_paths: list[str] = []
 let mut module_states: list[int] = []
 let mut module_public_names: list[list[str]] = []
 let mut module_all_names: list[list[str]] = []
+let mut module_import_owners: list[int] = []
+let mut module_import_aliases: list[str] = []
+let mut module_import_targets: list[int] = []
+let mut module_import_public: list[bool] = []
 let mut module_output: list[Token] = []
 
 fn module_normalize(path: str) -> str {
@@ -82,6 +86,8 @@ fn module_expand(src: str, path: str, entry: bool) -> int {
     while position < len(tokens) - 1 {
         let token = tokens[position]
         if token.kind == "IMPORT" {
+            let public_import = position > 0 and tokens[position - 1].kind == "PUB"
+            if public_import and len(body) > 0 and body[len(body) - 1].kind == "PUB" { body.pop() }
             let requested = tokens[position + 1].val
             let mut resolved = module_normalize(module_directory(canonical) + requested)
             if len(requested) >= 4 and slice(requested, 0, 4) == "std/" { resolved = "stdlib/" + slice(requested, 4, len(requested)) + ".w" }
@@ -97,6 +103,11 @@ fn module_expand(src: str, path: str, entry: bool) -> int {
             if module_contains(aliases, alias) or module_contains(names, alias) { report_error("W1002", token.line, token.col, "duplicate module alias") }
             aliases.append(alias)
             dependencies.append(dependency)
+            module_import_owners.append(index)
+            module_import_aliases.append(alias)
+            module_import_targets.append(dependency)
+            module_import_public.append(public_import)
+            if public_import { module_public_names[index].append(alias) }
         } else {
             body.append(token)
             position = position + 1
@@ -113,9 +124,20 @@ fn module_expand(src: str, path: str, entry: bool) -> int {
                 if token.val == aliases[i] and position + 2 < len(body) and body[position + 1].kind == "DOT" {
                     let member = body[position + 2]
                     let dependency = dependencies[i]
-                    if not module_contains(module_public_names[dependency], member.val) { report_error("W1001", member.line, member.col, "member is not exported: " + member.val) }
-                    module_output.append(Token { kind: "IDENT", val: module_name(dependency, member.val), line: token.line, col: token.col })
-                    position = position + 3
+                    let mut nested_target = -1
+                    for import_index in 0..len(module_import_owners) {
+                        if module_import_owners[import_index] == dependency and module_import_aliases[import_index] == member.val and module_import_public[import_index] { nested_target = module_import_targets[import_index] }
+                    }
+                    if nested_target >= 0 and position + 4 < len(body) and body[position + 3].kind == "DOT" {
+                        let nested_member = body[position + 4]
+                        if not module_contains(module_public_names[nested_target], nested_member.val) { report_error("W1001", nested_member.line, nested_member.col, "member is not exported: " + nested_member.val) }
+                        module_output.append(Token { kind: "IDENT", val: module_name(nested_target, nested_member.val), line: token.line, col: token.col })
+                        position = position + 5
+                    } else {
+                        if not module_contains(module_public_names[dependency], member.val) { report_error("W1001", member.line, member.col, "member is not exported: " + member.val) }
+                        module_output.append(Token { kind: "IDENT", val: module_name(dependency, member.val), line: token.line, col: token.col })
+                        position = position + 3
+                    }
                     consumed = true
                 }
             }
@@ -148,6 +170,12 @@ fn module_tokens(src: str, path: str) -> list[Token] {
     module_states = empty_states
     module_public_names = empty_groups
     module_all_names = empty_groups
+    let empty_ids: list[int] = []
+    let empty_public: list[bool] = []
+    module_import_owners = empty_ids
+    module_import_aliases = empty_names
+    module_import_targets = empty_ids
+    module_import_public = empty_public
     module_output = empty_tokens
     module_expand(src, path, true)
     module_output.append(Token { kind: "EOF", val: "", line: 1, col: 1 })

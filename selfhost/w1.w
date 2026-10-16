@@ -31,6 +31,11 @@ let mut g_temp_id: int = 0
 let mut g_fn_fallible: bool = false
 let mut g_ns: str = ""
 let mut g_enums: list[str] = []
+let mut g_enum_variant_names: list[str] = []
+let mut g_enum_variant_owners: list[str] = []
+let mut g_enum_variant_arities: list[int] = []
+let mut g_pattern_bind_lines: list[str] = []
+let mut g_pattern_bind_names: list[str] = []
 let mut g_modules: list[str] = []
 let mut g_classes: list[ClassMeta] = []
 let mut g_dispatch_names: list[str] = []
@@ -51,8 +56,9 @@ let mut g_borrowed_vars: list[str] = []
 
 # Standalone semantic parsing. Types are interned structures, never fixture names.
 struct SemType { kind: str, name: str, args: list[int] }
+struct SemGenericType { name: str, kind: str, params: list[str] }
 struct SemVar { name: str, type_id: int, mutable: bool, depth: int }
-struct SemFunction { name: str, params: list[str], type_id: int, body: int, end: int, owner: str, visible: bool }
+struct SemFunction { name: str, params: list[str], type_params: list[str], constraints: list[str], type_id: int, body: int, end: int, owner: str, visible: bool }
 struct SemField { owner: str, name: str, type_id: int, visible: bool }
 struct SemClass { name: str, parent: str, interfaces: list[str] }
 struct SemValue { type_id: int, root: str, writable: int, terminates: bool }
@@ -60,15 +66,23 @@ struct SemFlow { type_id: int, terminates: bool }
 let mut sem_tokens: list[Token] = []
 let mut sem_pos = 0
 let mut sem_types: list[SemType] = []
+let mut sem_generic_types: list[SemGenericType] = []
+let mut sem_type_params: list[str] = []
+let mut sem_active_constraints: list[str] = []
+let mut sem_unify_names: list[str] = []
+let mut sem_unify_types: list[int] = []
 let mut sem_variables: list[SemVar] = []
 let mut sem_functions: list[SemFunction] = []
 let mut sem_fields: list[SemField] = []
 let mut sem_classes: list[SemClass] = []
 let mut sem_variants: list[str] = []
 let mut sem_variant_types: list[int] = []
+let mut sem_variant_payloads: list[list[int]] = []
 let mut sem_depth = 0
 let mut sem_return = 0
 let mut sem_owner = ""
+let mut sem_current_function = ""
+let mut sem_layout_seen: list[str] = []
 let mut sem_loop = 0
 let mut sem_int = 0
 let mut sem_float = 0
@@ -94,6 +108,7 @@ let mut sem_indirect_positions: list[int] = []
 let mut sem_class_projection_positions: list[int] = []
 
 let mut sem_collection_call_positions: list[int] = []
+let mut sem_result_lift_positions: list[int] = []
 fn report_error(code: str, line: int, col: int, msg: str) -> unit {
     eprint("[" + code + "] " + g_in_path + ":" + str(line) + ":" + str(col) + " - " + msg)
     exit(1)
@@ -545,6 +560,10 @@ let mut module_paths: list[str] = []
 let mut module_states: list[int] = []
 let mut module_public_names: list[list[str]] = []
 let mut module_all_names: list[list[str]] = []
+let mut module_import_owners: list[int] = []
+let mut module_import_aliases: list[str] = []
+let mut module_import_targets: list[int] = []
+let mut module_import_public: list[bool] = []
 let mut module_output: list[Token] = []
 
 fn module_normalize(path: str) -> str {
@@ -624,6 +643,8 @@ fn module_expand(src: str, path: str, entry: bool) -> int {
     while position < len(tokens) - 1 {
         let token = tokens[position]
         if token.kind == "IMPORT" {
+            let public_import = position > 0 and tokens[position - 1].kind == "PUB"
+            if public_import and len(body) > 0 and body[len(body) - 1].kind == "PUB" { body.pop() }
             let requested = tokens[position + 1].val
             let mut resolved = module_normalize(module_directory(canonical) + requested)
             if len(requested) >= 4 and slice(requested, 0, 4) == "std/" { resolved = "stdlib/" + slice(requested, 4, len(requested)) + ".w" }
@@ -639,6 +660,11 @@ fn module_expand(src: str, path: str, entry: bool) -> int {
             if module_contains(aliases, alias) or module_contains(names, alias) { report_error("W1002", token.line, token.col, "duplicate module alias") }
             aliases.append(alias)
             dependencies.append(dependency)
+            module_import_owners.append(index)
+            module_import_aliases.append(alias)
+            module_import_targets.append(dependency)
+            module_import_public.append(public_import)
+            if public_import { module_public_names[index].append(alias) }
         } else {
             body.append(token)
             position = position + 1
@@ -655,9 +681,20 @@ fn module_expand(src: str, path: str, entry: bool) -> int {
                 if token.val == aliases[i] and position + 2 < len(body) and body[position + 1].kind == "DOT" {
                     let member = body[position + 2]
                     let dependency = dependencies[i]
-                    if not module_contains(module_public_names[dependency], member.val) { report_error("W1001", member.line, member.col, "member is not exported: " + member.val) }
-                    module_output.append(Token { kind: "IDENT", val: module_name(dependency, member.val), line: token.line, col: token.col })
-                    position = position + 3
+                    let mut nested_target = -1
+                    for import_index in 0..len(module_import_owners) {
+                        if module_import_owners[import_index] == dependency and module_import_aliases[import_index] == member.val and module_import_public[import_index] { nested_target = module_import_targets[import_index] }
+                    }
+                    if nested_target >= 0 and position + 4 < len(body) and body[position + 3].kind == "DOT" {
+                        let nested_member = body[position + 4]
+                        if not module_contains(module_public_names[nested_target], nested_member.val) { report_error("W1001", nested_member.line, nested_member.col, "member is not exported: " + nested_member.val) }
+                        module_output.append(Token { kind: "IDENT", val: module_name(nested_target, nested_member.val), line: token.line, col: token.col })
+                        position = position + 5
+                    } else {
+                        if not module_contains(module_public_names[dependency], member.val) { report_error("W1001", member.line, member.col, "member is not exported: " + member.val) }
+                        module_output.append(Token { kind: "IDENT", val: module_name(dependency, member.val), line: token.line, col: token.col })
+                        position = position + 3
+                    }
                     consumed = true
                 }
             }
@@ -690,6 +727,12 @@ fn module_tokens(src: str, path: str) -> list[Token] {
     module_states = empty_states
     module_public_names = empty_groups
     module_all_names = empty_groups
+    let empty_ids: list[int] = []
+    let empty_public: list[bool] = []
+    module_import_owners = empty_ids
+    module_import_aliases = empty_names
+    module_import_targets = empty_ids
+    module_import_public = empty_public
     module_output = empty_tokens
     module_expand(src, path, true)
     module_output.append(Token { kind: "EOF", val: "", line: 1, col: 1 })
@@ -905,6 +948,32 @@ fn emit_function_value(name: str) -> ExprRes {
     }
     return bind_call("w_function_new(" + adapter + ", w_unit())")
 }
+
+fn emit_struct_constructor(name: str, values: list[str]) -> ExprRes {
+    let mut keys: list[str] = []
+    let mut field_count = 0
+    for field in sem_fields {
+        if field.owner == name {
+            keys.append("\"" + field.name + "\"")
+            field_count = field_count + 1
+        }
+    }
+    if field_count != len(values) { report_error("W2005", at_tok().line, at_tok().col, "struct constructor arity: " + name) }
+    if field_count == 0 { return bind_call("w_make_struct(\"" + name + "\", 0, NULL, NULL)") }
+    let keys_var = new_aux("_keys")
+    let values_var = new_aux("_values")
+    let mut joined_keys = ""
+    let mut joined_values = ""
+    for i in 0..field_count {
+        if i > 0 { joined_keys = joined_keys + ", " joined_values = joined_values + ", " }
+        joined_keys = joined_keys + keys[i]
+        joined_values = joined_values + values[i]
+    }
+    let count = str(field_count)
+    emit_line("const char* " + keys_var + "[" + count + "] = { " + joined_keys + " };")
+    emit_line("WVal " + values_var + "[" + count + "] = { " + joined_values + " };")
+    return bind_call("w_make_struct(\"" + name + "\", " + count + ", " + keys_var + ", " + values_var + ")")
+}
 fn is_enum_name(name: str) -> bool {
     for e in g_enums {
         if e == name {
@@ -972,7 +1041,9 @@ fn parse_type_ann() -> bool {
         is_fallible = parse_type_ann()
         expect_kind("RPAREN")
     } else {
+        let type_token = at_tok()
         advance_tok()
+        if type_token.kind == "IDENT" and type_token.val == "Result" { is_fallible = true }
     }
     if match_kind("LBRACKET") {
         while not check_kind("RBRACKET") and not is_eof() {
@@ -1193,6 +1264,42 @@ fn projection_is_mutated() -> bool {
 
 
 fn emit_call(callee: ExprRes, args_c: list[str], collection: bool) -> ExprRes {
+    if len(callee.val) >= 6 and slice(callee.val, 0, 6) == "enum::" {
+        let marker = slice(callee.val, 6, len(callee.val))
+        let mut separator = -1
+        for i in 0..len(marker) - 1 { if slice(marker, i, i + 2) == "::" { separator = i } }
+        if separator < 0 { report_error("W9999", at_tok().line, at_tok().col, "invalid enum constructor marker") }
+        let owner = slice(marker, 0, separator)
+        let variant = slice(marker, separator + 2, len(marker))
+        if owner == "Option" and variant == "Some" {
+            if len(args_c) != 1 { report_error("W2005", at_tok().line, at_tok().col, "Option.Some arity") }
+            return bind_call("w_enum_payload(\"Option\", \"Some\", " + own_expr(args_c[0]) + ")")
+        }
+        if owner == "Result" and variant == "Ok" {
+            if len(args_c) != 1 { report_error("W2005", at_tok().line, at_tok().col, "Result.Ok arity") }
+            return bind_call("w_ok(" + own_expr(args_c[0]) + ")")
+        }
+        if owner == "Result" and variant == "Err" {
+            if len(args_c) != 1 { report_error("W2005", at_tok().line, at_tok().col, "Result.Err arity") }
+            return bind_call("w_err(" + own_expr(args_c[0]) + ")")
+        }
+        let mut arity = -1
+        for i in 0..len(g_enum_variant_names) {
+            if g_enum_variant_names[i] == variant and g_enum_variant_owners[i] == owner { arity = g_enum_variant_arities[i] }
+        }
+        if arity != len(args_c) { report_error("W2005", at_tok().line, at_tok().col, "enum constructor arity: " + owner + "." + variant) }
+        if arity == 0 { return bind_call("w_enum(\"" + owner + "\", \"" + variant + "\")") }
+        if arity == 1 { return bind_call("w_enum_payload(\"" + owner + "\", \"" + variant + "\", " + own_expr(args_c[0]) + ")") }
+        let payload_values = new_aux("_enum_values")
+        let mut values = ""
+        for i in 0..len(args_c) {
+            if i > 0 { values = values + ", " }
+            values = values + args_c[i]
+        }
+        emit_line("WVal " + payload_values + "[" + str(len(args_c)) + "] = { " + values + " };")
+        let payload = "w_make_tuple(" + str(len(args_c)) + ", " + payload_values + ")"
+        return bind_call("w_enum_payload(\"" + owner + "\", \"" + variant + "\", " + payload + ")")
+    }
     if is_bound_variable(callee.val) or (callee.lref == "" and not (len(callee.val) >= 2 and slice(callee.val, 0, 2) == "v_")) {
         return emit_indirect_call(callee.val, args_c)
     }
@@ -1371,6 +1478,8 @@ fn emit_call(callee: ExprRes, args_c: list[str], collection: bool) -> ExprRes {
         if find_class_meta_idx(fn_name) != -1 {
             return bind_call("w_new_" + fn_name + "(" + joined + ")")
         }
+        let generic_type = sem_generic_type(fn_name)
+        if generic_type >= 0 and sem_generic_types[generic_type].kind == "struct" { return emit_struct_constructor(fn_name, args_c) }
         return bind_call(c_fn_name(fn_name) + "(" + joined + ")")
     }
     return ExprRes { val: "w_unit()", lref: "" }
@@ -1519,109 +1628,108 @@ fn parse_match_expr() -> ExprRes {
     return ExprRes { val: res, lref: "" }
 }
 
-fn parse_match_arms(subj_tmp: str, res: str) -> unit {
-    let mut cond_c = "true"
-    let mut bind_lines: list[str] = []
-    let mut bind_names: list[str] = []
-    if match_kind("ELSE") {
-        cond_c = "true"
-    } elif check_kind("IDENT") {
-        let id_tok = advance_tok()
-        if match_kind("DOT") {
-            let var_tok = expect_kind("IDENT")
-            cond_c = "w_eq(" + subj_tmp + ", w_enum(\"" + id_tok.val + "\", \"" + var_tok.val + "\"))"
-        } elif match_kind("LPAREN") {
-            let payload_name = expect_kind("IDENT").val
+fn parse_pattern_condition(subject: str) -> str {
+    if match_kind("ELSE") { return "true" }
+    if match_kind("NONE") { return "w_is_none(" + subject + ")" }
+    if check_kind("INT") or check_kind("FLOAT") or check_kind("STR") or check_kind("TRUE") or check_kind("FALSE") {
+        let literal = parse_prefix_expr(false)
+        return "w_eq(" + subject + ", " + literal.val + ")"
+    }
+    let name = expect_kind("IDENT").val
+    if name == "_" { return "true" }
+    let mut owner = ""
+    let mut variant = name
+    if match_kind("DOT") {
+        owner = name
+        variant = expect_kind("IDENT").val
+    }
+    let mut enum_owner = owner
+    let mut arity = -1
+    if owner == "Option" and variant == "None" { return "w_is_none(" + subject + ")" }
+    if (owner == "Option" or owner == "") and variant == "Some" { arity = 1 enum_owner = "Option" }
+    if (owner == "Result" or owner == "") and (variant == "Ok" or variant == "Err") { arity = 1 enum_owner = "Result" }
+    if arity < 0 {
+        for i in 0..len(g_enum_variant_names) {
+            if g_enum_variant_names[i] == variant and (owner == "" or g_enum_variant_owners[i] == owner) {
+                arity = g_enum_variant_arities[i]
+                enum_owner = g_enum_variant_owners[i]
+            }
+        }
+    }
+    if arity >= 0 {
+        let mut condition = "true"
+        if enum_owner == "Option" and variant == "Some" { condition = "!w_is_none(" + subject + ")" }
+        elif enum_owner == "Result" and variant == "Ok" { condition = "(" + subject + ").tag == W_OK" }
+        elif enum_owner == "Result" and variant == "Err" { condition = "(" + subject + ").tag == W_ERR" }
+        else { condition = "w_is_enum_variant(" + subject + ", \"" + enum_owner + "\", \"" + variant + "\")" }
+        if match_kind("LPAREN") {
+            let mut index = 0
+            if not check_kind("RPAREN") {
+                let mut payload = "w_peek_enum_payload(" + subject + ")"
+                if enum_owner == "Option" { payload = "w_peek_optional(" + subject + ")" }
+                elif enum_owner == "Result" and variant == "Ok" { payload = "w_peek_ok(" + subject + ")" }
+                elif enum_owner == "Result" and variant == "Err" { payload = "w_peek_err(" + subject + ")" }
+                if arity > 1 { payload = "(" + payload + ").as.tuple->items[0]" }
+                let child = parse_pattern_condition(payload)
+                condition = "(" + condition + ") && (" + child + ")"
+                index = 1
+                while match_kind("COMMA") {
+                    if check_kind("RPAREN") { break }
+                    if index >= arity { report_error("W2001", at_tok().line, at_tok().col, "too many enum pattern elements") }
+                    let mut next_payload = "w_peek_enum_payload(" + subject + ")"
+                    if enum_owner == "Option" { next_payload = "w_peek_optional(" + subject + ")" }
+                    elif enum_owner == "Result" and variant == "Ok" { next_payload = "w_peek_ok(" + subject + ")" }
+                    elif enum_owner == "Result" and variant == "Err" { next_payload = "w_peek_err(" + subject + ")" }
+                    next_payload = "(" + next_payload + ").as.tuple->items[" + str(index) + "]"
+                    let next_condition = parse_pattern_condition(next_payload)
+                    condition = "(" + condition + ") && (" + next_condition + ")"
+                    index = index + 1
+                }
+            }
             expect_kind("RPAREN")
-            if id_tok.val == "Some" {
-                cond_c = "!w_is_none(" + subj_tmp + ")"
-                if payload_name != "_" {
-                    let mut binding = "WVal v_" + payload_name + " = w_clone(w_peek_optional("
-                    binding = binding + subj_tmp + "));"
-                    bind_lines.append(binding)
-                    bind_names.append("v_" + payload_name)
-                }
-            } elif id_tok.val == "Ok" {
-                cond_c = "(" + subj_tmp + ").tag == W_OK"
-                if payload_name != "_" {
-                    let mut binding = "WVal v_" + payload_name + " = w_clone(w_peek_ok("
-                    binding = binding + subj_tmp + "));"
-                    bind_lines.append(binding)
-                    bind_names.append("v_" + payload_name)
-                }
-            } elif id_tok.val == "Err" {
-                cond_c = "(" + subj_tmp + ").tag == W_ERR"
-                if payload_name != "_" {
-                    let mut binding = "WVal v_" + payload_name + " = w_clone(w_peek_err("
-                    binding = binding + subj_tmp + "));"
-                    bind_lines.append(binding)
-                    bind_names.append("v_" + payload_name)
-                }
-            } else {
-                report_error("W2013", at_tok().line, at_tok().col, "payload enum patterns are unsupported")
-            }
-        } elif check_kind("COMMA") {
-            let mut t_names: list[str] = [id_tok.val]
-            bind_names.append("v_" + id_tok.val)
-            while match_kind("COMMA") {
-                let nt = expect_kind("IDENT")
-                t_names.append(nt.val)
-                bind_names.append("v_" + nt.val)
-            }
-            cond_c = "((" + subj_tmp + ").tag == W_TUPLE && (" + subj_tmp + ").as.tuple->len == " + str(len(t_names)) + ")"
-            for ti in 0..len(t_names) {
-                bind_lines.append("WVal v_" + t_names[ti] + " = w_clone((" + subj_tmp + ").as.tuple->items[" + str(ti) + "]);")
-            }
-        } else {
-            cond_c = "true"
-            bind_lines.append("WVal v_" + id_tok.val + " = w_clone(" + subj_tmp + ");")
-            bind_names.append("v_" + id_tok.val)
+            if index != arity { report_error("W2001", at_tok().line, at_tok().col, "enum pattern arity") }
+        } elif arity != 0 {
+            report_error("W2005", at_tok().line, at_tok().col, "enum pattern requires payload")
         }
-    } else {
-        let lit_r = parse_prefix_expr(false)
-        cond_c = "w_eq(" + subj_tmp + ", " + lit_r.val + ")"
+        return condition
     }
-    expect_kind("FAT_ARROW")
-    emit_line("if (" + cond_c + ") {")
-    push_scope("block")
-    let saved = g_cur_stmts
-    let empty: list[str] = []
-    g_cur_stmts = empty
-    for bl in bind_lines {
-        emit_line(bl)
-    }
-    for bind_name in bind_names {
-        register_var(bind_name)
-    }
-    if check_kind("LBRACE") {
-        let arm_v = parse_block_expr()
-        emit_line("w_assign(&" + res + ", " + own_expr(arm_v) + ");")
-    } else {
-        let arm_v = parse_expr(0, true)
-        emit_line("w_assign(&" + res + ", " + own_expr(arm_v.val) + ");")
-    }
-    pop_scope()
-    let arm_lines = g_cur_stmts
-    g_cur_stmts = saved
-    for al in arm_lines {
-        emit_line("    " + al)
-    }
-    emit_line("}")
-    match_kind("COMMA")
-    if not check_kind("RBRACE") and not is_eof() {
-        emit_line("else {")
+    if owner != "" { return "w_is_enum_variant(" + subject + ", \"" + owner + "\", \"" + variant + "\")" }
+    g_pattern_bind_lines.append("WVal v_" + name + " = w_clone(" + subject + ");")
+    g_pattern_bind_names.append("v_" + name)
+    return "true"
+}
+
+fn parse_match_arms(subj_tmp: str, res: str) -> unit {
+    let matched = new_aux("_match_taken")
+    emit_line("bool " + matched + " = false;")
+    while not check_kind("RBRACE") and not is_eof() {
+        let empty_bindings: list[str] = []
+        g_pattern_bind_lines = empty_bindings
+        g_pattern_bind_names = empty_bindings
+        let condition = parse_pattern_condition(subj_tmp)
+        emit_line("if (!" + matched + " && (" + condition + ")) {")
         push_scope("block")
-        let saved_else = g_cur_stmts
-        let empty_else: list[str] = []
-        g_cur_stmts = empty_else
-        parse_match_arms(subj_tmp, res)
-        pop_scope()
-        let else_lines = g_cur_stmts
-        g_cur_stmts = saved_else
-        for el in else_lines {
-            emit_line("    " + el)
+        for binding in g_pattern_bind_lines { emit_line(binding) }
+        for binding_name in g_pattern_bind_names { register_var(binding_name) }
+        let has_guard = match_kind("IF")
+        if has_guard {
+            let guard = parse_expr(0, false)
+            emit_line("if ((" + guard.val + ").as.b) {")
+            push_scope("block")
         }
+        expect_kind("FAT_ARROW")
+        if check_kind("LBRACE") {
+            let arm_value = parse_block_expr()
+            emit_line("w_assign(&" + res + ", " + own_expr(arm_value) + ");")
+        } else {
+            let arm_value = parse_expr(0, true)
+            emit_line("w_assign(&" + res + ", " + own_expr(arm_value.val) + ");")
+        }
+        emit_line(matched + " = true;")
+        if has_guard { pop_scope() emit_line("}") }
+        pop_scope()
         emit_line("}")
+        match_kind("COMMA")
     }
 }
 
@@ -1679,6 +1787,23 @@ fn parse_prefix_expr(allow_struct: bool) -> ExprRes {
     }
     if match_kind("IDENT") {
         let name = tok.val
+        if name == "None" { return ExprRes { val: "w_none()", lref: "" } }
+        let function_index = sem_function(name)
+        if function_index >= 0 and len(sem_functions[function_index].type_params) > 0 and match_kind("LBRACKET") {
+            while not check_kind("RBRACKET") and not is_eof() {
+                parse_type_ann()
+                if not match_kind("COMMA") { break }
+            }
+            expect_kind("RBRACKET")
+        }
+        let generic_type = sem_generic_type(name)
+        if generic_type >= 0 and match_kind("LBRACKET") {
+            while not check_kind("RBRACKET") and not is_eof() {
+                parse_type_ann()
+                if not match_kind("COMMA") { break }
+            }
+            expect_kind("RBRACKET")
+        }
         if allow_struct and check_kind("LBRACE") {
             let p1 = peek_tok(1)
             let p2 = peek_tok(2)
@@ -1718,6 +1843,18 @@ fn parse_prefix_expr(allow_struct: bool) -> ExprRes {
         }
         if not check_kind("LPAREN") and not is_bound_variable("v_" + name) and sem_function(name) >= 0 {
             return emit_function_value(name)
+        }
+        if not is_bound_variable("v_" + name) {
+            let mut variant_owner = ""
+            let mut variant_arity = -1
+            for variant_index in 0..len(g_enum_variant_names) {
+                if g_enum_variant_names[variant_index] == name {
+                    variant_owner = g_enum_variant_owners[variant_index]
+                    variant_arity = g_enum_variant_arities[variant_index]
+                }
+            }
+            if variant_arity == 0 { return ExprRes { val: "w_enum(\"" + variant_owner + "\", \"" + name + "\")", lref: "" } }
+            if variant_arity > 0 { return ExprRes { val: "enum::" + variant_owner + "::" + name, lref: "" } }
         }
         return ExprRes { val: "v_" + name, lref: "&v_" + name }
     }
@@ -1906,8 +2043,17 @@ fn parse_expr(min_prec: int, allow_struct: bool) -> ExprRes {
                 }
                 if len(left.val) >= 2 and slice(left.val, 0, 2) == "v_" {
                     let raw_obj = slice(left.val, 2, len(left.val))
-                    if is_enum_name(raw_obj) {
-                        left = ExprRes { val: "w_enum(\"" + raw_obj + "\", \"" + prop + "\")", lref: "" }
+                    if is_enum_name(raw_obj) or raw_obj == "Option" or raw_obj == "Result" {
+                        if raw_obj == "Option" and prop == "None" { left = ExprRes { val: "w_none()", lref: "" } }
+                        elif (raw_obj == "Option" and prop == "Some") or (raw_obj == "Result" and (prop == "Ok" or prop == "Err")) { left = ExprRes { val: "enum::" + raw_obj + "::" + prop, lref: "" } }
+                        else {
+                            let mut variant_arity = 0
+                            for variant_index in 0..len(g_enum_variant_names) {
+                                if g_enum_variant_names[variant_index] == prop and g_enum_variant_owners[variant_index] == raw_obj { variant_arity = g_enum_variant_arities[variant_index] }
+                            }
+                            if variant_arity > 0 { left = ExprRes { val: "enum::" + raw_obj + "::" + prop, lref: "" } }
+                            else { left = ExprRes { val: "w_enum(\"" + raw_obj + "\", \"" + prop + "\")", lref: "" } }
+                        }
                     } else {
                         left = ExprRes { val: "w_member_get(" + left.val + ", \"" + prop + "\")", lref: "w_member_ref(" + clean_lref(left.lref) + ", \"" + prop + "\")::" + prop + "::" + clean_lref(left.lref) + "::" + left.val }
                     }
@@ -2103,6 +2249,9 @@ fn parse_expr(min_prec: int, allow_struct: bool) -> ExprRes {
             }
         }
     }
+    let mut needs_result_lift = false
+    for position in sem_result_lift_positions { if position == expression_start + 1 { needs_result_lift = true } }
+    if needs_result_lift { left = bind_call("w_ok(" + own_expr(left.val) + ")") }
     return left
 }
 
@@ -2307,6 +2456,14 @@ fn parse_for_stmt() -> unit {
 fn parse_struct_decl() -> unit {
     expect_kind("STRUCT")
     expect_kind("IDENT")
+    if match_kind("LBRACKET") {
+        while not check_kind("RBRACKET") and not is_eof() {
+            expect_kind("IDENT")
+            if match_kind("COLON") { parse_type_ann() }
+            if not match_kind("COMMA") { break }
+        }
+        expect_kind("RBRACKET")
+    }
     expect_kind("LBRACE")
     while not check_kind("RBRACE") and not is_eof() {
         expect_kind("IDENT")
@@ -2324,9 +2481,33 @@ fn parse_enum_decl() -> unit {
     expect_kind("ENUM")
     let name_tok = expect_kind("IDENT")
     g_enums.append(name_tok.val)
+    if match_kind("LBRACKET") {
+        while not check_kind("RBRACKET") and not is_eof() {
+            expect_kind("IDENT")
+            if match_kind("COLON") { expect_kind("IDENT") }
+            if not match_kind("COMMA") { break }
+        }
+        expect_kind("RBRACKET")
+    }
     expect_kind("LBRACE")
     while not check_kind("RBRACE") and not is_eof() {
-        expect_kind("IDENT")
+        let variant = expect_kind("IDENT")
+        let mut arity = 0
+        if match_kind("LPAREN") {
+            if not check_kind("RPAREN") {
+                parse_type_ann()
+                arity = 1
+                while match_kind("COMMA") {
+                    if check_kind("RPAREN") { break }
+                    parse_type_ann()
+                    arity = arity + 1
+                }
+            }
+            expect_kind("RPAREN")
+        }
+        g_enum_variant_names.append(variant.val)
+        g_enum_variant_owners.append(name_tok.val)
+        g_enum_variant_arities.append(arity)
         match_kind("COMMA")
     }
     expect_kind("RBRACE")
@@ -2636,6 +2817,14 @@ fn parse_import_decl() -> unit {
 fn parse_fn_decl() -> unit {
     expect_kind("FN")
     let name_tok = expect_kind("IDENT")
+    if match_kind("LBRACKET") {
+        while not check_kind("RBRACKET") and not is_eof() {
+            expect_kind("IDENT")
+            if match_kind("COLON") { parse_type_ann() }
+            if not match_kind("COMMA") { break }
+        }
+        expect_kind("RBRACKET")
+    }
     expect_kind("LPAREN")
     let mut param_names: list[str] = []
     if not check_kind("RPAREN") {
@@ -2774,6 +2963,11 @@ fn compile_source(src: str) -> str {
     let empty_sc: list[CleanupScope] = []
     g_scope_stack = empty_sc
     g_enums = empty_s
+    g_enum_variant_names = empty_s
+    g_enum_variant_owners = empty_s
+    g_enum_variant_arities = empty_i
+    g_pattern_bind_lines = empty_s
+    g_pattern_bind_names = empty_s
     g_modules = empty_s
     g_classes = empty_c
     g_dispatch_names = empty_s
@@ -2785,6 +2979,7 @@ fn compile_source(src: str) -> str {
     g_fn_defs = empty_s
     g_cur_stmts = empty_s
     let mut has_main_fn = false
+    let mut has_main_call = false
     let mut has_top_stmts = false
     push_scope("fn")
     while not is_eof() {
@@ -2822,6 +3017,7 @@ fn compile_source(src: str) -> str {
             let is_entry_call = check_kind("IDENT") and at_tok().val == "main" and peek_tok(1).kind == "LPAREN"
             let expr_r = parse_expr(0, true)
             if is_entry_call {
+                has_main_call = true
                 emit_line("WVal _t_main = " + expr_r.val + ";")
                 emit_line("if (_t_main.tag == W_ERR) { w_report_entrypoint_error(_t_main.as.box->val); w_release(_t_main); w_runtime_cleanup(); return 1; }")
                 emit_line("w_release(_t_main);")
@@ -2830,7 +3026,7 @@ fn compile_source(src: str) -> str {
             }
         }
     }
-    if not has_top_stmts and has_main_fn {
+    if has_main_fn and not has_main_call {
         emit_line("WVal _t_main = w_fn_main();")
         emit_line("if (_t_main.tag == W_ERR) { w_report_entrypoint_error(_t_main.as.box->val); w_release(_t_main); w_runtime_cleanup(); return 1; }")
         emit_line("w_release(_t_main);")
@@ -3014,6 +3210,15 @@ fn sem_named(name: str) -> int {
     sem_error("W1001", "unknown type: " + name)
     return sem_unit
 }
+fn sem_generic_type(name: str) -> int {
+    for i in 0..len(sem_generic_types) { if sem_generic_types[i].name == name { return i } }
+    return -1
+}
+fn sem_same_type_declaration(declaration: int, instance: int) -> bool {
+    let declared = sem_types[declaration]
+    let concrete = sem_types[instance]
+    return declared.kind == concrete.kind and declared.name == concrete.name
+}
 fn sem_function(name: str) -> int {
     for i in 0..len(sem_functions) { if sem_functions[i].name == name { return i } }
     return -1
@@ -3067,6 +3272,11 @@ fn sem_assignable(source: int, target: int) -> bool {
 fn sem_require(source: int, target: int, code: str) {
     if not sem_assignable(source, target) { sem_error(code, "incompatible types") }
 }
+fn sem_mark_result_lift(position: int, source: int, target: int) {
+    if target < 0 or sem_kind(target) != "result" or sem_kind(source) == "ok" or sem_kind(source) == "err" or source == target or not sem_assignable(source, target) { return }
+    for existing in sem_result_lift_positions { if existing == position { return } }
+    sem_result_lift_positions.append(position)
+}
 fn sem_type() -> int {
     let mut result = sem_unit
     if sem_match("FN") {
@@ -3085,7 +3295,12 @@ fn sem_type() -> int {
         sem_expect("RPAREN")
     } else {
         let name = sem_expect("IDENT").val
-        if name == "int" or name == "int32" or name == "int64" { result = sem_int }
+        let mut is_parameter = false
+        for parameter in sem_type_params { if parameter == name { is_parameter = true } }
+        if is_parameter {
+            let empty: list[int] = []
+            result = sem_intern("typeparam", name, empty)
+        } elif name == "int" or name == "int32" or name == "int64" { result = sem_int }
         elif name == "float" or name == "double" { result = sem_float }
         elif name == "bool" { result = sem_bool }
         elif name == "str" { result = sem_str }
@@ -3103,7 +3318,21 @@ fn sem_type() -> int {
             if (kind == "dict" or kind == "result") and len(args) != 2 { sem_error("W2001", "type arity") }
             if kind == "dict" and not sem_key(args[0]) { sem_error("W2010", "invalid dictionary key") }
             result = sem_intern(kind, "", args)
-        } else { result = sem_named(name) }
+        } else {
+            let base = sem_named(name)
+            let generic = sem_generic_type(name)
+            if sem_match("LBRACKET") {
+                if generic < 0 { sem_error("W2001", "type is not generic: " + name) }
+                let mut arguments: list[int] = [sem_type()]
+                while sem_match("COMMA") { arguments.append(sem_type()) }
+                sem_expect("RBRACKET")
+                if len(arguments) != len(sem_generic_types[generic].params) { sem_error("W2001", "generic type arity: " + name) }
+                result = sem_intern(sem_types[base].kind, name, arguments)
+            } else {
+                if generic >= 0 { sem_error("W2001", "generic type arguments required: " + name) }
+                result = base
+            }
+        }
     }
     if sem_match("QUESTION") { result = sem_wrap("optional", result) }
     if sem_match("BANG") { result = sem_intern("result", "", [result, sem_type()]) }
@@ -3151,7 +3380,22 @@ fn sem_skip_block() -> int {
 fn sem_collect_function(owner: str, visible: bool) {
     sem_expect("FN")
     let local = sem_expect("IDENT").val
-    if sem_is("LBRACKET") { sem_error("W2013", "W1 generic specialization is not implemented") }
+    let previous_type_params = sem_type_params
+    let mut type_params: list[str] = []
+    let mut constraints: list[str] = []
+    if sem_match("LBRACKET") {
+        while not sem_is("RBRACKET") {
+            let parameter = sem_expect("IDENT")
+            for previous in type_params { if previous == parameter.val { report_error("W2001", parameter.line, parameter.col, "duplicate generic type parameter") } }
+            type_params.append(parameter.val)
+            let mut constraint = ""
+            if sem_match("COLON") { constraint = sem_expect("IDENT").val }
+            constraints.append(constraint)
+            if not sem_match("COMMA") { break }
+        }
+        sem_expect("RBRACKET")
+    }
+    sem_type_params = type_params
     let name = owner + local
     if sem_function(name) >= 0 { sem_error("W1002", "duplicate function: " + name) }
     sem_expect("LPAREN")
@@ -3171,12 +3415,29 @@ fn sem_collect_function(owner: str, visible: bool) {
     let mut body = -1
     let mut end = sem_pos
     if sem_is("LBRACE") { body = sem_pos end = sem_skip_block() }
-    sem_functions.append(SemFunction { name: name, params: params, type_id: signature, body: body, end: end, owner: owner, visible: visible })
+    sem_type_params = previous_type_params
+    sem_functions.append(SemFunction { name: name, params: params, type_params: type_params, constraints: constraints, type_id: signature, body: body, end: end, owner: owner, visible: visible })
 }
 fn sem_collect_record(kind: str) {
     sem_take()
     let name = sem_expect("IDENT").val
-    if sem_is("LBRACKET") { sem_error("W2013", "W1 generic declarations are not implemented") }
+    let previous_type_params = sem_type_params
+    let mut type_params: list[str] = []
+    let generic = sem_generic_type(name)
+    if generic >= 0 { type_params = sem_generic_types[generic].params }
+    sem_type_params = type_params
+    if generic >= 0 {
+        sem_expect("LBRACKET")
+        let mut parameter_index = 0
+        while not sem_is("RBRACKET") {
+            let parameter = sem_expect("IDENT")
+            if parameter_index >= len(type_params) or type_params[parameter_index] != parameter.val { report_error("W0006", parameter.line, parameter.col, "generic parameter list changed during collection") }
+            if sem_match("COLON") { sem_expect("IDENT") }
+            parameter_index = parameter_index + 1
+            if not sem_match("COMMA") { break }
+        }
+        sem_expect("RBRACKET")
+    }
     let type_id = sem_named(name)
     let mut parent = ""
     let mut interfaces: list[str] = []
@@ -3193,9 +3454,20 @@ fn sem_collect_record(kind: str) {
         if sem_is("FN") { sem_collect_function(name + ".", visible) }
         elif kind == "enum" {
             let variant = sem_expect("IDENT").val
-            if sem_is("LPAREN") { sem_error("W2013", "W1 enum payload layout is not implemented") }
+            let mut payload_types: list[int] = []
+            if sem_match("LPAREN") {
+                if not sem_is("RPAREN") {
+                    payload_types.append(sem_type())
+                    while sem_match("COMMA") {
+                        if sem_is("RPAREN") { break }
+                        payload_types.append(sem_type())
+                    }
+                }
+                sem_expect("RPAREN")
+            }
             sem_variants.append(variant)
             sem_variant_types.append(type_id)
+            sem_variant_payloads.append(payload_types)
             sem_match("COMMA")
         } else {
             let field = sem_expect("IDENT").val
@@ -3206,6 +3478,7 @@ fn sem_collect_record(kind: str) {
         }
     }
     sem_expect("RBRACE")
+    sem_type_params = previous_type_params
 }
 let mut sem_expected = -1
 fn sem_builtin(name: str) -> bool {
@@ -3292,6 +3565,89 @@ fn sem_call_builtin(name: str, args: list[int]) -> int {
 fn sem_check_call(signature: int, args: list[int]) -> int {
     let type_ = sem_types[signature]
     if type_.kind == "builtin" { return sem_call_builtin(type_.name, args) }
+    if type_.kind == "enum_ctor" {
+        let mut separator = -1
+        for i in 0..len(type_.name) - 1 { if slice(type_.name, i, i + 1) == "." { separator = i } }
+        if separator < 0 { sem_error("W9999", "invalid enum constructor metadata") }
+        let owner = slice(type_.name, 0, separator)
+        let variant = slice(type_.name, separator + 1, len(type_.name))
+        if owner == "Option" and variant == "Some" {
+            if len(args) != 1 { sem_error("W2005", "Option.Some arity") }
+            return sem_wrap("optional", args[0])
+        }
+        if owner == "Result" and (variant == "Ok" or variant == "Err") {
+            if len(args) != 1 { sem_error("W2005", "Result constructor arity") }
+            if sem_expected >= 0 and sem_kind(sem_expected) == "result" {
+                let expected = sem_types[sem_expected]
+                if variant == "Ok" { sem_require(args[0], expected.args[0], "W2001") }
+                else { sem_require(args[0], expected.args[1], "W2001") }
+            }
+            if variant == "Ok" { return sem_wrap("ok", args[0]) }
+            return sem_wrap("err", args[0])
+        }
+        let mut target = type_.args[0]
+        let generic = sem_generic_type(owner)
+        let mut payload_types: list[int] = []
+        for i in 1..len(type_.args) { payload_types.append(type_.args[i]) }
+        if len(args) != len(payload_types) { sem_error("W2005", "enum constructor arity: " + owner + "." + variant) }
+        if generic >= 0 and len(sem_types[target].args) == 0 {
+            let empty_names: list[str] = []
+            let empty_types: list[int] = []
+            sem_unify_names = empty_names
+            sem_unify_types = empty_types
+            for i in 0..len(args) { if not sem_unify_type(payload_types[i], args[i]) { sem_error("W2001", "enum payload type mismatch") } }
+            let mut concrete: list[int] = []
+            for parameter in sem_generic_types[generic].params {
+                let mut found = -1
+                for i in 0..len(sem_unify_names) { if sem_unify_names[i] == parameter { found = sem_unify_types[i] } }
+                if found < 0 { sem_error("W2001", "cannot infer enum type argument: " + parameter) }
+                concrete.append(found)
+            }
+            target = sem_intern("enum", owner, concrete)
+        } elif generic >= 0 {
+            sem_unify_names = sem_generic_types[generic].params
+            sem_unify_types = sem_types[target].args
+            for i in 0..len(args) {
+                sem_require(args[i], sem_substitute_type(payload_types[i], sem_unify_names, sem_unify_types), "W2001")
+            }
+        } else {
+            for i in 0..len(args) { sem_require(args[i], payload_types[i], "W2001") }
+        }
+        return target
+    }
+    if type_.kind == "struct_ctor" {
+        let generic = sem_generic_type(type_.name)
+        let mut target = sem_named(type_.name)
+        let mut explicit = false
+        if len(type_.args) == 1 { target = type_.args[0] explicit = true }
+        let mut fields: list[int] = []
+        for i in 0..len(sem_fields) { if sem_fields[i].owner == type_.name { fields.append(i) } }
+        if len(args) != len(fields) { sem_error("W2005", "struct constructor arity: " + type_.name) }
+        let empty_names: list[str] = []
+        let empty_types: list[int] = []
+        sem_unify_names = empty_names
+        sem_unify_types = empty_types
+        if explicit and generic >= 0 {
+            sem_unify_names = sem_generic_types[generic].params
+            sem_unify_types = sem_types[target].args
+        }
+        for i in 0..len(args) {
+            let field_type = sem_fields[fields[i]].type_id
+            if generic >= 0 and not explicit { sem_unify_type(field_type, args[i]) }
+            sem_require(args[i], sem_substitute_type(field_type, sem_unify_names, sem_unify_types), "W2001")
+        }
+        if generic >= 0 and not explicit {
+            let mut concrete: list[int] = []
+            for parameter in sem_generic_types[generic].params {
+                let mut inferred = -1
+                for i in 0..len(sem_unify_names) { if sem_unify_names[i] == parameter { inferred = sem_unify_types[i] } }
+                if inferred < 0 { sem_error("W2001", "cannot infer generic struct type argument: " + parameter) }
+                concrete.append(inferred)
+            }
+            target = sem_intern(sem_generic_types[generic].kind, type_.name, concrete)
+        }
+        return target
+    }
     if type_.kind == "constructor" {
         let target = type_.args[0]
         let method = sem_method(sem_types[target].name, "init")
@@ -3301,8 +3657,50 @@ fn sem_check_call(signature: int, args: list[int]) -> int {
     }
     if type_.kind != "function" { sem_error("W2005", "value is not callable") }
     if len(type_.args) != len(args) + 1 { sem_error("W2005", "call arity") }
-    for i in 0..len(args) { sem_require(args[i], type_.args[i], "W2001") }
-    return type_.args[len(args)]
+    let empty_names: list[str] = []
+    let empty_types: list[int] = []
+    sem_unify_names = empty_names
+    sem_unify_types = empty_types
+    for i in 0..len(args) { sem_unify_type(type_.args[i], args[i]) }
+    for i in 0..len(args) {
+        let expected = sem_substitute_type(type_.args[i], sem_unify_names, sem_unify_types)
+        sem_require(args[i], expected, "W2001")
+    }
+    return sem_substitute_type(type_.args[len(args)], sem_unify_names, sem_unify_types)
+}
+fn sem_substitute_type(type_id: int, names: list[str], values: list[int]) -> int {
+    let type_ = sem_types[type_id]
+    if type_.kind == "typeparam" {
+        for i in 0..len(names) { if names[i] == type_.name { return values[i] } }
+        return type_id
+    }
+    if len(type_.args) == 0 { return type_id }
+    let mut replaced: list[int] = []
+    let mut changed = false
+    for arg in type_.args {
+        let next = sem_substitute_type(arg, names, values)
+        replaced.append(next)
+        if next != arg { changed = true }
+    }
+    if not changed { return type_id }
+    return sem_intern(type_.kind, type_.name, replaced)
+}
+fn sem_unify_type(pattern: int, actual: int) -> bool {
+    let expected = sem_types[pattern]
+    if expected.kind == "typeparam" {
+        for i in 0..len(sem_unify_names) {
+            if sem_unify_names[i] == expected.name { return sem_unify_types[i] == actual }
+        }
+        sem_unify_names.append(expected.name)
+        sem_unify_types.append(actual)
+        return true
+    }
+    let actual_type = sem_types[actual]
+    if expected.kind != actual_type.kind or expected.name != actual_type.name or len(expected.args) != len(actual_type.args) { return false }
+    for i in 0..len(expected.args) {
+        if not sem_unify_type(expected.args[i], actual_type.args[i]) { return false }
+    }
+    return true
 }
 fn sem_field(owner: str, name: str) -> int {
     let mut current = owner
@@ -3321,11 +3719,39 @@ fn sem_field(owner: str, name: str) -> int {
 }
 fn sem_member(receiver: SemValue, name: str) -> SemValue {
     let type_ = sem_types[receiver.type_id]
+    if type_.kind == "typeparam" {
+        let mut constraint = ""
+        for i in 0..len(sem_type_params) {
+            if sem_type_params[i] == type_.name and i < len(sem_active_constraints) { constraint = sem_active_constraints[i] }
+        }
+        if constraint != "" {
+            let method_index = sem_method(constraint, name)
+            if method_index >= 0 {
+                let method = sem_functions[method_index]
+                return SemValue { type_id: method.type_id, root: "#method", writable: -1, terminates: false }
+            }
+        }
+        sem_error("W3002", "unknown member on generic type parameter: " + name)
+    }
     if type_.kind == "enum" {
         for i in 0..len(sem_variants) {
-            if sem_variants[i] == name and sem_variant_types[i] == receiver.type_id { return sem_value(receiver.type_id) }
+            if sem_variants[i] == name and sem_types[sem_variant_types[i]].name == type_.name {
+                if len(sem_variant_payloads[i]) == 0 { return sem_value(receiver.type_id) }
+                let mut arguments: list[int] = [receiver.type_id]
+                for payload in sem_variant_payloads[i] { arguments.append(payload) }
+                return sem_value(sem_intern("enum_ctor", type_.name + "." + name, arguments))
+            }
         }
         sem_error("W1001", "unknown enum variant")
+    }
+    if type_.kind == "optional" and (name == "Some" or name == "None") {
+        if name == "None" { return sem_value(sem_none) }
+        return sem_value(sem_intern("enum_ctor", "Option.Some", [receiver.type_id, type_.args[0]]))
+    }
+    if type_.kind == "result" and (name == "Ok" or name == "Err") {
+        let mut payload = type_.args[0]
+        if name == "Err" { payload = type_.args[1] }
+        return sem_value(sem_intern("enum_ctor", "Result." + name, [receiver.type_id, payload]))
     }
     if type_.kind == "list" or type_.kind == "dict" {
         let mut args: list[int] = []
@@ -3358,7 +3784,12 @@ fn sem_member(receiver: SemValue, name: str) -> SemValue {
             root = ""
             if sem_initializing and receiver.root == "this" { root = "this:" + name }
         }
-        return SemValue { type_id: field.type_id, root: root, writable: field.type_id, terminates: false }
+        let mut field_type = field.type_id
+        let generic = sem_generic_type(type_.name)
+        if generic >= 0 and len(type_.args) == len(sem_generic_types[generic].params) {
+            field_type = sem_substitute_type(field_type, sem_generic_types[generic].params, type_.args)
+        }
+        return SemValue { type_id: field_type, root: root, writable: field_type, terminates: false }
     }
     let method_index = sem_method(type_.name, name)
     if method_index >= 0 {
@@ -3421,17 +3852,37 @@ fn sem_prefix(allow_struct: bool, statement: bool) -> SemValue {
     }
     if sem_match("LBRACE") {
         if sem_match("RBRACE") { return sem_value(sem_simple("empty")) }
+        let context = sem_expected
+        let mut expected_key = -1
+        let mut expected_value = -1
+        if context >= 0 and sem_kind(context) == "dict" {
+            expected_key = sem_types[context].args[0]
+            expected_value = sem_types[context].args[1]
+        }
+        sem_expected = expected_key
         let key = sem_expression(0, true).type_id
+        sem_expected = context
         if not sem_key(key) { sem_error("W2010", "invalid dictionary key") }
+        if expected_key >= 0 { sem_require(key, expected_key, "W2001") }
         sem_expect("COLON")
+        sem_expected = expected_value
         let value = sem_expression(0, true).type_id
+        sem_expected = context
+        if expected_value >= 0 { sem_require(value, expected_value, "W2001") }
         while sem_match("COMMA") {
             if sem_is("RBRACE") { break }
-            sem_require(sem_expression(0, true).type_id, key, "W2001")
+            sem_expected = expected_key
+            let next_key = sem_expression(0, true).type_id
+            sem_expected = context
+            sem_require(next_key, key, "W2001")
             sem_expect("COLON")
-            sem_require(sem_expression(0, true).type_id, value, "W2001")
+            sem_expected = expected_value
+            let next_value = sem_expression(0, true).type_id
+            sem_expected = context
+            sem_require(next_value, value, "W2001")
         }
         sem_expect("RBRACE")
+        if expected_key >= 0 { return sem_value(context) }
         return sem_value(sem_intern("dict", "", [key, value]))
     }
     if sem_is("IF") { return sem_if(statement) }
@@ -3451,6 +3902,16 @@ fn sem_prefix(allow_struct: bool, statement: bool) -> SemValue {
     sem_match("NEW")
     let name = sem_expect("IDENT").val
     if name == "None" { return sem_value(sem_none) }
+    if name == "Option" or name == "Result" {
+        sem_expect("DOT")
+        let variant = sem_expect("IDENT").val
+        if name == "Option" and variant == "None" { return sem_value(sem_none) }
+        if name == "Option" and variant == "Some" or name == "Result" and (variant == "Ok" or variant == "Err") {
+            let empty: list[int] = []
+            return sem_value(sem_intern("enum_ctor", name + "." + variant, empty))
+        }
+        sem_error("W1001", "unknown built-in enum variant: " + name + "." + variant)
+    }
     let variable = sem_lookup(name)
     if variable >= 0 {
         let value = sem_variables[variable]
@@ -3462,45 +3923,116 @@ fn sem_prefix(allow_struct: bool, statement: bool) -> SemValue {
         return sem_value(sem_intern("builtin", name, empty))
     }
     let function = sem_function(name)
-    if function >= 0 { return SemValue { type_id: sem_functions[function].type_id, root: "fn:" + name, writable: -1, terminates: false } }
-    for i in 0..len(sem_types) {
-        let type_ = sem_types[i]
-        if type_.name == name {
-            if type_.kind == "class" { return sem_value(sem_wrap("constructor", i)) }
-            if type_.kind == "struct" and allow_struct and sem_match("LBRACE") {
-                let mut initialized: list[str] = []
-                while not sem_is("RBRACE") {
-                    let field_name = sem_expect("IDENT").val
-                    let field = sem_field(name, field_name)
-                    if field < 0 { sem_error("W3002", "unknown struct field") }
-                    for previous in initialized { if previous == field_name { sem_error("W2007", "duplicate initializer") } }
-                    initialized.append(field_name)
-                    sem_expect("COLON")
-                    sem_require(sem_expression(0, true).type_id, sem_fields[field].type_id, "W2001")
-                    sem_match("COMMA")
-                }
-                sem_expect("RBRACE")
-                for field in sem_fields {
-                    if field.owner == name {
-                        let mut found = false
-                        for candidate in initialized { if candidate == field.name { found = true } }
-                        if not found { sem_error("W2007", "missing struct field") }
-                    }
+    if function >= 0 {
+        let signature = sem_functions[function]
+        let mut type_id = signature.type_id
+        if len(signature.type_params) > 0 and sem_match("LBRACKET") {
+            let mut arguments: list[int] = []
+            while not sem_is("RBRACKET") {
+                arguments.append(sem_type())
+                if not sem_match("COMMA") { break }
+            }
+            sem_expect("RBRACKET")
+            if len(arguments) != len(signature.type_params) { sem_error("W2001", "generic function type arity") }
+            let mut substitutions: list[int] = []
+            for parameter in signature.type_params {
+                let empty: list[int] = []
+                substitutions.append(sem_intern("typeparam", parameter, empty))
+            }
+            let target = sem_types[signature.type_id]
+            let mut specialized: list[int] = []
+            for part in target.args { specialized.append(sem_substitute_type(part, signature.type_params, arguments)) }
+            type_id = sem_intern("function", "", specialized)
+        }
+        return SemValue { type_id: type_id, root: "fn:" + name, writable: -1, terminates: false }
+    }
+    let generic_type = sem_generic_type(name)
+    let mut selected_type = -1
+    if generic_type >= 0 and sem_match("LBRACKET") {
+        let mut type_arguments: list[int] = []
+        while not sem_is("RBRACKET") {
+            type_arguments.append(sem_type())
+            if not sem_match("COMMA") { break }
+        }
+        sem_expect("RBRACKET")
+        if len(type_arguments) != len(sem_generic_types[generic_type].params) { sem_error("W2001", "generic type arity: " + name) }
+        selected_type = sem_intern(sem_generic_types[generic_type].kind, name, type_arguments)
+    } elif sem_expected >= 0 and generic_type >= 0 and sem_same_type_declaration(sem_named(name), sem_expected) {
+        selected_type = sem_expected
+    }
+    let mut named_type = selected_type
+    if named_type < 0 {
+        for i in 0..len(sem_types) {
+            if sem_types[i].name == name and (sem_types[i].kind == "class" or sem_types[i].kind == "struct" or sem_types[i].kind == "enum") {
+                if len(sem_types[i].args) == 0 { named_type = i }
+            }
+        }
+    }
+    if named_type < 0 {
+        let mut variant = -1
+        for i in 0..len(sem_variants) {
+            if sem_variants[i] == name {
+                if variant >= 0 { sem_error("W1001", "ambiguous enum variant") }
+                if len(sem_variant_payloads[i]) > 0 { sem_error("W2005", "enum variant requires a payload: " + name) }
+                variant = sem_variant_types[i]
+            }
+        }
+        if variant >= 0 { return sem_value(variant) }
+        sem_error("W1001", "unknown identifier: " + name)
+    }
+    if sem_kind(named_type) == "class" { return sem_value(sem_wrap("constructor", named_type)) }
+    if sem_kind(named_type) == "struct" {
+        if sem_is("LPAREN") {
+            let mut target_types: list[int] = []
+            if selected_type >= 0 { target_types.append(selected_type) }
+            return sem_value(sem_intern("struct_ctor", name, target_types))
+        }
+        if allow_struct and sem_match("LBRACE") {
+            let empty_names: list[str] = []
+            let empty_types: list[int] = []
+            sem_unify_names = empty_names
+            sem_unify_types = empty_types
+            if selected_type >= 0 and generic_type >= 0 {
+                sem_unify_names = sem_generic_types[generic_type].params
+                sem_unify_types = sem_types[selected_type].args
+            }
+            let mut initialized: list[str] = []
+            while not sem_is("RBRACE") {
+                let field_name = sem_expect("IDENT").val
+                let field = sem_field(name, field_name)
+                if field < 0 { sem_error("W3002", "unknown struct field") }
+                for previous in initialized { if previous == field_name { sem_error("W2007", "duplicate initializer") } }
+                initialized.append(field_name)
+                sem_expect("COLON")
+                let actual = sem_expression(0, true).type_id
+                if generic_type >= 0 and selected_type < 0 { sem_unify_type(sem_fields[field].type_id, actual) }
+                let expected = sem_substitute_type(sem_fields[field].type_id, sem_unify_names, sem_unify_types)
+                sem_require(actual, expected, "W2001")
+                sem_match("COMMA")
+            }
+            sem_expect("RBRACE")
+            for field in sem_fields {
+                if field.owner == name {
+                    let mut found = false
+                    for candidate in initialized { if candidate == field.name { found = true } }
+                    if not found { sem_error("W2007", "missing struct field") }
                 }
             }
-            return sem_value(i)
+            if generic_type >= 0 and selected_type < 0 {
+                let mut concrete_types: list[int] = []
+                for parameter in sem_generic_types[generic_type].params {
+                    let mut concrete = -1
+                    for i in 0..len(sem_unify_names) { if sem_unify_names[i] == parameter { concrete = sem_unify_types[i] } }
+                    if concrete < 0 { sem_error("W2001", "cannot infer generic struct type argument: " + parameter) }
+                    concrete_types.append(concrete)
+                }
+                named_type = sem_intern(sem_generic_types[generic_type].kind, name, concrete_types)
+            }
+            return sem_value(named_type)
         }
+        return sem_value(named_type)
     }
-    let mut variant = -1
-    for i in 0..len(sem_variants) {
-        if sem_variants[i] == name {
-            if variant >= 0 { sem_error("W1001", "ambiguous enum variant") }
-            variant = sem_variant_types[i]
-        }
-    }
-    if variant >= 0 { return sem_value(variant) }
-    sem_error("W1001", "unknown identifier: " + name)
-    return sem_value(sem_unit)
+    return sem_value(named_type)
 }
 fn sem_complete_constructor() {
     if sem_initializing {
@@ -3519,6 +4051,8 @@ fn sem_expression(minimum: int, allow_struct: bool) -> SemValue {
     let mut left = sem_prefix(allow_struct, statement)
     while true {
         let call_position = sem_pos + sem_token_offset
+        let call_line = sem_at().line
+        let call_col = sem_at().col
         if sem_match("LPAREN") {
             if left.root == "#collection" { sem_collection_call_positions.append(call_position) }
             if sem_kind(left.type_id) == "function" and left.root != "#method" and left.root != "#collection" and not (len(left.root) >= 3 and slice(left.root, 0, 3) == "fn:") { sem_indirect_positions.append(call_position) }
@@ -3528,13 +4062,28 @@ fn sem_expression(minimum: int, allow_struct: bool) -> SemValue {
             while not sem_is("RPAREN") {
                 sem_expected = -1
                 if signature.kind == "function" and len(args) + 1 < len(signature.args) { sem_expected = signature.args[len(args)] }
+                if signature.kind == "enum_ctor" and previous_expected >= 0 {
+                    let expected_type = sem_types[previous_expected]
+                    if signature.name == "Option.Some" and expected_type.kind == "optional" { sem_expected = expected_type.args[0] }
+                    elif signature.name == "Result.Ok" and expected_type.kind == "result" { sem_expected = expected_type.args[0] }
+                    elif signature.name == "Result.Err" and expected_type.kind == "result" { sem_expected = expected_type.args[1] }
+                }
+                let argument_start = sem_pos + sem_token_offset
+                let argument_expected = sem_expected
                 let argument = sem_expression(0, true)
+                sem_mark_result_lift(argument_start, argument.type_id, argument_expected)
                 if sem_initializing and argument.root == "this" { sem_complete_constructor() }
                 args.append(argument.type_id)
                 if not sem_match("COMMA") { break }
             }
             sem_expect("RPAREN")
             sem_expected = previous_expected
+            if len(left.root) >= 3 and slice(left.root, 0, 3) == "fn:" {
+                let function_index = sem_function(slice(left.root, 3, len(left.root)))
+                if function_index >= 0 and len(sem_functions[function_index].type_params) > 0 {
+                    sem_check_generic_constraints(function_index, args, call_line, call_col)
+                }
+            }
             left = sem_value(sem_check_call(left.type_id, args))
         } elif sem_match("DOT") {
             if sem_kind(left.type_id) == "class" { sem_class_projection_positions.append(call_position) }
@@ -3611,7 +4160,10 @@ fn sem_expression(minimum: int, allow_struct: bool) -> SemValue {
                 sem_require(right.type_id, sem_bool, "W2001")
                 left = sem_value(sem_bool)
             } elif operator == "EQ" or operator == "NEQ" {
-                if not sem_assignable(left.type_id, right.type_id) and not sem_assignable(right.type_id, left.type_id) { sem_error("W2001", "equality types") }
+                let left_kind = sem_kind(left.type_id)
+                let right_kind = sem_kind(right.type_id)
+                let result_pair = (left_kind == "ok" or left_kind == "err") and (right_kind == "ok" or right_kind == "err")
+                if not result_pair and not sem_assignable(left.type_id, right.type_id) and not sem_assignable(right.type_id, left.type_id) { sem_error("W2001", "equality types") }
                 left = sem_value(sem_bool)
             } else {
                 if left.type_id != right.type_id { sem_error("W2001", "binary operand types") }
@@ -3679,29 +4231,66 @@ fn sem_pattern(subject: int) -> str {
         sem_require(type_id, subject, "W2001")
         return "literal:" + token.val
     }
-    let name = sem_expect("IDENT").val
+    let mut owner = ""
+    let mut name = sem_expect("IDENT").val
     if name == "_" { return "*" }
-    if sem_match("DOT") {
-        let variant = sem_expect("IDENT").val
-        if name != sem_types[subject].name { sem_error("W2001", "pattern enum identity") }
-        let mut valid = false
-        for i in 0..len(sem_variants) { if sem_variants[i] == variant and sem_variant_types[i] == subject { valid = true } }
-        if not valid { sem_error("W1001", "unknown enum pattern") }
-        return variant
-    }
+    if sem_match("DOT") { owner = name name = sem_expect("IDENT").val }
+    let kind = sem_kind(subject)
     if sem_match("LPAREN") {
-        let kind = sem_kind(subject)
-        let mut payload = sem_unit
-        if name == "Some" and kind == "optional" { payload = sem_types[subject].args[0] }
-        elif name == "Ok" and kind == "result" { payload = sem_types[subject].args[0] }
-        elif name == "Err" and kind == "result" { payload = sem_types[subject].args[1] }
-        else { sem_error("W2001", "payload pattern") }
-        let binding = sem_expect("IDENT").val
-        if binding != "_" { sem_declare(binding, payload, false) }
+        let mut payload_types: list[int] = []
+        let mut valid = false
+        if (owner == "" or owner == "Option") and name == "Some" and kind == "optional" {
+            payload_types = [sem_types[subject].args[0]]
+            valid = true
+        } elif (owner == "" or owner == "Result") and name == "Ok" and kind == "result" {
+            payload_types = [sem_types[subject].args[0]]
+            valid = true
+        } elif (owner == "" or owner == "Result") and name == "Err" and kind == "result" {
+            payload_types = [sem_types[subject].args[1]]
+            valid = true
+        } elif kind == "enum" {
+            if owner != "" and owner != sem_types[subject].name { sem_error("W2001", "pattern enum identity") }
+            let generic = sem_generic_type(sem_types[subject].name)
+            for i in 0..len(sem_variants) {
+                if sem_variants[i] == name and sem_types[sem_variant_types[i]].name == sem_types[subject].name {
+                    payload_types = sem_variant_payloads[i]
+                    if generic >= 0 and len(sem_types[subject].args) == len(sem_generic_types[generic].params) {
+                        let mut concrete: list[int] = []
+                        for payload in payload_types { concrete.append(sem_substitute_type(payload, sem_generic_types[generic].params, sem_types[subject].args)) }
+                        payload_types = concrete
+                    }
+                    valid = true
+                }
+            }
+        }
+        if not valid { sem_error("W2001", "payload pattern") }
+        let mut count = 0
+        if not sem_is("RPAREN") {
+            if count >= len(payload_types) { sem_error("W2001", "too many enum pattern bindings") }
+            sem_pattern(payload_types[count])
+            count = count + 1
+            while sem_match("COMMA") {
+                if sem_is("RPAREN") { break }
+                if count >= len(payload_types) { sem_error("W2001", "too many enum pattern bindings") }
+                sem_pattern(payload_types[count])
+                count = count + 1
+            }
+        }
         sem_expect("RPAREN")
+        if count != len(payload_types) { sem_error("W2001", "enum pattern arity") }
         return name
     }
-    if name == "None" { return "None" }
+    if kind == "enum" {
+        if owner != "" and owner != sem_types[subject].name { sem_error("W2001", "pattern enum identity") }
+        let mut valid = false
+        for i in 0..len(sem_variants) { if sem_variants[i] == name and sem_types[sem_variant_types[i]].name == sem_types[subject].name and len(sem_variant_payloads[i]) == 0 { valid = true } }
+        if valid { return name }
+        if owner != "" { sem_error("W1001", "unknown enum pattern") }
+        sem_declare(name, subject, false)
+        return "*"
+    }
+    if name == "None" and (kind == "optional" or owner == "Option") { return "None" }
+    if owner != "" { sem_error("W2001", "qualified enum pattern required") }
     sem_declare(name, subject, false)
     return "*"
 }
@@ -3773,8 +4362,10 @@ fn sem_let() {
     sem_expect("ASSIGN")
     let previous = sem_expected
     sem_expected = annotation
+    let expression_start = sem_pos + sem_token_offset
     let value = sem_expression(0, true).type_id
     sem_expected = previous
+    sem_mark_result_lift(expression_start, value, annotation)
     if sem_kind(value) == "builtin" { sem_error("W2013", "builtin values require an explicit lambda adapter") }
     if annotation < 0 {
         if value == sem_none or sem_kind(value) == "empty" { sem_error("W2001", "initializer needs type context") }
@@ -3794,7 +4385,11 @@ fn sem_block(statement: bool) -> SemFlow {
             let previous = sem_expected
             sem_expected = sem_return
             let mut value = sem_unit
-            if not sem_is("RBRACE") and sem_at().line == sem_tokens[sem_pos - 1].line { value = sem_expression(0, true).type_id }
+            if not sem_is("RBRACE") and sem_at().line == sem_tokens[sem_pos - 1].line {
+                let expression_start = sem_pos + sem_token_offset
+                value = sem_expression(0, true).type_id
+                sem_mark_result_lift(expression_start, value, sem_return)
+            }
             sem_expected = previous
             sem_require(value, sem_return, "W2004")
             sem_complete_constructor()
@@ -3851,10 +4446,16 @@ fn sem_check_function(function: SemFunction) {
     let variables = sem_variables
     let owner = sem_owner
     let returned = sem_return
+    let current_function = sem_current_function
     let initial = sem_initializing
     let initialized = sem_initialized
     let depth = sem_depth
+    let previous_type_params = sem_type_params
+    let previous_constraints = sem_active_constraints
     sem_owner = function.owner
+    sem_current_function = function.name
+    sem_type_params = function.type_params
+    sem_active_constraints = function.constraints
     if len(sem_owner) > 0 { sem_owner = slice(sem_owner, 0, len(sem_owner) - 1) }
     sem_pos = function.body
     sem_depth = 1
@@ -3880,9 +4481,64 @@ fn sem_check_function(function: SemFunction) {
     sem_variables = variables
     sem_owner = owner
     sem_return = returned
+    sem_current_function = current_function
     sem_initializing = initial
     sem_initialized = initialized
     sem_depth = depth
+    sem_type_params = previous_type_params
+    sem_active_constraints = previous_constraints
+}
+fn sem_check_generic_constraints(function_index: int, args: list[int], line: int, col: int) {
+    let function = sem_functions[function_index]
+    let signature = sem_types[function.type_id]
+    let empty_names: list[str] = []
+    let empty_types: list[int] = []
+    sem_unify_names = empty_names
+    sem_unify_types = empty_types
+    for i in 0..len(args) { sem_unify_type(signature.args[i], args[i]) }
+    if function.name == sem_current_function {
+        for parameter in function.type_params {
+            for i in 0..len(sem_unify_names) {
+                if sem_unify_names[i] == parameter and sem_kind(sem_unify_types[i]) != "typeparam" and sem_contains_type_parameter(sem_unify_types[i], parameter) {
+                    report_error("W2011", line, col, "structural generic expansion cycle detected: " + function.name)
+                }
+            }
+        }
+    }
+    for i in 0..len(function.type_params) {
+        let constraint = function.constraints[i]
+        if constraint != "" {
+            let mut concrete = -1
+            for j in 0..len(sem_unify_names) { if sem_unify_names[j] == function.type_params[i] { concrete = sem_unify_types[j] } }
+            if concrete < 0 or not sem_assignable(concrete, sem_named(constraint)) { report_error("W2001", line, col, "generic constraint not satisfied: " + constraint) }
+        }
+    }
+}
+fn sem_contains_type_parameter(type_id: int, name: str) -> bool {
+    let type_ = sem_types[type_id]
+    if type_.kind == "typeparam" { return type_.name == name }
+    for argument in type_.args { if sem_contains_type_parameter(argument, name) { return true } }
+    return false
+}
+fn sem_struct_reaches(current: str, target: str) -> bool {
+    if current == target { return true }
+    for seen in sem_layout_seen { if seen == current { return false } }
+    sem_layout_seen.append(current)
+    for field in sem_fields {
+        if field.owner == current and sem_kind(field.type_id) == "struct" {
+            if sem_struct_reaches(sem_types[field.type_id].name, target) { return true }
+        }
+    }
+    return false
+}
+fn sem_validate_layout_cycles() {
+    for field in sem_fields {
+        let empty_seen: list[str] = []
+        sem_layout_seen = empty_seen
+        if sem_kind(field.type_id) == "struct" and sem_struct_reaches(sem_types[field.type_id].name, field.owner) {
+            sem_error("W2011", "recursive inline struct layout detected: " + field.owner + " -> " + sem_types[field.type_id].name)
+        }
+    }
 }
 fn sem_reset(tokens: list[Token]) {
     sem_tokens = tokens
@@ -3890,24 +4546,33 @@ fn sem_reset(tokens: list[Token]) {
     sem_token_offset = 0
     sem_depth = 0
     sem_owner = ""
+    sem_current_function = ""
     sem_loop = 0
     let empty_types: list[SemType] = []
     let empty_variables: list[SemVar] = []
     let empty_functions: list[SemFunction] = []
     let empty_fields: list[SemField] = []
     let empty_classes: list[SemClass] = []
+    let empty_generic_types: list[SemGenericType] = []
     let empty_names: list[str] = []
     let empty_ids: list[int] = []
     sem_types = empty_types
+    sem_type_params = empty_names
+    sem_active_constraints = empty_names
+    sem_layout_seen = empty_names
     sem_variables = empty_variables
     sem_functions = empty_functions
     sem_fields = empty_fields
     sem_classes = empty_classes
+    sem_generic_types = empty_generic_types
     sem_variants = empty_names
     sem_variant_types = empty_ids
+    let empty_payloads: list[list[int]] = []
+    sem_variant_payloads = empty_payloads
     sem_indirect_positions = empty_ids
     sem_class_projection_positions = empty_ids
     sem_collection_call_positions = empty_ids
+    sem_result_lift_positions = empty_ids
     let empty_lambdas: list[SemLambda] = []
     sem_lambdas = empty_lambdas
     sem_capture_names = empty_names
@@ -3938,6 +4603,25 @@ fn sem_reset(tokens: list[Token]) {
             if kind == "ENUM" { tag = "enum" }
             for type_ in sem_types { if type_.name == name { report_error("W1002", tokens[i + 1].line, tokens[i + 1].col, "duplicate type") } }
             sem_intern(tag, name, empty)
+            if tokens[i + 2].kind == "LBRACKET" {
+                let mut params: list[str] = []
+                let mut position = i + 3
+                while position < len(tokens) and tokens[position].kind != "RBRACKET" {
+                    let parameter = tokens[position]
+                    if parameter.kind != "IDENT" { report_error("W0006", parameter.line, parameter.col, "expected generic type parameter") }
+                    params.append(parameter.val)
+                    position = position + 1
+                    if position < len(tokens) and tokens[position].kind == "COLON" {
+                        position = position + 1
+                        if position >= len(tokens) or tokens[position].kind != "IDENT" { report_error("W0006", tokens[position - 1].line, tokens[position - 1].col, "expected generic constraint") }
+                        position = position + 1
+                    }
+                    if position < len(tokens) and tokens[position].kind == "COMMA" { position = position + 1 }
+                    elif position < len(tokens) and tokens[position].kind != "RBRACKET" { report_error("W0006", tokens[position].line, tokens[position].col, "expected ',' in generic parameters") }
+                }
+                if len(params) == 0 { report_error("W2001", tokens[i + 2].line, tokens[i + 2].col, "generic declaration requires a type parameter") }
+                sem_generic_types.append(SemGenericType { name: name, kind: tag, params: params })
+            }
         }
     }
 }
@@ -3969,6 +4653,7 @@ fn sem_validate(tokens: list[Token]) {
         else { sem_take() }
     }
     sem_validate_inheritance()
+    sem_validate_layout_cycles()
     sem_pos = 1
     while not sem_is("RBRACE") and not sem_is("EOF") {
         sem_match("PUB")

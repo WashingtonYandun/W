@@ -12,6 +12,11 @@ fn compile_source(src: str) -> str {
     let empty_sc: list[CleanupScope] = []
     g_scope_stack = empty_sc
     g_enums = empty_s
+    g_enum_variant_names = empty_s
+    g_enum_variant_owners = empty_s
+    g_enum_variant_arities = empty_i
+    g_pattern_bind_lines = empty_s
+    g_pattern_bind_names = empty_s
     g_modules = empty_s
     g_classes = empty_c
     g_dispatch_names = empty_s
@@ -23,6 +28,7 @@ fn compile_source(src: str) -> str {
     g_fn_defs = empty_s
     g_cur_stmts = empty_s
     let mut has_main_fn = false
+    let mut has_main_call = false
     let mut has_top_stmts = false
     push_scope("fn")
     while not is_eof() {
@@ -60,6 +66,7 @@ fn compile_source(src: str) -> str {
             let is_entry_call = check_kind("IDENT") and at_tok().val == "main" and peek_tok(1).kind == "LPAREN"
             let expr_r = parse_expr(0, true)
             if is_entry_call {
+                has_main_call = true
                 emit_line("WVal _t_main = " + expr_r.val + ";")
                 emit_line("if (_t_main.tag == W_ERR) { w_report_entrypoint_error(_t_main.as.box->val); w_release(_t_main); w_runtime_cleanup(); return 1; }")
                 emit_line("w_release(_t_main);")
@@ -68,7 +75,7 @@ fn compile_source(src: str) -> str {
             }
         }
     }
-    if not has_top_stmts and has_main_fn {
+    if has_main_fn and not has_main_call {
         emit_line("WVal _t_main = w_fn_main();")
         emit_line("if (_t_main.tag == W_ERR) { w_report_entrypoint_error(_t_main.as.box->val); w_release(_t_main); w_runtime_cleanup(); return 1; }")
         emit_line("w_release(_t_main);")
