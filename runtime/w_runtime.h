@@ -11,6 +11,7 @@
 #include <math.h>
 #include <errno.h>
 #include <ctype.h>
+#include <stdarg.h>
 
 typedef enum {
     W_UNIT = 0,
@@ -116,6 +117,33 @@ struct WVal {
 };
 
 typedef WVal (*WInvoke)(WVal environment, int32_t argc, const WVal* argv);
+
+/* Native runtime failures retain the source operation that last entered W. */
+static const char* w_g_source_file = NULL;
+static int32_t w_g_source_line = 0;
+static int32_t w_g_source_col = 0;
+
+static inline void w_runtime_set_position(const char* file, int32_t line, int32_t col) {
+    w_g_source_file = file;
+    w_g_source_line = line;
+    w_g_source_col = col;
+}
+
+static inline void w_runtime_fail(const char* code, const char* format, ...) {
+    if (w_g_source_file && w_g_source_file[0] != '\0' && w_g_source_line > 0) {
+        fprintf(stderr, "[%s] %s:%" PRId32 ":%" PRId32 " - ",
+                code, w_g_source_file, w_g_source_line, w_g_source_col);
+    } else {
+        fprintf(stderr, "[%s] RuntimeError: ", code);
+    }
+    va_list args;
+    va_start(args, format);
+    vfprintf(stderr, format, args);
+    va_end(args);
+    fputc('\n', stderr);
+    exit(1);
+}
+
 struct WClassVTable {
     int32_t count;
     const WInvoke* methods;
@@ -1371,16 +1399,14 @@ static inline WVal w_index_get(WVal obj, WVal idx) {
     if (obj.tag == W_LIST) {
         int64_t i = idx.as.i;
         if (i < 0 || i >= obj.as.list->len) {
-            fprintf(stderr, "[W4002] RuntimeError: List index out of bounds\n");
-            exit(1);
+            w_runtime_fail("W4002", "List index out of bounds");
         }
         return obj.as.list->data[i];
     }
     if (obj.tag == W_STR) {
         size_t off = 0, blen = 0;
         if (!w_string_offset(obj, idx.as.i, &off, &blen) || blen == 0) {
-            fprintf(stderr, "[W4002] RuntimeError: String index out of bounds\n");
-            exit(1);
+            w_runtime_fail("W4002", "String index out of bounds");
         }
         char* buf = (char*)w_alloc_safe(blen + 1);
         memcpy(buf, obj.as.s + off, blen);
@@ -1391,8 +1417,7 @@ static inline WVal w_index_get(WVal obj, WVal idx) {
         int32_t index = w_dict_find(obj.as.dict, idx);
         if (index < 0) {
             /* SPEC 10.2: a missing key is W4002. `d.get(k)` is the optional form. */
-            fprintf(stderr, "[W4002] RuntimeError: Dictionary key not found\n");
-            exit(1);
+            w_runtime_fail("W4002", "Dictionary key not found");
         }
         return obj.as.dict->vals[index];
     }
@@ -1405,13 +1430,22 @@ static inline WVal w_index_get_owned(WVal object, WVal index) {
     return object.tag == W_STR ? value : w_clone(value);
 }
 
+static inline WVal w_index_get_at(WVal object, WVal index, const char* file, int32_t line, int32_t col) {
+    w_runtime_set_position(file, line, col);
+    return w_index_get(object, index);
+}
+
+static inline WVal w_index_get_owned_at(WVal object, WVal index, const char* file, int32_t line, int32_t col) {
+    w_runtime_set_position(file, line, col);
+    return w_index_get_owned(object, index);
+}
+
 static inline WVal* w_index_ref(WVal* obj, WVal idx) {
     if (obj->tag == W_LIST) {
         w_list_detach(obj);
         int64_t i = idx.as.i;
         if (i < 0 || i >= obj->as.list->len) {
-            fprintf(stderr, "[W4002] RuntimeError: List index out of bounds\n");
-            exit(1);
+            w_runtime_fail("W4002", "List index out of bounds");
         }
         return &obj->as.list->data[i];
     }
@@ -1437,6 +1471,11 @@ static inline WVal* w_index_ref(WVal* obj, WVal idx) {
     }
     fprintf(stderr, "[W4003] RuntimeError: Cannot index-assign non-collection\n");
     exit(1);
+}
+
+static inline WVal* w_index_ref_at(WVal* obj, WVal idx, const char* file, int32_t line, int32_t col) {
+    w_runtime_set_position(file, line, col);
+    return w_index_ref(obj, idx);
 }
 
 static inline WVal w_member_get(WVal obj, const char* prop) {
@@ -1485,10 +1524,14 @@ static inline WVal w_list_pop(WVal* list_val) {
     w_list_detach(list_val);
     WListBuf* b = list_val->as.list;
     if (b->len == 0) {
-        fprintf(stderr, "[W4002] RuntimeError: pop from empty list\n");
-        exit(1);
+        w_runtime_fail("W4002", "pop from empty list");
     }
     return b->data[--b->len];
+}
+
+static inline WVal w_list_pop_at(WVal* list_val, const char* file, int32_t line, int32_t col) {
+    w_runtime_set_position(file, line, col);
+    return w_list_pop(list_val);
 }
 
 static inline WVal w_list_clear(WVal* list_val) {
@@ -1552,26 +1595,36 @@ static inline WVal w_mul(WVal a, WVal b) {
 
 static inline WVal w_div(WVal a, WVal b) {
     if (a.tag == W_INT && b.tag == W_INT) {
-        if (b.as.i == 0) { fprintf(stderr, "[W4001] RuntimeError: Division by zero\n"); exit(1); }
+        if (b.as.i == 0) w_runtime_fail("W4001", "Division by zero");
         if (a.as.i == INT64_MIN && b.as.i == -1) return w_int(INT64_MIN);
         return w_int(a.as.i / b.as.i);
     }
     if (a.tag == W_FLOAT && b.tag == W_FLOAT) {
-        if (b.as.f == 0.0) { fprintf(stderr, "[W4001] RuntimeError: Division by zero\n"); exit(1); }
+        if (b.as.f == 0.0) w_runtime_fail("W4001", "Division by zero");
         return w_float(a.as.f / b.as.f);
     }
     fprintf(stderr, "[W4003] RuntimeError: Invalid operand types for division (tags %d, %d)\n", a.tag, b.tag);
     exit(1);
 }
 
+static inline WVal w_div_at(WVal a, WVal b, const char* file, int32_t line, int32_t col) {
+    w_runtime_set_position(file, line, col);
+    return w_div(a, b);
+}
+
 static inline WVal w_mod(WVal a, WVal b) {
     if (a.tag == W_INT && b.tag == W_INT) {
-        if (b.as.i == 0) { fprintf(stderr, "[W4001] RuntimeError: Modulo by zero\n"); exit(1); }
+        if (b.as.i == 0) w_runtime_fail("W4001", "Modulo by zero");
         if (a.as.i == INT64_MIN && b.as.i == -1) return w_int(0);
         return w_int(a.as.i % b.as.i);
     }
     fprintf(stderr, "[W4003] RuntimeError: Invalid operand types for modulo (tags %d, %d)\n", a.tag, b.tag);
     exit(1);
+}
+
+static inline WVal w_mod_at(WVal a, WVal b, const char* file, int32_t line, int32_t col) {
+    w_runtime_set_position(file, line, col);
+    return w_mod(a, b);
 }
 
 static inline WVal w_neg(WVal a) {

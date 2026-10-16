@@ -11,6 +11,7 @@ considera cerrado solo porque su informe histórico diga que terminó.
 | A–D | Cerradas | Estabilización, ownership, HIR, especialización genérica en W0, self-hosting y contratos de paridad documentados en `docs/history/`. |
 | E01–E04 | Integradas | Funciones como valores, closures, módulos/FFI, OOP genérico, stdlib y LSP; la cobertura por backend está desglosada en [EXPANSION.md](EXPANSION.md). |
 | F01 | Cerrada | Los 114 fixtures pasan en los cuatro motores; W1 incluye los 15 casos genéricos y el fixture de módulos comprobados. |
+| F02 | Cerrada | Panics operativos nativos `W4001`/`W4002` con ubicación exacta en AST C99, HIR C99 y W1; política de ciclos ARC y `W_MEM_CHECK` opt-in fijada en ADR-012. |
 
 “E integrada” no significa paridad universal entre motores. W0 tiene cobertura de la
 expansión más amplia; W1 soporta subconjuntos medidos por fixture. La tabla del corpus
@@ -41,12 +42,23 @@ las sesiones tipadas de W0 también se mantiene; véase [ENGINE_PARITY_MATRIX.md
 La integración se protege con regresiones directas de W1 en
 `tests/unit/test_w1_generic_functions.py`, el perfil release y la suite de bootstrap.
 
-## Después de F01
+## F02 — Diagnósticos nativos y política ARC
 
-Antes de añadir más sintaxis, resolver dos límites operativos ya documentados en
-[KNOWN_LIMITS.md](KNOWN_LIMITS.md): ubicaciones de origen en panics de binarios nativos y
-política explícita de reporte de ciclos ARC. El reporte de memoria debe seguir siendo
-opt-in hasta decidir cómo distinguir errores de desarrollo de ejecuciones de producción.
+Los backends AST C99, HIR C99 y W1 reportan ruta, línea y columna para división/módulo
+por cero, fallos de indexación y `list.pop()` sobre listas vacías. La regresión
+`tests/unit/test_runtime_source_locations.py` exige el mismo formato y ubicación en los
+tres backends.
+
+El runtime no recolecta ciclos ARC. `Weak[C]` sigue siendo el mecanismo explícito para
+romper ciclos; `W_MEM_CHECK=1` es una verificación opt-in de contadores lógicos durante
+la salida normal y no cambia el comportamiento de producción si no se solicita. ADR-012
+registra este contrato y sus límites.
+
+Los detalles no cubiertos —sobre todo ubicaciones para fallos internos `W4003` y para
+fallos de runtime fuera del conjunto operacional anterior— permanecen en
+[KNOWN_LIMITS.md](KNOWN_LIMITS.md).
+
+## Después de F02
 
 Las capturas mutables, las uniones de errores y la concurrencia cambian semántica y modelo
 de memoria. Quedan diferidas hasta que existan casos de uso concretos y contratos separados;

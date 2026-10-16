@@ -701,7 +701,7 @@ class CCodeGen:
         if isinstance(target, IndexExpr):
             parent = self.prepare_assignment_ref(target.object, out)
             index = self.emit_value(target.index, out)
-            return f"w_index_ref({parent}, {index})"
+            return self._source_call("w_index_ref_at", f"{parent}, {index}", target)
         if isinstance(target, MemberExpr):
             from checker.WType import ClassType
             if isinstance(getattr(target.object, 'inferred_type', None), ClassType):
@@ -719,7 +719,7 @@ class CCodeGen:
         if isinstance(target, IndexExpr):
             obj_ref = self.emit_lvalue_ref(target.object, out)
             idx_val = self.emit_value(target.index, out)
-            return f"w_index_ref({obj_ref}, {idx_val})"
+            return self._source_call("w_index_ref_at", f"{obj_ref}, {idx_val}", target)
         if isinstance(target, MemberExpr):
             obj_ref = self.emit_lvalue_ref(target.object, out)
             return f'w_member_ref({obj_ref}, "{target.property}")'
@@ -735,6 +735,10 @@ class CCodeGen:
         tmp = self.new_temp()
         self._declare_owned_var(tmp, c_call, out)
         return tmp
+
+    def _source_call(self, name: str, args: str, node: Expr) -> str:
+        file = getattr(node, "source_file", None) or self.file
+        return f"{name}({args}, {self.escape_c_str(file)}, {node.line}, {node.col})"
 
     def _enum_name(self, expr, fallback):
         if self.interner is not None:
@@ -862,6 +866,10 @@ class CCodeGen:
             }
             if expr.op in op_map:
                 call = f"{op_map[expr.op]}({lhs}, {rhs})"
+                if expr.op == "/":
+                    return self._source_call("w_div_at", f"{lhs}, {rhs}", expr)
+                if expr.op == "%":
+                    return self._source_call("w_mod_at", f"{lhs}, {rhs}", expr)
                 return self._bind_call(call, out) if expr.op == "+" else call
             if expr.op == "==":
                 return f"w_bool(w_eq({lhs}, {rhs}))"
@@ -970,7 +978,8 @@ class CCodeGen:
         if isinstance(expr, IndexExpr):
             obj_val = self.emit_value(expr.object, out)
             idx_val = self.emit_expr(expr.index, out)
-            return self._bind_call(f"w_index_get_owned({obj_val}, {idx_val})", out)
+            call = self._source_call("w_index_get_owned_at", f"{obj_val}, {idx_val}", expr)
+            return self._bind_call(call, out)
 
         if isinstance(expr, CallExpr):
             if getattr(expr, "indirect_call", False):
@@ -1104,7 +1113,8 @@ class CCodeGen:
                     return self._bind_call(f"w_list_append({lref}, {arg_v})", out)
                 if method == "pop" and isinstance(receiver_type, ListType):
                     lref = self.emit_lvalue_ref(obj_expr, out)
-                    return self._bind_call(f"w_list_pop({lref})", out)
+                    call = self._source_call("w_list_pop_at", lref, expr)
+                    return self._bind_call(call, out)
                 if method == "clear" and isinstance(receiver_type, ListType):
                     lref = self.emit_lvalue_ref(obj_expr, out)
                     return self._bind_call(f"w_list_clear({lref})", out)
