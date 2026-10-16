@@ -58,44 +58,27 @@ This is a language change, not a patch.
 
 ---
 
-## 2. A function cannot propagate more than one error type
+## 2. Las uniones de error tienen alternativas restringidas
 
-**What happens.** `?` requires the error type of the operand to match the declared error
-type of the enclosing function exactly (SPEC §7, "Error types must match exactly"):
+**Qué ocurre.** `T ! E1 | E2` permite propagar distintos errores con `?` y hacer un
+`match` exhaustivo sobre el valor ligado por `else err`. El origen se propaga si su
+conjunto de errores es subconjunto del conjunto declarado por la función destino. No se
+convierten los payloads.
 
-```w
-struct E1 { a: int }
-struct E2 { b: int }
-fn one() -> int ! E1 { return Err(E1 { a: 1 }) }
-fn two() -> int ! E2 { return Err(E2 { b: 2 }) }
-fn both() -> int ! E1 {
-    let x = one()?
-    let y = two()?     # W2006: Error type mismatch in '?' propagation: 'E2' vs declared 'E1'
-    return x + y
-}
-```
+Las alternativas admitidas son `int`, `float`, `bool`, `str`, `struct` no genéricos y
+`enum` no genéricos. El patrón es `Tipo(error)` o `Tipo(_)` y liga el payload completo.
+Las alternativas repetidas se canonicalizan; la unión necesita al menos dos alternativas
+distintas.
 
-**Why it is this way.** Exact matching keeps `?` a pure type check with no implicit
-conversions, which is consistent with "no hidden mutations" and keeps the diagnostic
-deterministic.
+**Límite.** No se admiten clases, tipos genéricos, colecciones, tuplas, funciones ni otros
+tipos compuestos. Las clases pueden pertenecer a jerarquías superpuestas; colecciones y
+funciones no conservan en `WVal` la identidad concreta de sus parámetros. Permitirlos sin
+un descriptor runtime adicional haría que los patrones no pudieran distinguir las
+alternativas de forma segura. F03 mantiene el payload original y compara su identidad
+runtime; no añade una caja ni una conversión implícita.
 
-**Cost.** Any function whose body can fail in more than one way has to map errors by
-hand at every call site:
-
-```w
-let y = two() else err { return Err(E1 { a: err.b }) }
-```
-
-There is no error union, no error interface, and no `From`-style conversion. User-defined
-error types do work (`struct MyErr { code: int }` with `Err(MyErr { code: 7 })` and `?`
-propagation), so this is purely about composition.
-
-**What a fix requires.** Either a union type `T ! E1 | E2` (checker work in
-`is_assignable`, exhaustiveness for `else err`, plus interning and mangling for the new
-type shape) or an implicit conversion step in `?` gated on a declared conversion. The
-union is the honest option because it preserves exhaustiveness.
-
-*Open decision.*
+**Trabajo futuro.** Ampliar este conjunto requiere un contrato de identidad runtime para
+cada nueva categoría, especialmente clases con herencia y tipos genéricos monomorfizados.
 
 ---
 
@@ -103,14 +86,15 @@ union is the honest option because it preserves exhaustiveness.
 
 **What happens.** `selfhost/w1.w` (bundled from `selfhost/src/*.w`) is a compiler with
 its own lexer, recursive-descent parser, token-driven semantic pass with type interning,
-and direct-to-C emitter. It compiles all 114 fixtures in the public core corpus, including
-the 15 generic fixtures and the checked-module fixture. Its support outside those tested
+and direct-to-C emitter. It compiles all 121 fixtures in the public corpus, including
+the F03 error-union case, 15 generic fixtures and the checked-module fixture. Its support outside those tested
 programs is not guaranteed to match W0:
 
 | Area | Verified | Remaining boundary |
 | :--- | :--- | :--- |
 | Generic functions, structs, enums, recursive ADTs and cycle diagnostics | 15/15 core corpus fixtures across all engines | This is fixture coverage, not exhaustive equivalence for every generic program or constraint. |
 | Imports with generic specialization | `checked_modules` fixture passes in W1 | W1 expands modules into tokens; it does not share W0's typed-module cache or canonical declaration arena. |
+| Closed error unions | One runtime fixture and six negative fixtures pass in W1 | Only primitive, non-generic struct and non-generic enum alternatives are supported. |
 | Closures, FFI, generic OOP, stdlib and LSP | Separate expansion-suite coverage | No claim of W1 parity; see [EXPANSION.md](EXPANSION.md). |
 
 W1 expands imports into a token stream, qualifies module names, enforces `pub` exports,
@@ -126,11 +110,11 @@ header", and it says nothing about the expressiveness of the language subset it 
 three-stage fixed point proves determinism and convergence; it cannot prove correctness,
 because a bug in the semantics is reproduced identically at every stage.
 
-**State.** F01 is closed: on 2026-10-15 the release profile passed 114/114 fixtures on
-all four engines with no exclusions. The three-stage bootstrap also reached an identical
-C output hash at every stage. These checks prove the recorded corpus and deterministic
-self-hosting contract; they do not prove universal language parity or semantic correctness
-outside the tested programs.
+**State.** F01 closed with 114/114 fixtures on 2026-10-15. F03 extends that corpus to
+121/121 cases on all four engines, with zero unsupported fixtures. The three-stage
+bootstrap also reaches an identical C output hash at every stage. These checks prove the
+recorded corpus and deterministic self-hosting contract; they do not prove universal
+language parity or semantic correctness outside the tested programs.
 
 ---
 

@@ -44,6 +44,7 @@ enum TypeEntry {
     Primitive(PrimKind)                                 # unit, bool, int, float, str, none
     Optional(inner: TypeId)                             # T?
     Result(ok: TypeId, err: TypeId)                     # T ! E
+    ErrorUnion(alternatives: sorted TypeIds)             # Error channel only: T ! E1 | E2
     List(elem: TypeId)                                  # list[T]
     Dict(key: TypeId, val: TypeId)                      # dict[K, V]
     Tuple(elems: list[TypeId])                          # tuple[T1, T2, ...]
@@ -120,7 +121,19 @@ The assignability relation `is_assignable(src: TypeId, dst: TypeId) -> bool` (`s
 3. `S? <: T?` if `S <: T`.
 4. `T <: (T ! E)` (implicit `Ok` wrapping) and `E <: (T ! E)` (implicit `Err` wrapping), provided `T != E`.
 
-### 5.3 Nominal Class & Interface Subtyping
+### 5.3 Uniones cerradas del canal de error
+
+Una unión de error contiene al menos dos tipos distintos y solo puede aparecer como el
+segundo componente de `Result<T, E>`. `ErrorUnionType` se interna con alternativas
+ordenadas y sin duplicados. Una alternativa puede ampliarse a una unión que la contenga;
+una unión origen puede propagarse únicamente si cada uno de sus miembros pertenece al
+conjunto destino. No hay conversiones de payload.
+
+Para mantener identidad runtime verificable y evitar conjuntos ambiguos, las alternativas
+admitidas son escalares (`int`, `float`, `bool`, `str`), `struct` no genéricos y `enum`
+no genéricos. Clases, genéricos y tipos compuestos quedan fuera de este contrato.
+
+### 5.4 Nominal Class & Interface Subtyping
 1. **Single Inheritance (`extends`):** `NominalClass(sub_def, sub_args) <: NominalClass(sup_def, sup_args)` if and only if walking the `superclass` chain from `sub` (with generic argument substitution) reaches `NominalClass(sup_def, sup_args)`.
 2. **Interface Satisfaction (`implements`):** `NominalClass(cls_def, cls_args) <: NominalInterface(intf_def, intf_args)` if `cls` or any of its superclasses declares `implements` for `NominalInterface(intf_def, intf_args)`.
 
