@@ -40,10 +40,10 @@ The following table summarizes compiler support across the public core corpus. T
 
 | Feature Category | Fixtures | W0 Interpreter | W0 AST C99 | W0 Typed HIR (Default) | W1 Self-Hosted C99 | Status / Milestone |
 | :--- | :---: | :---: | :---: | :---: | :---: | :--- |
-| **`core`** | 104 | ✅ 104/104 | ✅ 104/104 | ✅ 104/104 | ✅ 104/104 | Declared supported |
+| **`core`** | 98 | ✅ 98/98 | ✅ 98/98 | ✅ 98/98 | ✅ 98/98 | Declared supported |
 | **`generics`** | 15 | ✅ 15/15 | ✅ 15/15 | ✅ 15/15 | ✅ 15/15 | Declared supported |
 | **`checked_modules`** | 1 | ✅ 1/1 | ✅ 1/1 | ✅ 1/1 | ✅ 1/1 | Declared supported |
-| **`error_unions`** | 1 | ✅ 1/1 | ✅ 1/1 | ✅ 1/1 | ✅ 1/1 | Declared supported · F03 |
+| **`error_unions`** | 7 | ✅ 7/7 | ✅ 7/7 | ✅ 7/7 | ✅ 7/7 | Declared supported · F03 |
 | **Total Verified** | **121** | **121/121 (100.0%)** | **121/121 (100.0%)** | **121/121 (100.0%)** | **121/121 (100.0%)** | _measured_ |
 
 Regenerate with `python3 tools/ci_conformance.py --matrix`, which reads `summary.json`
@@ -73,7 +73,7 @@ gap: a construct the checker accepted while the HIR backend rejected it.
 
 ### 3.1 Core Language & Control Flow (`core`)
 - **Status:** **100% Parity** across all 4 engines.
-- **Coverage:** 104 fixtures (positive runtime fixtures, control flow, functions, OOP contracts, recursion, and error diagnostics).
+- **Coverage:** 98 fixtures (positive runtime fixtures, control flow, functions, OOP contracts, recursion, and error diagnostics).
 - **Features Included:**
   - Arithmetic, logic, bitwise, and comparison expressions.
   - While loops, range loops (`for i in 0..10`), break, continue, and scope cleanup.
@@ -118,8 +118,8 @@ gap: a construct the checker accepted while the HIR backend rejected it.
 - W1 loads imports, enforces public names, qualifies module identities, and detects cycles before feeding a flattened token stream to its compiler. This passes the checked-module fixture, including imported generic specialization, but does not provide W0's shared typed declarations or specialization cache.
 
 ### 3.7 Closed Error Unions (`error_unions`)
-- **Status:** **1/1 runtime fixture passes on all four engines**; six invalid fixtures are
-  rejected consistently; F03 is complete.
+- **Status:** **7/7 fixtures pass on all four engines**: one runtime fixture and six
+  invalid fixtures rejected consistently; F03 is complete.
 - `T ! E1 | E2` is restricted to the Result error channel. `?` widens an error only when
   the source set is a subset of the declared target set. `else err` patterns check scalar
   tags or exact nominal struct/enum identity, including module-qualified types, and

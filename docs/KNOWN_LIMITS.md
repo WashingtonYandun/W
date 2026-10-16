@@ -87,14 +87,14 @@ cada nueva categoría, especialmente clases con herencia y tipos genéricos mono
 **What happens.** `selfhost/w1.w` (bundled from `selfhost/src/*.w`) is a compiler with
 its own lexer, recursive-descent parser, token-driven semantic pass with type interning,
 and direct-to-C emitter. It compiles all 121 fixtures in the public corpus, including
-the F03 error-union case, 15 generic fixtures and the checked-module fixture. Its support outside those tested
-programs is not guaranteed to match W0:
+seven F03 error-union fixtures, 15 generic fixtures and the checked-module fixture. Its
+support outside those tested programs is not guaranteed to match W0:
 
 | Area | Verified | Remaining boundary |
 | :--- | :--- | :--- |
 | Generic functions, structs, enums, recursive ADTs and cycle diagnostics | 15/15 core corpus fixtures across all engines | This is fixture coverage, not exhaustive equivalence for every generic program or constraint. |
 | Imports with generic specialization | `checked_modules` fixture passes in W1 | W1 expands modules into tokens; it does not share W0's typed-module cache or canonical declaration arena. |
-| Closed error unions | One runtime fixture and six negative fixtures pass in W1 | Only primitive, non-generic struct and non-generic enum alternatives are supported. |
+| Closed error unions | All 7 release fixtures pass on the four engines: one runtime case and six negative cases | Only primitive, non-generic struct and non-generic enum alternatives are supported. |
 | Closures, FFI, generic OOP, stdlib and LSP | Separate expansion-suite coverage | No claim of W1 parity; see [EXPANSION.md](EXPANSION.md). |
 
 W1 expands imports into a token stream, qualifies module names, enforces `pub` exports,

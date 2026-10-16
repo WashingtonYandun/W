@@ -565,7 +565,7 @@ present in the tree and covered by the test suite unless marked otherwise.
 
 Parenthesized types group constructors: `(T?) ! E` is Result[Option[T],E], `(T ! E)?` is Option[Result[T,E]], and `(T ! E1) ! E2` is Result[Result[T,E1],E2]. Ungrouped `T ! E1 ! E2` associates to the right. Formatting preserves these distinctions.
 
-Postfix `?` handles exactly the outer constructor. A second `?` on an optional payload is invalid inside a function whose outer return type is Result; use an explicit branch/recovery value instead. Error propagation requires the source error set to be a subset of the declared destination set; it never converts or flattens error payloads. Returning an inner Result as a success payload requires preserving its outer success layer. Bare values denote success, including when success and error types coincide.
+Postfix `?` handles exactly the outer constructor. A second `?` on an optional payload is invalid inside a function whose outer return type is Result; use an explicit branch/recovery value instead. Error propagation requires the source error set to be a subset of the declared destination set; it never converts or flattens error payloads. A complete `Result[T, E1]` value can be assigned to or returned as `Result[T, E2]` only when `T` is identical and every `E1` alternative is present in `E2`; this preserves the tagged value without wrapping it in another `Ok`. Nested Result layers are never collapsed. Returning an inner Result as a success payload requires preserving its outer success layer. Bare values denote success, including when success and error types coincide.
 
 Optional/Option and fallible/Result spellings share canonical type identity. Optional display is payload-transparent; explicit Some values follow the same display policy as sugar. Some(None) differs from None. Implicit conversions do not add/remove nullable depth; use explicit Some for nested optionality. Guarded match arms do not contribute unconditional coverage. Nested variant payload cases must be exhaustive.
 
@@ -605,7 +605,7 @@ W distinguishes between two distinct compiler guarantees:
 * **Bootstrap Fixed-Point:** A 3-stage bootstrap self-compilation of `selfhost/w1.w` produces bit-identical C code:
   $$\text{SHA256}(c_0) == \text{SHA256}(c_1) == \text{SHA256}(c_2)$$
   This guarantees determinism and convergence of the self-hosted compiler subset.
-* **Feature Parity:** Documented in `docs/ENGINE_PARITY_MATRIX.md`, and measured rather than declared: the counts in that file come from `summary.json`, which is produced by an actual run of `tools/ci_conformance.py` over the corpus. The W0 toolchain passes all 107 corpus fixtures on all three of its engines. W1 passes the 91 core fixtures and rejects the 16 `generics` and `checked_modules` fixtures with `W2013`; it does **not** support generic specialization or checked-module sessions, and does not pattern-match `Option` or `Result`.
+* **Feature Parity:** Documented in `docs/ENGINE_PARITY_MATRIX.md` and measured rather than declared. The release profile passes all 121 fixtures on all four engines, with no unsupported cases. This is corpus evidence, not a claim of universal W0/W1 equivalence; see the feature breakdown and limits in the parity matrix.
 
 ### 14.3 Code Generation Determinism
 Given identical source text and compiler flags:
