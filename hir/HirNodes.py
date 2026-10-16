@@ -452,7 +452,7 @@ class HirExprStmt(HirStmt):
 
 
 # ==========================================
-# HIR Expressions (18 Canonical Variants)
+# HIR Expressions
 # ==========================================
 
 class HirConstInt(HirExpr):
@@ -532,6 +532,14 @@ class HirBinaryOp(HirExpr):
         self.op = op
         self.left = left
         self.right = right
+
+
+class HirSequence(HirExpr):
+    """Ordered statement effects followed by a value, evaluated at the expression site."""
+    def __init__(self, statements: List[HirStmt], value: HirExpr, type_id: int, span: Span):
+        super().__init__(type_id, span)
+        self.statements = statements
+        self.value = value
 
 
 class HirConstructStruct(HirExpr):

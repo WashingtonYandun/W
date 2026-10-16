@@ -93,6 +93,13 @@ class HirVerifier:
                 expected = TYPE_BOOL
             if expected is None or value.type_id != expected:
                 self._fail(value, 'Invalid binary operand/result types')
+        if isinstance(value, H.HirSequence):
+            allowed = (H.HirAssign, H.HirBindTemp)
+            if not isinstance(value.statements, list) or any(
+                    not isinstance(statement, allowed) for statement in value.statements):
+                self._fail(value, 'Expression sequence requires an ordered statement list')
+            if not isinstance(value.value, H.HirExpr) or value.value.type_id != value.type_id:
+                self._fail(value, 'Expression sequence result type does not match its value')
         if isinstance(value, H.HirRange):
             entry = self.interner.get_entry(value.type_id)
             if value.start.type_id != TYPE_INT or value.end.type_id != TYPE_INT or entry.tag != 'list' or entry.data != TYPE_INT:

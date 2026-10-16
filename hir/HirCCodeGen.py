@@ -19,7 +19,7 @@ from hir.HirNodes import (
     HirFnDecl, HirStructDecl, HirEnumDecl, HirInterfaceDecl, HirClassDecl, HirModule,
     HirLet, HirBindTemp, HirAssign, HirWhile, HirForList, HirReturn, HirBreak, HirContinue, HirExprStmt,
     HirConstInt, HirConstFloat, HirConstBool, HirConstStr, HirConstNone, HirConstUnit,
-    HirLocalRef, HirThisRef, HirUnaryOp, HirBinaryOp,
+    HirLocalRef, HirThisRef, HirUnaryOp, HirBinaryOp, HirSequence,
     HirConstructStruct, HirConstructEnum, HirConstructObject, HirConstructList, HirConstructDict, HirConstructTuple,
     HirDirectCall, HirBuiltinCall, HirMethodCall, HirFieldRead, HirIndexRead,
     HirTryPropagate, HirCoalesce, HirElseHandle, HirIf, HirMatch, HirMatchArm, HirRange, HirSuperRef,
@@ -183,6 +183,8 @@ class HirCCodeGen:
                 out.append("\\t")
             elif code == 0:
                 out.append("\\000")
+            elif code == 63:
+                out.append("\\077")
             else:
                 out.append(ch)
         out.append('"')
@@ -687,6 +689,11 @@ class HirCCodeGen:
         main_stmts.append("w_release(_t_main);")
 
     def emit_expr(self, expr: HirExpr, out: List[str]) -> str:
+        if isinstance(expr, HirSequence):
+            for statement in expr.statements:
+                self.emit_stmt(statement, out)
+            return self.emit_expr(expr.value, out)
+
         if isinstance(expr, HirClosure):
             environment = self.emit_expr(expr.environment, out)
             signature = self.interner.get_entry(expr.type_id)

@@ -12,7 +12,7 @@ from hir.HirNodes import (
     HirStmt, HirExpr, HirBlock, HirParam, HirFieldDef,
     HirLet, HirBindTemp, HirAssign, HirWhile, HirForList, HirReturn, HirBreak, HirContinue, HirExprStmt,
     HirConstInt, HirConstFloat, HirConstBool, HirConstStr, HirConstNone, HirConstUnit,
-    HirLocalRef, HirThisRef, HirSuperRef, HirUnaryOp, HirBinaryOp,
+    HirLocalRef, HirThisRef, HirSuperRef, HirUnaryOp, HirBinaryOp, HirSequence,
     HirConstructStruct, HirConstructEnum, HirConstructObject, HirConstructList, HirConstructDict, HirConstructTuple,
     HirFunctionRef, HirClosure, HirIndirectCall, HirDirectCall, HirBuiltinCall, HirMethodCall, HirFieldRead, HirIndexRead,
     HirCoerce, HirTryPropagate, HirCoalesce, HirElseHandle, HirRange, HirIf, HirMatch, HirMatchArm,
@@ -167,6 +167,9 @@ class HirDumper:
             return f"({expr.op} {self.format_expr(expr.operand)}):type_id={expr.type_id}"
         if isinstance(expr, HirBinaryOp):
             return f"({self.format_expr(expr.left)} {expr.op} {self.format_expr(expr.right)}):type_id={expr.type_id}"
+        if isinstance(expr, HirSequence):
+            effects = "; ".join(type(statement).__name__ for statement in expr.statements)
+            return f"sequence[{effects}] => {self.format_expr(expr.value)}:type_id={expr.type_id}"
         if isinstance(expr, HirConstructStruct):
             f_str = ", ".join(f"{name}: {self.format_expr(val)}" for name, val in expr.fields)
             return f"struct_init {expr.struct_name}{{{f_str}}}:type_id={expr.type_id}"
