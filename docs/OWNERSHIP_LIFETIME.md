@@ -148,7 +148,9 @@ one release obligation, including when it happens to be an immediate scalar.
 - `w_unwrap_optional`, `w_unwrap_ok`, `w_unwrap_err`, `w_unwrap_success` retain their
   returned payload; the source wrapper may be released independently.
 - `w_index_get_owned` and `w_dict_get` retain their result. Present dictionary
-  values are wrapped, including present None. String indexing allocates a string.
+  values are wrapped, including present None. La indexación de strings devuelve un
+  valor propio: ASCII de un carácter usa almacenamiento estático; los demás caracteres
+  conservan un buffer administrado independiente. El caller libera ambos del mismo modo.
 - `w_make_list`, `w_make_tuple`, `w_make_dict`, `w_make_struct`, `w_make_object`
   borrow their initializer arrays and clone the stored values. `w_make_range`
   creates an owned list. Field/variant/type names come from static generated C.
