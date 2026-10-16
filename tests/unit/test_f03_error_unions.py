@@ -1,6 +1,7 @@
 from checker.TypeChecker import TypeChecker
 from checker.TypeInterner import TypeInterner
 from checker.WType import ErrorUnionType, IntType, StructType, is_assignable
+from compiler.CompilationSession import CompilationSession
 from error.Error import TypeError as WTypeError
 from formatter.Formatter import Formatter
 from parser.Parser import Parser
@@ -74,3 +75,13 @@ fn recover() -> int { return fail() else err { match err {
 } } }
 """
     TypeChecker().check(Parser().parse(source))
+
+
+def test_error_union_accepts_module_qualified_alternatives_and_patterns():
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[2]
+    fixture = root / "tests/runtime/error_union_composition.w"
+    session = CompilationSession(project_root=str(root))
+
+    session.check_source(fixture.read_text(), str(fixture))

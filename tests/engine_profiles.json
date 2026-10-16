@@ -28,6 +28,7 @@
     "tests/runtime/math_lib.w": "Imported library exercised by tests/runtime/import_module.w",
     "tests/modules/checked_session/left.w": "Checked-module fixture dependency exercised by tests/modules/checked_session/main.w",
     "tests/modules/checked_session/right.w": "Checked-module fixture dependency exercised by tests/modules/checked_session/main.w",
-    "tests/modules/checked_session/shared.w": "Checked-module fixture dependency exercised by tests/modules/checked_session/main.w"
+    "tests/modules/checked_session/shared.w": "Checked-module fixture dependency exercised by tests/modules/checked_session/main.w",
+    "tests/modules/error_union/errors.w": "Exported error types and constructors imported by tests/runtime/error_union_composition.w"
   }
 }

@@ -2835,12 +2835,21 @@ class TypeChecker:
                 elif isinstance(arm.pattern, EnumPattern):
                     v_name = arm.pattern.variant
                     if isinstance(subject_t, ErrorUnionType):
-                        matched_type = next(
-                            (member for member in subject_t.alternatives
-                             if self._error_pattern_name(member) == v_name),
-                            None
-                        )
-                        if arm.pattern.enum_name is not None or matched_type is None:
+                        if arm.pattern.enum_name is None:
+                            matched_type = next(
+                                (member for member in subject_t.alternatives
+                                 if self._error_pattern_name(member) == v_name),
+                                None
+                            )
+                        else:
+                            qualified_name = f"{arm.pattern.enum_name}.{v_name}"
+                            qualified_type = self._lookup_type_name(qualified_name)
+                            matched_type = next(
+                                (member for member in subject_t.alternatives
+                                 if member == qualified_type),
+                                None
+                            )
+                        if matched_type is None:
                             raise TypeError(
                                 message=f"Pattern '{v_name}(...)' is not an alternative of error union '{subject_t}'",
                                 line=arm.line,
@@ -2867,7 +2876,7 @@ class TypeChecker:
                         arm.pattern.error_type_match = matched_type
                         arm_bindings = {}
                         self._bind_pattern_type(arm.pattern.args[0], matched_type, arm_bindings, arm.line, arm.col)
-                        covered_variants.add(v_name)
+                        covered_variants.add(self._error_pattern_name(matched_type))
                     else:
                         if arm.pattern.enum_name:
                             if isinstance(subject_t, EnumType):
@@ -3030,6 +3039,13 @@ class TypeChecker:
                 pattern = row[0]
                 if wildcard(pattern):
                     specialized.append([WildcardPattern() for _ in payload] + row[1:])
+                elif (
+                    isinstance(first, ErrorUnionType)
+                    and isinstance(pattern, EnumPattern)
+                    and getattr(pattern, "error_type_match", None) is not None
+                    and self._error_pattern_name(pattern.error_type_match) == name
+                ):
+                    specialized.append(pattern.args + row[1:])
                 elif isinstance(pattern, EnumPattern) and pattern.variant == name:
                     specialized.append(pattern.args + row[1:])
                 elif isinstance(pattern, HirEnumPattern) and pattern.variant_name == name:
