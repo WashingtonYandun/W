@@ -1020,6 +1020,8 @@ fn escape_c_str(s: str) -> str {
             out = out + "\\t"
         } elif code == 0 {
             out = out + "\\000"
+        } elif code == 63 {
+            out = out + "\\077"
         } else {
             out = out + ch
         }
@@ -4223,12 +4225,20 @@ fn sem_expression(minimum: int, allow_struct: bool) -> SemValue {
             let operator = sem_at().kind
             let precedence = op_precedence(operator)
             if precedence <= minimum { break }
+            let logical_left = sem_pos - 1
+            let mut logical_constant = -1
+            if logical_left >= 0 {
+                if sem_tokens[logical_left].kind == "FALSE" { logical_constant = 0 }
+                elif sem_tokens[logical_left].kind == "TRUE" { logical_constant = 1 }
+            }
             sem_take()
             let mut right_minimum = precedence
             if operator == "ASSIGN" or operator == "QQ" { right_minimum = precedence - 1 }
             let previous_expected = sem_expected
             if operator == "ASSIGN" { sem_expected = left.writable }
+            let before_right = sem_initialized
             let right = sem_expression(right_minimum, allow_struct)
+            let after_right = sem_initialized
             sem_expected = previous_expected
             if operator == "ASSIGN" {
                 if left.writable < 0 { sem_error("W2002", "invalid assignment target") }
@@ -4237,6 +4247,11 @@ fn sem_expression(minimum: int, allow_struct: bool) -> SemValue {
                 if sem_initializing and len(left.root) > 5 and slice(left.root, 0, 5) == "this:" { sem_initialized.append(slice(left.root, 5, len(left.root))) }
                 left = sem_value(left.writable)
             } elif operator == "QQ" {
+                if left.type_id == sem_none {
+                    sem_initialized = after_right
+                } else {
+                    sem_initialized = sem_intersect(before_right, after_right)
+                }
                 if left.type_id == sem_none { left = right }
                 elif sem_kind(left.type_id) == "optional" {
                     let inner = sem_types[left.type_id].args[0]
@@ -4250,6 +4265,15 @@ fn sem_expression(minimum: int, allow_struct: bool) -> SemValue {
             } elif operator == "AND" or operator == "OR" {
                 sem_require(left.type_id, sem_bool, "W2001")
                 sem_require(right.type_id, sem_bool, "W2001")
+                let skips_right = (operator == "AND" and logical_constant == 0) or (
+                    operator == "OR" and logical_constant == 1
+                )
+                let runs_right = (operator == "AND" and logical_constant == 1) or (
+                    operator == "OR" and logical_constant == 0
+                )
+                if skips_right { sem_initialized = before_right }
+                elif runs_right { sem_initialized = after_right }
+                else { sem_initialized = sem_intersect(before_right, after_right) }
                 left = sem_value(sem_bool)
             } elif operator == "EQ" or operator == "NEQ" {
                 let left_kind = sem_kind(left.type_id)

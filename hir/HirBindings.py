@@ -122,6 +122,14 @@ class HirBindings:
                 self.visit(statement, scope)
             self.visit(node.tail_expr, scope)
             return
+        if isinstance(node, H.HirSequence):
+            inner = dict(scope)
+            for statement in node.statements:
+                self.visit(statement, inner)
+            self.visit(node.value, inner)
+            if not self.compatible(node.value.type_id, node.type_id):
+                self.verifier._fail(node, 'Sequence result type does not match its value')
+            return
         if isinstance(node, (H.HirLet, H.HirBindTemp)):
             self.visit(node.init_expr, scope)
             if not self.compatible(node.init_expr.type_id, node.type_id):

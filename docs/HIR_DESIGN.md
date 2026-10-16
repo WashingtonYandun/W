@@ -125,6 +125,7 @@ Every `HirExpr` contains `{ kind: HirExprKind, type_id: TypeId, span: Span }`:
 | `LocalRef(SymbolId)` / `ThisRef(TypeId)` | Direct reference to a local variable, parameter, or method receiver |
 | `UnaryOp(UnaryKind, operand)` | `NegInt` (wrapping), `NegFloat`, `NotBool` |
 | `BinaryOp(BinaryKind, left, right)` | Type-specialized operator (`AddInt`, `AddFloat`, `ConcatStr`, `DivIntTrunc`, `ModIntTrunc`, `EqVal`, `EqRef`, etc.) |
+| `Sequence(statements, value)` | Ordered effects embedded at the expression site, followed by a value; preserves conditional evaluation for `and`, `or`, and `??` |
 | `ConstructStruct(TypeId, fields: list[(FieldIdx, HirExpr)])` | Value-type `struct` initialization in canonical field declaration order |
 | `ConstructEnum(TypeId, variant_idx: u32)` | Enum variant construction |
 | `ConstructObject(TypeId, args: list[HirExpr])` | Unified heap-allocated `class` construction + `init` invocation (replaces both `Class(...)` and `new Class(...)`) |
@@ -175,7 +176,9 @@ When the TypeChecker / HIR Builder constructs an lvalue path from an expression 
 
 ## 5. Evaluation Order Lowering (`L→R` Sequence Points)
 
-Per `SPEC.md` Section 5.4, W guarantees strict left-to-right evaluation of all sub-expressions. Because C99 leaves function argument and binary operand evaluation order unspecified between sequence points, HIR lowering normalizes compound expressions into statement-level temporaries before C99 emission:
+Per `SPEC.md` Section 5.4, W guarantees strict left-to-right evaluation of all sub-expressions. Because C99 leaves function argument and binary operand evaluation order unspecified between sequence points, HIR lowering normalizes compound expressions into ordered statements. Effects that belong to an expression remain in a `Sequence(statements, value)` node and are emitted at that exact expression site. This is required for right operands of `and`, `or`, and `??`: the backend emits those sequences inside the conditional branch that evaluates the operand, so skipped operands cannot mutate state.
+
+Ordinary call arguments and strict binary operands are still emitted left-to-right as ordered C statements before the consuming operation:
 
 ### Example
 Surface W code:

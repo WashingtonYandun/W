@@ -49,6 +49,11 @@ def check_constructor(declaration, class_type, method, file):
         if missing:
             fail(node, 'Constructor leaves uninitialized fields: ' + ', '.join(sorted(missing)))
 
+    def constant_bool(node):
+        if isinstance(node, A.BoolLiteral):
+            return node.value
+        return None
+
     def expression(node, initialized):
         if node is None or initialized is None:
             return initialized
@@ -59,6 +64,33 @@ def check_constructor(declaration, class_type, method, file):
                 if initialized is not None:
                     initialized = initialized | {target.property}
                 return initialized
+        if isinstance(node, A.BinaryExpr) and node.op in ('and', 'or'):
+            after_left = expression(node.left, initialized)
+            if after_left is None:
+                return None
+            left_constant = constant_bool(node.left)
+            skips_right = (node.op == 'and' and left_constant is False) or (
+                node.op == 'or' and left_constant is True)
+            executes_right = (node.op == 'and' and left_constant is True) or (
+                node.op == 'or' and left_constant is False)
+            if skips_right:
+                return after_left
+            after_right = expression(node.right, set(after_left))
+            if executes_right:
+                return after_right
+            if after_right is None:
+                return after_left
+            return after_left & after_right
+        if isinstance(node, A.CoalesceExpr):
+            after_left = expression(node.left, initialized)
+            if after_left is None:
+                return None
+            after_right = expression(node.right, set(after_left))
+            if isinstance(node.left, A.NoneLiteral):
+                return after_right
+            if after_right is None:
+                return after_left
+            return after_left & after_right
         if isinstance(node, A.MemberExpr) and is_self(node.object):
             if node.property in required and node.property not in initialized:
                 fail(node, "Read before initialization: this." + node.property)
@@ -72,20 +104,45 @@ def check_constructor(declaration, class_type, method, file):
                 initialized = expression(argument, initialized)
             return initialized
         if isinstance(node, A.IfExpr):
-            expression(node.condition, initialized)
-            branches = [block(node.then_branch, set(initialized))]
-            for alternative in node.elif_branches:
-                expression(alternative.condition, initialized)
-                branches.append(block(alternative.body, set(initialized)))
-            branches.append(block(node.else_branch, set(initialized)) if node.else_branch else set(initialized))
+            branches = []
+            condition = node.condition
+            branch = node.then_branch
+            fallthrough = initialized
+            alternatives = [(condition, branch)] + [
+                (alternative.condition, alternative.body) for alternative in node.elif_branches
+            ]
+            for condition, branch in alternatives:
+                if fallthrough is None:
+                    break
+                after_condition = expression(condition, fallthrough)
+                if after_condition is None:
+                    fallthrough = None
+                    break
+                known = constant_bool(condition)
+                if known is not False:
+                    branches.append(block(branch, set(after_condition)))
+                if known is True:
+                    fallthrough = None
+                    break
+                fallthrough = after_condition
+            if fallthrough is not None:
+                if node.else_branch:
+                    branches.append(block(node.else_branch, set(fallthrough)))
+                else:
+                    branches.append(fallthrough)
             live = [branch for branch in branches if branch is not None]
             return set.intersection(*live) if live else None
         if isinstance(node, A.MatchExpr):
-            expression(node.subject, initialized)
+            after_subject = expression(node.subject, initialized)
+            if after_subject is None:
+                return None
             branches = []
             for arm in node.arms:
-                expression(arm.guard, initialized)
-                branches.append(block(arm.body, set(initialized)))
+                if arm.guard is not None:
+                    # A guard may be skipped because its pattern did not match, and may
+                    # fail and continue to another arm. Its writes are not definite.
+                    expression(arm.guard, set(after_subject))
+                branches.append(block(arm.body, set(after_subject)))
             live = [branch for branch in branches if branch is not None]
             return set.intersection(*live) if live else None
         if isinstance(node, A.Node):
@@ -105,12 +162,18 @@ def check_constructor(declaration, class_type, method, file):
             if initialized is None:
                 break
             if isinstance(statement, A.ReturnStmt):
-                expression(statement.value, initialized)
-                complete(statement, initialized)
+                returned = expression(statement.value, initialized)
+                complete(statement, returned if returned is not None else initialized)
                 initialized = None
             elif isinstance(statement, (A.ForStmt, A.WhileStmt)):
-                expression(getattr(statement, 'condition', getattr(statement, 'iterable', None)), initialized)
-                block(statement.body, set(initialized))
+                after_condition = expression(
+                    getattr(statement, 'condition', getattr(statement, 'iterable', None)), initialized
+                )
+                if after_condition is None:
+                    initialized = None
+                else:
+                    block(statement.body, set(after_condition))
+                    initialized = after_condition
             else:
                 initialized = expression(getattr(statement, 'expr', getattr(statement, 'initializer', None)), initialized)
         return expression(node.tail_expr, initialized)
