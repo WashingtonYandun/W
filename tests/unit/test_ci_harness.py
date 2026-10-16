@@ -16,7 +16,8 @@ def run_ci_harness_tests():
     assert harness.compare([reference, harness.EngineResult('ast', stdout='expected\n', exit_code=1)], 'expected\n')[0] is False
     assert harness.compare([reference, harness.EngineResult('w1', stdout='expected\n', infrastructure_error='sanitizer failure')])[0] is False
     assert not harness.unsupported_reason('new_generic_named_core_fixture.w', 'w1')
-    assert harness.unsupported_reason('tests/runtime/generic_function.w', 'w1')
+    assert not harness.unsupported_reason('tests/runtime/generic_function.w', 'w1')
+    assert not harness.unsupported_reason('tests/modules/checked_session/main.w', 'w1')
     assert not harness.unsupported_reason('tests/runtime/generic_function.w', 'hir')
     with tempfile.TemporaryDirectory() as temporary:
         directory = Path(temporary)
@@ -36,7 +37,17 @@ def run_ci_harness_tests():
         try:
             harness.run_engine = lambda engine, *args: harness.EngineResult(engine, stdout='ok\n')
             assert harness.verify('', 'tests/runtime/generic_function.w', '', directory, 'ok\n')[0]
-            assert not harness.verify('', 'tests/runtime/generic_function.w', '', directory, 'ok\n', strict=True)[0]
+            assert harness.verify('', 'tests/runtime/generic_function.w', '', directory, 'ok\n', strict=True)[0]
+            feature = harness.feature_for('tests/runtime/generic_function.w')
+            old_reason = harness.PROFILES['features'][feature].get('w1')
+            harness.PROFILES['features'][feature]['w1'] = 'synthetic unsupported row for harness test'
+            try:
+                assert not harness.verify('', 'tests/runtime/generic_function.w', '', directory, 'ok\n', strict=True)[0]
+            finally:
+                if old_reason is None:
+                    harness.PROFILES['features'][feature].pop('w1')
+                else:
+                    harness.PROFILES['features'][feature]['w1'] = old_reason
             assert not harness.verify('', 'invalid.w', '', directory, expect_rejection=True)[0]
         finally:
             harness.run_engine = original

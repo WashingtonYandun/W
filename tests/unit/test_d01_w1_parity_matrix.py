@@ -6,7 +6,7 @@ Invariants verified:
 1. Every fixture in the corpus is classified in tests/engine_profiles.json without stale entries.
 2. Every unsupported engine feature has an explicit, non-empty tracking reason pointing to its milestone.
 3. Standalone W1 binary executes directly on core fixtures without W0 pre-filtering.
-4. Standalone W1 binary rejects unsupported generic features with the documented semantic diagnostic.
+4. Standalone W1 binary accepts generic functions directly and emits C without W0 pre-filtering.
 5. ci_conformance.py --matrix generates a valid Markdown parity matrix matching current counts.
 6. docs/ENGINE_PARITY_MATRIX.md matches the actual engine status reported by the harness.
 """
@@ -73,8 +73,8 @@ def test_unsupported_reasons_and_milestones():
 
 
 def test_standalone_w1_execution_contracts():
-    """Verify standalone W1 core success and explicit generic rejection."""
-    print("  [TEST] Standalone W1 execution contracts (core success vs generic rejection)...")
+    """Verify standalone W1 core and generic compilation without W0 pre-filtering."""
+    print("  [TEST] Standalone W1 execution contracts (core and generic compilation)...")
     from main import ensure_selfhost_w1_binary
     w1_bin = ensure_selfhost_w1_binary(str(ROOT))
     assert os.path.exists(w1_bin), f"W1 binary must exist at {w1_bin}"
@@ -87,17 +87,12 @@ def test_standalone_w1_execution_contracts():
         assert rc == 0, f"Standalone W1 failed on core fixture '{core_src}': {err}"
         assert os.path.exists(core_c), "W1 must emit C file for core fixture"
 
-        # 2. Generic fixture: must fail directly without crashing or hanging
+        # 2. Generic fixture: must compile directly without passing through W0.
         gen_c = os.path.join(td, "gen_out.c")
         gen_src = str(ROOT / "tests/runtime/generic_function.w")
         rc_gen, out_gen, err_gen = _run_cmd([w1_bin, gen_src, gen_c], cwd=str(ROOT))
-        assert rc_gen != 0, f"Standalone W1 should have rejected unsupported generic fixture '{gen_src}'"
-        assert "[W2013]" in err_gen, (
-            f"Expected W1 generic rejection diagnostic, got: {err_gen or out_gen}"
-        )
-        assert "generic specialization is not implemented" in err_gen, (
-            f"Expected the documented generic limitation diagnostic, got: {err_gen or out_gen}"
-        )
+        assert rc_gen == 0, f"Standalone W1 failed on generic fixture '{gen_src}': {err_gen or out_gen}"
+        assert os.path.exists(gen_c), "W1 must emit C for a valid generic fixture"
 
 
 def test_ci_matrix_generation_tooling():
@@ -145,9 +140,12 @@ def test_documentation_consistency():
     assert int(total_row.group(1)) == corpus_size, (
         f"Doc reports a corpus of {total_row.group(1)} but the real corpus is {corpus_size}; "
         f"rerun: python3 tools/ci_conformance.py --matrix")
-    assert "Milestone F01" in content, "Doc must reference the active F01 remediation milestone"
+    assert "F01 is complete" in content, "Doc must record F01 completion"
+    assert "114/114 (100.0%)" in content, "Doc must record measured W1 corpus parity"
     roadmap = (ROOT / "docs/ROADMAP.md").read_text()
-    assert "F01" in roadmap and "114" in roadmap, "Roadmap must define measurable F01 acceptance"
+    assert "F01" in roadmap and "114" in roadmap and "Cerrada" in roadmap, (
+        "Roadmap must record completed F01 acceptance"
+    )
     assert "Bootstrap Fixed-Point vs. Core Corpus Parity" in content, (
         "Doc must distinguish bootstrap fixed-point from core-corpus parity"
     )

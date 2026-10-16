@@ -1,12 +1,8 @@
 {
   "features": {
     "core": {},
-    "generics": {
-      "w1": "F01: W1 generic specialization and generic diagnostics are not implemented"
-    },
-    "checked_modules": {
-      "w1": "F01: W1 does not implement checked-module identity, reuse or imported generic specialization"
-    }
+    "generics": {},
+    "checked_modules": {}
   },
   "fixtures": {
     "tests/runtime/generic_domain_err.w": "generics",
