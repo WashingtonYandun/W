@@ -134,27 +134,20 @@ outside the tested programs.
 
 ---
 
-## 4. Runtime panics carry no source location in native builds
+## 4. Native runtime panic locations have a defined supported scope
 
 **What happens.**
 
-```
-$ ./w run div.w                # [W4001] div.w:3:14 - Division by zero
-$ ./w build div.w -o div && ./div
-                               # [W4001] RuntimeError: Division by zero
-```
+Native AST C99, HIR C99, and W1 builds now report exact source locations for the
+operational panic cases `W4001` (division/modulo by zero) and `W4002` (invalid list,
+string, or dictionary reads; invalid list index writes; and `list.pop()` on an empty
+list). The location is attached to the runtime operation itself, so nested expressions
+do not accidentally report the location of a later operand.
 
-**Why it is this way.** Panic sites are inline `fprintf`/`exit` calls in
-`runtime/w_runtime.h`, which has no notion of the source position of the operation that
-failed. Adding one means the emitter must pass a file/line pair into every potentially
-failing runtime entry (`w_div`, `w_mod`, `w_index_get`, `w_unwrap_optional`, ...).
-
-**Cost.** A native binary that panics tells you *what* failed but not *where*. Debuggable
-enough for a small tool, not for production.
-
-**Fix.** Thread a `(const char* file, int line)` pair, or a per-statement
-`w_set_position()` before each panicking operation, and have the panic helpers print it.
-Mechanical but broad.
+The runtime still falls back to `[Wxxxx] RuntimeError: ...` for calls made without a W
+source span and for other runtime failures, especially internal `W4003` memory/type
+invariant failures. This is deliberate: those failures are not reliably attributable to
+one user expression. The interpreter continues to report its existing source spans.
 
 ---
 
@@ -181,15 +174,18 @@ Without that environment variable the program exits 0 in silence.
 pause behaviour and complexity that the "deterministic refcounting" promise in SPEC §8
 rules out.
 
+**Policy.** `W_MEM_CHECK` is opt-in and checks logical runtime allocation counters during
+normal cleanup. It does not collect cycles, run on panic-driven `exit()`, or replace
+ASan/LSan byte-level checks in development and CI. Keeping it opt-in avoids changing
+stderr or exit status for production programs that intentionally retain process-lifetime
+objects.
+
 **Cost.** `Weak[C]` is the sanctioned escape hatch and works, but nothing forces its use
-and nothing reports the mistake unless the memory check is on.
+and a strong cycle is silent unless the memory check or an external leak detector is on.
 
-**Suggested next step (small, no language change).** Make the runtime report the leak
-count unconditionally at exit when the process is terminating normally, or enable the
-existing check by default in `w run` and `w build` during development. Detecting the cycle
-is already implemented; only the reporting policy is missing.
-
-*Open decision* (policy, not semantics).
+**Decision.** Keep `W_MEM_CHECK` explicitly opt-in in every execution mode. Runtime
+defaults must not change stderr or exit status based on build mode. See
+[ADR-012](adr/ADR-012-native-runtime-diagnostics-and-arc-cycle-policy.md).
 
 ---
 
