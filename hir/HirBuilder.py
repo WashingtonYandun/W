@@ -23,11 +23,11 @@ from hir.HirNodes import (
     HirFnDecl, HirStructDecl, HirEnumDecl, HirInterfaceDecl, HirClassDecl, HirModule,
     HirLet, HirBindTemp, HirAssign, HirWhile, HirForList, HirReturn, HirBreak, HirContinue, HirExprStmt,
     HirConstInt, HirConstFloat, HirConstBool, HirConstStr, HirConstNone, HirConstUnit,
-    HirLocalRef, HirThisRef, HirSuperRef, HirUnaryOp, HirBinaryOp, HirSequence,
+    HirLocalRef, HirThisRef, HirSuperRef, HirUnaryOp, HirBinaryOp, HirSequence, HirAssignment,
     HirConstructStruct, HirConstructEnum, HirConstructObject, HirConstructList, HirConstructDict, HirConstructTuple,
     HirDirectCall, HirBuiltinCall, HirMethodCall, HirFieldRead, HirIndexRead,
     HirTryPropagate, HirCoalesce, HirElseHandle, HirIf, HirMatch, HirMatchArm, HirRange,
-    SymbolId, FieldId, VariantId, CallTarget, DirectCallTarget, BuiltinCallTarget, VirtualCallTarget,
+    SymbolId, FieldId, VariantId, CallTarget, DirectCallTarget, BuiltinCallTarget, VirtualCallTarget, CollectionCallTarget,
     CowPath, CowProjection, CowFieldProjection, CowIndexProjection,
     HirPattern, HirWildcardPattern, HirBindingPattern, HirLiteralPattern, HirEnumPattern, HirErrorTypePattern, HirTuplePattern,
     HirCoerce
@@ -36,7 +36,7 @@ from hir.HirNodes import (
 
 BUILTIN_NAMES = {
     "weak", "upgrade", "print", "eprint", "len", "range", "ord", "chr", "slice", "str", "int", "float", "bool",
-    "bytes", "args", "exit", "enumerate", "dict_items", "read_file", "write_file",
+    "join_strings", "bytes", "args", "exit", "enumerate", "dict_items", "read_file", "write_file",
     "w_read_file", "w_write_file"
 }
 
@@ -191,6 +191,11 @@ class HirBuilder:
                 raise WError("HIR builder must use the checked module arena", file=self.file_path,
                              code="W9999", stage="hir-lowering")
             program = program.session.link(program)
+        from codegen.VirtualDispatch import virtual_method_slots
+        self.virtual_slots = virtual_method_slots(
+            (method.name, len(method.params))
+            for declaration in program.body if isinstance(declaration, (ClassDecl, InterfaceDecl))
+            for method in declaration.methods if method.name != "init")
         # Pre-scan top-level nominal types to distinguish constructors from calls
         for stmt in program.body:
             if isinstance(stmt, ClassDecl):
@@ -404,41 +409,10 @@ class HirBuilder:
         return HirBlock(stmts, self._span(block), tail_expr=tail_hir)
 
     def _lower_assignment_expression(self, expr: AssignmentExpr) -> HirExpr:
-        """Lowers `a = b` used where a value is required.
-
-        W defines assignment as a right-associative expression (`=` has a precedence level
-        in SPEC 5), so `a = b = 5`, `let x = (a = 1)` and `d = e = f = 9` are all legal,
-        but the HIR has no assignment expression node.
-
-        The lowering produces a complete, already ordered statement plan:
-
-            1. what the target expression needed,
-            2. what the value expression needed (including a nested assignment's plan),
-            3. the assignment that gives this target its new value,
-            4. a capture of the target, so an enclosing assignment cannot overwrite the
-               value before this expression reads it.
-
-        Reading the target instead of capturing it (which `w_assign` returning its argument
-        suggests) resurfaces the *old* value whenever the target is written again later in
-        the same chain, so the capture is required.
-
-        The sequence remains attached to this expression, so its effects run at the exact
-        point where the expression is evaluated, including conditional operands.
-        """
-        span = self._span(expr)
-        tgt_hir = self._lower_expr(expr.target)
-        val_hir = self._lower_expr(expr.value)
-        statements: List[HirStmt] = []
-        statements.append(HirAssign(tgt_hir, val_hir, span,
-                                    path=self._build_cow_path(tgt_hir)))
-
-        temp_name = f"__w_assign_value_{self.assign_temp_counter}"
-        self.assign_temp_counter += 1
-        tempid = self._declare_symbol(temp_name)
-        tid = self._get_expr_type_id(expr) or tgt_hir.type_id
-        statements.append(HirBindTemp(temp_name, tid, tgt_hir, span, symbol_id=tempid))
-        value = HirLocalRef(temp_name, tid, span, symbol_id=tempid)
-        return HirSequence(statements, value, tid, span)
+        target = self._lower_expr(expr.target)
+        value = self._lower_expr(expr.value)
+        return HirAssignment(target, value, self._get_expr_type_id(expr),
+                             self._span(expr), path=self._build_cow_path(target))
 
     def _lower_stmt(self, stmt: Stmt) -> HirStmt:
         span = self._span(stmt)
@@ -528,10 +502,10 @@ class HirBuilder:
         elif isinstance(expr, IdentExpr):
             if hasattr(expr, "function_reference"):
                 return HirFunctionRef(expr.function_reference, tid, span)
-            if expr.name in ("None", "none"):
+            if expr.name in ("None", "none") and not hasattr(expr, "resolved_symbol"):
                 return HirConstNone(tid or TYPE_NONE, span)
-            if expr.name in self.enum_variants:
-                en_name = getattr(expr, "resolved_enum_name", self.enum_variants[expr.name])
+            if hasattr(expr, "resolved_enum_name"):
+                en_name = expr.resolved_enum_name
                 return self._construct_enum(en_name, expr.name, 0, tid or self.interner.mk_enum(en_name), span)
             sym = self._resolve_symbol(expr.name)
             return HirLocalRef(expr.name, tid, span, symbol_id=sym)
@@ -592,14 +566,14 @@ class HirBuilder:
                 if c_name == "Err" and len(raw_args) == 1:
                     arg_hir = self._lower_expr(raw_args[0])
                     return self._construct_enum("Result", "Err", 1, tid or self.interner.mk_enum("Result"), span, arg_hir)
-                if c_name in self.enum_variants:
+                if c_name in self.enum_variants and not hasattr(expr.callee, "resolved_symbol"):
                     en_name = self.enum_variants[c_name]
                     args_hir = [self._lower_expr(a) for a in raw_args]
                     payload_hir = args_hir[0] if len(args_hir) == 1 else (HirConstructTuple([a.type_id for a in args_hir], args_hir, self.interner.mk_tuple(tuple(a.type_id for a in args_hir)), span) if len(args_hir) > 1 else None)
                     return self._construct_enum(en_name, c_name, 0, tid or self.interner.mk_enum(en_name), span, payload_hir)
 
             # Check if this call is a qualified Enum variant constructor: Enum.Variant(...)
-            if isinstance(expr.callee, MemberExpr) and isinstance(expr.callee.object, IdentExpr) and expr.callee.object.name in self.enums:
+            if isinstance(expr.callee, MemberExpr) and isinstance(expr.callee.object, IdentExpr) and expr.callee.object.name in self.enums and not hasattr(expr.callee.object, 'resolved_symbol'):
                 en_name = expr.callee.object.name
                 v_name = expr.callee.property
                 args_hir = [self._lower_expr(a) for a in raw_args]
@@ -618,7 +592,7 @@ class HirBuilder:
                 fields = [(field_names[i] if i < len(field_names) else f"f{i}", args_hir[i]) for i in range(len(args_hir))]
                 return HirConstructStruct(expr.callee.name, fields, tid or self.interner.mk_struct(expr.callee.name), span)
             # Check if builtin call
-            elif isinstance(expr.callee, IdentExpr) and expr.callee.name in BUILTIN_NAMES:
+            elif isinstance(expr.callee, IdentExpr) and expr.callee.name in BUILTIN_NAMES and getattr(getattr(expr.callee, 'resolved_symbol', None), 'kind', None) == 'builtin':
                 args_hir = [self._lower_expr(a) for a in raw_args]
                 target = BuiltinCallTarget(expr.callee.name)
                 return HirBuiltinCall(expr.callee.name, args_hir, tid, span, target=target)
@@ -634,16 +608,15 @@ class HirBuilder:
                 slot = None
                 target_cls = None
                 rec_entry = self.interner.get_entry(rec_hir.type_id)
-                if rec_entry and rec_entry.tag == "class":
-                    target_cls = rec_entry.data
-                    cdef = self.interner.class_defs.get(rec_entry.data)
-                    if cdef and expr.callee.property in cdef.methods:
-                        slot = list(cdef.methods.keys()).index(expr.callee.property)
-                elif rec_entry and rec_entry.tag == "interface":
-                    idef = self.interner.interface_defs.get(rec_entry.data)
-                    if idef and expr.callee.property in idef.methods:
-                        slot = list(idef.methods.keys()).index(expr.callee.property)
-                target = VirtualCallTarget(expr.callee.property, slot=slot, target_class=target_cls)
+                if rec_entry and rec_entry.tag in ("class", "interface"):
+                    if not isinstance(rec_hir, HirSuperRef):
+                        slot = self.virtual_slots.index((expr.callee.property, len(args_hir)))
+                    if rec_entry.tag == "class":
+                        target_cls = rec_entry.data
+                if rec_entry.tag in ("list", "dict"):
+                    target = CollectionCallTarget(rec_entry.tag, expr.callee.property)
+                else:
+                    target = VirtualCallTarget(expr.callee.property, slot=slot, target_class=target_cls)
                 return HirMethodCall(rec_hir, expr.callee.property, args_hir, tid, span, slot=slot, target=target)
             # Direct top-level function call
             elif isinstance(expr.callee, IdentExpr):
@@ -657,7 +630,7 @@ class HirBuilder:
                 return HirDirectCall(callee_name, args_hir, tid, span, decl_id=decl_id, target=target)
         elif isinstance(expr, MemberExpr):
             # Check if this is an Enum variant: EnumName.Variant
-            if isinstance(expr.object, IdentExpr) and expr.object.name in self.enums:
+            if isinstance(expr.object, IdentExpr) and expr.object.name in self.enums and not hasattr(expr.object, 'resolved_symbol'):
                 enum_name = expr.object.name
                 variant_name = expr.property
                 if enum_name == "Option" and variant_name in ("None", "none"):
@@ -692,9 +665,14 @@ class HirBuilder:
         elif isinstance(expr, ElseErrExpr):
             op_hir = self._lower_expr(expr.operand)
             h_block = getattr(expr, "handler", getattr(expr, "body", None))
-            handler_hir = self._lower_block(h_block)
             err_var = getattr(expr, "err_name", getattr(expr, "err_variable", None))
-            return HirElseHandle(op_hir, err_var, handler_hir, tid, span)
+            self._push_scope()
+            symbol = self._declare_symbol(err_var) if err_var else None
+            handler_hir = self._lower_block(h_block)
+            self._pop_scope()
+            result = HirElseHandle(op_hir, err_var, handler_hir, tid, span)
+            result.symbol_id = symbol
+            return result
         elif isinstance(expr, IfExpr):
             cond_hir = self._lower_expr(expr.condition)
             then_hir = self._lower_block(expr.then_branch)

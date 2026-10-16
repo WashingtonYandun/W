@@ -123,7 +123,7 @@ def generate_markdown_matrix(measured=None) -> str:
     rows.append("### Engine Definitions")
     rows.append("- **W0 Interpreter (`runtime/Interpreter.py`):** Canonical reference AST tree-walking interpreter.")
     rows.append("- **W0 AST C99 (`codegen/CCodeGen.py`):** Secondary C99 oracle for differential validation.")
-    rows.append("- **W0 Typed HIR (`hir/HirCCodeGen.py`):** Primary production compiler backend since Milestone C06.")
+    rows.append("- **W0 Typed HIR (`hir/HirCCodeGen.py`):** Primary compiler entry; verified MIR drives C99 emission (ADR-018).")
     rows.append("- **W1 Self-Hosted (`selfhost/w1.w`):** Native Stage-2 compiler binary compiled via 3-stage bootstrap fixed-point.")
     return "\n".join(rows)
 

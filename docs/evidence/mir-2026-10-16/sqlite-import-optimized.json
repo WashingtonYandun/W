@@ -1,0 +1,229 @@
+{
+  "rows": 10000,
+  "samples": 5,
+  "sanitize": false,
+  "platform": "darwin",
+  "compiler": "Apple clang version 21.0.0 (clang-2100.3.34.2)\nTarget: arm64-apple-darwin25.6.0\nThread model: posix\nInstalledDir: /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin\n",
+  "flags": [
+    "-std=c99",
+    "-O2",
+    "-g",
+    "-I<checkout>"
+  ],
+  "bootstrap_seconds": 19.52968970796792,
+  "memory_method": "one isolated child ru_maxrss; Darwin bytes, Linux KiB converted to bytes",
+  "engines": {
+    "c": {
+      "sqlite_version_number": 3051000,
+      "build_seconds": 0.14962412498425692,
+      "run_seconds": [
+        0.008599666005466133,
+        0.00818150001578033,
+        0.008560749993193895,
+        0.008114708005450666,
+        0.00809850002406165
+      ],
+      "median_run_seconds": 0.00818150001578033,
+      "peak_memory_bytes": [
+        2179072,
+        2179072,
+        2179072,
+        2179072,
+        2179072
+      ],
+      "median_peak_memory_bytes": 2179072,
+      "binary_bytes": 37120,
+      "input_bytes": 168900,
+      "persisted_rows": 10000,
+      "persisted_total": 42950172910000,
+      "live_adapter_resources": 0,
+      "failure_cases": [
+        "duplicate_batch",
+        "duplicate_persisted",
+        "bad_decimal",
+        "overflow",
+        "sum_overflow",
+        "header",
+        "columns",
+        "empty_value",
+        "nul",
+        "unicode_digit",
+        "no_rows",
+        "row_limit",
+        "open",
+        "missing_file"
+      ],
+      "link_command": [
+        "cc",
+        "-std=c99",
+        "-O2",
+        "-g",
+        "-I<checkout>",
+        "<checkout>/examples/ffi/sqlite/import_reference.c",
+        "/var/folders/1d/zj02r88x5m356mpg0yw6cqm00000gn/T/w-sqlite-import-4z1myrig/adapter.o",
+        "-lsqlite3",
+        "-o",
+        "/var/folders/1d/zj02r88x5m356mpg0yw6cqm00000gn/T/w-sqlite-import-4z1myrig/c"
+      ]
+    },
+    "ast": {
+      "sqlite_version_number": 3051000,
+      "build_seconds": 0.5740695419954136,
+      "run_seconds": [
+        0.07043104100739583,
+        0.07008083298569545,
+        0.07033329200930893,
+        0.07522275001974776,
+        0.07075837498996407
+      ],
+      "median_run_seconds": 0.07043104100739583,
+      "peak_memory_bytes": [
+        2342912,
+        2342912,
+        2326528,
+        2375680,
+        2375680
+      ],
+      "median_peak_memory_bytes": 2342912,
+      "binary_bytes": 100448,
+      "input_bytes": 168900,
+      "persisted_rows": 10000,
+      "persisted_total": 42950172910000,
+      "live_adapter_resources": 0,
+      "failure_cases": [
+        "duplicate_batch",
+        "duplicate_persisted",
+        "bad_decimal",
+        "overflow",
+        "sum_overflow",
+        "header",
+        "columns",
+        "empty_value",
+        "nul",
+        "unicode_digit",
+        "no_rows",
+        "row_limit",
+        "open",
+        "missing_file"
+      ],
+      "link_command": [
+        "cc",
+        "-std=c99",
+        "-O2",
+        "-g",
+        "-I<checkout>",
+        "/var/folders/1d/zj02r88x5m356mpg0yw6cqm00000gn/T/w-sqlite-import-4z1myrig/ast.c",
+        "/var/folders/1d/zj02r88x5m356mpg0yw6cqm00000gn/T/w-sqlite-import-4z1myrig/adapter.o",
+        "-lsqlite3",
+        "-o",
+        "/var/folders/1d/zj02r88x5m356mpg0yw6cqm00000gn/T/w-sqlite-import-4z1myrig/ast"
+      ]
+    },
+    "hir": {
+      "sqlite_version_number": 3051000,
+      "build_seconds": 0.7084216250223108,
+      "run_seconds": [
+        0.0626512499875389,
+        0.062410084006842226,
+        0.06269125000108033,
+        0.06276975001674145,
+        0.06260987505083904
+      ],
+      "median_run_seconds": 0.0626512499875389,
+      "peak_memory_bytes": [
+        2408448,
+        2408448,
+        2375680,
+        2408448,
+        2392064
+      ],
+      "median_peak_memory_bytes": 2408448,
+      "binary_bytes": 99568,
+      "input_bytes": 168900,
+      "persisted_rows": 10000,
+      "persisted_total": 42950172910000,
+      "live_adapter_resources": 0,
+      "failure_cases": [
+        "duplicate_batch",
+        "duplicate_persisted",
+        "bad_decimal",
+        "overflow",
+        "sum_overflow",
+        "header",
+        "columns",
+        "empty_value",
+        "nul",
+        "unicode_digit",
+        "no_rows",
+        "row_limit",
+        "open",
+        "missing_file"
+      ],
+      "link_command": [
+        "cc",
+        "-std=c99",
+        "-O2",
+        "-g",
+        "-I<checkout>",
+        "/var/folders/1d/zj02r88x5m356mpg0yw6cqm00000gn/T/w-sqlite-import-4z1myrig/hir.c",
+        "/var/folders/1d/zj02r88x5m356mpg0yw6cqm00000gn/T/w-sqlite-import-4z1myrig/adapter.o",
+        "-lsqlite3",
+        "-o",
+        "/var/folders/1d/zj02r88x5m356mpg0yw6cqm00000gn/T/w-sqlite-import-4z1myrig/hir"
+      ]
+    },
+    "w1": {
+      "sqlite_version_number": 3051000,
+      "build_seconds": 0.7595567500102334,
+      "run_seconds": [
+        0.07079504104331136,
+        0.07056549994740635,
+        0.07045004103565589,
+        0.07775887497700751,
+        0.07083729101577774
+      ],
+      "median_run_seconds": 0.07079504104331136,
+      "peak_memory_bytes": [
+        2375680,
+        2326528,
+        2342912,
+        2342912,
+        2326528
+      ],
+      "median_peak_memory_bytes": 2342912,
+      "binary_bytes": 100448,
+      "input_bytes": 168900,
+      "persisted_rows": 10000,
+      "persisted_total": 42950172910000,
+      "live_adapter_resources": 0,
+      "failure_cases": [
+        "duplicate_batch",
+        "duplicate_persisted",
+        "bad_decimal",
+        "overflow",
+        "sum_overflow",
+        "header",
+        "columns",
+        "empty_value",
+        "nul",
+        "unicode_digit",
+        "no_rows",
+        "row_limit",
+        "open",
+        "missing_file"
+      ],
+      "link_command": [
+        "cc",
+        "-std=c99",
+        "-O2",
+        "-g",
+        "-I<checkout>",
+        "/var/folders/1d/zj02r88x5m356mpg0yw6cqm00000gn/T/w-sqlite-import-4z1myrig/w1.c",
+        "/var/folders/1d/zj02r88x5m356mpg0yw6cqm00000gn/T/w-sqlite-import-4z1myrig/adapter.o",
+        "-lsqlite3",
+        "-o",
+        "/var/folders/1d/zj02r88x5m356mpg0yw6cqm00000gn/T/w-sqlite-import-4z1myrig/w1"
+      ]
+    }
+  }
+}

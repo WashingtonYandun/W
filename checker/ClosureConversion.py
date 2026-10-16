@@ -48,7 +48,14 @@ def convert_lambda(checker, expression):
         raise TypeError('Lambda signature must match exactly', file=checker.file,
                         line=expression.line, col=expression.col, code='W2001')
     captures = {}
-    body = copy.deepcopy(expression.body)
+    # Preserve binding identities while copying syntax for the generated function.
+    outer_symbols = {}
+    current = outer
+    while current is not None:
+        for symbol in current.symbols.values():
+            outer_symbols[id(symbol)] = symbol
+        current = current.parent
+    body = copy.deepcopy(expression.body, dict(outer_symbols))
     # The counter lives on the compilation session, not on the checker. A checker is
     # created per module, so a per-checker counter restarted at 1 in every module and
     # two importing modules each holding one lambda both produced `_W_Closure_1_Env`.
@@ -74,8 +81,8 @@ def convert_lambda(checker, expression):
             raise TypeError('Capture this through an explicit local binding', file=checker.file,
                             line=node.line, col=node.col, code='W2001')
         if isinstance(node, A.IdentExpr) and node.name not in bound:
-            symbol = outer.lookup_symbol(node.name)
-            if symbol and symbol.kind in ('var', 'param'):
+            symbol = getattr(node, 'resolved_symbol', None)
+            if symbol and id(symbol) in outer_symbols and symbol.kind in ('var', 'param'):
                 captures[node.name] = symbol.type
                 return A.MemberExpr(A.IdentExpr(environment_parameter, node.line, node.col),
                                     node.name, node.line, node.col)
@@ -91,6 +98,11 @@ def convert_lambda(checker, expression):
             node.iterable = rewrite(node.iterable, bound)
             names = pattern_names(node.pattern)
             node.body = rewrite(node.body, bound | names)
+            return node
+        if isinstance(node, A.ElseErrExpr):
+            node.operand = rewrite(node.operand, bound)
+            local = bound | ({node.err_name} if node.err_name else set())
+            node.handler = rewrite(node.handler, local)
             return node
         if isinstance(node, A.MatchArm):
             local = bound | pattern_names(node.pattern)
@@ -108,6 +120,8 @@ def convert_lambda(checker, expression):
     def pattern_names(pattern):
         if isinstance(pattern, A.IdentifierPattern):
             return {pattern.name}
+        if isinstance(pattern, A.ErrorTypePattern):
+            return pattern_names(pattern.binding)
         names = set()
         for field in ('elements', 'args'):
             for child in getattr(pattern, field, []):

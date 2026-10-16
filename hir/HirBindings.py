@@ -19,6 +19,8 @@ class HirBindings:
             self.interner.to_wtype(source), self.interner.to_wtype(target))
 
     def check(self, module):
+        from codegen.VirtualDispatch import hir_virtual_method_slots
+        self.virtual_slots = hir_virtual_method_slots(module, self.interner)
         self.classes = {class_.name: class_ for class_ in module.classes}
         self.structs = {struct.name: struct for struct in module.structs}
         self.enums = {enum.name: enum for enum in module.enums}
@@ -44,34 +46,24 @@ class HirBindings:
                 scope[parameter.symbol_id.id] = parameter.type_id
         try:
             self.visit(function.body, scope)
-            if (function.body.tail_expr is not None
-                    and not self.always_returns(function.body.tail_expr)
-                    and not self.compatible(function.body.tail_expr.type_id, function.return_type_id)):
-                self.verifier._fail(function, 'Function tail type does not match return type')
+            from common.ControlFlow import exits, NORMAL
+            if NORMAL in exits(function.body, self.match_is_exhaustive):
+                tail_type = function.body.tail_expr.type_id if function.body.tail_expr is not None else TYPE_UNIT
+                if not self.compatible(tail_type, function.return_type_id):
+                    self.verifier._fail(function, 'Function has an invalid normal return path')
         finally:
             self.return_type = previous
 
+    def match_is_exhaustive(self, node):
+        from checker.PatternCoverage import pattern_matrix_exhaustive
+        subject = self.interner.to_wtype(node.subject.type_id)
+        rows = [[arm.pattern] for arm in node.arms if arm.guard is None]
+        return pattern_matrix_exhaustive([subject], rows, self.interner)
+
     def always_returns(self, node):
-        """A terminating tail has no value to compare with the function result."""
-        if isinstance(node, H.HirReturn):
-            return True
-        if isinstance(node, H.HirExprStmt):
-            return self.always_returns(node.expr)
-        if isinstance(node, H.HirBlock):
-            return any(self.always_returns(statement) for statement in node.statements) or self.always_returns(node.tail_expr)
-        if isinstance(node, H.HirIf):
-            blocks = [node.then_block] + [block for _, block in node.elifs]
-            return node.else_block is not None and all(self.always_returns(block) for block in blocks + [node.else_block])
-        if isinstance(node, H.HirMatch):
-            from checker.TypeChecker import TypeChecker
-            subject_type = self.interner.to_wtype(node.subject.type_id)
-            rows = [[arm.pattern] for arm in node.arms if arm.guard is None]
-            checker = TypeChecker()
-            # HIR pattern TypeIds belong to this module's arena.
-            checker.interner = self.interner
-            exhaustive = checker._pattern_matrix_exhaustive([subject_type], rows)
-            return bool(node.arms) and exhaustive and all(self.always_returns(arm.body) for arm in node.arms)
-        return False
+        from common.ControlFlow import exits, NORMAL, RETURN
+        outcomes = exits(node, self.match_is_exhaustive)
+        return NORMAL not in outcomes and outcomes <= {RETURN}
 
     def bind(self, pattern, scope, type_id=None):
         if pattern is None:
@@ -264,6 +256,22 @@ class HirBindings:
                 self.verifier._fail(node, 'Unresolved or mistyped HIR field')
         if isinstance(node, H.HirMethodCall):
             entry = self.interner.get_entry(node.receiver.type_id)
+            if entry.tag in ('list', 'dict'):
+                if (not isinstance(node.target, H.CollectionCallTarget)
+                        or node.target.receiver_kind != entry.tag
+                        or node.target.method_name != node.method_name):
+                    self.verifier._fail(node, 'Collection intrinsic target does not match receiver')
+            elif (not isinstance(node.target, H.VirtualCallTarget)
+                    or node.target.method_name != node.method_name):
+                self.verifier._fail(node, 'Virtual target does not match method receiver')
+            if entry.tag in ('class', 'interface'):
+                slots = self.virtual_slots
+                key = (node.method_name, len(node.args))
+                expected_class = entry.data if entry.tag == 'class' else None
+                expected_slot = None if isinstance(node.receiver, H.HirSuperRef) else (slots.index(key) if key in slots else -1)
+                if (node.target.slot != expected_slot
+                        or node.slot != node.target.slot or node.target.target_class != expected_class):
+                    self.verifier._fail(node, 'Virtual slot does not match resolved signature')
             if entry.tag == 'class':
                 method = self.class_method(entry.data, node.method_name)
                 if method is None:
@@ -326,7 +334,9 @@ class HirBindings:
                 inner[node.err_var] = entry.data[1] if entry.tag == 'result' else None
             self.visit(node.handler, inner)
             return
-        if isinstance(node, H.HirAssign) and not self.compatible(node.value.type_id, node.target.type_id):
+        if isinstance(node, H.HirAssignment) and node.type_id != node.target.type_id:
+            self.verifier._fail(node, 'Assignment result type does not match destination')
+        if isinstance(node, (H.HirAssign, H.HirAssignment)) and not self.compatible(node.value.type_id, node.target.type_id):
             self.verifier._fail(node, 'Assigned value type does not match target type')
         if isinstance(node, H.HirNode):
             for child in vars(node).values():

@@ -1,0 +1,9 @@
+# ERROR: W2003
+class C {
+    public x: int
+    fn init(v: int) {
+        match v { 1 => { this.x = 9 } }
+        print("constructed")
+    }
+}
+print(C(2).x)

@@ -236,6 +236,18 @@ W guarantees **strict left-to-right ($L \rightarrow R$) evaluation order** acros
 * **Assignments:** In indexed or member assignments (`a()[b()] = c()` or `obj().field = val()`), the target container, index/member, and right-hand value are evaluated deterministically.
 * **Composite Literals:** Elements of `list`, `tuple`, `dict`, and fields of `struct` literals are evaluated in lexical left-to-right appearance order.
 
+Las asignaciones producen el valor asignado, incluso dentro de otra expresión. Los
+índices y los receptores de clase del destino se evalúan una vez, antes del valor de la
+derecha. El slot mutable se resuelve después: no se conserva un puntero a un elemento
+que el RHS puede invalidar al hacer crecer una lista. Un receptor de clase conserva su
+identidad aunque el RHS reasigne la variable que lo nombraba. Los operandos y argumentos
+ya evaluados conservan snapshots de los tipos por valor; las clases conservan identidad.
+Los campos de un literal se evalúan en orden escrito y su layout usa el orden de declaración.
+
+Un `match` parcial usado como sentencia conserva una salida normal sin coincidencia.
+Esa salida participa en las comprobaciones de retorno e inicialización de constructores.
+Los guards no garantizan cobertura. HIR verifica también las funciones sin expresión final.
+
 ### 5.2 Equality Semantics (`==` and `!=`)
 Equality is partitioned cleanly along the value vs reference boundary:
 * **Primitives & Enums (`int`, `float`, `bool`, `str`, `unit`, `none`, `enum`):** Value equality (`"abc" == "abc"` is `true`).
@@ -291,6 +303,10 @@ Equality is partitioned cleanly along the value vs reference boundary:
       print(i)
   }
   ```
+  Los límites se evalúan una vez, de izquierda a derecha. Los bucles directos usan
+  contadores sin asignar una lista; un rango usado como valor sigue siendo `list[int]`.
+  Se conserva el límite de 100 millones de elementos y el error de overflow cuando el
+  extremo inclusivo es `INT64_MAX`, incluso si el cuerpo sale inmediatamente.
 * **While loops:**
   ```w
   while condition {
@@ -503,10 +519,16 @@ fn compile(source: str) {
 | `ord(s)` | `(str) -> int` | Returns the Unicode code point of the first character in `s` |
 | `chr(c)` | `(int) -> str` | Returns a single-code-point UTF-8 string for code point `c` |
 | `slice(x, a, b)` | `(str \| list[T], int, int) -> str \| list[T]` | Returns code-point substring or sub-list in `[a, b)`. Preserves the container kind; out-of-range bounds are clamped and an empty result is returned when `b <= a` |
+| `join_strings(parts, separator)` | `(list[str], str) -> str` | Concatena con una asignación del resultado, preservando NUL; coste O(bytes de salida + partes) |
 | `bytes(s)` | `(str) -> list[int]` | Returns raw UTF-8 unsigned bytes (`0..=255`) of `s` |
 | `args()` | `() -> list[str]` | Returns command-line arguments passed to the program |
 | `read_file(p)` | `(str) -> str ! IoError` | Reads a UTF-8 file from disk or returns `IoError` |
 | `write_file(p, c)` | `(str, str) -> unit ! IoError` | Writes UTF-8 content `c` to path `p` or returns `IoError` |
+
+`read_file` conserva los saltos LF/CRLF y los NUL del contenido UTF-8. Las conversiones
+numéricas de bool producen 0/1. `float(str)` acepta decimales ASCII, signo, exponente,
+espacios ASCII externos y `nan`, `inf`, `infinity` sin distinguir mayúsculas. Rechaza
+cifras Unicode, hexadecimal, sufijos y NUL con `W4003`; no depende de la gramática de Python.
 
 ### 11.2 Built-in Collection Methods
 * **`list[T]`:**
@@ -605,7 +627,7 @@ W distinguishes between two distinct compiler guarantees:
 * **Bootstrap Fixed-Point:** A 3-stage bootstrap self-compilation of `selfhost/w1.w` produces bit-identical C code:
   $$\text{SHA256}(c_0) == \text{SHA256}(c_1) == \text{SHA256}(c_2)$$
   This guarantees determinism and convergence of the self-hosted compiler subset.
-* **Feature Parity:** Documented in `docs/ENGINE_PARITY_MATRIX.md` and measured rather than declared. The release profile passes all 130 fixtures on all four engines, with no unsupported cases. This is corpus evidence, not a claim of universal W0/W1 equivalence; see the feature breakdown and limits in the parity matrix.
+* **Feature Parity:** Documented in `docs/ENGINE_PARITY_MATRIX.md` and measured rather than declared. The release profile passes all 161 fixtures on all four engines, with no unsupported cases. This is corpus evidence, not a claim of universal W0/W1 equivalence; see the feature breakdown and limits in the parity matrix.
 
 ### 14.3 Code Generation Determinism
 Given identical source text and compiler flags:

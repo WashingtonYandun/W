@@ -50,6 +50,7 @@ static int execute(PilotDatabase *handle, const char *sql) {
 
 int32_t pilot_begin(void *handle) { return execute(handle, "BEGIN"); }
 int32_t pilot_commit(void *handle) { return execute(handle, "COMMIT"); }
+int32_t pilot_rollback(void *handle) { return execute(handle, "ROLLBACK"); }
 
 int32_t pilot_insert(void *pointer, int64_t id, int64_t value) {
     PilotDatabase *handle = pointer;

@@ -138,28 +138,9 @@ class CCodeGen:
             return f"w_fn_{prefix}__{name}"
         return f"w_fn_{name}"
 
-    def escape_c_str(self, s: str) -> str:
-        out: List[str] = ['"']
-        for ch in s:
-            code = ord(ch)
-            if code == 34:
-                out.append('\\"')
-            elif code == 92:
-                out.append("\\\\")
-            elif code == 10:
-                out.append("\\n")
-            elif code == 13:
-                out.append("\\r")
-            elif code == 9:
-                out.append("\\t")
-            elif code == 0:
-                out.append("\\000")
-            elif code == 63:
-                out.append("\\077")
-            else:
-                out.append(ch)
-        out.append('"')
-        return "".join(out)
+    def escape_c_str(self, value: str) -> str:
+        from codegen.CStrings import quote
+        return quote(value)
 
     def generate(self, program: Program) -> str:
         if hasattr(program, "session"):
@@ -508,7 +489,7 @@ class CCodeGen:
             return
 
         if isinstance(stmt, LetDecl):
-            val = self.emit_expr(stmt.initializer, out)
+            val = self.emit_value(stmt.initializer, out)
             c_name = f"v_{stmt.name}"
             self._declare_owned_var(c_name, self._own_expr(val), out)
             return
@@ -567,6 +548,11 @@ class CCodeGen:
             return
 
         if isinstance(stmt, ForStmt):
+            if isinstance(stmt.iterable, RangeExpr):
+                from codegen.RangeLoop import emit_range_loop
+                emit_range_loop(self, stmt.iterable.start, stmt.iterable.end, stmt.iterable.inclusive,
+                                stmt.body, lambda item, lines: self._emit_pattern_bindings(stmt.pattern, item, lines), out)
+                return
             out.append("{")
             self._push_scope("block")
             for_outer: List[str] = []
@@ -830,10 +816,10 @@ class CCodeGen:
         if isinstance(expr, IdentExpr):
             if hasattr(expr, "function_reference"):
                 return self.function_value(expr.function_reference, len(expr.inferred_type.params), out)
-            if expr.name in ("None", "none"):
+            if expr.name in ("None", "none") and not hasattr(expr, "resolved_symbol"):
                 return "w_none()"
-            if expr.name in self.enum_variants and not self._is_local_var(f"v_{expr.name}"):
-                en_name = getattr(expr, "resolved_enum_name", self.enum_variants[expr.name])
+            if hasattr(expr, "resolved_enum_name"):
+                en_name = expr.resolved_enum_name
                 return f'w_enum("{en_name}", "{expr.name}")'
             return self.c_var(expr.name)
 
@@ -982,18 +968,14 @@ class CCodeGen:
                 c_target = self.c_var(expr.target.name)
                 out.append(f"w_assign(&{c_target}, w_move(&{rhs_hold}));")
                 return c_target
-            out.append(f"w_assign({lref}, w_move(&{rhs_hold}));")
-            return "w_unit()"
+            return self._bind_call(f"w_clone(w_assign({lref}, w_move(&{rhs_hold})))", out)
 
         if isinstance(expr, MemberExpr):
             if isinstance(expr.object, IdentExpr):
-                if expr.object.name in self.enum_names:
+                if expr.object.name in self.enum_names and not hasattr(expr.object, 'resolved_symbol'):
                     if expr.object.name == "Option" and expr.property in ("None", "none"):
                         return "w_none()"
                     return f'w_enum("{self._enum_name(expr, expr.object.name)}", "{expr.property}")'
-                if expr.property in self.enum_variants:
-                    en_name = self.enum_variants[expr.property]
-                    return f'w_enum("{en_name}", "{expr.property}")'
                 if f"v_{expr.object.name}_{expr.property}" in self.global_vars:
                     return f"v_{expr.object.name}_{expr.property}"
             obj_val = self.emit_expr(expr.object, out)
@@ -1020,7 +1002,7 @@ class CCodeGen:
                 if fn_name == "Err" and len(arg_vals) == 1:
                     return self._bind_call(f"w_err({self._own_expr(arg_vals[0])})", out)
 
-                if fn_name in self.enum_variants and not self._is_local_var(f"v_{fn_name}"):
+                if fn_name in self.enum_variants and not hasattr(expr.callee, 'resolved_symbol'):
                     en_name = self.enum_variants[fn_name]
                     if len(arg_vals) == 0:
                         return f'w_enum("{en_name}", "{fn_name}")'
@@ -1032,6 +1014,9 @@ class CCodeGen:
                         out.append(f"WVal _elems_{tup_tmp}[{len(arg_vals)}] = {{ {elems_c} }};")
                         out.append(f"WVal {tup_tmp} = w_make_tuple({len(arg_vals)}, _elems_{tup_tmp});")
                         return self._bind_call(f'w_enum_payload("{en_name}", "{fn_name}", {self._own_expr(tup_tmp)})', out)
+
+                if fn_name == "join_strings":
+                    return self._bind_call(f"w_builtin_join_strings({arg_vals[0]}, {arg_vals[1]})", out)
 
                 if fn_name == "print":
                     if not arg_vals:
@@ -1090,7 +1075,8 @@ class CCodeGen:
                 obj_expr = expr.callee.object
                 method = expr.callee.property
 
-                if isinstance(obj_expr, IdentExpr) and obj_expr.name in self.enum_names:
+                if (isinstance(obj_expr, IdentExpr) and obj_expr.name in self.enum_names
+                        and not hasattr(obj_expr, "resolved_symbol")):
                     en_name = obj_expr.name
                     arg_vals = [self.emit_value(a, out) for a in expr.args]
                     if (en_name == "Result" or en_name.startswith("Result__")) and method == "Ok" and len(arg_vals) == 1:
@@ -1132,15 +1118,15 @@ class CCodeGen:
                 from checker.WType import ListType, DictType
                 receiver_type = getattr(obj_expr, "inferred_type", None)
                 if method == "append" and isinstance(receiver_type, ListType):
-                    lref = self.emit_lvalue_ref(obj_expr, out)
+                    lref = self.prepare_assignment_ref(obj_expr, out)
                     arg_v = self.emit_value(expr.args[0], out)
                     return self._bind_call(f"w_list_append({lref}, {arg_v})", out)
                 if method == "pop" and isinstance(receiver_type, ListType):
-                    lref = self.emit_lvalue_ref(obj_expr, out)
+                    lref = self.prepare_assignment_ref(obj_expr, out)
                     call = self._source_call("w_list_pop_at", lref, expr)
                     return self._bind_call(call, out)
                 if method == "clear" and isinstance(receiver_type, ListType):
-                    lref = self.emit_lvalue_ref(obj_expr, out)
+                    lref = self.prepare_assignment_ref(obj_expr, out)
                     return self._bind_call(f"w_list_clear({lref})", out)
                 if method == "get" and isinstance(receiver_type, DictType):
                     obj_v = self.emit_value(obj_expr, out)
@@ -1190,8 +1176,10 @@ class CCodeGen:
         if isinstance(expr, StructInitExpr):
             if not expr.fields:
                 return self._bind_call(f'w_make_struct("{expr.struct_name}", 0, NULL, NULL)', out)
-            f_names = [f'"{f.name}"' for f in expr.fields]
-            f_vals = [self.emit_value(f.value, out) for f in expr.fields]
+            evaluated = {field.name: self.emit_value(field.value, out) for field in expr.fields}
+            field_order = list(expr.inferred_type.fields)
+            f_names = [f'"{name}"' for name in field_order]
+            f_vals = [evaluated[name] for name in field_order]
             k_tmp = self.new_aux("_k")
             v_tmp = self.new_aux("_v")
             out.append(f"const char* {k_tmp}[{len(f_names)}] = {{ {', '.join(f_names)} }};")

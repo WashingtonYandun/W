@@ -1,0 +1,2 @@
+class Buffer { public fn append(value: int) -> int { return value + 1 } }
+print(Buffer().append(41))
