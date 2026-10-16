@@ -6,13 +6,14 @@ Invariants verified:
 1. Every fixture in the corpus is classified in tests/engine_profiles.json without stale entries.
 2. Every unsupported engine feature has an explicit, non-empty tracking reason pointing to its milestone.
 3. Standalone W1 binary executes directly on core fixtures without W0 pre-filtering.
-4. Standalone W1 binary rejects unsupported generic features directly with non-zero exit code.
+4. Standalone W1 binary rejects unsupported generic features with the documented semantic diagnostic.
 5. ci_conformance.py --matrix generates a valid Markdown parity matrix matching current counts.
 6. docs/ENGINE_PARITY_MATRIX.md matches the actual engine status reported by the harness.
 """
 
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -58,17 +59,21 @@ def test_unsupported_reasons_and_milestones():
     core = features.get("core", {})
     assert not core, f"Core feature must have no engine limitations, found: {core}"
 
-    # All non-empty engine limitations must reference a tracking milestone (e.g. D02)
+    roadmap_text = (ROOT / "docs/ROADMAP.md").read_text()
+    roadmap_milestones = set(re.findall(r"\b[A-Z]\d{2}\b", roadmap_text))
+
+    # Every limitation must point to a milestone that exists in the active roadmap.
     for feat_name, limitations in features.items():
         for engine, reason in limitations.items():
             assert reason, f"Feature '{feat_name}' engine '{engine}' has empty unsupported reason"
-            assert any(tag in reason for tag in ("D02", "D03", "D04", "D05", "D06")), (
+            reason_milestones = set(re.findall(r"\b[A-Z]\d{2}\b", reason))
+            assert roadmap_milestones.intersection(reason_milestones), (
                 f"Feature '{feat_name}' engine '{engine}' reason must reference roadmap milestone: {reason}"
             )
 
 
 def test_standalone_w1_execution_contracts():
-    """Verify standalone W1 execution on core (success) vs generic (clean rejection)."""
+    """Verify standalone W1 core success and explicit generic rejection."""
     print("  [TEST] Standalone W1 execution contracts (core success vs generic rejection)...")
     from main import ensure_selfhost_w1_binary
     w1_bin = ensure_selfhost_w1_binary(str(ROOT))
@@ -88,7 +93,10 @@ def test_standalone_w1_execution_contracts():
         rc_gen, out_gen, err_gen = _run_cmd([w1_bin, gen_src, gen_c], cwd=str(ROOT))
         assert rc_gen != 0, f"Standalone W1 should have rejected unsupported generic fixture '{gen_src}'"
         assert "[W2013]" in err_gen, (
-            f"Expected parser rejection on generic syntax from standalone W1, got: {err_gen or out_gen}"
+            f"Expected W1 generic rejection diagnostic, got: {err_gen or out_gen}"
+        )
+        assert "generic specialization is not implemented" in err_gen, (
+            f"Expected the documented generic limitation diagnostic, got: {err_gen or out_gen}"
         )
 
 
@@ -137,9 +145,11 @@ def test_documentation_consistency():
     assert int(total_row.group(1)) == corpus_size, (
         f"Doc reports a corpus of {total_row.group(1)} but the real corpus is {corpus_size}; "
         f"rerun: python3 tools/ci_conformance.py --matrix")
-    assert "Milestone D02" in content, "Doc must reference D02 remediation milestone"
-    assert "Bootstrap Fixed-Point vs. Full Language Parity" in content, (
-        "Doc must clearly contrast bootstrap fixed-point with full language parity"
+    assert "Milestone F01" in content, "Doc must reference the active F01 remediation milestone"
+    roadmap = (ROOT / "docs/ROADMAP.md").read_text()
+    assert "F01" in roadmap and "114" in roadmap, "Roadmap must define measurable F01 acceptance"
+    assert "Bootstrap Fixed-Point vs. Core Corpus Parity" in content, (
+        "Doc must distinguish bootstrap fixed-point from core-corpus parity"
     )
 
     expansion = (ROOT / "docs/EXPANSION.md").read_text()

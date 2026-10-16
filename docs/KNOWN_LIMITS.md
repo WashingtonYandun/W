@@ -112,7 +112,7 @@ but it does **not** implement:
 | Generic declarations, specialization | `W2013 W1 generic declarations are not implemented` |
 | Enum payload layout | `W2013 W1 enum payload layout is not implemented` |
 | Pattern matching on `Option` / `Result` | `W0001` / `W2001`, see below |
-| W0-equivalent checked-module sessions and imported generic specialization | declared unsupported under D02 |
+| W0-equivalent checked-module sessions and imported generic specialization | declared unsupported under F01 |
 
 Basic imports are supported: W1 expands the module graph into a token stream, qualifies
 module names, enforces `pub` exports, and detects cycles (`selfhost/src/03_modules.w`).
@@ -143,7 +143,7 @@ because a bug in the semantics is reproduced identically at every stage.
 **State.** The public core corpus passes on W1. The 15 generic fixtures and one checked-
 module fixture are declared unsupported in `tests/engine_profiles.json`; the `release`
 profile of `tools/ci_conformance.py` deliberately fails while those exclusions exist.
-Closing them is milestone D02.
+Closing the 16 corpus exclusions is milestone F01; see [ROADMAP.md](ROADMAP.md).
 
 ---
 
