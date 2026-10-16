@@ -61,7 +61,7 @@ def test_unsupported_reasons_and_milestones():
 
     # Active milestone planning is maintained in the project Brain, not in public docs.
     # Keep the engine profile self-contained and require actionable identifiers.
-    milestone_pattern = re.compile(r"\\b[A-Z]\\d{2}\\b")
+    milestone_pattern = re.compile(r"\b[A-Z]\d{2}\b")
     for feat_name, limitations in features.items():
         for engine, reason in limitations.items():
             assert reason, f"Feature '{feat_name}' engine '{engine}' has empty unsupported reason"
