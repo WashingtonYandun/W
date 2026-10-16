@@ -103,7 +103,9 @@ def test_ci_matrix_generation_tooling():
     assert "# W Language Engine Feature Parity Matrix" in out, "Output must contain matrix header"
     assert "| **`core`** |" in out, "Output must contain core row"
     assert "| **`generics`** |" in out, "Output must contain generics row"
-    assert "| **`error_unions`** | 7 |" in out, "Output must report all seven F03 fixtures"
+    profile = json.loads((ROOT / 'tests/engine_profiles.json').read_text())
+    error_union_count = sum(feature == 'error_unions' for feature in profile['fixtures'].values())
+    assert f"| **`error_unions`** | {error_union_count} |" in out, "Output must report all F03 fixtures"
     assert "| **Total Verified** |" in out, "Output must contain total row"
     # The matrix must report measured per-engine numbers, not a restatement of the
     # declaration file. Previously this test asserted the literal strings "91/91" and
@@ -153,8 +155,12 @@ def test_documentation_consistency():
     assert error_union_row and int(error_union_row.group(1)) == len(error_union_fixtures), (
         "Parity matrix error-union count must match fixture classifications"
     )
-    assert len(error_union_fixtures) == 7, "F03 must classify its runtime case and six negative cases"
+    expected_error_union_paths = list((ROOT / 'tests/runtime').glob('error_union_*.w'))
+    expected_error_union_paths += list((ROOT / 'tests/types/invalid').glob('error_union_*.w'))
+    expected_error_union_fixtures = {str(path.relative_to(ROOT)) for path in expected_error_union_paths}
+    assert set(error_union_fixtures) == expected_error_union_fixtures, "F03 fixtures must be classified together"
     roadmap = (ROOT / "docs/ROADMAP.md").read_text()
+    assert f"**{corpus_size} fixtures**" in roadmap, "Roadmap must distinguish the current corpus from historical milestones"
     assert "F01" in roadmap and "114" in roadmap and "Cerrada" in roadmap, (
         "Roadmap must record completed F01 acceptance"
     )

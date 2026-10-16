@@ -25,7 +25,7 @@ from hir.HirNodes import (
     HirTryPropagate, HirCoalesce, HirElseHandle, HirIf, HirMatch, HirMatchArm, HirRange, HirSuperRef,
     SymbolId, FieldId, VariantId, CallTarget, DirectCallTarget, BuiltinCallTarget, VirtualCallTarget,
     CowProjection, CowFieldProjection, CowIndexProjection, CowPath,
-    HirPattern, HirWildcardPattern, HirBindingPattern, HirLiteralPattern, HirEnumPattern, HirTuplePattern,
+    HirPattern, HirWildcardPattern, HirBindingPattern, HirLiteralPattern, HirEnumPattern, HirErrorTypePattern, HirTuplePattern,
     HirCoerce
 )
 from common.Telemetry import CodegenTelemetry
@@ -1170,11 +1170,10 @@ class HirCCodeGen:
             for idx, elem_pat in enumerate(pattern.elements):
                 sub_expr = f"({val_expr}).as.tuple->items[{idx}]"
                 self._emit_pattern_bindings(elem_pat, sub_expr, out)
+        elif isinstance(pattern, HirErrorTypePattern):
+            self._emit_pattern_bindings(pattern.binding, val_expr, out)
         elif isinstance(pattern, HirEnumPattern):
-            if pattern.error_type_id is not None:
-                if pattern.args:
-                    self._emit_pattern_bindings(pattern.args[0], val_expr, out)
-            elif pattern.variant in ("None", "none") and (pattern.enum_name is None or pattern.enum_name.split("__", 1)[0] == "Option"):
+            if pattern.variant in ("None", "none") and (pattern.enum_name is None or pattern.enum_name.split("__", 1)[0] == "Option"):
                 pass
             elif pattern.variant == "Some" and (pattern.enum_name is None or pattern.enum_name.split("__", 1)[0] == "Option"):
                 if pattern.args:
@@ -1213,12 +1212,12 @@ class HirCCodeGen:
         if isinstance(pattern, HirLiteralPattern):
             lit_v = self.emit_expr(pattern.expr, out)
             return f"w_eq({val_expr}, {lit_v})"
+        if isinstance(pattern, HirErrorTypePattern):
+            entry = self.interner.get_entry(pattern.error_type_id)
+            kind = entry.data if entry.tag == "primitive" else entry.tag
+            name = entry.data if entry.tag in ("struct", "enum") else kind
+            return f"w_value_is_error_type({val_expr}, {self.escape_c_str(kind)}, {self.escape_c_str(name)})"
         if isinstance(pattern, HirEnumPattern):
-            if pattern.error_type_id is not None:
-                entry = self.interner.get_entry(pattern.error_type_id)
-                kind = entry.data if entry.tag == "primitive" else entry.tag
-                name = entry.data if entry.tag in ("struct", "enum") else kind
-                return f"w_value_is_error_type({val_expr}, {self.escape_c_str(kind)}, {self.escape_c_str(name)})"
             if pattern.variant in ("None", "none") and (pattern.enum_name is None or pattern.enum_name.split("__", 1)[0] == "Option"):
                 return f"(({val_expr}).tag == W_NONE || (({val_expr}).tag == W_ENUM && strcmp(({val_expr}).as.en.enum_name, \"Option\") == 0 && strcmp(({val_expr}).as.en.variant, \"None\") == 0))"
             if pattern.variant == "Some" and (pattern.enum_name is None or pattern.enum_name.split("__", 1)[0] == "Option"):

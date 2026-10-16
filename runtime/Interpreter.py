@@ -10,7 +10,7 @@ from node.NodeType import (
     ThisExpr, SuperExpr, NewExpr,
     UnaryExpr, BinaryExpr, CoalesceExpr, RangeExpr, PostfixTryExpr, ElseErrExpr, CallExpr,
     MemberExpr, IndexExpr, AssignmentExpr, StructInitExpr, ListExpr, DictExpr, TupleExpr,
-    IfExpr, MatchExpr, Pattern, IdentifierPattern, TuplePattern, EnumPattern,
+    IfExpr, MatchExpr, Pattern, IdentifierPattern, TuplePattern, EnumPattern, ErrorTypePattern,
     LiteralPattern, WildcardPattern,
     GenericType, NamedType, OptionalType as AstOptionalType, ListType as AstListType, DictType as AstDictType
 )
@@ -847,13 +847,12 @@ class Interpreter:
             lit_val = self.eval_expr(pattern.literal, self.global_env)
             return lit_val == value, {}
 
+        if isinstance(pattern, ErrorTypePattern):
+            if not self._matches_error_type(value, pattern.matched_type):
+                return False, {}
+            return self.match_pattern(pattern.binding, value)
+
         if isinstance(pattern, EnumPattern):
-            if getattr(pattern, "error_type_match", None) is not None:
-                if not self._matches_error_type(value, pattern.error_type_match):
-                    return False, {}
-                if not pattern.args:
-                    return True, {}
-                return self.match_pattern(pattern.args[0], value)
             # 1. Option cases: None and Some
             if pattern.variant in ("None", "none") and (pattern.enum_name is None or pattern.enum_name.split("__", 1)[0] == "Option"):
                 if isinstance(value, WNone) or (

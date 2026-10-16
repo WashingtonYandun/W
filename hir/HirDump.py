@@ -16,7 +16,7 @@ from hir.HirNodes import (
     HirConstructStruct, HirConstructEnum, HirConstructObject, HirConstructList, HirConstructDict, HirConstructTuple,
     HirFunctionRef, HirClosure, HirIndirectCall, HirDirectCall, HirBuiltinCall, HirMethodCall, HirFieldRead, HirIndexRead,
     HirCoerce, HirTryPropagate, HirCoalesce, HirElseHandle, HirRange, HirIf, HirMatch, HirMatchArm,
-    HirPattern, HirWildcardPattern, HirBindingPattern, HirLiteralPattern, HirEnumPattern, HirTuplePattern
+    HirPattern, HirWildcardPattern, HirBindingPattern, HirLiteralPattern, HirEnumPattern, HirErrorTypePattern, HirTuplePattern
 )
 
 
@@ -137,6 +137,9 @@ class HirDumper:
             return f"{mut}{pat.name}[{pat.symbol_id}]:type_id={pat.type_id}"
         if isinstance(pat, HirLiteralPattern):
             return f"lit({pat.value!r}, kind={pat.literal_kind}, type_id={pat.type_id})"
+        if isinstance(pat, HirErrorTypePattern):
+            return (f"error_type({pat.type_name}, type_id={pat.error_type_id}, "
+                    f"{self.format_pattern(pat.binding)}):type_id={pat.type_id}")
         if isinstance(pat, HirEnumPattern):
             sub_str = f"({', '.join(self.format_pattern(sp) for sp in pat.subpatterns)})" if pat.subpatterns else ""
             return f"{pat.enum_name}::{pat.variant_name}[{pat.variant_id}]{sub_str}:type_id={pat.type_id}"

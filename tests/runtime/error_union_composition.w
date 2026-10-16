@@ -53,3 +53,4 @@ fn report(route: int) -> int {
 }
 
 print(report(0), report(1), report(2), report(3))
+print(errors.recover_local())

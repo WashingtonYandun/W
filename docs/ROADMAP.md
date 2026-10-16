@@ -1,6 +1,6 @@
 # Roadmap actual de W
 
-Revisado: 2026-10-15. Este documento separa los hitos terminados de los límites que
+Revisado: 2026-10-16. Este documento separa los hitos terminados de los límites que
 siguen abiertos. La matriz y las suites automatizadas son la evidencia; un hito no se
 considera cerrado solo porque su informe histórico diga que terminó.
 
@@ -12,11 +12,18 @@ considera cerrado solo porque su informe histórico diga que terminó.
 | E01–E04 | Integradas | Funciones como valores, closures, módulos/FFI, OOP genérico, stdlib y LSP; la cobertura por backend está desglosada en [EXPANSION.md](EXPANSION.md). |
 | F01 | Cerrada | Los 114 fixtures pasan en los cuatro motores; W1 incluye los 15 casos genéricos y el fixture de módulos comprobados. |
 | F02 | Cerrada | Panics operativos nativos `W4001`/`W4002` con ubicación exacta en AST C99, HIR C99 y W1; política de ciclos ARC y `W_MEM_CHECK` opt-in fijada en ADR-012. |
-| F03 | Cerrada | Uniones cerradas en el canal de error, propagación por subconjunto y patrones exhaustivos en los cuatro motores; ADR-013. Release 121/121, bootstrap fijo y ASan/UBSan limpios. |
+| F03 | Cerrada | Uniones cerradas en el canal de error, propagación por subconjunto y patrones exhaustivos en los cuatro motores; ADR-013. Corpus actual: 8 fixtures F03, incluidos ownership y CoW. |
+| H01–H03 | Integradas en `main` | Escapes C99 seguros, efectos de expresión locales en HIR e inicialización de constructores sensible a rutas; ADR-014 y PR #69. |
+| Seguimiento F03 | Implementado | Nodos de patrón de error propios en AST comprobado/HIR, validación independiente y regresión de ownership con ASan/UBSan y `W_MEM_CHECK`; ADR-015. |
 
 “E integrada” no significa paridad universal entre motores. W0 tiene cobertura de la
 expansión más amplia; W1 soporta subconjuntos medidos por fixture. La tabla del corpus
 principal está en [ENGINE_PARITY_MATRIX.md](ENGINE_PARITY_MATRIX.md).
+
+El corpus vigente contiene **130 fixtures** en los cuatro motores, sin exclusiones:
+106 de `core`, 15 de `generics`, 1 de `checked_modules` y 8 de `error_unions`.
+Las cifras de 114 y 121 que aparecen en los cierres F01/F03 de abajo son evidencia
+histórica de esos hitos; no representan el total vigente.
 
 ## F01 — Paridad de W1 en el corpus principal
 
@@ -73,7 +80,7 @@ genéricos y `enum` no genéricos. Los patrones `Tipo(error)` y `Tipo(_)` compru
 identidad runtime del payload. Clases, genéricos y tipos compuestos quedan fuera hasta que
 tengan una identidad runtime inequívoca.
 
-F03 quedó cerrada con pruebas de interning y subconjuntos; casos válidos e inválidos en
+F03 quedó cerrada inicialmente con pruebas de interning y subconjuntos; casos válidos e inválidos en
 los cuatro motores; matriz de paridad actualizada; release 121/121 sin exclusiones;
 bootstrap de tres etapas con hashes idénticos; 55/55 programas runtime en la etapa 2; y
 ASan/UBSan más `W_MEM_CHECK` limpios para el fixture de composición.
@@ -85,12 +92,20 @@ diferidas hasta contar con casos de uso y contratos separados. La expansión de 
 del corpus principal —por ejemplo, FFI o todos los contratos de closures y OOP genérico—
 requiere una decisión posterior basada en uso y coste.
 
-La auditoría deja dos tareas de diseño, no bloqueantes para F03:
+El seguimiento de la auditoría separó los patrones de tipo de error de las variantes
+enum: el checker produce `ErrorTypePattern` y el lowering produce `HirErrorTypePattern`
+con identidad de tipo canónica. Se eliminó el enum ficticio y el verificador rechaza
+su reintroducción. La sintaxis se conserva; véase ADR-015.
 
-1. Los patrones de tipo de error reutilizan hoy la representación de `EnumPattern`. Antes
-   de ampliar el matching, introducir un nodo AST/HIR propio para que errores nominales y
-   variantes enum no compartan una semántica accidental.
-2. El propósito de W como lenguaje de propósito general no está validado por usuarios ni
-   casos de producción. Antes de ampliar la superficie, elegir y probar un nicho concreto;
-   hasta entonces, describir W como un compilador experimental con capacidades medidas,
-   no como una alternativa general a C, Rust o Python.
+`tests/runtime/error_union_ownership.w` comprueba strings y listas dentro de errores,
+ensanchamiento directo de Result, propagación con temporales vivos, guards fallidos y
+copias CoW. `python3 -m tests.unit.test_f03_ownership` exige salida idéntica en los
+cuatro motores y cero fallos de ASan/UBSan o `W_MEM_CHECK` en los nativos. Linux añade
+LSan; macOS no ofrece esa comprobación de fugas por bytes.
+
+La decisión de producto sigue abierta: Washington eligió **integración con una biblioteca
+C mediante FFI** como primer ámbito de validación. [FFI_VALIDATION.md](FFI_VALIDATION.md)
+define el piloto y las condiciones de aceptación. El piloto técnico ya integra SQLite con un registro persistente
+de mediciones en W0 AST/HIR y una referencia C; el lote sintético no valida todavía un
+flujo real ni una ventaja para usuarios. Faltan esa validación y la medición de memoria
+física antes de declarar un perfil de producción.

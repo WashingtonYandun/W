@@ -193,7 +193,6 @@ class EnumPattern(Pattern):
         self.enum_name = enum_name
         self.variant = variant
         self.args = args or []
-        self.error_type_match = None
 
     def to_dict(self) -> dict:
         d = {
@@ -206,9 +205,20 @@ class EnumPattern(Pattern):
             d["enum_name"] = self.enum_name
         if self.args:
             d["args"] = [a.to_dict() for a in self.args]
-        if self.error_type_match is not None:
-            d["error_type_match"] = str(self.error_type_match)
         return d
+
+class ErrorTypePattern(Pattern):
+    """A checked error-union alternative, resolved to nominal type identity."""
+    def __init__(self, type_name: str, binding: Pattern, matched_type: Any, line: int = 1, col: int = 1):
+        super().__init__(line, col)
+        self.type_name = type_name
+        self.binding = binding
+        self.matched_type = matched_type
+
+    def to_dict(self) -> dict:
+        return {"kind": "ErrorTypePattern", "type_name": self.type_name,
+                "binding": self.binding.to_dict(), "matched_type": str(self.matched_type),
+                "line": self.line, "col": self.col}
 
 class LiteralPattern(Pattern):
     def __init__(self, literal: 'Expr', line: int = 1, col: int = 1):
