@@ -1,10 +1,12 @@
-# W Language Specification (SPEC v0.2)
+# Supplemental Language Specifications
 
-This directory contains the formal normative specification of the W Programming Language. Every normative rule is given an identifier (e.g. `[W-SPEC-TYPE-042]`) linked to diagnostic error codes and automated conformance tests.
+`SPEC.md` at the repository root is W's normative language specification and the single source of truth for syntax and semantics. The focused notes in this directory expand on selected areas; they do not override the root specification.
 
-## Table of Contents
-1. [Types & Semantics](types.md) (`[W-SPEC-TYPE]`)
-2. [Generics & Monomorphization](generics.md) (`[W-SPEC-GEN]`)
-3. [Pattern Matching & Algebraic Data Types](pattern-matching.md) (`[W-SPEC-PAT]`)
-4. [Memory Model & Ownership](ownership.md) (`[W-SPEC-MEM]`)
-5. [Error Handling & Fallibility](errors.md) (`[W-SPEC-ERR]`)
+## Contents
+
+1. [Types and semantics](types.md)
+2. [Generics and monomorphization](generics.md)
+3. [Pattern matching and algebraic data types](pattern-matching.md)
+4. [Memory model and ownership](../docs/OWNERSHIP_LIFETIME.md)
+5. [Error handling](../SPEC.md)
+6. [Compiler errors and diagnostics](../docs/COMPILER_ERROR_BOUNDARIES.md)
