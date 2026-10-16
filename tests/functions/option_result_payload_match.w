@@ -1,0 +1,26 @@
+fn maybe(flag: bool) -> int? {
+    if flag { return Some(42) }
+    return none
+}
+
+fn outcome(flag: bool) -> int ! str {
+    if flag { return Ok(7) }
+    return Err("failed")
+}
+
+match maybe(true) {
+    Some(value) => print("some", value),
+    None => print("none")
+}
+match outcome(false) {
+    Ok(value) => print("ok", value),
+    Err(message) => print("error", message)
+}
+match maybe(false) {
+    Some(_) => print("unexpected"),
+    None => print("none")
+}
+match outcome(true) {
+    Ok(value) => print("ok", value),
+    Err(_) => print("unexpected")
+}
