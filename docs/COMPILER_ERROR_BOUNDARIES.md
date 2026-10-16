@@ -8,4 +8,4 @@ This increment addresses three concrete failures identified by the compiler audi
 
 Regression coverage lives in test_compiler_boundaries.py and is included in the generic hardening suite used by the full conformance runner.
 
-This increment does not implement the complete HIR verifier, canonical type unification, string ownership redesign or W1 generic parity. W9999 represents a compiler defect, not a user type error. Constraints are checked using the current compilation unit's scope; module identity remains part of the architecture plan.
+This increment does not implement the complete HIR verifier, canonical type unification or string ownership redesign. W1 generic parity is now covered by the F01 public corpus, but that does not make W1's token-expanded module frontend equivalent to W0's shared typed compilation sessions. W9999 represents a compiler defect, not a user type error. Constraints in W0 are checked using the current compilation unit's scope.

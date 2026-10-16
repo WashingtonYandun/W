@@ -5,7 +5,7 @@ Everything here is a deliberate deferral with a stated cost, not an oversight. I
 marked *open decision* change the language surface and therefore need an explicit call
 before any implementation work.
 
-Last reviewed: `0.3.0.dev1`.
+Last reviewed: `2026-10-15`.
 
 ---
 
@@ -99,37 +99,24 @@ union is the honest option because it preserves exhaustiveness.
 
 ---
 
-## 3. W1 is a compiler for a subset, not a second implementation
+## 3. W1 has measured corpus parity, not universal feature parity
 
-**What happens.** `selfhost/w1.w` (4.1k lines, bundled from `selfhost/src/*.w`) is a
-genuine compiler: its own lexer, recursive-descent parser, a token-driven semantic pass
-with type interning, and a direct-to-C emitter that reuses `runtime/w_runtime.h`. W1
-supports first-class calls and closures for the forms exercised by the expansion suite,
-but it does **not** implement:
+**What happens.** `selfhost/w1.w` (bundled from `selfhost/src/*.w`) is a compiler with
+its own lexer, recursive-descent parser, token-driven semantic pass with type interning,
+and direct-to-C emitter. It compiles all 114 fixtures in the public core corpus, including
+the 15 generic fixtures and the checked-module fixture. Its support outside those tested
+programs is not guaranteed to match W0:
 
-| Feature | Diagnostic |
-| :--- | :--- |
-| Generic declarations, specialization | `W2013 W1 generic declarations are not implemented` |
-| Enum payload layout | `W2013 W1 enum payload layout is not implemented` |
-| Nested payload patterns and generic enum payload layout in W1 | `W0001` / `W2013`, see below |
-| W0-equivalent checked-module sessions and imported generic specialization | declared unsupported under F01 |
+| Area | Verified | Remaining boundary |
+| :--- | :--- | :--- |
+| Generic functions, structs, enums, recursive ADTs and cycle diagnostics | 15/15 core corpus fixtures across all engines | This is fixture coverage, not exhaustive equivalence for every generic program or constraint. |
+| Imports with generic specialization | `checked_modules` fixture passes in W1 | W1 expands modules into tokens; it does not share W0's typed-module cache or canonical declaration arena. |
+| Closures, FFI, generic OOP, stdlib and LSP | Separate expansion-suite coverage | No claim of W1 parity; see [EXPANSION.md](EXPANSION.md). |
 
-Basic imports are supported: W1 expands the module graph into a token stream, qualifies
-module names, enforces `pub` exports, and detects cycles (`selfhost/src/03_modules.w`).
-This is not the same architecture as W0's `CompilationSession`: W1 does not maintain a
-shared typed-module cache or canonical cross-module declaration identities. The single
-`checked_modules` corpus fixture also uses generic imports, which W1 cannot specialize.
-
-W1 supports one-level payload matches for the built-in `Option` and `Result` types:
-
-```w
-match option { Some(v) => { ... }, None => { ... } }
-match result { Ok(v) => { ... }, Err(e) => { ... } }
-```
-
-Nested payload patterns such as `Some(Ok(v))` and payloads on user-defined generic enums
-remain unsupported in W1. The expansion suite has a four-engine regression for the basic
-forms; generic OOP, stdlib and C FFI cases still run only on W0 engines.
+W1 expands imports into a token stream, qualifies module names, enforces `pub` exports,
+and detects cycles (`selfhost/src/03_modules.w`). The checked-module fixture—including
+its imported generic specialization—passes. This is not W0's `CompilationSession`: W1
+does not maintain a shared typed-module cache or canonical cross-module declaration arena.
 
 **Why it is this way.** W1 is a bootstrap: its purpose is to prove the language can
 describe a compiler and reach a reproducible fixed point, not to duplicate W0.
@@ -139,10 +126,11 @@ header", and it says nothing about the expressiveness of the language subset it 
 three-stage fixed point proves determinism and convergence; it cannot prove correctness,
 because a bug in the semantics is reproduced identically at every stage.
 
-**State.** The public core corpus passes on W1. The 15 generic fixtures and one checked-
-module fixture are declared unsupported in `tests/engine_profiles.json`; the `release`
-profile of `tools/ci_conformance.py` deliberately fails while those exclusions exist.
-Closing the 16 corpus exclusions is milestone F01; see [ROADMAP.md](ROADMAP.md).
+**State.** F01 is closed: on 2026-10-15 the release profile passed 114/114 fixtures on
+all four engines with no exclusions. The three-stage bootstrap also reached an identical
+C output hash at every stage. These checks prove the recorded corpus and deterministic
+self-hosting contract; they do not prove universal language parity or semantic correctness
+outside the tested programs.
 
 ---
 
