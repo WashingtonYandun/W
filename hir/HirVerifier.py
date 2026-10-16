@@ -41,6 +41,8 @@ class HirVerifier:
             children = [entry.data]
         elif entry.tag in ("dict", "result", "tuple"):
             children = list(entry.data)
+        elif entry.tag == "error_union":
+            children = list(entry.data)
         elif entry.tag == "function":
             children = list(entry.data[0]) + [entry.data[1]]
         elif entry.tag == "struct":
@@ -161,7 +163,15 @@ class HirVerifier:
                 if expected is not None and value.type_id != expected:
                     self._fail(value, "Literal pattern type mismatch")
             elif isinstance(value, H.HirEnumPattern):
-                if not isinstance(value.variant_id, H.VariantId):
+                if value.error_type_id is not None:
+                    self._type(value.error_type_id, value, "error_type_id")
+                    subject = self.interner.get_entry(value.type_id)
+                    if (subject.tag != "error_union" or value.error_type_id not in subject.data
+                            or len(value.subpatterns) != 1
+                            or value.subpatterns[0].type_id != value.error_type_id
+                            or not isinstance(value.subpatterns[0], (H.HirBindingPattern, H.HirWildcardPattern))):
+                        self._fail(value, "Error type pattern does not match its error union alternative")
+                elif not isinstance(value.variant_id, H.VariantId):
                     self._fail(value, "Enum pattern requires VariantId")
             if id(value) in self.active:
                 self._fail(value, "Cyclic HIR pattern")

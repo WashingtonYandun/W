@@ -12,6 +12,7 @@ considera cerrado solo porque su informe histórico diga que terminó.
 | E01–E04 | Integradas | Funciones como valores, closures, módulos/FFI, OOP genérico, stdlib y LSP; la cobertura por backend está desglosada en [EXPANSION.md](EXPANSION.md). |
 | F01 | Cerrada | Los 114 fixtures pasan en los cuatro motores; W1 incluye los 15 casos genéricos y el fixture de módulos comprobados. |
 | F02 | Cerrada | Panics operativos nativos `W4001`/`W4002` con ubicación exacta en AST C99, HIR C99 y W1; política de ciclos ARC y `W_MEM_CHECK` opt-in fijada en ADR-012. |
+| F03 | Cerrada | Uniones cerradas en el canal de error, propagación por subconjunto y patrones exhaustivos en los cuatro motores; ADR-013. Release 121/121, bootstrap fijo y ASan/UBSan limpios. |
 
 “E integrada” no significa paridad universal entre motores. W0 tiene cobertura de la
 expansión más amplia; W1 soporta subconjuntos medidos por fixture. La tabla del corpus
@@ -58,12 +59,38 @@ Los detalles no cubiertos —sobre todo ubicaciones para fallos internos `W4003`
 fallos de runtime fuera del conjunto operacional anterior— permanecen en
 [KNOWN_LIMITS.md](KNOWN_LIMITS.md).
 
-## Después de F02
+## F03 — Uniones cerradas de errores
 
-Las capturas mutables, las uniones de errores y la concurrencia cambian semántica y modelo
-de memoria. Quedan diferidas hasta que existan casos de uso concretos y contratos separados;
-no se mezclan con F01 ni se anuncian como parte de E01–E04.
+F03 permite declarar distintos tipos de error en `T ! E1 | E2`. `?` propaga cuando el
+conjunto de errores de origen está contenido en el conjunto destino, sin convertir ni
+envolver de nuevo el payload. `else err` conserva el valor original y `match` exige cubrir
+cada alternativa cuando produce un valor. Un `Result[T, E1]` completo se puede devolver
+como `Result[T, E2]` si `T` es idéntico y `E1` está contenido en `E2`; este ensanchamiento
+conserva el valor y no aplana resultados anidados.
 
-La expansión de W1 más allá del corpus principal —por ejemplo, FFI o todos los contratos
-de closures y OOP genérico— necesita una decisión posterior basada en uso y coste. F01 no
-la promete.
+El contrato inicial limita las alternativas a `int`, `float`, `bool`, `str`, `struct` no
+genéricos y `enum` no genéricos. Los patrones `Tipo(error)` y `Tipo(_)` comprueban la
+identidad runtime del payload. Clases, genéricos y tipos compuestos quedan fuera hasta que
+tengan una identidad runtime inequívoca.
+
+F03 quedó cerrada con pruebas de interning y subconjuntos; casos válidos e inválidos en
+los cuatro motores; matriz de paridad actualizada; release 121/121 sin exclusiones;
+bootstrap de tres etapas con hashes idénticos; 55/55 programas runtime en la etapa 2; y
+ASan/UBSan más `W_MEM_CHECK` limpios para el fixture de composición.
+
+## Después de F03
+
+Las capturas mutables y la concurrencia cambian semántica y modelo de memoria; siguen
+diferidas hasta contar con casos de uso y contratos separados. La expansión de W1 más allá
+del corpus principal —por ejemplo, FFI o todos los contratos de closures y OOP genérico—
+requiere una decisión posterior basada en uso y coste.
+
+La auditoría deja dos tareas de diseño, no bloqueantes para F03:
+
+1. Los patrones de tipo de error reutilizan hoy la representación de `EnumPattern`. Antes
+   de ampliar el matching, introducir un nodo AST/HIR propio para que errores nominales y
+   variantes enum no compartan una semántica accidental.
+2. El propósito de W como lenguaje de propósito general no está validado por usuarios ni
+   casos de producción. Antes de ampliar la superficie, elegir y probar un nicho concreto;
+   hasta entonces, describir W como un compilador experimental con capacidades medidas,
+   no como una alternativa general a C, Rust o Python.

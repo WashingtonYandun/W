@@ -73,7 +73,7 @@ def generate_markdown_matrix(measured=None) -> str:
             return f"⏳ {passed}/{count} ({unsupported} declared unsupported)"
         return f"{mark} {passed}/{count}"
 
-    feature_order = ['core', 'generics', 'checked_modules']
+    feature_order = ['core', 'generics', 'checked_modules', 'error_unions']
     for feat in feature_order:
         items = by_feature.get(feat, [])
         count = len(items)

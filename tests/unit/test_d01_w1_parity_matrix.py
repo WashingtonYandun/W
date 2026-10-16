@@ -103,6 +103,7 @@ def test_ci_matrix_generation_tooling():
     assert "# W Language Engine Feature Parity Matrix" in out, "Output must contain matrix header"
     assert "| **`core`** |" in out, "Output must contain core row"
     assert "| **`generics`** |" in out, "Output must contain generics row"
+    assert "| **`error_unions`** | 7 |" in out, "Output must report all seven F03 fixtures"
     assert "| **Total Verified** |" in out, "Output must contain total row"
     # The matrix must report measured per-engine numbers, not a restatement of the
     # declaration file. Previously this test asserted the literal strings "91/91" and
@@ -141,7 +142,18 @@ def test_documentation_consistency():
         f"Doc reports a corpus of {total_row.group(1)} but the real corpus is {corpus_size}; "
         f"rerun: python3 tools/ci_conformance.py --matrix")
     assert "F01 is complete" in content, "Doc must record F01 completion"
-    assert "114/114 (100.0%)" in content, "Doc must record measured W1 corpus parity"
+    assert "121/121 (100.0%)" in content, "Doc must record current measured W1 corpus parity"
+    assert "error_unions" in content and "F03" in content, "Doc must record F03 error-union parity"
+    profile = json.loads((ROOT / "tests/engine_profiles.json").read_text())
+    error_union_fixtures = [
+        label for label, feature in profile.get("fixtures", {}).items()
+        if feature == "error_unions"
+    ]
+    error_union_row = _re.search(r"\| \*\*`error_unions`\*\* \| (\d+) \|", content)
+    assert error_union_row and int(error_union_row.group(1)) == len(error_union_fixtures), (
+        "Parity matrix error-union count must match fixture classifications"
+    )
+    assert len(error_union_fixtures) == 7, "F03 must classify its runtime case and six negative cases"
     roadmap = (ROOT / "docs/ROADMAP.md").read_text()
     assert "F01" in roadmap and "114" in roadmap and "Cerrada" in roadmap, (
         "Roadmap must record completed F01 acceptance"
@@ -155,6 +167,14 @@ def test_documentation_consistency():
         "Expansion docs must quote the current core corpus size, not a stale count"
     )
     assert "107 fixtures" not in expansion, "Stale expansion corpus count must be removed"
+
+    spec = (ROOT / "SPEC.md").read_text()
+    assert "107 corpus fixtures" not in spec and "91 core fixtures" not in spec, (
+        "SPEC parity section must not preserve obsolete W1 limits"
+    )
+    assert "all 121 fixtures on all four engines" in spec, (
+        "SPEC parity section must state the current measured release corpus"
+    )
 
     limits = (ROOT / "docs/KNOWN_LIMITS.md").read_text()
     assert "Lambda and callable syntax" not in limits, (

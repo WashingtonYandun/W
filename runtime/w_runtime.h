@@ -116,6 +116,20 @@ struct WVal {
     } as;
 };
 
+static inline bool w_value_is_error_type(WVal value, const char* kind, const char* name) {
+    if (strcmp(kind, "int") == 0) return value.tag == W_INT;
+    if (strcmp(kind, "float") == 0) return value.tag == W_FLOAT;
+    if (strcmp(kind, "bool") == 0) return value.tag == W_BOOL;
+    if (strcmp(kind, "str") == 0) return value.tag == W_STR;
+    if (strcmp(kind, "struct") == 0) {
+        return value.tag == W_STRUCT && value.as.st && strcmp(value.as.st->name, name) == 0;
+    }
+    if (strcmp(kind, "enum") == 0) {
+        return value.tag == W_ENUM && value.as.en.enum_name && strcmp(value.as.en.enum_name, name) == 0;
+    }
+    return false;
+}
+
 typedef WVal (*WInvoke)(WVal environment, int32_t argc, const WVal* argv);
 
 /* Native runtime failures retain the source operation that last entered W. */

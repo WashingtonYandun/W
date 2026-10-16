@@ -109,3 +109,6 @@ let mut sem_class_projection_positions: list[int] = []
 
 let mut sem_collection_call_positions: list[int] = []
 let mut sem_result_lift_positions: list[int] = []
+let mut sem_error_pattern_positions: list[int] = []
+let mut sem_error_pattern_kinds: list[str] = []
+let mut sem_error_pattern_names: list[str] = []

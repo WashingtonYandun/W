@@ -23,7 +23,7 @@ W0. La stdlib incluye `std/io`, `std/text`, `std/bytes` y `std/algorithms`. `./w
 reutiliza el checker y los spans del lexer.
 
 La cobertura del corpus principal se mide por separado en la [matriz de
-paridad](ENGINE_PARITY_MATRIX.md): contiene 114 fixtures y no incluye los contratos de
+paridad](ENGINE_PARITY_MATRIX.md): contiene 121 fixtures y no incluye los contratos de
 expansión de `tests/unit/test_expansion_contracts.py`. F01 cerró la paridad de ese corpus,
 incluidos los genéricos y el fixture de módulos comprobados. Una suite E en verde no
 significa que cada caso pase en todos los motores; los motores concretos se declaran en

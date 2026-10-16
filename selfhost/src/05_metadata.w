@@ -82,6 +82,7 @@ fn parse_type_ann() -> bool {
     if match_kind("BANG") {
         let err_tok = at_tok()
         parse_type_ann()
+        while match_kind("PIPE") { parse_type_ann() }
         is_fallible = true
         g_cur_err_type = err_tok.val
     }
