@@ -141,7 +141,8 @@ def test_documentation_consistency():
         f"Doc reports a corpus of {total_row.group(1)} but the real corpus is {corpus_size}; "
         f"rerun: python3 tools/ci_conformance.py --matrix")
     assert "F01 is complete" in content, "Doc must record F01 completion"
-    assert "114/114 (100.0%)" in content, "Doc must record measured W1 corpus parity"
+    assert "121/121 (100.0%)" in content, "Doc must record current measured W1 corpus parity"
+    assert "error_unions" in content and "F03" in content, "Doc must record F03 error-union parity"
     roadmap = (ROOT / "docs/ROADMAP.md").read_text()
     assert "F01" in roadmap and "114" in roadmap and "Cerrada" in roadmap, (
         "Roadmap must record completed F01 acceptance"
