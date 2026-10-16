@@ -145,6 +145,22 @@ class ResultType(WType):
         return f"{self.ok} ! {self.err}"
 
 
+class ErrorUnionType(WType):
+    """A statically known, closed set of alternative error payload types."""
+    def __init__(self, alternatives: List[WType]):
+        unique: List[WType] = []
+        for alternative in alternatives:
+            if not any(alternative == existing for existing in unique):
+                unique.append(alternative)
+        self.alternatives = tuple(sorted(unique, key=str))
+
+    def __eq__(self, other: Any) -> bool:
+        return isinstance(other, ErrorUnionType) and self.alternatives == other.alternatives
+
+    def __str__(self) -> str:
+        return " | ".join(str(alternative) for alternative in self.alternatives)
+
+
 class FunctionType(WType):
     def __init__(self, params: List[WType], ret: WType, is_mutating: bool = False):
         self.params = params
@@ -333,6 +349,15 @@ def is_assignable(source: WType, target: WType) -> bool:
 
     if source == target:
         return True
+
+    if isinstance(source, ErrorUnionType) or isinstance(target, ErrorUnionType):
+        source_alternatives = source.alternatives if isinstance(source, ErrorUnionType) else (source,)
+        target_alternatives = target.alternatives if isinstance(target, ErrorUnionType) else (target,)
+        return all(
+            any(is_assignable(source_alternative, target_alternative)
+                for target_alternative in target_alternatives)
+            for source_alternative in source_alternatives
+        )
 
     def optional_inner(value):
         if isinstance(value, OptionalType):

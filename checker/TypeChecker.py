@@ -6,6 +6,7 @@ from node.NodeType import (
     ExternFnDecl, LambdaExpr, FunctionType as AstFunctionType, Node, Program, Stmt, Expr, TypeNode, Pattern, Block,
     NamedType, OptionalType as AstOptionalType, ListType as AstListType,
     DictType as AstDictType, TupleType as AstTupleType, ResultType as AstResultType,
+    ErrorUnionType as AstErrorUnionType,
     GenericType, TypeParam,
     IdentifierPattern, TuplePattern, EnumPattern, LiteralPattern, WildcardPattern,
     FnDecl, Param, StructDecl, StructField, EnumDecl,
@@ -23,7 +24,7 @@ from checker.WType import (
     WType, IntType, FloatType, BoolType, StrType, UnitType, NoneType,
     OptionalType, WeakType, ListType, DictType, TupleType, StructType, EnumType,
     InterfaceType, ClassFieldInfo, ClassMethodInfo, ClassType,
-    ResultType, FunctionType, ModuleType, AnyType,
+    ResultType, ErrorUnionType, FunctionType, ModuleType, AnyType,
     TypeParamType, GenericStructTemplate, GenericFnTemplate, GenericEnumTemplate, is_assignable
 )
 from checker.SymbolTable import Scope, Symbol, create_global_scope
@@ -74,6 +75,10 @@ def _equality_compatible(left: WType, right: WType, seen: Optional[set] = None) 
     if isinstance(left, ResultType) and isinstance(right, ResultType):
         return (_equality_compatible(left.ok, right.ok, seen)
                 and _equality_compatible(left.err, right.err, seen))
+    if isinstance(left, ErrorUnionType) and isinstance(right, ErrorUnionType):
+        return (len(left.alternatives) == len(right.alternatives)
+                and all(_equality_compatible(a, b, seen)
+                        for a, b in zip(left.alternatives, right.alternatives)))
     return False
 
 
@@ -142,6 +147,9 @@ def _mangle_type_static(t: WType) -> str:
         return f"tuple_{len(t.elements)}__{elems}"
     if isinstance(t, ResultType):
         return f"res__{_mangle_type_static(t.ok)}__{_mangle_type_static(t.err)}"
+    if isinstance(t, ErrorUnionType):
+        members = "__".join(_mangle_type_static(member) for member in t.alternatives)
+        return f"errunion_{len(t.alternatives)}__{members}"
     if isinstance(t, TypeParamType):
         return t.name
     safe_str = str(t).replace("[", "__").replace("]", "").replace(", ", "__").replace(" ", "_")
@@ -180,6 +188,8 @@ def _type_contains(sub: WType, container: WType) -> bool:
         return _type_contains(sub, container.inner)
     if isinstance(container, ResultType):
         return _type_contains(sub, container.ok) or _type_contains(sub, container.err)
+    if isinstance(container, ErrorUnionType):
+        return any(_type_contains(sub, member) for member in container.alternatives)
     if isinstance(container, (StructType, EnumType)) and getattr(container, "type_args", None):
         return any(_type_contains(sub, arg) for arg in container.type_args)
     return False
@@ -1156,7 +1166,7 @@ class TypeChecker:
             source_ok, source_error = source_entry.data
             target_ok, target_error = target_entry.data
             same_ok = source_ok == target_ok or self.interner.get_entry(source_ok).tag == "any" or self.interner.get_entry(target_ok).tag == "any"
-            same_error = source_error == target_error or self.interner.get_entry(source_error).tag == "any" or self.interner.get_entry(target_error).tag == "any"
+            same_error = self.interner.is_assignable(source_error, target_error)
             if same_ok and same_error:
                 return
         if self.interner.get_entry(target_id).tag == "result" and expr.inferred_type_id != target_id:
@@ -1460,9 +1470,9 @@ class TypeChecker:
                         code="T010"
                     )
                 cur_err = self.current_fn_ret_type.err if isinstance(self.current_fn_ret_type, ResultType) else self.current_fn_ret_type.type_args[1]
-                if res_err != cur_err:
+                if not is_assignable(res_err, cur_err):
                     raise TypeError(
-                        message=f"Error type mismatch in '?' propagation: '{res_err}' vs declared '{cur_err}'",
+                        message=f"Error type mismatch in '?' propagation: '{res_err}' is not covered by declared '{cur_err}'",
                         line=expr.line,
                         col=expr.col,
                         file=self.file,
@@ -2772,6 +2782,12 @@ class TypeChecker:
             elif isinstance(subject_t, ResultType):
                 expected_variants = {"Ok", "Err"}
                 payload_types_map = {"Ok": [subject_t.ok], "Err": [subject_t.err]}
+            elif isinstance(subject_t, ErrorUnionType):
+                expected_variants = {self._error_pattern_name(member) for member in subject_t.alternatives}
+                payload_types_map = {
+                    self._error_pattern_name(member): [member]
+                    for member in subject_t.alternatives
+                }
             elif isinstance(subject_t, EnumType):
                 if getattr(subject_t, "template_name", None) == "Option" and getattr(subject_t, "type_args", None):
                     expected_variants = {"Some", "None"}
@@ -2818,55 +2834,90 @@ class TypeChecker:
 
                 elif isinstance(arm.pattern, EnumPattern):
                     v_name = arm.pattern.variant
-                    if arm.pattern.enum_name:
-                        if isinstance(subject_t, EnumType):
-                            if arm.pattern.enum_name != subject_t.name and arm.pattern.enum_name != getattr(subject_t, "template_name", None):
+                    if isinstance(subject_t, ErrorUnionType):
+                        matched_type = next(
+                            (member for member in subject_t.alternatives
+                             if self._error_pattern_name(member) == v_name),
+                            None
+                        )
+                        if arm.pattern.enum_name is not None or matched_type is None:
+                            raise TypeError(
+                                message=f"Pattern '{v_name}(...)' is not an alternative of error union '{subject_t}'",
+                                line=arm.line,
+                                col=arm.col,
+                                file=self.file,
+                                code="T003"
+                            )
+                        if len(arm.pattern.args) != 1:
+                            raise TypeError(
+                                message=f"Error type pattern '{v_name}(...)' requires exactly one binding pattern",
+                                line=arm.line,
+                                col=arm.col,
+                                file=self.file,
+                                code="T015"
+                            )
+                        if not isinstance(arm.pattern.args[0], (IdentifierPattern, WildcardPattern)):
+                            raise TypeError(
+                                message="Error type patterns accept one binding or wildcard, such as 'ParseError(err)'",
+                                line=arm.line,
+                                col=arm.col,
+                                file=self.file,
+                                code="T015"
+                            )
+                        arm.pattern.error_type_match = matched_type
+                        arm_bindings = {}
+                        self._bind_pattern_type(arm.pattern.args[0], matched_type, arm_bindings, arm.line, arm.col)
+                        covered_variants.add(v_name)
+                    else:
+                        if arm.pattern.enum_name:
+                            if isinstance(subject_t, EnumType):
+                                if arm.pattern.enum_name != subject_t.name and arm.pattern.enum_name != getattr(subject_t, "template_name", None):
+                                    raise TypeError(
+                                        message=f"Pattern '{arm.pattern.enum_name}.{v_name}' is incompatible with match subject '{subject_t}'",
+                                        line=arm.line,
+                                        col=arm.col,
+                                        file=self.file,
+                                        code="T003"
+                                    )
+                            elif isinstance(subject_t, OptionalType) and arm.pattern.enum_name != "Option":
                                 raise TypeError(
-                                    message=f"Pattern '{arm.pattern.enum_name}.{v_name}' is incompatible with match subject '{subject_t}'",
+                                    message=f"Pattern '{arm.pattern.enum_name}.{v_name}' is incompatible with optional subject '{subject_t}'",
                                     line=arm.line,
                                     col=arm.col,
                                     file=self.file,
                                     code="T003"
                                 )
-                        elif isinstance(subject_t, OptionalType) and arm.pattern.enum_name != "Option":
-                            raise TypeError(
-                                message=f"Pattern '{arm.pattern.enum_name}.{v_name}' is incompatible with optional subject '{subject_t}'",
-                                line=arm.line,
-                                col=arm.col,
-                                file=self.file,
-                                code="T003"
-                            )
-                        elif isinstance(subject_t, ResultType) and arm.pattern.enum_name != "Result":
-                            raise TypeError(
-                                message=f"Pattern '{arm.pattern.enum_name}.{v_name}' is incompatible with result subject '{subject_t}'",
-                                line=arm.line,
-                                col=arm.col,
-                                file=self.file,
-                                code="T003"
-                            )
+                            elif isinstance(subject_t, ResultType) and arm.pattern.enum_name != "Result":
+                                raise TypeError(
+                                    message=f"Pattern '{arm.pattern.enum_name}.{v_name}' is incompatible with result subject '{subject_t}'",
+                                    line=arm.line,
+                                    col=arm.col,
+                                    file=self.file,
+                                    code="T003"
+                                )
 
-                    if expected_variants is not None and v_name not in expected_variants:
-                        raise TypeError(
-                            message=f"Pattern variant '{v_name}' is incompatible with match subject '{subject_t}'",
-                            line=arm.line,
-                            col=arm.col,
-                            file=self.file,
-                            code="T003"
-                        )
-                    if isinstance(subject_t, EnumType) and getattr(subject_t, "template_name", None) not in ("Option", "Result"):
-                        arm.pattern.enum_name = subject_t.name
-                    covered_variants.add(v_name)
-                    expected_payloads = payload_types_map.get(v_name, [])
-                    if len(arm.pattern.args) != len(expected_payloads):
-                        raise TypeError(
-                            message=f"Variant '{v_name}' expects {len(expected_payloads)} arguments, found {len(arm.pattern.args)}",
-                            line=arm.line,
-                            col=arm.col,
-                            file=self.file,
-                            code="T015"
-                        )
-                    for arg_pat, arg_type in zip(arm.pattern.args, expected_payloads):
-                        self._bind_pattern_type(arg_pat, arg_type, arm_bindings, arm.line, arm.col)
+                        if expected_variants is not None and v_name not in expected_variants:
+                            raise TypeError(
+                                message=f"Pattern variant '{v_name}' is incompatible with match subject '{subject_t}'",
+                                line=arm.line,
+                                col=arm.col,
+                                file=self.file,
+                                code="T003"
+                            )
+                        if isinstance(subject_t, EnumType) and getattr(subject_t, "template_name", None) not in ("Option", "Result"):
+                            arm.pattern.enum_name = subject_t.name
+                        covered_variants.add(v_name)
+                        expected_payloads = payload_types_map.get(v_name, [])
+                        if len(arm.pattern.args) != len(expected_payloads):
+                            raise TypeError(
+                                message=f"Variant '{v_name}' expects {len(expected_payloads)} arguments, found {len(arm.pattern.args)}",
+                                line=arm.line,
+                                col=arm.col,
+                                file=self.file,
+                                code="T015"
+                            )
+                        for arg_pat, arg_type in zip(arm.pattern.args, expected_payloads):
+                            self._bind_pattern_type(arg_pat, arg_type, arm_bindings, arm.line, arm.col)
 
                 if arm.guard is not None:
                     guard_scope = Scope(parent=self.current_scope)
@@ -2960,6 +3011,11 @@ class TypeChecker:
             constructors = {"Some": optional, "None": []}
         elif result:
             constructors = {"Ok": [result[0]], "Err": [result[1]]}
+        elif isinstance(first, ErrorUnionType):
+            constructors = {
+                self._error_pattern_name(member): [member]
+                for member in first.alternatives
+            }
         elif isinstance(first, EnumType):
             constructors = {name: first.variant_payloads.get(name, []) for name in first.variants}
         elif isinstance(first, TupleType):
@@ -2996,6 +3052,14 @@ class TypeChecker:
             if not self._pattern_matrix_exhaustive(payload + types[1:], specialized):
                 return False
         return True
+
+    @staticmethod
+    def _error_pattern_name(error_type: WType) -> str:
+        if error_type in (IntType, FloatType, BoolType, StrType):
+            return str(error_type)
+        if isinstance(error_type, (StructType, EnumType)):
+            return error_type.name
+        return str(error_type)
 
     def _bind_pattern_type(self, pattern: Pattern, expected_type: WType, bindings: Dict[str, WType], line: int, col: int) -> None:
         pattern.inferred_type_id = self.interner.intern(expected_type)
@@ -3114,6 +3178,8 @@ class TypeChecker:
             return AstTupleType([self._wtype_to_type_node(e) for e in t.elements])
         if isinstance(t, ResultType):
             return AstResultType(self._wtype_to_type_node(t.ok), self._wtype_to_type_node(t.err))
+        if isinstance(t, ErrorUnionType):
+            return AstErrorUnionType([self._wtype_to_type_node(member) for member in t.alternatives])
         if isinstance(t, FunctionType):
             return AstFunctionType([self._wtype_to_type_node(p) for p in t.params], self._wtype_to_type_node(t.ret))
         if isinstance(t, TypeParamType):
@@ -3148,6 +3214,12 @@ class TypeChecker:
             return AstResultType(
                 self._substitute_type_node(node.ok_type, subst),
                 self._substitute_type_node(node.err_type, subst),
+                line=node.line,
+                col=node.col
+            )
+        if isinstance(node, AstErrorUnionType):
+            return AstErrorUnionType(
+                [self._substitute_type_node(member, subst) for member in node.error_types],
                 line=node.line,
                 col=node.col
             )
@@ -3294,6 +3366,13 @@ class TypeChecker:
             return (self._unify_type(param_type_node.ok_type, arg_wtype.ok, type_params, bindings) and
                     self._unify_type(param_type_node.err_type, arg_wtype.err, type_params, bindings))
 
+        if isinstance(param_type_node, AstErrorUnionType) and isinstance(arg_wtype, ErrorUnionType):
+            try:
+                declared = ErrorUnionType([self._resolve_type_node(member) for member in param_type_node.error_types])
+            except Exception:
+                return False
+            return declared == arg_wtype
+
         if isinstance(param_type_node, GenericType) and isinstance(arg_wtype, (StructType, EnumType, ClassType, InterfaceType)):
             tmpl_name = getattr(arg_wtype, "template_name", None)
             tmpl_args = getattr(arg_wtype, "type_args", None)
@@ -3364,6 +3443,8 @@ class TypeChecker:
             return 1 + self._type_complexity(t.inner)
         if isinstance(t, ResultType):
             return 1 + self._type_complexity(t.ok) + self._type_complexity(t.err)
+        if isinstance(t, ErrorUnionType):
+            return 1 + sum(self._type_complexity(member) for member in t.alternatives)
         if isinstance(t, (StructType, EnumType)) and getattr(t, "type_args", None):
             return 1 + sum(self._type_complexity(a) for a in t.type_args)
         if isinstance(t, TupleType):
@@ -3912,8 +3993,17 @@ class TypeChecker:
 
         if isinstance(node, AstResultType):
             ok_t = self._resolve_type_node(node.ok_type)
-            err_t = self._resolve_type_node(node.err_type)
+            if isinstance(node.err_type, AstErrorUnionType):
+                err_t = self._resolve_error_union_node(node.err_type)
+            else:
+                err_t = self._resolve_type_node(node.err_type)
             return ResultType(ok_t, err_t)
+
+        # Type substitution in the canonical Result[T, E] enum can place the
+        # error-set node inside a generic payload annotation, even though source
+        # syntax only introduces unions after `!`.
+        if isinstance(node, AstErrorUnionType):
+            return self._resolve_error_union_node(node)
 
         raise TypeError(
             message=f"Unsupported type construct '{node.__class__.__name__}'",
@@ -3922,3 +4012,28 @@ class TypeChecker:
             file=self.file,
             code="T002"
         )
+
+    def _resolve_error_union_node(self, node: AstErrorUnionType) -> ErrorUnionType:
+        if len(node.error_types) < 2:
+            raise TypeError("An error union requires at least two alternatives", line=node.line,
+                            col=node.col, file=self.file, code="T003")
+
+        alternatives = [self._resolve_type_node(member) for member in node.error_types]
+        for alternative, source_node in zip(alternatives, node.error_types):
+            is_scalar = alternative in (IntType, FloatType, BoolType, StrType)
+            is_nominal = isinstance(alternative, (StructType, EnumType))
+            is_generic_nominal = is_nominal and bool(getattr(alternative, "type_args", ()))
+            if not (is_scalar or (is_nominal and not is_generic_nominal)):
+                raise TypeError(
+                    message=f"Error union alternative '{alternative}' has no distinct runtime type identity; use int, float, bool, str, a non-generic struct, or a non-generic enum",
+                    line=source_node.line,
+                    col=source_node.col,
+                    file=self.file,
+                    code="T003"
+                )
+
+        union = ErrorUnionType(alternatives)
+        if len(union.alternatives) < 2:
+            raise TypeError("An error union must contain at least two distinct alternatives",
+                            line=node.line, col=node.col, file=self.file, code="T003")
+        return union

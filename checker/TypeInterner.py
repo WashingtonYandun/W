@@ -4,7 +4,7 @@ from checker.WType import (
     OpaqueType, WType, PrimitiveType, IntType, FloatType, BoolType, StrType, UnitType, NoneType,
     OptionalType, WeakType, ListType, DictType, TupleType, StructType, EnumType,
     InterfaceType, ClassFieldInfo, ClassMethodInfo, ClassType,
-    ResultType, FunctionType, ModuleType, AnyType, TypeParamType
+    ResultType, ErrorUnionType, FunctionType, ModuleType, AnyType, TypeParamType
 )
 
 _ARENA_IDS = count(1)
@@ -276,6 +276,24 @@ class TypeInterner:
         if tid not in self._id_to_wtype:
             self._id_to_wtype[tid] = ResultType(self.to_wtype(ok_id), self.to_wtype(err_id))
         return tid
+
+    def mk_error_union(self, alternatives: Tuple[int, ...]) -> int:
+        if not alternatives or any(type_id == TYPE_ERROR for type_id in alternatives):
+            return TYPE_ERROR
+        canonical = tuple(sorted(set(alternatives)))
+        if len(canonical) < 2:
+            return canonical[0] if canonical else TYPE_ERROR
+        key = ("error_union", canonical)
+        # A union carries one of its member values directly. Conservatively mark
+        # it as owning so cleanup remains correct when any alternative contains
+        # ARC-managed storage (for example a struct with strings or collections).
+        caps = TypeCapabilities(needs_retain=True, needs_release=True, is_value=True,
+                                is_reference=False, is_copyable=True,
+                                is_comparable=False, is_valid_dict_key=False)
+        type_id = self._intern(key, TypeEntry("error_union", canonical), caps)
+        if type_id not in self._id_to_wtype:
+            self._id_to_wtype[type_id] = ErrorUnionType([self.to_wtype(item) for item in canonical])
+        return type_id
 
     def mk_list(self, elem_id: int) -> int:
         if elem_id == TYPE_ERROR:
@@ -579,6 +597,14 @@ class TypeInterner:
         if dst_entry.tag == "any":
             return False
 
+        if src_entry.tag == "error_union" or dst_entry.tag == "error_union":
+            src_members = src_entry.data if src_entry.tag == "error_union" else (src_id,)
+            dst_members = dst_entry.data if dst_entry.tag == "error_union" else (dst_id,)
+            return all(
+                any(self.is_assignable(src_member, dst_member) for dst_member in dst_members)
+                for src_member in src_members
+            )
+
         # OOP Subtyping: Class -> Superclass
         if src_entry.tag == "class" and dst_entry.tag == "class":
             return self.is_class_subclass_of(src_id, dst_entry.data)
@@ -627,6 +653,8 @@ class TypeInterner:
         elif entry.tag == "result":
             ok_id, err_id = entry.data
             return f"{self.to_string(ok_id)} ! {self.to_string(err_id)}"
+        elif entry.tag == "error_union":
+            return " | ".join(self.to_string(member) for member in entry.data)
         elif entry.tag == "weak":
             return f"Weak[{self.to_string(entry.data)}]"
         elif entry.tag == "list":
@@ -685,6 +713,8 @@ class TypeInterner:
             return self.mk_optional(self.from_wtype(wtype.inner))
         elif isinstance(wtype, ResultType):
             return self.mk_result(self.from_wtype(wtype.ok), self.from_wtype(wtype.err))
+        elif isinstance(wtype, ErrorUnionType):
+            return self.mk_error_union(tuple(self.from_wtype(item) for item in wtype.alternatives))
         elif isinstance(wtype, ListType):
             return self.mk_list(self.from_wtype(wtype.element))
         elif isinstance(wtype, DictType):
@@ -787,6 +817,8 @@ class TypeInterner:
         elif entry.tag == "result":
             ok_id, err_id = entry.data
             res = ResultType(self.to_wtype(ok_id), self.to_wtype(err_id))
+        elif entry.tag == "error_union":
+            res = ErrorUnionType([self.to_wtype(member) for member in entry.data])
         elif entry.tag == "list":
             res = ListType(self.to_wtype(entry.data))
         elif entry.tag == "dict":

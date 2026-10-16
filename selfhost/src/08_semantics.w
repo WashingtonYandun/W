@@ -30,6 +30,46 @@ fn sem_simple(kind: str) -> int {
 }
 fn sem_wrap(kind: str, child: int) -> int { return sem_intern(kind, "", [child]) }
 fn sem_kind(type_id: int) -> str { return sem_types[type_id].kind }
+fn sem_error_type_name(type_id: int) -> str {
+    let type_ = sem_types[type_id]
+    if type_.kind == "int" { return "int" }
+    if type_.kind == "float" { return "float" }
+    if type_.kind == "bool" { return "bool" }
+    if type_.kind == "str" { return "str" }
+    return type_.name
+}
+fn sem_error_union(first: int) -> int {
+    let mut alternatives: list[int] = [first]
+    let mut has_union = false
+    while sem_match("PIPE") { has_union = true alternatives.append(sem_type()) }
+    if not has_union { return first }
+    let mut unique: list[int] = []
+    for alternative in alternatives {
+        let kind = sem_kind(alternative)
+        if kind != "int" and kind != "float" and kind != "bool" and kind != "str" and kind != "struct" and kind != "enum" {
+            sem_error("W2001", "error union alternatives must be scalar, non-generic struct, or non-generic enum types")
+        }
+        if len(sem_types[alternative].args) > 0 and (kind == "struct" or kind == "enum") {
+            sem_error("W2001", "generic nominal types cannot be error union alternatives")
+        }
+        let mut found = false
+        for existing in unique { if existing == alternative { found = true } }
+        if not found { unique.append(alternative) }
+    }
+    if len(unique) < 2 { sem_error("W2001", "an error union requires at least two distinct alternatives") }
+    let mut canonical: list[int] = []
+    let mut previous = -1
+    while len(canonical) < len(unique) {
+        let mut next = -1
+        for alternative in unique {
+            if alternative > previous and (next < 0 or alternative < next) { next = alternative }
+        }
+        if next < 0 { sem_error("W9999", "failed to canonicalize error union") }
+        canonical.append(next)
+        previous = next
+    }
+    return sem_intern("error_union", "", canonical)
+}
 fn sem_named(name: str) -> int {
     for i in 0..len(sem_types) { if sem_types[i].name == name { return i } }
     sem_error("W1001", "unknown type: " + name)
@@ -75,6 +115,18 @@ fn sem_assignable(source: int, target: int) -> bool {
         if s.kind == "ok" { return sem_assignable(s.args[0], t.args[0]) }
         if s.kind == "err" { return sem_assignable(s.args[0], t.args[1]) }
         return sem_assignable(source, t.args[0])
+    }
+    if t.kind == "error_union" {
+        if s.kind == "error_union" {
+            for source_member in s.args {
+                let mut covered = false
+                for target_member in t.args { if source_member == target_member { covered = true } }
+                if not covered { return false }
+            }
+            return true
+        }
+        for target_member in t.args { if source == target_member { return true } }
+        return false
     }
     if s.kind == "class" and (t.kind == "class" or t.kind == "interface") {
         let mut current = s.name
@@ -160,7 +212,7 @@ fn sem_type() -> int {
         }
     }
     if sem_match("QUESTION") { result = sem_wrap("optional", result) }
-    if sem_match("BANG") { result = sem_intern("result", "", [result, sem_type()]) }
+    if sem_match("BANG") { result = sem_intern("result", "", [result, sem_error_union(sem_type())]) }
     return result
 }
 fn sem_key(type_id: int) -> bool {
@@ -935,7 +987,7 @@ fn sem_expression(minimum: int, allow_struct: bool) -> SemValue {
             let returned = sem_types[sem_return]
             if type_.kind != "optional" and type_.kind != "result" { sem_error("W2006", "propagation operand") }
             if returned.kind != type_.kind { sem_error("W2006", "propagation return channel") }
-            if type_.kind == "result" and type_.args[1] != returned.args[1] { sem_error("W2006", "propagation error channel") }
+            if type_.kind == "result" and not sem_assignable(type_.args[1], returned.args[1]) { sem_error("W2006", "propagation error channel") }
             left = sem_value(type_.args[0])
         } elif sem_match("ELSE") {
             let operand = sem_types[left.type_id]
@@ -1056,12 +1108,35 @@ fn sem_pattern(subject: int) -> str {
         sem_require(type_id, subject, "W2001")
         return "literal:" + token.val
     }
+    let pattern_position = sem_pos + sem_token_offset
     let mut owner = ""
     let mut name = sem_expect("IDENT").val
     if name == "_" { return "*" }
     if sem_match("DOT") { owner = name name = sem_expect("IDENT").val }
     let kind = sem_kind(subject)
     if sem_match("LPAREN") {
+        if kind == "error_union" {
+            if owner != "" { sem_error("W2001", "error type patterns must be unqualified") }
+            let mut error_type = -1
+            if name == "int" { error_type = sem_int }
+            elif name == "float" { error_type = sem_float }
+            elif name == "bool" { error_type = sem_bool }
+            elif name == "str" { error_type = sem_str }
+            else { error_type = sem_named(name) }
+            let mut is_alternative = false
+            for alternative in sem_types[subject].args { if alternative == error_type { is_alternative = true } }
+            if not is_alternative { sem_error("W2001", "error type pattern is not an alternative of this union") }
+            if sem_is("RPAREN") { sem_error("W2005", "error type pattern requires exactly one payload binding") }
+            if not sem_is("IDENT") { sem_error("W2005", "error type pattern payload must be a binding or wildcard") }
+            let child_pattern = sem_pattern(error_type)
+            if child_pattern != "*" { sem_error("W2005", "error type pattern payload must be a binding or wildcard") }
+            if sem_match("COMMA") { sem_error("W2005", "error type pattern requires exactly one payload binding") }
+            sem_expect("RPAREN")
+            sem_error_pattern_positions.append(pattern_position)
+            sem_error_pattern_kinds.append(sem_kind(error_type))
+            sem_error_pattern_names.append(sem_error_type_name(error_type))
+            return sem_error_type_name(error_type)
+        }
         let mut payload_types: list[int] = []
         let mut valid = false
         if (owner == "" or owner == "Option") and name == "Some" and kind == "optional" {
@@ -1171,6 +1246,9 @@ fn sem_match_expression() -> SemValue {
         if kind == "bool" { required = ["literal:true", "literal:false"] }
         elif kind == "optional" { required = ["Some", "None"] }
         elif kind == "result" { required = ["Ok", "Err"] }
+        elif kind == "error_union" {
+            for alternative in sem_types[subject].args { required.append(sem_error_type_name(alternative)) }
+        }
         elif kind != "enum" { sem_error("W2003", "match requires exhaustive patterns") }
         for name in required { if not module_contains(covered, name) { sem_error("W2003", "non-exhaustive match") } }
     }
@@ -1398,6 +1476,11 @@ fn sem_reset(tokens: list[Token]) {
     sem_class_projection_positions = empty_ids
     sem_collection_call_positions = empty_ids
     sem_result_lift_positions = empty_ids
+    sem_error_pattern_positions = empty_ids
+    let empty_error_pattern_kinds: list[str] = []
+    let empty_error_pattern_names: list[str] = []
+    sem_error_pattern_kinds = empty_error_pattern_kinds
+    sem_error_pattern_names = empty_error_pattern_names
     let empty_lambdas: list[SemLambda] = []
     sem_lambdas = empty_lambdas
     sem_capture_names = empty_names

@@ -411,6 +411,26 @@ fn parse_match_expr() -> ExprRes {
 }
 
 fn parse_pattern_condition(subject: str) -> str {
+    let pattern_position = g_pos + 1
+    let mut error_pattern_kind = ""
+    let mut error_pattern_name = ""
+    for i in 0..len(sem_error_pattern_positions) {
+        if sem_error_pattern_positions[i] == pattern_position {
+            error_pattern_kind = sem_error_pattern_kinds[i]
+            error_pattern_name = sem_error_pattern_names[i]
+        }
+    }
+    if error_pattern_kind != "" {
+        expect_kind("IDENT")
+        expect_kind("LPAREN")
+        let mut condition = "w_value_is_error_type(" + subject + ", " + escape_c_str(error_pattern_kind) + ", " + escape_c_str(error_pattern_name) + ")"
+        if not check_kind("RPAREN") {
+            let child = parse_pattern_condition(subject)
+            condition = "(" + condition + ") && (" + child + ")"
+        }
+        expect_kind("RPAREN")
+        return condition
+    }
     if match_kind("ELSE") { return "true" }
     if match_kind("NONE") { return "w_is_none(" + subject + ")" }
     if check_kind("INT") or check_kind("FLOAT") or check_kind("STR") or check_kind("TRUE") or check_kind("FALSE") {

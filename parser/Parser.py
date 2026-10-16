@@ -6,7 +6,7 @@ from lexer.Lexer import Lexer
 from error.Error import ParserError
 from node.NodeType import (
     ExternFnDecl, LambdaExpr, FunctionType as AstFunctionType, Node, Program, Stmt, Expr, TypeNode, Pattern, Block,
-    NamedType, GenericType, TypeParam, OptionalType, ListType, DictType, TupleType, ResultType,
+    NamedType, GenericType, TypeParam, OptionalType, ListType, DictType, TupleType, ResultType, ErrorUnionType,
     IdentifierPattern, TuplePattern, EnumPattern, LiteralPattern, WildcardPattern,
     FnDecl, Param, StructDecl, StructField, EnumDecl, VariantDecl,
     InterfaceDecl, InterfaceMethod, ClassDecl, ClassField, MethodDecl,
@@ -220,6 +220,11 @@ class Parser:
         # Check for fallible return type '!'
         if self.match(TokenType.EXCLAMATION):
             err_type = self.parse_type()
+            error_types = [err_type]
+            while self.match(TokenType.PIPE):
+                error_types.append(self.parse_type())
+            if len(error_types) > 1:
+                err_type = ErrorUnionType(error_types, line=line, col=col)
             inner_type = ResultType(ok_type=inner_type, err_type=err_type, line=line, col=col)
 
         return inner_type

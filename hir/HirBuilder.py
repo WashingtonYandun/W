@@ -2,6 +2,7 @@ from error.Error import WError
 from typing import Any, Dict, List, Optional, Tuple, Set
 from node.NodeType import (
     ExternFnDecl, LambdaExpr, Program, Stmt, Expr, TypeNode, ResultType as AstResultType,
+    ErrorUnionType as AstErrorUnionType,
     NamedType, OptionalType as AstOptionalType, ListType as AstListType, DictType as AstDictType,
     GenericType,
     Pattern, IdentifierPattern, TuplePattern, EnumPattern, LiteralPattern, WildcardPattern,
@@ -151,6 +152,19 @@ class HirBuilder:
             elems = [self._lower_pattern(p, t) for p, t in zip(pat.elements, subtypes)]
             return HirTuplePattern(elems, expected_tid, span)
         if isinstance(pat, EnumPattern):
+            if getattr(pat, "error_type_match", None) is not None:
+                matched_type_id = self.interner.intern(pat.error_type_match)
+                lowered_args = [self._lower_pattern(arg, matched_type_id) for arg in pat.args]
+                return HirEnumPattern(
+                    "__W_ERROR_TYPE__",
+                    self._error_type_pattern_name(pat.error_type_match),
+                    0,
+                    lowered_args,
+                    expected_tid,
+                    span,
+                    variant_id=VariantId(0, self._error_type_pattern_name(pat.error_type_match)),
+                    error_type_id=matched_type_id
+                )
             variant = pat.variant
             enum_name = pat.enum_name
             if variant in ("Some", "None") and (enum_name is None or enum_name.startswith("Option")):
@@ -181,6 +195,10 @@ class HirBuilder:
             return HirEnumPattern(enum_name, variant, variant_idx, lowered_subs, expected_tid, span,
                                   variant_id=VariantId(variant_idx, variant))
         return HirWildcardPattern(expected_tid, span)
+
+    @staticmethod
+    def _error_type_pattern_name(error_type) -> str:
+        return str(error_type)
 
     def _span(self, node):
         return Span(node.line, node.col, file_path=getattr(node, 'source_file', self.file_path),
@@ -819,6 +837,10 @@ class HirBuilder:
             return self.interner.mk_result(
                 self._get_type_id_from_node(node.ok_type),
                 self._get_type_id_from_node(node.err_type)
+            )
+        elif isinstance(node, AstErrorUnionType):
+            return self.interner.mk_error_union(
+                tuple(self._get_type_id_from_node(member) for member in node.error_types)
             )
         elif isinstance(node, GenericType):
             args_mangled = "__".join(self._get_type_name_from_node(a) for a in node.type_args)

@@ -2,7 +2,7 @@ from decimal import Decimal
 import math
 from typing import List, Optional
 from node.NodeType import (
-    ExternFnDecl, LambdaExpr, FunctionType as AstFunctionType, Program, Stmt, Expr, TypeNode, NamedType, GenericType, TypeParam, OptionalType, ListType, DictType, TupleType, ResultType,
+    ExternFnDecl, LambdaExpr, FunctionType as AstFunctionType, Program, Stmt, Expr, TypeNode, NamedType, GenericType, TypeParam, OptionalType, ListType, DictType, TupleType, ResultType, ErrorUnionType,
     Pattern, IdentifierPattern, TuplePattern, EnumPattern, LiteralPattern, WildcardPattern,
     Block, ExprStmt, Param, FnDecl, StructField, StructDecl, EnumDecl,
     InterfaceMethod, InterfaceDecl, ClassField, MethodDecl, ClassDecl,
@@ -87,6 +87,8 @@ class Formatter:
             if isinstance(t.ok_type, ResultType):
                 ok = f"({ok})"
             return f"{ok} ! {self.format_type(t.err_type)}"
+        if isinstance(t, ErrorUnionType):
+            return " | ".join(self.format_type(error_type) for error_type in t.error_types)
         return "unit"
 
     # ==========================================
