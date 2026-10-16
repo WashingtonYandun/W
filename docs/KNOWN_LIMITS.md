@@ -103,16 +103,22 @@ union is the honest option because it preserves exhaustiveness.
 
 **What happens.** `selfhost/w1.w` (4.1k lines, bundled from `selfhost/src/*.w`) is a
 genuine compiler: its own lexer, recursive-descent parser, a token-driven semantic pass
-with type interning, and a direct-to-C emitter that reuses `runtime/w_runtime.h`. It does
-**not** implement:
+with type interning, and a direct-to-C emitter that reuses `runtime/w_runtime.h`. W1
+supports first-class calls and closures for the forms exercised by the expansion suite,
+but it does **not** implement:
 
 | Feature | Diagnostic |
 | :--- | :--- |
 | Generic declarations, specialization | `W2013 W1 generic declarations are not implemented` |
 | Enum payload layout | `W2013 W1 enum payload layout is not implemented` |
 | Pattern matching on `Option` / `Result` | `W0001` / `W2001`, see below |
-| Lambda and callable syntax | `W2013` |
-| Checked-module sessions | not attempted |
+| W0-equivalent checked-module sessions and imported generic specialization | declared unsupported under D02 |
+
+Basic imports are supported: W1 expands the module graph into a token stream, qualifies
+module names, enforces `pub` exports, and detects cycles (`selfhost/src/03_modules.w`).
+This is not the same architecture as W0's `CompilationSession`: W1 does not maintain a
+shared typed-module cache or canonical cross-module declaration identities. The single
+`checked_modules` corpus fixture also uses generic imports, which W1 cannot specialize.
 
 Pattern matching on `Option` and `Result` fails in **every** form:
 
@@ -122,8 +128,9 @@ match o { Option.Some(v) => { ... } } # qualified: "pattern enum identity"
 ```
 
 `selfhost/src/*.w` contains zero occurrences of `Some(`, `Ok(` or `Err(`, so the bootstrap
-never exercises the feature it cannot handle. That is a deliberate style discipline, and
-it is what makes the 3-stage fixed point possible.
+does not exercise the unsupported pattern forms. Separate W1 tests must carry those
+contracts; the expansion suite currently exercises closures and first-class calls on W1,
+but runs generic OOP, stdlib and C FFI cases only on W0 engines.
 
 **Why it is this way.** W1 is a bootstrap: its purpose is to prove the language can
 describe a compiler and reach a reproducible fixed point, not to duplicate W0.
@@ -133,9 +140,10 @@ header", and it says nothing about the expressiveness of the language subset it 
 three-stage fixed point proves determinism and convergence; it cannot prove correctness,
 because a bug in the semantics is reproduced identically at every stage.
 
-**State.** Declared in `tests/engine_profiles.json` with milestone reasons; the `release`
-profile of `tools/ci_conformance.py` deliberately fails while the gaps exist. Closing them
-is milestone D02.
+**State.** The public core corpus passes on W1. The 15 generic fixtures and one checked-
+module fixture are declared unsupported in `tests/engine_profiles.json`; the `release`
+profile of `tools/ci_conformance.py` deliberately fails while those exclusions exist.
+Closing them is milestone D02.
 
 ---
 

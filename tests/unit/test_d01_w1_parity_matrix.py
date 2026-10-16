@@ -121,7 +121,7 @@ def test_ci_matrix_generation_tooling():
 
 
 def test_documentation_consistency():
-    """Verify that docs/ENGINE_PARITY_MATRIX.md exists and is consistent with engine profiles."""
+    """Keep published engine and expansion limits aligned with the measured corpus."""
     print("  [TEST] Documentation consistency in docs/ENGINE_PARITY_MATRIX.md...")
     doc_path = ROOT / "docs/ENGINE_PARITY_MATRIX.md"
     assert doc_path.exists(), "docs/ENGINE_PARITY_MATRIX.md must exist"
@@ -140,6 +140,17 @@ def test_documentation_consistency():
     assert "Milestone D02" in content, "Doc must reference D02 remediation milestone"
     assert "Bootstrap Fixed-Point vs. Full Language Parity" in content, (
         "Doc must clearly contrast bootstrap fixed-point with full language parity"
+    )
+
+    expansion = (ROOT / "docs/EXPANSION.md").read_text()
+    assert f"{corpus_size} fixtures" in expansion, (
+        "Expansion docs must quote the current core corpus size, not a stale count"
+    )
+    assert "107 fixtures" not in expansion, "Stale expansion corpus count must be removed"
+
+    limits = (ROOT / "docs/KNOWN_LIMITS.md").read_text()
+    assert "Lambda and callable syntax" not in limits, (
+        "W1 supports first-class calls and closures in the tested expansion cases"
     )
 
 

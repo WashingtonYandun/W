@@ -114,7 +114,8 @@ gap: a construct the checker accepted while the HIR backend rejected it.
 - **Remediation Target:** **Milestone D02**.
 - **Explanation:**
   - W0 implements whole-program `CompilationSession` with arena deduplication and diamond import caching.
-  - W1 operates as a single-file compiler or uses the bootstrap bundler (`tools/bundle_w1.py`) rather than native multi-module compilation sessions.
+  - W1 has a source-level module expander in `selfhost/src/03_modules.w`: it loads imports, checks public names, qualifies module identities, and detects cycles before feeding a flattened token stream to the compiler.
+  - This is not a W0-equivalent checked session. W1 does not share canonical typed declarations or specialization caches across module units. The current `checked_modules` fixture also requires imported generic specialization, which W1 rejects. D02 must define and test the intended boundary instead of describing W1 as single-file-only.
 
 ---
 
