@@ -31,3 +31,10 @@ La biblioteca del sistema no se recompila instrumentada. El lote es sintético y
 memoria física máxima aún no se mide. Superar el piloto demuestra este contrato
 técnico; demostrar una ventaja para un usuario requiere un flujo y datos reales.
 `docs/FFI_VALIDATION.md` conserva los comandos y condiciones de aceptación pendientes.
+
+## Evolución posterior · ADR-017
+
+El importador CSV amplía el piloto a entradas de usuario, rollback atómico y medición
+física por proceso. Su runner verifica C/AST/HIR y W1 directo. El compromiso sigue limitado
+a esos programas: no demuestra soporte universal de FFI en W1. Los límites de la evidencia
+inicial de esta ADR son históricos; los resultados actuales están en `AUDIT_REMEDIATION.md`.

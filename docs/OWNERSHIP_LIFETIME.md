@@ -148,7 +148,9 @@ one release obligation, including when it happens to be an immediate scalar.
 - `w_unwrap_optional`, `w_unwrap_ok`, `w_unwrap_err`, `w_unwrap_success` retain their
   returned payload; the source wrapper may be released independently.
 - `w_index_get_owned` and `w_dict_get` retain their result. Present dictionary
-  values are wrapped, including present None. String indexing allocates a string.
+  values are wrapped, including present None. La indexación de strings devuelve un
+  valor propio: ASCII de un carácter usa almacenamiento estático; los demás caracteres
+  conservan un buffer administrado independiente. El caller libera ambos del mismo modo.
 - `w_make_list`, `w_make_tuple`, `w_make_dict`, `w_make_struct`, `w_make_object`
   borrow their initializer arrays and clone the stored values. `w_make_range`
   creates an owned list. Field/variant/type names come from static generated C.
@@ -197,10 +199,11 @@ value immediately. Collection initialization evaluates key then value per entry.
 Already-owned temporaries are reused. These snapshots can increase RC/CoW traffic;
 B02 must measure that cost before optimizing lifetimes.
 
-Assignments evaluate and protect the RHS before evaluating the target, following
-the interpreter contract. The RHS hold is registered before any target computation
-that can propagate; successful assignment moves it into the slot. W1 replays target
-emission after RHS evaluation rather than emitting target effects prematurely.
+Las asignaciones evalúan índices y receptores de clase antes del RHS, una sola vez.
+Después protegen el RHS y resuelven el slot mutable: una lista puede realocarse durante
+el RHS y no debe dejar un puntero guardado a un elemento. Los receptores de clase se
+retienen antes del RHS y conservan identidad. El resultado es el valor asignado, también
+en rutas compuestas. AST, HIR y W1 siguen este contrato; véase ADR-017.
 
 Return and propagation protect the escaping value before LIFO cleanup. Break and
 continue clean through the nearest loop; the for iterable belongs to its outer
@@ -266,3 +269,18 @@ As formalized in `ADR-009-Consolidation-and-Parity-Contracts.md`:
 2. **Zero Unintended Leaks:** All acyclic data structures, CoW path-copying mutations, monomorphized generic containers, and weak-reference broken cycles must exhibit zero memory leaks.
 3. **Deterministic Scope Cleanup:** The `CleanupScope` LIFO unwinding guarantees that memory is released immediately at scope exits across all four execution engines.
 
+
+## MIR y ABI escalar (ADR-018)
+
+En el backend principal, el ownership deja de ser solamente una convención del emitter:
+MIR contiene operaciones `clone`, `store` con operandos movidos y `release`, más salidas
+explícitas por bloque. Su verificador propaga inicialización definida, valores posiblemente
+vivos y pruebas de narrowing a través de joins y backedges. Rechaza consumir parámetros
+prestados, leer valores consumidos y retornar dejando referencias propias vivas.
+No es una prueba formal del runtime ni un análisis del ownership de recursos C `opaque`.
+
+Los locales, parámetros y retornos primitivos usan almacenamiento nativo de 64 bits,
+double o bool; no generan ARC. Globales y valores administrados siguen usando `WVal`.
+Los adaptadores de funciones como valores y despacho virtual convierten en la frontera
+con la ABI `WVal`. Los campos se proyectan por offsets físicos verificados. El backend
+AST y W1 conservan su implementación independiente y sirven de oráculos diferenciales.

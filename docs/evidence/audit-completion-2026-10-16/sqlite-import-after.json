@@ -1,0 +1,307 @@
+{
+  "rows": 10000,
+  "samples": 5,
+  "sanitize": false,
+  "platform": "darwin",
+  "compiler": "Apple clang version 21.0.0 (clang-2100.3.34.2)\nTarget: arm64-apple-darwin25.6.0\nThread model: posix\nInstalledDir: /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin\n",
+  "flags": [
+    "-std=c99",
+    "-O2",
+    "-g",
+    "-I<checkout>"
+  ],
+  "bootstrap_seconds": 0.0006028329953551292,
+  "memory_method": "one isolated child ru_maxrss; Darwin bytes, Linux KiB converted to bytes",
+  "engines": {
+    "c": {
+      "sqlite_version_number": 3051000,
+      "build_seconds": 0.19326566701056436,
+      "run_seconds": [
+        0.007904333004262298,
+        0.0075387919787317514,
+        0.0071725830202922225,
+        0.007482833985704929,
+        0.0076152500114403665
+      ],
+      "median_run_seconds": 0.0075387919787317514,
+      "user_seconds": [
+        0.00468,
+        0.004405,
+        0.004389,
+        0.004497,
+        0.004405
+      ],
+      "system_seconds": [
+        0.00196,
+        0.001777,
+        0.001727,
+        0.001741,
+        0.0018169999999999998
+      ],
+      "runtime_memory": null,
+      "peak_memory_bytes": [
+        2179072,
+        2179072,
+        2179072,
+        2179072,
+        2179072
+      ],
+      "median_peak_memory_bytes": 2179072,
+      "binary_bytes": 37120,
+      "input_bytes": 168900,
+      "persisted_rows": 10000,
+      "persisted_total": 42950172910000,
+      "live_adapter_resources": 0,
+      "failure_cases": [
+        "duplicate_batch",
+        "duplicate_persisted",
+        "bad_decimal",
+        "overflow",
+        "sum_overflow",
+        "header",
+        "columns",
+        "empty_value",
+        "nul",
+        "unicode_digit",
+        "no_rows",
+        "row_limit",
+        "open",
+        "missing_file"
+      ],
+      "link_command": [
+        "cc",
+        "-std=c99",
+        "-O2",
+        "-g",
+        "-I<checkout>",
+        "<checkout>/examples/ffi/sqlite/import_reference.c",
+        "/var/folders/1d/zj02r88x5m356mpg0yw6cqm00000gn/T/w-sqlite-import-edrw0r1t/adapter.o",
+        "-lsqlite3",
+        "-o",
+        "/var/folders/1d/zj02r88x5m356mpg0yw6cqm00000gn/T/w-sqlite-import-edrw0r1t/c"
+      ]
+    },
+    "ast": {
+      "sqlite_version_number": 3051000,
+      "build_seconds": 0.5514613330014981,
+      "run_seconds": [
+        0.0512747920001857,
+        0.05018500000005588,
+        0.04995187500026077,
+        0.04987100005382672,
+        0.05077924998477101
+      ],
+      "median_run_seconds": 0.05018500000005588,
+      "user_seconds": [
+        0.047867,
+        0.046805,
+        0.046653,
+        0.046523999999999996,
+        0.046941
+      ],
+      "system_seconds": [
+        0.002059,
+        0.002036,
+        0.001959,
+        0.0019549999999999997,
+        0.001996
+      ],
+      "runtime_memory": {
+        "alloc": 60007,
+        "free": 60007,
+        "retain": 745595,
+        "release": 805602,
+        "live": 0
+      },
+      "peak_memory_bytes": [
+        2342912,
+        2342912,
+        2375680,
+        2375680,
+        2359296
+      ],
+      "median_peak_memory_bytes": 2359296,
+      "binary_bytes": 100496,
+      "input_bytes": 168900,
+      "persisted_rows": 10000,
+      "persisted_total": 42950172910000,
+      "live_adapter_resources": 0,
+      "failure_cases": [
+        "duplicate_batch",
+        "duplicate_persisted",
+        "bad_decimal",
+        "overflow",
+        "sum_overflow",
+        "header",
+        "columns",
+        "empty_value",
+        "nul",
+        "unicode_digit",
+        "no_rows",
+        "row_limit",
+        "open",
+        "missing_file"
+      ],
+      "link_command": [
+        "cc",
+        "-std=c99",
+        "-O2",
+        "-g",
+        "-I<checkout>",
+        "/var/folders/1d/zj02r88x5m356mpg0yw6cqm00000gn/T/w-sqlite-import-edrw0r1t/ast.c",
+        "/var/folders/1d/zj02r88x5m356mpg0yw6cqm00000gn/T/w-sqlite-import-edrw0r1t/adapter.o",
+        "-lsqlite3",
+        "-o",
+        "/var/folders/1d/zj02r88x5m356mpg0yw6cqm00000gn/T/w-sqlite-import-edrw0r1t/ast"
+      ]
+    },
+    "hir": {
+      "sqlite_version_number": 3051000,
+      "build_seconds": 0.7031714170007035,
+      "run_seconds": [
+        0.0419079169514589,
+        0.04218975000549108,
+        0.04197154100984335,
+        0.04228279198287055,
+        0.04182929202215746
+      ],
+      "median_run_seconds": 0.04197154100984335,
+      "user_seconds": [
+        0.038796,
+        0.038867,
+        0.038776,
+        0.038765999999999995,
+        0.038702
+      ],
+      "system_seconds": [
+        0.0018859999999999999,
+        0.001924,
+        0.0019249999999999998,
+        0.001823,
+        0.0019459999999999998
+      ],
+      "runtime_memory": {
+        "alloc": 60007,
+        "free": 60007,
+        "retain": 745595,
+        "release": 805602,
+        "live": 0
+      },
+      "peak_memory_bytes": [
+        2359296,
+        2359296,
+        2326528,
+        2375680,
+        2375680
+      ],
+      "median_peak_memory_bytes": 2359296,
+      "binary_bytes": 99632,
+      "input_bytes": 168900,
+      "persisted_rows": 10000,
+      "persisted_total": 42950172910000,
+      "live_adapter_resources": 0,
+      "failure_cases": [
+        "duplicate_batch",
+        "duplicate_persisted",
+        "bad_decimal",
+        "overflow",
+        "sum_overflow",
+        "header",
+        "columns",
+        "empty_value",
+        "nul",
+        "unicode_digit",
+        "no_rows",
+        "row_limit",
+        "open",
+        "missing_file"
+      ],
+      "link_command": [
+        "cc",
+        "-std=c99",
+        "-O2",
+        "-g",
+        "-I<checkout>",
+        "/var/folders/1d/zj02r88x5m356mpg0yw6cqm00000gn/T/w-sqlite-import-edrw0r1t/hir.c",
+        "/var/folders/1d/zj02r88x5m356mpg0yw6cqm00000gn/T/w-sqlite-import-edrw0r1t/adapter.o",
+        "-lsqlite3",
+        "-o",
+        "/var/folders/1d/zj02r88x5m356mpg0yw6cqm00000gn/T/w-sqlite-import-edrw0r1t/hir"
+      ]
+    },
+    "w1": {
+      "sqlite_version_number": 3051000,
+      "build_seconds": 0.5088545419857837,
+      "run_seconds": [
+        0.05017404101090506,
+        0.0501564159640111,
+        0.050573374959640205,
+        0.050881374976597726,
+        0.05059762502787635
+      ],
+      "median_run_seconds": 0.050573374959640205,
+      "user_seconds": [
+        0.046838,
+        0.046731999999999996,
+        0.047242,
+        0.047358,
+        0.047320999999999995
+      ],
+      "system_seconds": [
+        0.0019749999999999998,
+        0.001941,
+        0.002043,
+        0.002049,
+        0.001926
+      ],
+      "runtime_memory": {
+        "alloc": 60007,
+        "free": 60007,
+        "retain": 745595,
+        "release": 805602,
+        "live": 0
+      },
+      "peak_memory_bytes": [
+        2310144,
+        2326528,
+        2293760,
+        2293760,
+        2293760
+      ],
+      "median_peak_memory_bytes": 2293760,
+      "binary_bytes": 100496,
+      "input_bytes": 168900,
+      "persisted_rows": 10000,
+      "persisted_total": 42950172910000,
+      "live_adapter_resources": 0,
+      "failure_cases": [
+        "duplicate_batch",
+        "duplicate_persisted",
+        "bad_decimal",
+        "overflow",
+        "sum_overflow",
+        "header",
+        "columns",
+        "empty_value",
+        "nul",
+        "unicode_digit",
+        "no_rows",
+        "row_limit",
+        "open",
+        "missing_file"
+      ],
+      "link_command": [
+        "cc",
+        "-std=c99",
+        "-O2",
+        "-g",
+        "-I<checkout>",
+        "/var/folders/1d/zj02r88x5m356mpg0yw6cqm00000gn/T/w-sqlite-import-edrw0r1t/w1.c",
+        "/var/folders/1d/zj02r88x5m356mpg0yw6cqm00000gn/T/w-sqlite-import-edrw0r1t/adapter.o",
+        "-lsqlite3",
+        "-o",
+        "/var/folders/1d/zj02r88x5m356mpg0yw6cqm00000gn/T/w-sqlite-import-edrw0r1t/w1"
+      ]
+    }
+  }
+}

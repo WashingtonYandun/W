@@ -1,0 +1,15 @@
+fn effect() -> int { print("effect")
+    return 7
+}
+fn explicit() -> unit { effect() }
+fn defaulted() { ["owned"] }
+fn grouped() -> (unit) { "discarded" }
+fn optional() -> unit? { none }
+class Worker { public fn run() -> unit { effect() } }
+let callback = |value: int| -> unit { str(value) }
+print(explicit(), defaulted(), grouped(), Worker().run(), callback(3), optional())
+fn tail_error() -> unit ! str { Err("tail") }
+fn tail_ok() -> unit ! str { Ok(print("ok")) }
+let recovered = tail_error() else error { print(error) }
+print(recovered)
+print(tail_ok() else error { print("unexpected", error) })

@@ -372,7 +372,7 @@ fn sem_collect_record(kind: str) {
 }
 let mut sem_expected = -1
 fn sem_builtin(name: str) -> bool {
-    return name == "print" or name == "eprint" or name == "len" or name == "int" or name == "float" or name == "str" or name == "ord" or name == "chr" or name == "bytes" or name == "slice" or name == "args" or name == "exit" or name == "enumerate" or name == "dict_items" or name == "read_file" or name == "write_file" or name == "Some" or name == "Ok" or name == "Err" or name == "weak" or name == "upgrade"
+    return name == "join_strings" or name == "print" or name == "eprint" or name == "len" or name == "int" or name == "float" or name == "str" or name == "ord" or name == "chr" or name == "bytes" or name == "slice" or name == "args" or name == "exit" or name == "enumerate" or name == "dict_items" or name == "read_file" or name == "write_file" or name == "Some" or name == "Ok" or name == "Err" or name == "weak" or name == "upgrade"
 }
 fn sem_call_builtin(name: str, args: list[int]) -> int {
     let count = len(args)
@@ -383,8 +383,14 @@ fn sem_call_builtin(name: str, args: list[int]) -> int {
     }
     let mut arity = 1
     if name == "slice" { arity = 3 }
-    if name == "write_file" { arity = 2 }
+    if name == "write_file" or name == "join_strings" { arity = 2 }
     if count != arity { sem_error("W2005", "builtin arity: " + name) }
+    if name == "join_strings" {
+        if count != 2 { sem_error("W2005", "join_strings arity") }
+        sem_require(args[0], sem_wrap("list", sem_str), "W2001")
+        sem_require(args[1], sem_str, "W2001")
+        return sem_str
+    }
     let first = args[0]
     let kind = sem_kind(first)
     if name == "Some" { return sem_wrap("optional", first) }
@@ -399,11 +405,11 @@ fn sem_call_builtin(name: str, args: list[int]) -> int {
         return sem_wrap("err", first)
     }
     if name == "len" {
-        if kind != "list" and kind != "dict" and first != sem_str { sem_error("W2001", "len requires a collection or string") }
+        if kind != "list" and kind != "dict" and kind != "tuple" and first != sem_str { sem_error("W2001", "len requires a collection or string") }
         return sem_int
     }
     if name == "int" or name == "float" or name == "str" {
-        if first != sem_int and first != sem_float and first != sem_str and (name != "str" or first != sem_bool) { sem_error("W2001", "conversion argument") }
+        if name != "str" and first != sem_int and first != sem_float and first != sem_str and first != sem_bool { sem_error("W2001", "conversion argument") }
         if name == "int" { return sem_int }
         if name == "float" { return sem_float }
         return sem_str
@@ -791,6 +797,12 @@ fn sem_prefix(allow_struct: bool, statement: bool) -> SemValue {
     }
     sem_match("NEW")
     let name = sem_expect("IDENT").val
+    let variable = sem_lookup(name)
+    if variable >= 0 {
+        let value = sem_variables[variable]
+        if sem_capture_depth >= 0 and value.depth < sem_capture_depth and not module_contains(sem_capture_names, name) { sem_capture_names.append(name) }
+        return SemValue { type_id: value.type_id, root: name, writable: value.type_id, terminates: false }
+    }
     if name == "None" { return sem_value(sem_none) }
     if name == "Option" or name == "Result" {
         sem_expect("DOT")
@@ -801,12 +813,6 @@ fn sem_prefix(allow_struct: bool, statement: bool) -> SemValue {
             return sem_value(sem_intern("enum_ctor", name + "." + variant, empty))
         }
         sem_error("W1001", "unknown built-in enum variant: " + name + "." + variant)
-    }
-    let variable = sem_lookup(name)
-    if variable >= 0 {
-        let value = sem_variables[variable]
-        if sem_capture_depth >= 0 and value.depth < sem_capture_depth and not module_contains(sem_capture_names, name) { sem_capture_names.append(name) }
-        return SemValue { type_id: value.type_id, root: name, writable: value.type_id, terminates: false }
     }
     if sem_builtin(name) {
         let empty: list[int] = []
@@ -1128,12 +1134,18 @@ fn sem_if(statement: bool) -> SemValue {
         common = sem_unit
     }
     sem_initialized = initialized
-    if statement { common = sem_unit }
+    # A discarded expression can still contain an if as a binary/postfix operand.
+    # Keep a common value type; incompatible discarded branches already yield unit.
     return SemValue { type_id: common, root: "", writable: -1, terminates: all_return }
 }
 fn sem_pattern(subject: int) -> str {
     if sem_match("ELSE") { return "*" }
     if sem_match("NONE") { return "None" }
+    if sem_match("MINUS") {
+        let literal = sem_expect("INT")
+        sem_require(sem_int, subject, "W2001")
+        return "literal:-" + literal.val
+    }
     if sem_is("INT") or sem_is("FLOAT") or sem_is("STR") or sem_is("TRUE") or sem_is("FALSE") {
         let token = sem_take()
         let mut type_id = sem_bool
@@ -1231,6 +1243,18 @@ fn sem_pattern(subject: int) -> str {
 }
 fn sem_match_expression() -> SemValue {
     sem_expect("MATCH")
+    # Preserve syntax-error priority before resolving an atomic subject's name.
+    # A bare pattern followed by a block always lacks its required arrow.
+    let mut pattern_start = sem_pos + 2
+    if pattern_start + 2 < len(sem_tokens) and sem_tokens[sem_pos + 1].kind == "LBRACE" {
+        if sem_tokens[pattern_start].kind == "MINUS" { pattern_start = pattern_start + 1 }
+        let pattern_kind = sem_tokens[pattern_start].kind
+        let bare_pattern = pattern_kind == "IDENT" or pattern_kind == "INT" or pattern_kind == "STR" or pattern_kind == "TRUE" or pattern_kind == "FALSE" or pattern_kind == "NONE"
+        let following = sem_tokens[pattern_start + 1]
+        if bare_pattern and following.kind == "LBRACE" {
+            report_error("W0001", following.line, following.col, "expected '=>' after match pattern")
+        }
+    }
     let subject = sem_expression(0, false).type_id
     sem_expect("LBRACE")
     let mut covered: list[str] = []
@@ -1247,7 +1271,7 @@ fn sem_match_expression() -> SemValue {
         let pattern = sem_pattern(subject)
         let mut guarded = false
         if sem_match("IF") { guarded = true sem_require(sem_expression(0, false).type_id, sem_bool, "W2001") }
-        sem_expect("FAT_ARROW")
+        if not sem_match("FAT_ARROW") { sem_error("W0001", "expected '=>' after match pattern") }
         let mut branch = SemFlow { type_id: sem_unit, terminates: false }
         if sem_is("LBRACE") { branch = sem_block(false) }
         else { let value = sem_expression(0, true) branch = SemFlow { type_id: value.type_id, terminates: value.terminates } }
@@ -1284,7 +1308,12 @@ fn sem_match_expression() -> SemValue {
         elif kind == "error_union" {
             for alternative in sem_types[subject].args { required.append(sem_error_type_name(alternative)) }
         }
-        elif kind != "enum" { sem_error("W2003", "match requires exhaustive patterns") }
+        elif kind != "enum" {
+            if common >= 0 and common != sem_unit { sem_error("W2003", "value match requires exhaustive patterns") }
+            if sem_expected >= 0 and sem_expected != sem_unit { sem_error("W2003", "value match requires exhaustive patterns") }
+            initialized = sem_intersect(initialized, initial)
+            all_return = false
+        }
         for name in required { if not module_contains(covered, name) { sem_error("W2003", "non-exhaustive match") } }
     }
     sem_initialized = initialized
@@ -1323,7 +1352,7 @@ fn sem_block(statement: bool) -> SemFlow {
             let previous = sem_expected
             sem_expected = sem_return
             let mut value = sem_unit
-            if not sem_is("RBRACE") and sem_at().line == sem_tokens[sem_pos - 1].line {
+            if expression_starter(sem_at().kind) {
                 let expression_start = sem_pos + sem_token_offset
                 value = sem_expression(0, true).type_id
                 sem_mark_result_lift(expression_start, value, sem_return)

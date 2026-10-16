@@ -1,0 +1,11 @@
+class Holder {
+    public xs: list[int]
+    fn init() { this.xs = [1] }
+}
+let mut current = Holder()
+let first = current
+fn change() -> int { current = Holder()
+    return 7
+}
+current.xs.append(change())
+print(first.xs, current.xs)

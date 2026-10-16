@@ -1,16 +1,16 @@
 pub fn join(parts: list[str], separator: str) -> str {
-    let mut result = ""
-    for index, part in enumerate(parts) {
-        if index > 0 { result = result + separator }
-        result = result + part
-    }
-    return result
+    return join_strings(parts, separator)
 }
 pub fn pad_left(text: str, width: int, fill: str) -> str {
-    if len(fill) == 0 { return text }
-    let mut result = text
-    while len(result) < width { result = fill + result }
-    return result
+    let size = len(fill)
+    let length = len(text)
+    if size == 0 or width <= length { return text }
+    let missing = width - length
+    let copies = missing / size + if missing % size != 0 { 1 } else { 0 }
+    let mut parts: list[str] = []
+    for index in 0..copies { parts.append(fill) }
+    parts.append(text)
+    return join_strings(parts, "")
 }
 pub fn lines(text: str) -> list[str] {
     let mut result: list[str] = []

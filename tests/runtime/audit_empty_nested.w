@@ -1,0 +1,2 @@
+let xs = [[]]
+print(xs)

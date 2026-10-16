@@ -41,20 +41,26 @@ flowchart TD
     E --> F["HIR Lowering (Typed HIR)"]
     F --> G["Monomorphization Pass (v0.2+)"]
     G --> H["L→R Temporary & CoW Path Lowering"]
-    H --> I["W0 HIR Interpreter"]
-    H --> J["C99 Backend (W0 & W1 Self-Hosted)"]
+    H --> I["MIR: CFG, ownership y layouts"]
+    I --> J["Verificador MIR → Backend C99 W0"]
 ```
 
-### Core Invariants of Typed HIR
-1. **Total Type Decoration:** Every `HirExpr`, `HirPattern`, and `HirLocal` carries a non-null, interned `TypeId` and source `Span`.
-2. **Zero Unresolved Names:** Variable, parameter, function, and type references use canonical integer identifiers (`SymbolId`, `TypeId`, `FieldIndex`, `MethodSlot`) rather than raw strings.
-3. **Desugared Surface Syntax:**
-   - Both `User("Ada")` and legacy `new User("Ada")` lower to `HirConstructObject(class_type_id, args)`.
-   - Omitted `-> unit` return annotations and bare `return` statements are normalized to explicit `Unit` values.
-   - `expr?` (postfix propagation) and `expr else err { ... }` lower to explicit control-flow branching over `Optional` / `Result` payloads.
-4. **Explicit Evaluation Order & Value Detachment:**
-   - Call arguments and binary operands with side effects are hoisted into ordered `HirStmt::BindTemp` statements before the consuming operation.
-   - Mutating lvalue paths are represented explicitly as `HirCowPath` chains.
+### Contratos implementados y relación con MIR
+
+HIR conserva la estructura del programa, tipos del arena, símbolos léxicos, targets de
+llamada y rutas CoW verificadas. `HirAssignment` conserva el valor de la asignación;
+`HirSequence` fija efectos condicionales sin adelantar operandos de cortocircuito.
+El análisis compartido de salidas comprueba retornos y fallthrough.
+
+El pipeline principal ahora continúa con `mir/Lowering.py`: resuelve layouts físicos,
+convierte control y propagación en bloques básicos y terminadores, y explicita retención,
+transferencia y liberación. `mir/Verifier.py` verifica ese contrato antes de que
+`mir/CCodeGen.py` emita C. `hir/HirCCodeGen.py` es una fachada de compatibilidad; no emite
+expresiones HIR ni tiene fallback al backend AST. `w mir archivo.w` permite inspeccionarlo.
+
+Los modelos de las secciones siguientes describen el nivel HIR. Las clases ejecutables
+canónicas son `hir/HirNodes.py`; [MIR_DESIGN.md](MIR_DESIGN.md) describe el nivel inferior.
+ADR-018 extiende los contratos de ADR-017.
 
 ---
 

@@ -98,6 +98,16 @@ class BuiltinCallTarget(CallTarget):
         return f"BuiltinTarget({self.builtin_name})"
 
 
+class CollectionCallTarget(CallTarget):
+    """Resolved collection intrinsic; never inferred from a user method's spelling."""
+    def __init__(self, receiver_kind: str, method_name: str):
+        self.receiver_kind = receiver_kind
+        self.method_name = method_name
+
+    def __repr__(self) -> str:
+        return f"CollectionTarget({self.receiver_kind}.{self.method_name})"
+
+
 class VirtualCallTarget(CallTarget):
     """Virtual call target dispatched dynamically or through a vtable slot."""
     def __init__(self, method_name: str, slot: Optional[int] = None, target_class: Optional[str] = None):
@@ -538,6 +548,16 @@ class HirBinaryOp(HirExpr):
         self.op = op
         self.left = left
         self.right = right
+
+
+class HirAssignment(HirExpr):
+    """An assignment result with one destination plan and one RHS evaluation."""
+    def __init__(self, target: HirExpr, value: HirExpr, type_id: int, span: Span,
+                 path: Optional[CowPath] = None):
+        super().__init__(type_id, span)
+        self.target = target
+        self.value = value
+        self.path = path
 
 
 class HirSequence(HirExpr):

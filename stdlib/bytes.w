@@ -1,7 +1,7 @@
 pub struct Utf8Error { offset: int }
 pub fn encode(text: str) -> list[int] { return bytes(text) }
 pub fn decode(data: list[int]) -> str ! Utf8Error {
-    let mut result = ""
+    let mut parts: list[str] = []
     let mut index = 0
     while index < len(data) {
         let first = data[index]
@@ -22,8 +22,8 @@ pub fn decode(data: list[int]) -> str ! Utf8Error {
         if codepoint < minimum or codepoint > 1114111 or (codepoint >= 55296 and codepoint <= 57343) {
             return Err(Utf8Error { offset: index })
         }
-        result = result + chr(codepoint)
+        parts.append(chr(codepoint))
         index = index + count
     }
-    return result
+    return join_strings(parts, "")
 }

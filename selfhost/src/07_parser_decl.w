@@ -23,13 +23,14 @@ fn parse_let_stmt(is_global: bool) -> unit {
         g_globals.append(vname)
         emit_line("w_assign(&" + vname + ", " + own_expr(val_r.val) + ");")
     } else {
-        declare_owned_var(vname, own_expr(val_r.val))
+        let initial = snapshot_value(val_r.val)
+        declare_owned_var(vname, own_expr(initial))
     }
 }
 
 fn parse_return_stmt() -> unit {
-    let return_token = expect_kind("RETURN")
-    if check_kind("RBRACE") or is_eof() or at_tok().line > return_token.line {
+    expect_kind("RETURN")
+    if not expression_starter(at_tok().kind) {
         emit_cleanup_until_fn()
         if g_fn_fallible {
             emit_line("return w_ok(w_unit());")
@@ -78,6 +79,23 @@ fn parse_while_stmt() -> unit {
     emit_line("}")
 }
 
+fn direct_range_operator() -> str {
+    let mut offset = 0
+    let mut depth = 0
+    while true {
+        let kind = peek_tok(offset).kind
+        if kind == "EOF" or (depth == 0 and (kind == "LBRACE" or kind == "RBRACE")) { return "" }
+        if depth == 0 and (kind == "DOT_DOT" or kind == "DOT_DOT_EQ") { return kind }
+        if kind == "LPAREN" or kind == "LBRACKET" { depth = depth + 1 }
+        elif kind == "RPAREN" or kind == "RBRACKET" {
+            if depth == 0 { return "" }
+            depth = depth - 1
+        }
+        offset = offset + 1
+    }
+    return ""
+}
+
 fn parse_for_stmt() -> unit {
     expect_kind("FOR")
     let pat0 = expect_kind("IDENT")
@@ -92,16 +110,40 @@ fn parse_for_stmt() -> unit {
     let saved_outer = g_cur_stmts
     let empty: list[str] = []
     g_cur_stmts = empty
-    let iter_r = parse_expr(0, false)
-    let iter_tmp = new_temp()
-    let idx_tmp = new_aux("_idx")
-    let item_tmp = new_aux("_item")
-    declare_owned_var(iter_tmp, own_expr(iter_r.val))
-    emit_line("for (int32_t " + idx_tmp + " = 0; " + idx_tmp + " < " + iter_tmp + ".as.list->len; " + idx_tmp + "++) {")
+    let range_kind = direct_range_operator()
+    let mut first = ""
+    let mut iter_tmp = ""
+    let mut count = ""
+    let mut idx_tmp = ""
+    let mut item_tmp = ""
+    if range_kind != "" {
+        let start = parse_expr(op_precedence(range_kind), false)
+        first = snapshot_value(start.val)
+        expect_kind(range_kind)
+        let end = parse_expr(0, false)
+        let last = snapshot_value(end.val)
+        count = new_aux("_count")
+        idx_tmp = new_aux("_idx")
+        item_tmp = new_aux("_item")
+        let inclusive = range_kind == "DOT_DOT_EQ"
+        emit_line("int32_t " + count + " = w_range_count(" + first + ", " + last + ", " + str(inclusive) + ");")
+        emit_line("for (int32_t " + idx_tmp + " = 0; " + idx_tmp + " < " + count + "; " + idx_tmp + "++) {")
+    } else {
+        let iter_r = parse_expr(0, false)
+        iter_tmp = new_temp()
+        idx_tmp = new_aux("_idx")
+        item_tmp = new_aux("_item")
+        declare_owned_var(iter_tmp, own_expr(iter_r.val))
+        emit_line("for (int32_t " + idx_tmp + " = 0; " + idx_tmp + " < " + iter_tmp + ".as.list->len; " + idx_tmp + "++) {")
+    }
     push_scope("loop")
     let saved_loop = g_cur_stmts
     g_cur_stmts = empty
-    emit_line("WVal " + item_tmp + " = " + iter_tmp + ".as.list->data[" + idx_tmp + "];")
+    if range_kind != "" {
+        emit_line("WVal " + item_tmp + " = w_int((" + first + ").as.i + (int64_t)" + idx_tmp + ");")
+    } else {
+        emit_line("WVal " + item_tmp + " = " + iter_tmp + ".as.list->data[" + idx_tmp + "];")
+    }
     if len(pat_names) == 1 {
         declare_owned_var("v_" + pat_names[0], "w_clone(" + item_tmp + ")")
     } else {
@@ -274,8 +316,11 @@ fn parse_class_decl() -> unit {
             }
             expect_kind("RPAREN")
             let mut fallible = false
+            let mut unit_return = true
             if match_kind("ARROW") {
+                let type_start = g_pos
                 fallible = parse_type_ann()
+                unit_return = parsed_unit_return(type_start)
             }
             m_names.append(mname)
             m_arities.append(len(p_names))
@@ -297,7 +342,8 @@ fn parse_class_decl() -> unit {
             let empty: list[str] = []
             g_cur_stmts = empty
             push_scope("fn")
-            let ret_v = parse_block_expr()
+            let mut ret_v = parse_block_expr()
+            if unit_return { ret_v = "w_unit()" }
             let ret_hold = new_aux("_ret")
             emit_line("WVal " + ret_hold + " = " + own_expr(ret_v) + ";")
             pop_scope()
@@ -518,8 +564,11 @@ fn parse_fn_decl() -> unit {
     }
     expect_kind("RPAREN")
     let mut fallible = false
+    let mut unit_return = true
     if match_kind("ARROW") {
+        let type_start = g_pos
         fallible = parse_type_ann()
+        unit_return = parsed_unit_return(type_start)
     }
     let mut sig = "void"
     if len(param_names) > 0 {
@@ -544,7 +593,8 @@ fn parse_fn_decl() -> unit {
     for parameter in param_names { borrowed.append("v_" + parameter) }
     g_borrowed_vars = borrowed
     push_scope("fn")
-    let ret_v = parse_block_expr()
+    let mut ret_v = parse_block_expr()
+    if unit_return { ret_v = "w_unit()" }
     let ret_hold = new_aux("_ret")
     emit_line("WVal " + ret_hold + " = " + own_expr(ret_v) + ";")
     pop_scope()

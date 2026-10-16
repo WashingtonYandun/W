@@ -10,7 +10,7 @@
 
 Wawi, W's mascot, is inspired by Ecuador's bioluminescent click beetle, the Ninacuro (*Pyrophorus noctilucus*).
 
-The current development version is `0.3.0.dev1`. W is under active development and does not yet guarantee production stability. W0 is the reference compiler; W1 is a self-hosted compiler with a narrower supported profile. See the [engine parity matrix](docs/ENGINE_PARITY_MATRIX.md), [expansion status](docs/EXPANSION.md), and [known limits](docs/KNOWN_LIMITS.md) for the current boundaries.
+The current alpha version is `0.4.0a1`. W is under active development and does not yet guarantee production stability. W0 is the reference compiler; W1 is a self-hosted compiler with a narrower supported profile. See the [engine parity matrix](docs/ENGINE_PARITY_MATRIX.md), [expansion status](docs/EXPANSION.md), and [known limits](docs/KNOWN_LIMITS.md) for the current boundaries.
 
 ## Getting started
 
@@ -88,6 +88,6 @@ The [language specification](SPEC.md) defines W's syntax and semantics. Mileston
 
 ## Known limits
 
-W1 does not yet implement all of W0's generic specialization. The ARC runtime is single-threaded and does not support shared-memory concurrency. Ranges materialize lists and check their size before allocation. The FFI does not support C callbacks, pointer arithmetic, or automatic allocator transfer.
+W1 does not yet implement all of W0's generic specialization. The ARC runtime is single-threaded and does not support shared-memory concurrency. Direct range loops use bounded counters; range values still materialize lists. The FFI does not support C callbacks, pointer arithmetic, or automatic allocator transfer.
 
 W is licensed under the [MIT License](LICENSE). See [CONTRIBUTING.md](CONTRIBUTING.md) to contribute.

@@ -211,6 +211,7 @@ fn emit_call(callee: ExprRes, args_c: list[str], collection: bool, line: int, co
         if fn_name == "exit" and len(args_c) == 1 {
             return bind_call("w_builtin_exit(" + args_c[0] + ")")
         }
+        if fn_name == "join_strings" { return bind_call("w_builtin_join_strings(" + args_c[0] + ", " + args_c[1] + ")") }
         if fn_name == "len" {
             return bind_call("w_builtin_len(" + args_c[0] + ")")
         }
@@ -433,6 +434,10 @@ fn parse_pattern_condition(subject: str) -> str {
     }
     if match_kind("ELSE") { return "true" }
     if match_kind("NONE") { return "w_is_none(" + subject + ")" }
+    if check_kind("MINUS") {
+        let literal = parse_prefix_expr(false)
+        return "w_eq(" + subject + ", " + literal.val + ")"
+    }
     if check_kind("INT") or check_kind("FLOAT") or check_kind("STR") or check_kind("TRUE") or check_kind("FALSE") {
         let literal = parse_prefix_expr(false)
         return "w_eq(" + subject + ", " + literal.val + ")"
@@ -589,9 +594,9 @@ fn parse_prefix_expr(allow_struct: bool) -> ExprRes {
     }
     if match_kind("IDENT") {
         let name = tok.val
-        if name == "None" { return ExprRes { val: "w_none()", lref: "" } }
+        if name == "None" and not is_bound_variable("v_" + name) { return ExprRes { val: "w_none()", lref: "" } }
         let function_index = sem_function(name)
-        if function_index >= 0 and len(sem_functions[function_index].type_params) > 0 and match_kind("LBRACKET") {
+        if function_index >= 0 and not is_bound_variable("v_" + name) and len(sem_functions[function_index].type_params) > 0 and match_kind("LBRACKET") {
             while not check_kind("RBRACKET") and not is_eof() {
                 parse_type_ann()
                 if not match_kind("COMMA") { break }
@@ -599,7 +604,7 @@ fn parse_prefix_expr(allow_struct: bool) -> ExprRes {
             expect_kind("RBRACKET")
         }
         let generic_type = sem_generic_type(name)
-        if generic_type >= 0 and match_kind("LBRACKET") {
+        if generic_type >= 0 and not is_bound_variable("v_" + name) and match_kind("LBRACKET") {
             while not check_kind("RBRACKET") and not is_eof() {
                 parse_type_ann()
                 if not match_kind("COMMA") { break }
@@ -625,6 +630,21 @@ fn parse_prefix_expr(allow_struct: bool) -> ExprRes {
                 if len(f_names) == 0 {
                     return bind_call("w_make_struct(\"" + name + "\", 0, NULL, NULL)")
                 }
+                let mut ordered_names: list[str] = []
+                let mut ordered_values: list[str] = []
+                for field in sem_fields {
+                    if field.owner == name {
+                        let key = "\"" + field.name + "\""
+                        for index in 0..len(f_names) {
+                            if f_names[index] == key {
+                                ordered_names.append(key)
+                                ordered_values.append(f_vals[index])
+                            }
+                        }
+                    }
+                }
+                f_names = ordered_names
+                f_vals = ordered_values
                 let k_tmp = new_aux("_k")
                 let v_tmp = new_aux("_v")
                 let mut k_joined = ""
@@ -668,6 +688,9 @@ fn parse_prefix_expr(allow_struct: bool) -> ExprRes {
         if check_kind("INT") {
             let mut lit = advance_tok().val
             let digits = slice(lit, 0, len(lit))
+            if digits == "9223372036854775808" {
+                return ExprRes { val: "w_int((-9223372036854775807LL - 1LL))", lref: "" }
+            }
             return ExprRes { val: "w_int(-" + digits + "LL)", lref: "" }
         }
         let op_r = parse_expr(9, allow_struct)
@@ -846,7 +869,7 @@ fn parse_expr(min_prec: int, allow_struct: bool) -> ExprRes {
                 }
                 if len(left.val) >= 2 and slice(left.val, 0, 2) == "v_" {
                     let raw_obj = slice(left.val, 2, len(left.val))
-                    if is_enum_name(raw_obj) or raw_obj == "Option" or raw_obj == "Result" {
+                    if (is_enum_name(raw_obj) or raw_obj == "Option" or raw_obj == "Result") and not is_bound_variable(left.val) {
                         if raw_obj == "Option" and prop == "None" { left = ExprRes { val: "w_none()", lref: "" } }
                         elif (raw_obj == "Option" and prop == "Some") or (raw_obj == "Result" and (prop == "Ok" or prop == "Err")) { left = ExprRes { val: "enum::" + raw_obj + "::" + prop, lref: "" } }
                         else {
@@ -1022,8 +1045,7 @@ fn parse_expr(min_prec: int, allow_struct: bool) -> ExprRes {
                     left = ExprRes { val: left.val, lref: left.lref }
                 } else {
                     let target_ref = clean_lref(left.lref)
-                    emit_line("w_assign(" + target_ref + ", " + "w_move(&" + rhs_hold + "));")
-                    left = ExprRes { val: "w_unit()", lref: "" }
+                    left = bind_call("w_clone(w_assign(" + target_ref + ", w_move(&" + rhs_hold + ")))")
                 }
             } elif op_tok.kind == "DOT_DOT" {
                 left = bind_call("w_make_range(" + left.val + ", " + right.val + ", false)")
@@ -1099,6 +1121,8 @@ fn parse_lambda() -> ExprRes {
     let mut result = "w_unit()"
     if match_kind("FAT_ARROW") { result = parse_expr(0, true).val }
     else { result = parse_block_expr() }
+    let signature_types = sem_types[lambda.type_id].args
+    if signature_types[len(signature_types) - 1] == sem_unit { result = "w_unit()" }
     let returned = new_aux("_ret")
     emit_line("WVal " + returned + " = " + own_expr(result) + ";")
     pop_scope()

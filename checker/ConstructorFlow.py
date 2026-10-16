@@ -3,7 +3,7 @@ from node import NodeType as A
 from error.Error import TypeError
 
 
-def check_constructor(declaration, class_type, method, file):
+def check_constructor(declaration, class_type, method, file, match_is_exhaustive):
     required = {field.name for field in declaration.fields}
 
     def fail(node, message):
@@ -143,6 +143,8 @@ def check_constructor(declaration, class_type, method, file):
                     # fail and continue to another arm. Its writes are not definite.
                     expression(arm.guard, set(after_subject))
                 branches.append(block(arm.body, set(after_subject)))
+            if not match_is_exhaustive(node):
+                branches.append(after_subject)
             live = [branch for branch in branches if branch is not None]
             return set.intersection(*live) if live else None
         if isinstance(node, A.Node):

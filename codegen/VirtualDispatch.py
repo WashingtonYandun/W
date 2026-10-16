@@ -32,3 +32,18 @@ def emit_vtables(class_names, methods, resolve):
         definitions.append(f'static WVal w_dispatch__{name}__{arity}({parameters}) {{ '
                            f'return w_virtual_call(v_self, {slot}, {arity}, {arguments}); }}')
     return definitions
+
+
+
+def virtual_method_slots(signatures):
+    """Canonical slots shared by HIR lowering, verification and emission."""
+    return sorted(set(signatures))
+
+
+def hir_virtual_method_slots(module, interner):
+    signatures = [(method.name, len(method.params))
+                  for declaration in module.classes for method in declaration.methods
+                  if method.name != "init"]
+    signatures.extend((name, len(interner.get_entry(type_id).data[0]))
+                      for declaration in module.interfaces for name, type_id in declaration.methods)
+    return virtual_method_slots(signatures)

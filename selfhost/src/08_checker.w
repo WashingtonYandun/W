@@ -190,35 +190,5 @@ fn check_source(src: str, in_path: str) -> unit {
         return
     }
     check_delimiters(tokens)
-    check_match_syntax(tokens)
     sem_validate(tokens)
-}
-
-fn check_match_syntax(tokens: list[Token]) {
-    for start in 0..len(tokens) {
-        if tokens[start].kind == "MATCH" {
-            let mut position = start + 1
-            while position < len(tokens) and tokens[position].kind != "LBRACE" { position = position + 1 }
-            position = position + 1
-            let mut expects_arrow = true
-            let mut guarded = false
-            let mut depth = 0
-            let mut parentheses = 0
-            while position < len(tokens) {
-                let token = tokens[position]
-                if token.kind == "LPAREN" or token.kind == "LBRACKET" { parentheses = parentheses + 1 }
-                if token.kind == "RPAREN" or token.kind == "RBRACKET" { parentheses = parentheses - 1 }
-                if depth == 0 and parentheses == 0 {
-                    if token.kind == "RBRACE" { break }
-                    if token.kind == "FAT_ARROW" { expects_arrow = false }
-                    elif token.kind == "IF" { guarded = true }
-                    elif token.kind == "COMMA" { expects_arrow = true guarded = false }
-                    elif token.kind == "LBRACE" and expects_arrow and not guarded { report_error("W0001", token.line, token.col, "expected '=>' after match pattern") }
-                }
-                if token.kind == "LBRACE" { depth = depth + 1 }
-                if token.kind == "RBRACE" { depth = depth - 1 }
-                position = position + 1
-            }
-        }
-    }
 }

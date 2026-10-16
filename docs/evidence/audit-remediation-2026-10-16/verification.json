@@ -1,0 +1,35 @@
+{
+  "base_commit": "ebe2aa38ceb7e092244c53740b7a2eb545314b0d",
+  "branch": "feat/audit-remediation-2026-10-16",
+  "bootstrap_c_sha256": [
+    "db46ca0304e5c4c6e3c31b8c4d142aca943b3056471f0ad13583e9ed825260ce",
+    "db46ca0304e5c4c6e3c31b8c4d142aca943b3056471f0ad13583e9ed825260ce",
+    "db46ca0304e5c4c6e3c31b8c4d142aca943b3056471f0ad13583e9ed825260ce"
+  ],
+  "pytest_passed": 77,
+  "conformance_checks_passed": 633,
+  "release_fixtures_per_engine": 158,
+  "engines": [
+    "interpreter",
+    "ast",
+    "hir",
+    "w1"
+  ],
+  "sanitizers_local": [
+    "ASan",
+    "UBSan"
+  ],
+  "sanitizers_ci_not_executed_locally": [
+    "Linux LSan"
+  ],
+  "property_seeds": [
+    17,
+    29,
+    37,
+    51,
+    63,
+    101,
+    202,
+    303
+  ]
+}

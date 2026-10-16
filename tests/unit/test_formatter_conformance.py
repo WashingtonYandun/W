@@ -1,12 +1,10 @@
-import glob
 import os
 import sys
-from parser.Parser import Parser
-from formatter.Formatter import Formatter
+from tests.formatter_contract import formatter_paths, verify_formatting
 
 
 def run_formatter_tests() -> bool:
-    files = sorted(glob.glob("tests/formatter/*.w") + glob.glob("tests/runtime/*.w"))
+    files = formatter_paths()
     passed = 0
     failed = 0
 
@@ -14,21 +12,12 @@ def run_formatter_tests() -> bool:
     print("W v0.1 Formatter Idempotence Suite")
     print("==========================================")
 
-    fmt = Formatter()
     for fpath in files:
         with open(fpath, "r", encoding="utf-8") as f:
             src = f.read()
         try:
-            ast1 = Parser(file=fpath).parse(src)
-            formatted1 = fmt.format(ast1)
-            ast2 = Parser(file=fpath).parse(formatted1)
-            formatted2 = fmt.format(ast2)
-
-            if formatted1 != formatted2:
-                print(f"[FAIL] {os.path.basename(fpath)}: Not idempotent (fmt(fmt(x)) != fmt(x))")
-                failed += 1
-            else:
-                passed += 1
+            verify_formatting(src, str(fpath))
+            passed += 1
         except Exception as e:
             print(f"[FAIL] {os.path.basename(fpath)}: Exception {e}")
             failed += 1
