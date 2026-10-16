@@ -1,48 +1,25 @@
-# Validación de W para integrar bibliotecas C
+# Validating W's C Interoperability
 
-- **Estado:** Piloto técnico y flujo CSV → SQLite implementados; perfil de producción pendiente.
-- **Fecha:** 2026-10-16
+- **Status:** The SQLite pilot and CSV import flow are implemented; a production profile has not been approved.
+- **Date:** 2026-10-16
 
-## Flujo elegido
+## Pilot workflow
 
-Washington delegó elegir una prueba útil. `examples/ffi/sqlite/import_csv.w` importa
-mediciones a una base local persistente: valida columnas, enteros ASCII de 64 bits y
-límites; usa una transacción; devuelve errores de datos o SQLite; destruye sus recursos.
-`import_reference.c` implementa el mismo contrato de forma independiente, con el mismo
-adaptador C y biblioteca. No disponemos todavía de un archivo operativo del usuario ni
-una medición del tiempo que le ahorra: eso sigue siendo la validación de producto.
+`examples/ffi/sqlite/import_csv.w` imports measurements into a persistent local database. It validates columns, 64-bit ASCII integers, and bounds; uses a transaction; returns data or SQLite errors; and closes its resources. `import_reference.c` independently implements the same contract with the same C adapter and library. There is not yet a real user workload or a measured time saving; product validation remains open.
 
-El formato admite exactamente el encabezado `id,value` y hasta 100000 filas. Ambas
-columnas son enteros decimales no negativos en `[0, INT64_MAX]`. Admite LF, CRLF y última
-línea sin salto; no admite comillas, campos vacíos, signos, cifras Unicode, NUL ni columnas
-adicionales. No es un parser CSV general. El identificador es clave primaria: duplicados
-en el lote o en la base abortan todo el lote. La suma total también debe caber en int64;
-se consulta antes de confirmar, y un overflow SQLite revierte la importación.
+The input format requires the exact header `id,value` and accepts up to 100,000 rows. Both columns are non-negative decimal integers in `[0, INT64_MAX]`. The parser accepts LF, CRLF, and a final line without a newline. It rejects quotes, empty fields, signs, Unicode digits, NUL, and extra columns; this is not a general CSV parser. The identifier is a primary key, so duplicates in the batch or database abort the whole batch. The aggregate sum must also fit in int64; it is checked before commit, and SQLite overflow rolls back the import.
 
-Una importación válida persiste datos; una inválida conserva exactamente las filas
-anteriores. Los errores de datos/SQLite devuelven estado 1; uso o lectura, estado 2;
-éxito, estado 0. `--version` muestra la versión SQLite enlazada.
+A valid import persists its rows. An invalid import preserves the exact set of rows that existed before the batch. Data and SQLite errors return exit status 1; usage or read errors return 2; success returns 0. `--version` prints the linked SQLite version.
 
-## Ownership y coste del adaptador
+## Ownership and adapter costs
 
-La FFI transporta escalares y `opaque`; no strings ni buffers W. La ruta de la base entra
-por `W_SQLITE_DB`. `adapter.c` mantiene SQL fijo, conexión y sentencias preparadas; el
-adaptador es código de producto que hay que mantener. Cierra sentencias y conexión con
-`pilot_close`, y libera el control con `pilot_dispose`. Cierre repetido es válido; uso
-tras cierre devuelve `SQLITE_MISUSE`. Usar un handle tras destruirlo o destruirlo dos
-veces sigue siendo un error inseguro que W no impide.
+The FFI carries scalars and `opaque` handles, not W strings or buffers. The database path comes from `W_SQLITE_DB`. `adapter.c` owns fixed SQL statements, the connection, and prepared statements; this adapter is product code that must be maintained. `pilot_close` closes statements and the connection, and `pilot_dispose` frees the control block. Repeated close is valid; use after close returns `SQLITE_MISUSE`. Using a handle after destruction or destroying it twice remains an unsafe error that W does not prevent.
 
-El helper W que adquiere el recurso reúne las salidas posteriores a la adquisición en
-un único punto de destrucción. Los errores retornados por `populate` se manejan antes de
-salir. No hace falta introducir `defer/with` para este caso; ADR-017 registra la decisión.
-Los contadores externos comprueban conexión, control y sentencias vivos. `W_MEM_CHECK`
-solo comprueba asignaciones W en salida normal; `exit()` no ejecuta ese chequeo. Los
-sanitizers y el contador externo son necesarios en este CLI, que devuelve códigos de salida.
+The W helper that acquires the resource routes every later exit through one cleanup point. Errors returned by `populate` are handled before leaving. This pilot does not require a new `defer/with` construct. External counters check that connections, control blocks, and statements are no longer live. `W_MEM_CHECK` checks only W allocations on normal exit; `exit()` bypasses that check. Sanitizers and external counters are needed for this CLI, which returns process exit codes.
 
-## Reproducir
+## Reproducing the checks
 
-Se necesitan un compilador C99, cabeceras SQLite y `libsqlite3`. Linux CI instala
-`libsqlite3-dev`; macOS usa el SDK y la biblioteca del sistema.
+A C99 compiler, SQLite headers, and `libsqlite3` are required. Linux CI installs `libsqlite3-dev`; macOS uses the system SDK and library.
 
 ```sh
 python3 tools/validate_sqlite_ffi.py --sanitize
@@ -51,7 +28,7 @@ python3 tools/validate_sqlite_import.py --rows 10000 --samples 3 --report .w_cac
 python3 tools/measure_tokenizer.py
 ```
 
-Para usar el importador desde la raíz del repositorio:
+To run the importer from the repository root:
 
 ```sh
 mkdir -p .w_cache/sqlite-import
@@ -60,27 +37,12 @@ cc -std=c99 -O2 -c examples/ffi/sqlite/adapter.c -o .w_cache/sqlite-import/adapt
 W_SQLITE_DB=.w_cache/sqlite-import/measurements.sqlite .w_cache/sqlite-import/import_csv measurements.csv
 ```
 
-El runner verifica C/AST/HIR y W1 invocado directamente, sin checker W0 previo para el
-input. Una conexión Python independiente compara las filas persistidas, no solo la salida.
-Prueba append en una segunda ejecución y 14 fallos, incluido un error después de insertar
-una primera fila válida. Exige rollback, código de salida, cero recursos externos vivos
-y cero stderr de sanitizers. Linux activa LSan; macOS no lo soporta. SQLite del sistema
-no se recompila instrumentado. El piloto anterior `measurements.w` conserva su prueba
-C/AST/HIR de cierre repetido y uso tras cierre.
+The runner tests C, AST, and HIR, then invokes W1 directly without running the W0 checker over the input. An independent Python connection compares persisted rows rather than checking output alone. The test appends data in a second run and exercises 14 failures, including an error after an earlier valid row has been inserted. It requires rollback, the expected exit status, no live external resources, and no sanitizer output. Linux enables LSan; macOS does not support it. The system SQLite library is not rebuilt with sanitizers. The earlier `measurements.w` pilot retains C/AST/HIR checks for repeated close and use after close.
 
-## Medición e interpretación
+## Measurement and interpretation
 
-Cada JSON registra compilador, plataforma, versión SQLite enlazada, flags, comandos,
-tiempo de construir cada programa, muestras, tamaño del binario y pico de memoria física.
-La compilación compartida del adaptador queda fuera del tiempo de cada programa; el
-bootstrap W1 se informa aparte. Se descarta una ejecución de calentamiento.
+Each JSON report records the compiler, platform, linked SQLite version, flags, commands, build time for each program, samples, binary size, and peak resident memory. The shared adapter build is excluded from each program's runtime; the W1 bootstrap is reported separately. One warm-up run is discarded.
 
-`tools/measure_process.py` ejecuta exactamente un hijo en un proceso de medición nuevo:
-`ru_maxrss` no hereda máximos de ejecuciones anteriores. Darwin informa bytes y Linux
-KiB, convertidos a bytes. El tiempo incluye inicio del binario, SQLite e I/O; excluye
-el lanzamiento del helper Python. RSS y tamaño dependen de plataforma, flags y SDK.
-Estos valores describen el flujo completo, no el coste aislado de FFI.
+`tools/measure_process.py` runs exactly one child in a fresh measurement process, so `ru_maxrss` does not inherit peaks from previous runs. Darwin reports bytes and Linux reports KiB; both are converted to bytes. Time includes process startup, SQLite, and I/O, but excludes launching the Python helper. RSS and binary size depend on platform, flags, and SDK. These numbers describe the full workflow, not the isolated cost of the FFI.
 
-W ofrece errores tipados y control del flujo en el lenguaje; aún necesita un adaptador
-manual y tiene costes de representación altos frente a C. El resultado valida utilidad
-técnica concreta, no una ventaja general de rendimiento ni un perfil de producción.
+W provides typed errors and control flow, but this pilot still needs a manual adapter and has higher representation costs than C. It validates one concrete integration path; it does not establish a general performance advantage or production readiness.

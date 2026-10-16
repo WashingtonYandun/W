@@ -35,6 +35,6 @@ The fixture combines a diamond import, global initialization, three homonymous I
 
 ## Boundaries and next step
 
-[ADR-008](adr/ADR-008-compilation-sessions.md) records the lifecycle, identity and import semantics. This is an in-memory whole-program cache with conservative invalidation. It does not implement persistent incremental compilation, a stable ABI, new public export rules, qualified type annotations or W1 module parity.
+ADR-008 records the lifecycle, identity and import semantics. This is an in-memory whole-program cache with conservative invalidation. It does not implement persistent incremental compilation, a stable ABI, new public export rules, qualified type annotations or W1 module parity.
 
 C02 is next: resolve HIR names, fields, variants and calls into semantic IDs and remove the transitional dependence on AST patterns/name lookup. C03 retains typed specialization/worklist and structural mangling work. D02 ports the full pipeline to W1.

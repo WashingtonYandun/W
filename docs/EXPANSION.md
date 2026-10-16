@@ -29,4 +29,4 @@ incluidos los genéricos y el fixture de módulos comprobados. Una suite E en ve
 significa que cada caso pase en todos los motores; los motores concretos se declaran en
 ese test.
 
-El importador SQLite de ADR-017 tiene cobertura propia C/AST/HIR/W1 directo. Esto no amplía el compromiso a toda la FFI de W1.
+El importador SQLite tiene cobertura propia C/AST/HIR/W1 directo. Esto no amplía el compromiso a toda la FFI de W1.

@@ -19,7 +19,7 @@ Milestones D04, D05, and D06 complete Phase D of the W Language stabilization ro
    - Strict separation of diagnostics and program output: `run --stats` and `build --stats` emit telemetry strictly to `stderr`, keeping program `stdout` unpolluted.
    - Upgraded benchmark suite `bench/run_bench.py` v0.2.0 testing W0 Interpreter, W0 Typed HIR C99 (default production backend), and W1 C99 using median of 3 samples with warmup.
 3. **Consolidation and Architectural Contracts (D06):**
-   - Created `docs/adr/ADR-009-Consolidation-and-Parity-Contracts.md` superseding informal parity claims and establishing immutable contracts for all four engines.
+   - Recorded immutable, testable parity contracts for all four engines, replacing earlier informal claims.
    - Succeeded with 100% pass rate across 409 test suites in `./w test` and 107/107 cases in `ci_conformance.py --sanitize`.
 
 ---

@@ -619,7 +619,7 @@ limited static-checking profile. This does not establish W1 generic parity.
 
 ---
 
-## 14. Compiler Engine Parity & Determinism Contracts (Phase D / ADR-009)
+## 14. Compiler Engine Parity & Determinism Contracts (Phase D)
 
 ### 14.1 Four Execution Targets & Architectural Roles
 The W compiler architecture formally defines four execution targets:
