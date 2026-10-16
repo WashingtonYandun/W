@@ -558,6 +558,10 @@ fn expect_kind(k: str) -> Token {
     return tok
 }
 
+fn expression_starter(kind: str) -> bool {
+    return kind == "INT" or kind == "FLOAT" or kind == "STR" or kind == "TRUE" or kind == "FALSE" or kind == "NONE" or kind == "IDENT" or kind == "THIS" or kind == "SUPER" or kind == "NEW" or kind == "MINUS" or kind == "NOT" or kind == "LPAREN" or kind == "LBRACKET" or kind == "LBRACE" or kind == "PIPE" or kind == "IF" or kind == "MATCH"
+}
+
 # Module expansion shares one token stream with the standalone semantic checker.
 let mut module_paths: list[str] = []
 let mut module_states: list[int] = []
@@ -1028,6 +1032,17 @@ fn escape_c_str(s: str) -> str {
     }
     out = out + "\""
     return out
+}
+
+fn parsed_unit_return(start: int) -> bool {
+    let mut found = false
+    for index in start..g_pos {
+        let token = g_tokens[index]
+        if token.kind == "LPAREN" or token.kind == "RPAREN" { continue }
+        if not found and token.kind == "IDENT" and token.val == "unit" { found = true }
+        else { return false }
+    }
+    return found
 }
 
 fn parse_type_ann() -> bool {
@@ -1658,6 +1673,10 @@ fn parse_pattern_condition(subject: str) -> str {
     }
     if match_kind("ELSE") { return "true" }
     if match_kind("NONE") { return "w_is_none(" + subject + ")" }
+    if check_kind("MINUS") {
+        let literal = parse_prefix_expr(false)
+        return "w_eq(" + subject + ", " + literal.val + ")"
+    }
     if check_kind("INT") or check_kind("FLOAT") or check_kind("STR") or check_kind("TRUE") or check_kind("FALSE") {
         let literal = parse_prefix_expr(false)
         return "w_eq(" + subject + ", " + literal.val + ")"
@@ -1908,6 +1927,9 @@ fn parse_prefix_expr(allow_struct: bool) -> ExprRes {
         if check_kind("INT") {
             let mut lit = advance_tok().val
             let digits = slice(lit, 0, len(lit))
+            if digits == "9223372036854775808" {
+                return ExprRes { val: "w_int((-9223372036854775807LL - 1LL))", lref: "" }
+            }
             return ExprRes { val: "w_int(-" + digits + "LL)", lref: "" }
         }
         let op_r = parse_expr(9, allow_struct)
@@ -2338,6 +2360,8 @@ fn parse_lambda() -> ExprRes {
     let mut result = "w_unit()"
     if match_kind("FAT_ARROW") { result = parse_expr(0, true).val }
     else { result = parse_block_expr() }
+    let signature_types = sem_types[lambda.type_id].args
+    if signature_types[len(signature_types) - 1] == sem_unit { result = "w_unit()" }
     let returned = new_aux("_ret")
     emit_line("WVal " + returned + " = " + own_expr(result) + ";")
     pop_scope()
@@ -2399,8 +2423,8 @@ fn parse_let_stmt(is_global: bool) -> unit {
 }
 
 fn parse_return_stmt() -> unit {
-    let return_token = expect_kind("RETURN")
-    if check_kind("RBRACE") or is_eof() or at_tok().line > return_token.line {
+    expect_kind("RETURN")
+    if not expression_starter(at_tok().kind) {
         emit_cleanup_until_fn()
         if g_fn_fallible {
             emit_line("return w_ok(w_unit());")
@@ -2686,8 +2710,11 @@ fn parse_class_decl() -> unit {
             }
             expect_kind("RPAREN")
             let mut fallible = false
+            let mut unit_return = true
             if match_kind("ARROW") {
+                let type_start = g_pos
                 fallible = parse_type_ann()
+                unit_return = parsed_unit_return(type_start)
             }
             m_names.append(mname)
             m_arities.append(len(p_names))
@@ -2709,7 +2736,8 @@ fn parse_class_decl() -> unit {
             let empty: list[str] = []
             g_cur_stmts = empty
             push_scope("fn")
-            let ret_v = parse_block_expr()
+            let mut ret_v = parse_block_expr()
+            if unit_return { ret_v = "w_unit()" }
             let ret_hold = new_aux("_ret")
             emit_line("WVal " + ret_hold + " = " + own_expr(ret_v) + ";")
             pop_scope()
@@ -2930,8 +2958,11 @@ fn parse_fn_decl() -> unit {
     }
     expect_kind("RPAREN")
     let mut fallible = false
+    let mut unit_return = true
     if match_kind("ARROW") {
+        let type_start = g_pos
         fallible = parse_type_ann()
+        unit_return = parsed_unit_return(type_start)
     }
     let mut sig = "void"
     if len(param_names) > 0 {
@@ -2956,7 +2987,8 @@ fn parse_fn_decl() -> unit {
     for parameter in param_names { borrowed.append("v_" + parameter) }
     g_borrowed_vars = borrowed
     push_scope("fn")
-    let ret_v = parse_block_expr()
+    let mut ret_v = parse_block_expr()
+    if unit_return { ret_v = "w_unit()" }
     let ret_hold = new_aux("_ret")
     emit_line("WVal " + ret_hold + " = " + own_expr(ret_v) + ";")
     pop_scope()
@@ -3227,37 +3259,7 @@ fn check_source(src: str, in_path: str) -> unit {
         return
     }
     check_delimiters(tokens)
-    check_match_syntax(tokens)
     sem_validate(tokens)
-}
-
-fn check_match_syntax(tokens: list[Token]) {
-    for start in 0..len(tokens) {
-        if tokens[start].kind == "MATCH" {
-            let mut position = start + 1
-            while position < len(tokens) and tokens[position].kind != "LBRACE" { position = position + 1 }
-            position = position + 1
-            let mut expects_arrow = true
-            let mut guarded = false
-            let mut depth = 0
-            let mut parentheses = 0
-            while position < len(tokens) {
-                let token = tokens[position]
-                if token.kind == "LPAREN" or token.kind == "LBRACKET" { parentheses = parentheses + 1 }
-                if token.kind == "RPAREN" or token.kind == "RBRACKET" { parentheses = parentheses - 1 }
-                if depth == 0 and parentheses == 0 {
-                    if token.kind == "RBRACE" { break }
-                    if token.kind == "FAT_ARROW" { expects_arrow = false }
-                    elif token.kind == "IF" { guarded = true }
-                    elif token.kind == "COMMA" { expects_arrow = true guarded = false }
-                    elif token.kind == "LBRACE" and expects_arrow and not guarded { report_error("W0001", token.line, token.col, "expected '=>' after match pattern") }
-                }
-                if token.kind == "LBRACE" { depth = depth + 1 }
-                if token.kind == "RBRACE" { depth = depth - 1 }
-                position = position + 1
-            }
-        }
-    }
 }
 fn sem_at() -> Token { return sem_tokens[sem_pos] }
 fn sem_is(kind: str) -> bool { return sem_at().kind == kind }
@@ -4395,12 +4397,18 @@ fn sem_if(statement: bool) -> SemValue {
         common = sem_unit
     }
     sem_initialized = initialized
-    if statement { common = sem_unit }
+    # A discarded expression can still contain an if as a binary/postfix operand.
+    # Keep a common value type; incompatible discarded branches already yield unit.
     return SemValue { type_id: common, root: "", writable: -1, terminates: all_return }
 }
 fn sem_pattern(subject: int) -> str {
     if sem_match("ELSE") { return "*" }
     if sem_match("NONE") { return "None" }
+    if sem_match("MINUS") {
+        let literal = sem_expect("INT")
+        sem_require(sem_int, subject, "W2001")
+        return "literal:-" + literal.val
+    }
     if sem_is("INT") or sem_is("FLOAT") or sem_is("STR") or sem_is("TRUE") or sem_is("FALSE") {
         let token = sem_take()
         let mut type_id = sem_bool
@@ -4498,6 +4506,18 @@ fn sem_pattern(subject: int) -> str {
 }
 fn sem_match_expression() -> SemValue {
     sem_expect("MATCH")
+    # Preserve syntax-error priority before resolving an atomic subject's name.
+    # A bare pattern followed by a block always lacks its required arrow.
+    let mut pattern_start = sem_pos + 2
+    if pattern_start + 2 < len(sem_tokens) and sem_tokens[sem_pos + 1].kind == "LBRACE" {
+        if sem_tokens[pattern_start].kind == "MINUS" { pattern_start = pattern_start + 1 }
+        let pattern_kind = sem_tokens[pattern_start].kind
+        let bare_pattern = pattern_kind == "IDENT" or pattern_kind == "INT" or pattern_kind == "STR" or pattern_kind == "TRUE" or pattern_kind == "FALSE" or pattern_kind == "NONE"
+        let following = sem_tokens[pattern_start + 1]
+        if bare_pattern and following.kind == "LBRACE" {
+            report_error("W0001", following.line, following.col, "expected '=>' after match pattern")
+        }
+    }
     let subject = sem_expression(0, false).type_id
     sem_expect("LBRACE")
     let mut covered: list[str] = []
@@ -4514,7 +4534,7 @@ fn sem_match_expression() -> SemValue {
         let pattern = sem_pattern(subject)
         let mut guarded = false
         if sem_match("IF") { guarded = true sem_require(sem_expression(0, false).type_id, sem_bool, "W2001") }
-        sem_expect("FAT_ARROW")
+        if not sem_match("FAT_ARROW") { sem_error("W0001", "expected '=>' after match pattern") }
         let mut branch = SemFlow { type_id: sem_unit, terminates: false }
         if sem_is("LBRACE") { branch = sem_block(false) }
         else { let value = sem_expression(0, true) branch = SemFlow { type_id: value.type_id, terminates: value.terminates } }
@@ -4595,7 +4615,7 @@ fn sem_block(statement: bool) -> SemFlow {
             let previous = sem_expected
             sem_expected = sem_return
             let mut value = sem_unit
-            if not sem_is("RBRACE") and sem_at().line == sem_tokens[sem_pos - 1].line {
+            if expression_starter(sem_at().kind) {
                 let expression_start = sem_pos + sem_token_offset
                 value = sem_expression(0, true).type_id
                 sem_mark_result_lift(expression_start, value, sem_return)

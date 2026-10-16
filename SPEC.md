@@ -112,6 +112,11 @@ Identifiers must start with an ASCII letter (`a-z`, `A-Z`) or underscore `_`, fo
   }
   ```
 
+En funciones y lambdas de bloque declaradas `unit` —incluido el retorno omitido en
+funciones— el tail implícito se evalúa por sus efectos y se descarta. Un `return`
+explícito con un valor incompatible se rechaza. `unit ! E` conserva los errores de su
+tail; un resultado fallido no se convierte en éxito al descartar un valor.
+
 A bare `return` is one that is followed by `}`, `)`, `]`, `,`, `else`, `elif` or EOF.
 It is **not** decided by line breaks: `return` followed by an expression on the next
 line returns that expression, and the value may span lines.
@@ -627,7 +632,7 @@ W distinguishes between two distinct compiler guarantees:
 * **Bootstrap Fixed-Point:** A 3-stage bootstrap self-compilation of `selfhost/w1.w` produces bit-identical C code:
   $$\text{SHA256}(c_0) == \text{SHA256}(c_1) == \text{SHA256}(c_2)$$
   This guarantees determinism and convergence of the self-hosted compiler subset.
-* **Feature Parity:** Documented in `docs/ENGINE_PARITY_MATRIX.md` and measured rather than declared. The release profile passes all 161 fixtures on all four engines, with no unsupported cases. This is corpus evidence, not a claim of universal W0/W1 equivalence; see the feature breakdown and limits in the parity matrix.
+* **Feature Parity:** Documented in `docs/ENGINE_PARITY_MATRIX.md` and measured rather than declared. The release profile passes all 168 fixtures on all four engines, with no unsupported cases. This is corpus evidence, not a claim of universal W0/W1 equivalence; see the feature breakdown and limits in the parity matrix.
 
 ### 14.3 Code Generation Determinism
 Given identical source text and compiler flags:

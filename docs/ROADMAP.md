@@ -20,8 +20,8 @@ considera cerrado solo porque su informe histórico diga que terminó.
 expansión más amplia; W1 soporta subconjuntos medidos por fixture. La tabla del corpus
 principal está en [ENGINE_PARITY_MATRIX.md](ENGINE_PARITY_MATRIX.md).
 
-El corpus vigente contiene **161 fixtures** en los cuatro motores, sin exclusiones:
-134 de `core`, 15 de `generics`, 1 de `checked_modules` y 8 de `error_unions`.
+El corpus vigente contiene **168 fixtures** en los cuatro motores, sin exclusiones:
+144 de `core`, 15 de `generics`, 1 de `checked_modules` y 8 de `error_unions`.
 Las cifras de 114 y 121 que aparecen en los cierres F01/F03 de abajo son evidencia
 histórica de esos hitos; no representan el total vigente.
 
@@ -106,7 +106,7 @@ LSan; macOS no ofrece esa comprobación de fugas por bytes.
 La decisión de producto sigue abierta: Washington eligió **integración con una biblioteca
 C mediante FFI** como primer ámbito de validación. [FFI_VALIDATION.md](FFI_VALIDATION.md)
 define el piloto y las condiciones de aceptación. El piloto técnico ya integra SQLite con un registro persistente
-de mediciones en W0 AST/HIR y una referencia C; el lote sintético no valida todavía un
+de mediciones en W0 AST/HIR y una referencia C; el lote sintético no valida todavía una
 ventaja para usuarios. El importador CSV de ADR-017 sí valida persistencia, rollback y
 RSS físico; todavía falta observar uso de un usuario externo antes de declarar un perfil
 de producción.
@@ -127,3 +127,17 @@ registra arquitectura y mediciones contra C.
 El siguiente paso es perfilar el coste de parsing, strings y fronteras runtime/FFI en
 uso real. LLVM queda condicionado a demostrar un límite de C99. Listas especializadas,
 capturas mutables, concurrencia y Windows siguen siendo trabajos separados.
+
+## Cierre adicional de auditoría · 2026-10-16
+
+Se amplía el gate del formatter a ejemplos recursivos, stdlib y fuentes self-hosted; se
+comprueba preservación estructural de AST, además de idempotencia. Ese gate encontró y
+corrigió guards de match eliminados. Los árboles de expresiones tipados generados con
+oráculo independiente cubren composición de scopes, efectos, control, errores y closures;
+W1 corrige patrones negativos, sujetos de match compuestos y tipos de if usados en operadores.
+Los cuatro motores respetan descarte de tails unit; MIR conserva errores en Result[unit, E].
+W1 deja de decidir el valor de return por el salto de línea.
+
+El perfil de asignaciones identifica strings ASCII de un carácter como coste evitable;
+se reutilizan valores inmutables estáticos, incluido NUL, manteniendo Unicode administrado.
+[AUDIT_STATUS.md](AUDIT_STATUS.md) registra el estado de A01–A12 y las decisiones diferidas.

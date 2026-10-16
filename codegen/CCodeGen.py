@@ -317,6 +317,8 @@ class CCodeGen:
                 body_stmts: List[str] = []
                 self._push_scope("fn")
                 ret_expr = self.emit_block_value(m.body, body_stmts)
+                if m.return_type is None or isinstance(m.return_type, NamedType) and m.return_type.name == 'unit':
+                    ret_expr = 'w_unit()'
                 ret_hold = self.new_aux("_ret")
                 body_stmts.append(f"WVal {ret_hold} = {self._own_expr(ret_expr)};")
                 self._pop_scope(body_stmts)
@@ -424,6 +426,8 @@ class CCodeGen:
         body_stmts: List[str] = []
         self._push_scope("fn")
         ret_expr = self.emit_block_value(stmt.body, body_stmts)
+        if stmt.return_type is None or isinstance(stmt.return_type, NamedType) and stmt.return_type.name == 'unit':
+            ret_expr = 'w_unit()'
         ret_hold = self.new_aux("_ret")
         body_stmts.append(f"WVal {ret_hold} = {self._own_expr(ret_expr)};")
         self._pop_scope(body_stmts)

@@ -419,6 +419,8 @@ class Formatter:
             lines: List[str] = [f"match {subj_str} {{"]
             for arm in expr.arms:
                 pat_str = "else" if isinstance(arm.pattern, WildcardPattern) else self.format_pattern(arm.pattern)
+                if arm.guard is not None:
+                    pat_str += ' if ' + self.format_expr(arm.guard, level + 1)
                 # If single tail_expr with no statements, can format inline or block
                 if not arm.body.statements and arm.body.tail_expr is not None:
                     arm_expr_str = self.format_expr(arm.body.tail_expr, level + 1)

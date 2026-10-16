@@ -8,6 +8,7 @@
 - [Expansión](EXPANSION.md): funciones como valores, closures, módulos públicos, FFI, OOP genérico, stdlib y LSP.
 - [Roadmap actual](ROADMAP.md): estado comprobado, siguiente hito y criterios de cierre.
 - [Decisiones técnicas](adr/): contratos de arquitectura versionados.
+- [Estado vigente de la auditoría](AUDIT_STATUS.md): A01–A12, regresiones nuevas y decisiones diferidas.
 - [Correcciones de auditoría y evidencia](AUDIT_REMEDIATION.md): contratos corregidos, SQLite y mediciones contra C.
 - `history/`: informes de hitos anteriores. Describen el estado de su fecha; no son la especificación vigente.
 

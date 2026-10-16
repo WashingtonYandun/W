@@ -1134,12 +1134,18 @@ fn sem_if(statement: bool) -> SemValue {
         common = sem_unit
     }
     sem_initialized = initialized
-    if statement { common = sem_unit }
+    # A discarded expression can still contain an if as a binary/postfix operand.
+    # Keep a common value type; incompatible discarded branches already yield unit.
     return SemValue { type_id: common, root: "", writable: -1, terminates: all_return }
 }
 fn sem_pattern(subject: int) -> str {
     if sem_match("ELSE") { return "*" }
     if sem_match("NONE") { return "None" }
+    if sem_match("MINUS") {
+        let literal = sem_expect("INT")
+        sem_require(sem_int, subject, "W2001")
+        return "literal:-" + literal.val
+    }
     if sem_is("INT") or sem_is("FLOAT") or sem_is("STR") or sem_is("TRUE") or sem_is("FALSE") {
         let token = sem_take()
         let mut type_id = sem_bool
@@ -1237,6 +1243,18 @@ fn sem_pattern(subject: int) -> str {
 }
 fn sem_match_expression() -> SemValue {
     sem_expect("MATCH")
+    # Preserve syntax-error priority before resolving an atomic subject's name.
+    # A bare pattern followed by a block always lacks its required arrow.
+    let mut pattern_start = sem_pos + 2
+    if pattern_start + 2 < len(sem_tokens) and sem_tokens[sem_pos + 1].kind == "LBRACE" {
+        if sem_tokens[pattern_start].kind == "MINUS" { pattern_start = pattern_start + 1 }
+        let pattern_kind = sem_tokens[pattern_start].kind
+        let bare_pattern = pattern_kind == "IDENT" or pattern_kind == "INT" or pattern_kind == "STR" or pattern_kind == "TRUE" or pattern_kind == "FALSE" or pattern_kind == "NONE"
+        let following = sem_tokens[pattern_start + 1]
+        if bare_pattern and following.kind == "LBRACE" {
+            report_error("W0001", following.line, following.col, "expected '=>' after match pattern")
+        }
+    }
     let subject = sem_expression(0, false).type_id
     sem_expect("LBRACE")
     let mut covered: list[str] = []
@@ -1253,7 +1271,7 @@ fn sem_match_expression() -> SemValue {
         let pattern = sem_pattern(subject)
         let mut guarded = false
         if sem_match("IF") { guarded = true sem_require(sem_expression(0, false).type_id, sem_bool, "W2001") }
-        sem_expect("FAT_ARROW")
+        if not sem_match("FAT_ARROW") { sem_error("W0001", "expected '=>' after match pattern") }
         let mut branch = SemFlow { type_id: sem_unit, terminates: false }
         if sem_is("LBRACE") { branch = sem_block(false) }
         else { let value = sem_expression(0, true) branch = SemFlow { type_id: value.type_id, terminates: value.terminates } }
@@ -1334,7 +1352,7 @@ fn sem_block(statement: bool) -> SemFlow {
             let previous = sem_expected
             sem_expected = sem_return
             let mut value = sem_unit
-            if not sem_is("RBRACE") and sem_at().line == sem_tokens[sem_pos - 1].line {
+            if expression_starter(sem_at().kind) {
                 let expression_start = sem_pos + sem_token_offset
                 value = sem_expression(0, true).type_id
                 sem_mark_result_lift(expression_start, value, sem_return)

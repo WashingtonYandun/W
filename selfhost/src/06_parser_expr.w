@@ -434,6 +434,10 @@ fn parse_pattern_condition(subject: str) -> str {
     }
     if match_kind("ELSE") { return "true" }
     if match_kind("NONE") { return "w_is_none(" + subject + ")" }
+    if check_kind("MINUS") {
+        let literal = parse_prefix_expr(false)
+        return "w_eq(" + subject + ", " + literal.val + ")"
+    }
     if check_kind("INT") or check_kind("FLOAT") or check_kind("STR") or check_kind("TRUE") or check_kind("FALSE") {
         let literal = parse_prefix_expr(false)
         return "w_eq(" + subject + ", " + literal.val + ")"
@@ -684,6 +688,9 @@ fn parse_prefix_expr(allow_struct: bool) -> ExprRes {
         if check_kind("INT") {
             let mut lit = advance_tok().val
             let digits = slice(lit, 0, len(lit))
+            if digits == "9223372036854775808" {
+                return ExprRes { val: "w_int((-9223372036854775807LL - 1LL))", lref: "" }
+            }
             return ExprRes { val: "w_int(-" + digits + "LL)", lref: "" }
         }
         let op_r = parse_expr(9, allow_struct)
@@ -1114,6 +1121,8 @@ fn parse_lambda() -> ExprRes {
     let mut result = "w_unit()"
     if match_kind("FAT_ARROW") { result = parse_expr(0, true).val }
     else { result = parse_block_expr() }
+    let signature_types = sem_types[lambda.type_id].args
+    if signature_types[len(signature_types) - 1] == sem_unit { result = "w_unit()" }
     let returned = new_aux("_ret")
     emit_line("WVal " + returned + " = " + own_expr(result) + ";")
     pop_scope()
