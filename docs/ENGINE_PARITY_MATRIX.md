@@ -34,15 +34,15 @@ flowchart TD
 
 ## 2. Feature Parity Matrix
 
-The following table summarizes compiler support across the fixtures of the Phase D public corpus. The counts are regenerated from `summary.json` by `tools/ci_conformance.py --matrix`, which reports measurements from the last verified run rather than restating `tests/engine_profiles.json`. Closures, FFI, generic OOP, stdlib and the LSP live in a separate expansion suite; see [EXPANSION.md](EXPANSION.md).
+The following table summarizes compiler support across the public core corpus. The counts are regenerated from `summary.json` by `tools/ci_conformance.py --matrix`, which reports measurements from the last verified run rather than restating `tests/engine_profiles.json`. Closures, FFI, generic OOP, stdlib and the LSP live in a separate expansion suite; see [EXPANSION.md](EXPANSION.md). Current project status and the next parity target are in [ROADMAP.md](ROADMAP.md).
 
 <!-- GENERATED TABLE START -->
 
 | Feature Category | Fixtures | W0 Interpreter | W0 AST C99 | W0 Typed HIR (Default) | W1 Self-Hosted C99 | Status / Milestone |
 | :--- | :---: | :---: | :---: | :---: | :---: | :--- |
 | **`core`** | 98 | ✅ 98/98 | ✅ 98/98 | ✅ 98/98 | ✅ 98/98 | Declared supported |
-| **`generics`** | 15 | ✅ 15/15 | ✅ 15/15 | ✅ 15/15 | ⏳ 0/15 (15 declared unsupported) | Pending D02 |
-| **`checked_modules`** | 1 | ✅ 1/1 | ✅ 1/1 | ✅ 1/1 | ⏳ 0/1 (1 declared unsupported) | Pending D02 |
+| **`generics`** | 15 | ✅ 15/15 | ✅ 15/15 | ✅ 15/15 | ⏳ 0/15 (15 declared unsupported) | Pending F01 |
+| **`checked_modules`** | 1 | ✅ 1/1 | ✅ 1/1 | ✅ 1/1 | ⏳ 0/1 (1 declared unsupported) | Pending F01 |
 | **Total Verified** | **114** | **114/114 (100.0%)** | **114/114 (100.0%)** | **114/114 (100.0%)** | **98/114 (86.0%)** | _measured_ |
 
 Regenerate with `python3 tools/ci_conformance.py --matrix`, which reads `summary.json`
@@ -103,23 +103,23 @@ gap: a construct the checker accepted while the HIR backend rejected it.
 
 ### 3.5 Monomorphized Generics & ADTs (`generics`)
 - **Status:** **Supported in W0** (15/15); **Unsupported in W1** (0/15).
-- **Remediation Target:** **Milestone D02**.
+- **Remediation Target:** **Milestone F01**.
 - **Explanation:**
   - W0 supports generic functions `fn id[T]`, generic structs `struct Box[T]`, generic enums `enum Option[T]`, recursive ADTs (e.g. `enum Tree[T]`), and layout graph cycle checking (`W2011`).
-  - W1 (`selfhost/w1.w`) currently expects standard parentheses after identifiers and does not parse type parameters (`[` / `]`), failing with `expected 'LPAREN', found '['`.
-  - Porting the TypeInterner, monomorphization engine, and generic lowering to W1 is the core objective of Milestone D02.
+  - W1's parser accepts enough syntax to produce a targeted error, but `selfhost/src/08_semantics.w` explicitly rejects generic function and record declarations with `W2013`.
+  - Porting generic declaration collection, type substitution, specialization, layout-cycle checks and C lowering to W1 is the core objective of Milestone F01.
 
 ### 3.6 Checked Compilation Sessions & Modules (`checked_modules`)
 - **Status:** **Supported in W0** (1/1); **Unsupported in W1** (0/1).
-- **Remediation Target:** **Milestone D02**.
+- **Remediation Target:** **Milestone F01**.
 - **Explanation:**
   - W0 implements whole-program `CompilationSession` with arena deduplication and diamond import caching.
   - W1 has a source-level module expander in `selfhost/src/03_modules.w`: it loads imports, checks public names, qualifies module identities, and detects cycles before feeding a flattened token stream to the compiler.
-  - This is not a W0-equivalent checked session. W1 does not share canonical typed declarations or specialization caches across module units. The current `checked_modules` fixture also requires imported generic specialization, which W1 rejects. D02 must define and test the intended boundary instead of describing W1 as single-file-only.
+  - This is not a W0-equivalent checked session. W1 does not share canonical typed declarations or specialization caches across module units. The current `checked_modules` fixture also requires imported generic specialization, which W1 rejects. F01 defines the measurable target: support the existing checked-module fixture while retaining the token-expansion frontend unless implementation evidence requires a larger redesign.
 
 ---
 
-## 4. Bootstrap Fixed-Point vs. Full Language Parity
+## 4. Bootstrap Fixed-Point vs. Core Corpus Parity
 
 It is critical to distinguish between two distinct compiler guarantees:
 
@@ -127,9 +127,9 @@ It is critical to distinguish between two distinct compiler guarantees:
    - The 3-stage bootstrap fixed-point ($\text{SHA256}(c_0) == \text{SHA256}(c_1) == \text{SHA256}(c_2)$) proves that the self-hosted compiler `selfhost/w1.w` is self-consistent and emits bit-for-bit identical C99 code across successive generations when compiling itself.
    - It **does not** prove that W1 accepts all language constructs present in W0.
 
-2. **Full Language Parity:**
-   - Full parity requires W1 to accept and correctly compile 100% of the surface language features, including generics, ADTs, and modular compilation sessions.
-   - Full parity is the explicit goal of Phase D (specifically D02).
+2. **Core Corpus Parity:**
+   - Core corpus parity means every fixture in this 114-case public corpus passes on every engine, with no unsupported exclusions.
+   - It does not claim W1 parity for the separate E expansion suite or every possible source program. F01 owns the 16 current W1 exclusions in this corpus.
 
 ---
 
@@ -146,7 +146,7 @@ The compiler test harness (`tools/ci_conformance.py`) enforces strict behavioral
 ### 5.2 Release Profile (`--profile=release`)
 - Evaluates all 114 corpus fixtures across all engines without allowing any unsupported exclusions.
 - **Requirement:** Every engine must pass 100% of all fixtures.
-- **Result:** Intentionally fails as long as W1 has unsupported features (`generics`, `checked_modules`), preventing deceptive releases that claim full self-hosting before D02 is complete.
+- **Result:** Intentionally fails as long as W1 has unsupported features (`generics`, `checked_modules`), preventing a release from claiming core-corpus parity before F01 is complete.
 
 ---
 
