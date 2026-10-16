@@ -1,0 +1,9 @@
+class C {
+    public ready: bool
+
+    fn init(value: bool?) {
+        value ?? (this.ready = true)
+    }
+}
+
+let value = C(none)

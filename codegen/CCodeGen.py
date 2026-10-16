@@ -154,6 +154,8 @@ class CCodeGen:
                 out.append("\\t")
             elif code == 0:
                 out.append("\\000")
+            elif code == 63:
+                out.append("\\077")
             else:
                 out.append(ch)
         out.append('"')

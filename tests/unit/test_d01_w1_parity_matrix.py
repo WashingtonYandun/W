@@ -142,7 +142,7 @@ def test_documentation_consistency():
         f"Doc reports a corpus of {total_row.group(1)} but the real corpus is {corpus_size}; "
         f"rerun: python3 tools/ci_conformance.py --matrix")
     assert "F01 is complete" in content, "Doc must record F01 completion"
-    assert "121/121 (100.0%)" in content, "Doc must record current measured W1 corpus parity"
+    assert f"{corpus_size}/{corpus_size} (100.0%)" in content, "Doc must record current measured W1 corpus parity"
     assert "error_unions" in content and "F03" in content, "Doc must record F03 error-union parity"
     profile = json.loads((ROOT / "tests/engine_profiles.json").read_text())
     error_union_fixtures = [
@@ -172,7 +172,7 @@ def test_documentation_consistency():
     assert "107 corpus fixtures" not in spec and "91 core fixtures" not in spec, (
         "SPEC parity section must not preserve obsolete W1 limits"
     )
-    assert "all 121 fixtures on all four engines" in spec, (
+    assert f"all {corpus_size} fixtures on all four engines" in spec, (
         "SPEC parity section must state the current measured release corpus"
     )
 

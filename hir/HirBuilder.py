@@ -23,7 +23,7 @@ from hir.HirNodes import (
     HirFnDecl, HirStructDecl, HirEnumDecl, HirInterfaceDecl, HirClassDecl, HirModule,
     HirLet, HirBindTemp, HirAssign, HirWhile, HirForList, HirReturn, HirBreak, HirContinue, HirExprStmt,
     HirConstInt, HirConstFloat, HirConstBool, HirConstStr, HirConstNone, HirConstUnit,
-    HirLocalRef, HirThisRef, HirSuperRef, HirUnaryOp, HirBinaryOp,
+    HirLocalRef, HirThisRef, HirSuperRef, HirUnaryOp, HirBinaryOp, HirSequence,
     HirConstructStruct, HirConstructEnum, HirConstructObject, HirConstructList, HirConstructDict, HirConstructTuple,
     HirDirectCall, HirBuiltinCall, HirMethodCall, HirFieldRead, HirIndexRead,
     HirTryPropagate, HirCoalesce, HirElseHandle, HirIf, HirMatch, HirMatchArm, HirRange,
@@ -69,12 +69,6 @@ class HirBuilder:
         self.imported_files: Set[str] = set()
         self.symbol_counter = 0
         self.scopes: List[Dict[str, SymbolId]] = [{}]
-        # Statements recorded while lowering an assignment used as a sub-expression;
-        # drained by the enclosing block (`a = b` yields the assigned value).
-        self.pending_stmts: List[HirStmt] = []
-        # Nesting depth of assignment-expression lowering: only the outermost call
-        # re-parks the ordered statement list for the enclosing block.
-        self._pending_depth = 0
         self.assign_temp_counter = 0
 
     def _push_scope(self) -> None:
@@ -417,32 +411,10 @@ class HirBuilder:
         self._push_scope()
         stmts: List[HirStmt] = []
         for statement in block.statements:
-            lowered = self._lower_stmt(statement)
-            # An assignment used as a sub-expression records its statements here,
-            # because the HIR has no assignment expression node. They execute before
-            # the statement that consumes the assigned value.
-            stmts.extend(self._take_pending_stmts())
-            stmts.append(lowered)
-        tail_hir = None
-        if block.tail_expr is not None:
-            if isinstance(block.tail_expr, AssignmentExpr):
-                tgt_hir = self._lower_expr(block.tail_expr.target)
-                val_hir = self._lower_expr(block.tail_expr.value)
-                path = self._build_cow_path(tgt_hir)
-                stmts.extend(self._take_pending_stmts())
-                stmts.append(HirAssign(tgt_hir, val_hir, Span(block.tail_expr.line, block.tail_expr.col), path=path))
-                tail_hir = HirConstUnit(TYPE_UNIT, Span(block.tail_expr.line, block.tail_expr.col))
-            else:
-                tail_hir = self._lower_expr(block.tail_expr)
-                stmts.extend(self._take_pending_stmts())
+            stmts.append(self._lower_stmt(statement))
+        tail_hir = self._lower_expr(block.tail_expr) if block.tail_expr is not None else None
         self._pop_scope()
         return HirBlock(stmts, self._span(block), tail_expr=tail_hir)
-
-    def _take_pending_stmts(self) -> List[HirStmt]:
-        """Drains statements recorded by expression lowering (`a = b` as a value)."""
-        pending = self.pending_stmts
-        self.pending_stmts = []
-        return pending
 
     def _lower_assignment_expression(self, expr: AssignmentExpr) -> HirExpr:
         """Lowers `a = b` used where a value is required.
@@ -463,48 +435,23 @@ class HirBuilder:
         suggests) resurfaces the *old* value whenever the target is written again later in
         the same chain, so the capture is required.
 
-        Only the outermost assignment publishes the plan through `pending_stmts`; nested
-        calls return theirs through the value expression's own `pending_stmts`, which this
-        call absorbs. A nested call must never clear the list, because that list belongs to
-        the enclosing one.
+        The sequence remains attached to this expression, so its effects run at the exact
+        point where the expression is evaluated, including conditional operands.
         """
         span = self._span(expr)
-        outer = self._pending_depth == 0
-
-        self._pending_depth += 1
-        try:
-            tgt_hir = self._lower_expr(expr.target)
-            pre = self.pending_stmts
-            self.pending_stmts = []
-            val_hir = self._lower_expr(expr.value)
-            inner = self.pending_stmts
-        finally:
-            self._pending_depth -= 1
-        self.pending_stmts = []
-
-        # A nested assignment's plan ends with the statement that gives the value; that
-        # statement is this target's assignment too, so it is taken out and re-appended
-        # in place instead of being duplicated.
-        nested = list(inner)
-        creation = nested.pop() if isinstance(nested[-1] if nested else None, HirAssign) else None
+        tgt_hir = self._lower_expr(expr.target)
+        val_hir = self._lower_expr(expr.value)
         statements: List[HirStmt] = []
-        statements.extend(pre)
-        statements.extend(nested)
-        if creation is not None:
-            statements.append(creation)
-        else:
-            statements.append(HirAssign(tgt_hir, val_hir, span,
-                                        path=self._build_cow_path(tgt_hir)))
+        statements.append(HirAssign(tgt_hir, val_hir, span,
+                                    path=self._build_cow_path(tgt_hir)))
 
         temp_name = f"__w_assign_value_{self.assign_temp_counter}"
         self.assign_temp_counter += 1
         tempid = self._declare_symbol(temp_name)
         tid = self._get_expr_type_id(expr) or tgt_hir.type_id
         statements.append(HirBindTemp(temp_name, tid, tgt_hir, span, symbol_id=tempid))
-
-        if outer:
-            self.pending_stmts = statements
-        return HirLocalRef(temp_name, tid, span, symbol_id=tempid)
+        value = HirLocalRef(temp_name, tid, span, symbol_id=tempid)
+        return HirSequence(statements, value, tid, span)
 
     def _lower_stmt(self, stmt: Stmt) -> HirStmt:
         span = self._span(stmt)

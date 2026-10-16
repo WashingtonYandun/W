@@ -41,6 +41,8 @@ fn escape_c_str(s: str) -> str {
             out = out + "\\t"
         } elif code == 0 {
             out = out + "\\000"
+        } elif code == 63 {
+            out = out + "\\077"
         } else {
             out = out + ch
         }

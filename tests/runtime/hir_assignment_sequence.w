@@ -1,0 +1,20 @@
+let mut value = 0
+
+print(false and ((value = 1) == 1), value)
+print(true or ((value = 2) == 2), value)
+print(true and ((value = 3) == 3), value)
+print(false or ((value = 4) == 4), value)
+print(value, (value = 5), value)
+
+fn return_assignment() -> int {
+    let mut local = 0
+    return local = 6
+}
+
+print(return_assignment())
+print((value = 7), (value = 8), value)
+
+let maybe: int? = Some(4)
+print(maybe ?? (value = 9), value)
+let empty: int? = none
+print(empty ?? (value = 10), value)
