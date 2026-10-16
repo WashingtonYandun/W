@@ -65,7 +65,9 @@ fn parse_type_ann() -> bool {
         is_fallible = parse_type_ann()
         expect_kind("RPAREN")
     } else {
+        let type_token = at_tok()
         advance_tok()
+        if type_token.kind == "IDENT" and type_token.val == "Result" { is_fallible = true }
     }
     if match_kind("LBRACKET") {
         while not check_kind("RBRACKET") and not is_eof() {

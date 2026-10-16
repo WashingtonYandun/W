@@ -731,6 +731,17 @@ static inline WVal w_peek_err(WVal v) {
     return w_none();
 }
 
+static inline bool w_is_enum_variant(WVal value, const char* enum_name, const char* variant) {
+    return value.tag == W_ENUM && value.as.en.enum_name && value.as.en.variant &&
+        strcmp(value.as.en.enum_name, enum_name) == 0 && strcmp(value.as.en.variant, variant) == 0;
+}
+
+static inline WVal w_peek_enum_payload(WVal value) {
+    if (value.tag == W_ENUM && value.as.en.box) return value.as.en.box->val;
+    fprintf(stderr, "[W4003] RuntimeError: enum payload access on invalid value\n");
+    exit(1);
+}
+
 static inline void w_list_detach(WVal* v) {
     if (v->tag != W_LIST || !v->as.list) return;
     WListBuf* old_b = v->as.list;
@@ -1727,6 +1738,10 @@ static inline char* w_format_float(double value) {
 static inline const char* w_nominal_display_name(const char* name) {
     if (strncmp(name, "__wm_", 5) == 0) {
         const char* boundary = strstr(name + 5, "__");
+        if (boundary) return boundary + 2;
+    }
+    if (strncmp(name, "__w1_m", 6) == 0) {
+        const char* boundary = strstr(name + 6, "__");
         if (boundary) return boundary + 2;
     }
     return name;
