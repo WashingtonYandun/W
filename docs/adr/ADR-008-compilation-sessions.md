@@ -1,6 +1,6 @@
 # ADR-008: Whole-program compilation sessions and checked module units
 
-Status: accepted for W0 (C01). W1 adoption remains D02.
+Status: accepted for W0 (C01). Observable W1 parity for checked modules is tracked by F01; it does not require copying this internal architecture.
 
 ## Problem
 
@@ -33,4 +33,4 @@ HIR spans retain source paths and ModuleId as file identity, so dependency verif
 
 Whole-program checking and lowering share the same type meanings. Diamond and symlink imports preserve declaration identity and execute initialization once. Reuse avoids repeated parsing/checking; invalidation prioritizes correctness over fine-grained incremental compilation.
 
-This changes previously inconsistent import behavior, including duplicate module initialization and running imported `main` functions. These behaviors are now explicitly defined and tested. W1 has not acquired this pipeline; the checked-module fixture is declared unsupported for W1 in the engine manifest. Release coverage remains blocked until D02.
+This changes previously inconsistent import behavior, including duplicate module initialization and running imported `main` functions. These behaviors are now explicitly defined and tested. W1 still uses token expansion rather than this shared typed pipeline, but it now passes the `checked_modules` core-corpus fixture, including imported generic specialization. F01 closes the 114-case release corpus; it does not claim architectural equivalence between W0 and W1.

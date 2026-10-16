@@ -1,6 +1,6 @@
 # Engine Feature Parity Matrix & Implementation Boundaries
 
-> **Milestone D01 Contract:** W explicitly documents the exact support status of each compiler engine across all language features. Releases do not claim universal parity while self-hosting limitations exist.
+> **Milestone D01 Contract:** W documents measured engine support for every fixture in the public core corpus. This matrix does not claim universal language parity.
 
 ---
 
@@ -34,16 +34,16 @@ flowchart TD
 
 ## 2. Feature Parity Matrix
 
-The following table summarizes compiler support across the fixtures of the Phase D public corpus. The counts are regenerated from `summary.json` by `tools/ci_conformance.py --matrix`, which reports measurements from the last verified run rather than restating `tests/engine_profiles.json`. Closures, FFI, generic OOP, stdlib and the LSP live in a separate expansion suite; see [EXPANSION.md](EXPANSION.md).
+The following table summarizes compiler support across the public core corpus. The counts are regenerated from `summary.json` by `tools/ci_conformance.py --matrix`, which reports measurements from the last verified run rather than restating `tests/engine_profiles.json`. Closures, FFI, generic OOP, stdlib and the LSP live in a separate expansion suite; see [EXPANSION.md](EXPANSION.md). Current project status and follow-up work are in [ROADMAP.md](ROADMAP.md).
 
 <!-- GENERATED TABLE START -->
 
 | Feature Category | Fixtures | W0 Interpreter | W0 AST C99 | W0 Typed HIR (Default) | W1 Self-Hosted C99 | Status / Milestone |
 | :--- | :---: | :---: | :---: | :---: | :---: | :--- |
 | **`core`** | 98 | ✅ 98/98 | ✅ 98/98 | ✅ 98/98 | ✅ 98/98 | Declared supported |
-| **`generics`** | 15 | ✅ 15/15 | ✅ 15/15 | ✅ 15/15 | ⏳ 0/15 (15 declared unsupported) | Pending D02 |
-| **`checked_modules`** | 1 | ✅ 1/1 | ✅ 1/1 | ✅ 1/1 | ⏳ 0/1 (1 declared unsupported) | Pending D02 |
-| **Total Verified** | **114** | **114/114 (100.0%)** | **114/114 (100.0%)** | **114/114 (100.0%)** | **98/114 (86.0%)** | _measured_ |
+| **`generics`** | 15 | ✅ 15/15 | ✅ 15/15 | ✅ 15/15 | ✅ 15/15 | Declared supported |
+| **`checked_modules`** | 1 | ✅ 1/1 | ✅ 1/1 | ✅ 1/1 | ✅ 1/1 | Declared supported |
+| **Total Verified** | **114** | **114/114 (100.0%)** | **114/114 (100.0%)** | **114/114 (100.0%)** | **114/114 (100.0%)** | _measured_ |
 
 Regenerate with `python3 tools/ci_conformance.py --matrix`, which reads `summary.json`
 from an actual run of `python3 tools/ci_conformance.py` over the corpus. These are
@@ -102,23 +102,18 @@ gap: a construct the checker accepted while the HIR backend rejected it.
   - Verified under AddressSanitizer and LeakSanitizer: 0 memory leaks for acyclic and weak-broken structures.
 
 ### 3.5 Monomorphized Generics & ADTs (`generics`)
-- **Status:** **Supported in W0** (15/15); **Unsupported in W1** (0/15).
-- **Remediation Target:** **Milestone D02**.
-- **Explanation:**
-  - W0 supports generic functions `fn id[T]`, generic structs `struct Box[T]`, generic enums `enum Option[T]`, recursive ADTs (e.g. `enum Tree[T]`), and layout graph cycle checking (`W2011`).
-  - W1 (`selfhost/w1.w`) currently expects standard parentheses after identifiers and does not parse type parameters (`[` / `]`), failing with `expected 'LPAREN', found '['`.
-  - Porting the TypeInterner, monomorphization engine, and generic lowering to W1 is the core objective of Milestone D02.
+- **Status:** **15/15 corpus fixtures pass on all four engines**; F01 is complete.
+- **Coverage:** Generic functions and structs, generic enums and `Option`/`Result`, recursive ADTs, imported generic specialization, and stable constraint/layout-cycle diagnostics (`W2011`, `W2001`).
+- This is measured corpus coverage, not a guarantee that every possible generic program has identical behavior on W0 and W1.
 
 ### 3.6 Checked Compilation Sessions & Modules (`checked_modules`)
-- **Status:** **Supported in W0** (1/1); **Unsupported in W1** (0/1).
-- **Remediation Target:** **Milestone D02**.
-- **Explanation:**
-  - W0 implements whole-program `CompilationSession` with arena deduplication and diamond import caching.
-  - W1 operates as a single-file compiler or uses the bootstrap bundler (`tools/bundle_w1.py`) rather than native multi-module compilation sessions.
+- **Status:** **1/1 corpus fixture passes on all four engines**; F01 is complete.
+- W0 implements whole-program `CompilationSession` with arena deduplication and diamond import caching.
+- W1 loads imports, enforces public names, qualifies module identities, and detects cycles before feeding a flattened token stream to its compiler. This passes the checked-module fixture, including imported generic specialization, but does not provide W0's shared typed declarations or specialization cache.
 
 ---
 
-## 4. Bootstrap Fixed-Point vs. Full Language Parity
+## 4. Bootstrap Fixed-Point vs. Core Corpus Parity
 
 It is critical to distinguish between two distinct compiler guarantees:
 
@@ -126,9 +121,9 @@ It is critical to distinguish between two distinct compiler guarantees:
    - The 3-stage bootstrap fixed-point ($\text{SHA256}(c_0) == \text{SHA256}(c_1) == \text{SHA256}(c_2)$) proves that the self-hosted compiler `selfhost/w1.w` is self-consistent and emits bit-for-bit identical C99 code across successive generations when compiling itself.
    - It **does not** prove that W1 accepts all language constructs present in W0.
 
-2. **Full Language Parity:**
-   - Full parity requires W1 to accept and correctly compile 100% of the surface language features, including generics, ADTs, and modular compilation sessions.
-   - Full parity is the explicit goal of Phase D (specifically D02).
+2. **Core Corpus Parity:**
+   - Core corpus parity means every fixture in this 114-case public corpus passes on every engine, with no unsupported exclusions.
+   - It does not claim W1 parity for the separate E expansion suite or every possible source program. F01 closed the 16 exclusions that previously existed in this corpus.
 
 ---
 
@@ -145,7 +140,7 @@ The compiler test harness (`tools/ci_conformance.py`) enforces strict behavioral
 ### 5.2 Release Profile (`--profile=release`)
 - Evaluates all 114 corpus fixtures across all engines without allowing any unsupported exclusions.
 - **Requirement:** Every engine must pass 100% of all fixtures.
-- **Result:** Intentionally fails as long as W1 has unsupported features (`generics`, `checked_modules`), preventing deceptive releases that claim full self-hosting before D02 is complete.
+- **Result:** Fails on any unsupported fixture or behavioral mismatch. It currently passes all 114 fixtures on all four engines with no exclusions; F01 is complete.
 
 ---
 
@@ -154,4 +149,4 @@ The compiler test harness (`tools/ci_conformance.py`) enforces strict behavioral
 When invoking W1 via `w build --backend=selfhost <file.w>` or `w build --selfhost <file.w>`:
 - The command executes the native `w1_stage2` binary directly via `subprocess.run([w1_bin, input, output])`.
 - **No W0 pre-check or pre-filtering is performed.**
-- If the source file contains features unsupported by W1 (such as generics), the native W1 compiler itself parses, validates, and emits its own error messages directly.
+- If the source file uses a feature outside W1's measured subset, the native W1 compiler itself parses, validates, and emits its own error messages directly.

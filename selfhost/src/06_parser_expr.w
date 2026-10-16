@@ -46,6 +46,42 @@ fn projection_is_mutated() -> bool {
 
 
 fn emit_call(callee: ExprRes, args_c: list[str], collection: bool) -> ExprRes {
+    if len(callee.val) >= 6 and slice(callee.val, 0, 6) == "enum::" {
+        let marker = slice(callee.val, 6, len(callee.val))
+        let mut separator = -1
+        for i in 0..len(marker) - 1 { if slice(marker, i, i + 2) == "::" { separator = i } }
+        if separator < 0 { report_error("W9999", at_tok().line, at_tok().col, "invalid enum constructor marker") }
+        let owner = slice(marker, 0, separator)
+        let variant = slice(marker, separator + 2, len(marker))
+        if owner == "Option" and variant == "Some" {
+            if len(args_c) != 1 { report_error("W2005", at_tok().line, at_tok().col, "Option.Some arity") }
+            return bind_call("w_enum_payload(\"Option\", \"Some\", " + own_expr(args_c[0]) + ")")
+        }
+        if owner == "Result" and variant == "Ok" {
+            if len(args_c) != 1 { report_error("W2005", at_tok().line, at_tok().col, "Result.Ok arity") }
+            return bind_call("w_ok(" + own_expr(args_c[0]) + ")")
+        }
+        if owner == "Result" and variant == "Err" {
+            if len(args_c) != 1 { report_error("W2005", at_tok().line, at_tok().col, "Result.Err arity") }
+            return bind_call("w_err(" + own_expr(args_c[0]) + ")")
+        }
+        let mut arity = -1
+        for i in 0..len(g_enum_variant_names) {
+            if g_enum_variant_names[i] == variant and g_enum_variant_owners[i] == owner { arity = g_enum_variant_arities[i] }
+        }
+        if arity != len(args_c) { report_error("W2005", at_tok().line, at_tok().col, "enum constructor arity: " + owner + "." + variant) }
+        if arity == 0 { return bind_call("w_enum(\"" + owner + "\", \"" + variant + "\")") }
+        if arity == 1 { return bind_call("w_enum_payload(\"" + owner + "\", \"" + variant + "\", " + own_expr(args_c[0]) + ")") }
+        let payload_values = new_aux("_enum_values")
+        let mut values = ""
+        for i in 0..len(args_c) {
+            if i > 0 { values = values + ", " }
+            values = values + args_c[i]
+        }
+        emit_line("WVal " + payload_values + "[" + str(len(args_c)) + "] = { " + values + " };")
+        let payload = "w_make_tuple(" + str(len(args_c)) + ", " + payload_values + ")"
+        return bind_call("w_enum_payload(\"" + owner + "\", \"" + variant + "\", " + payload + ")")
+    }
     if is_bound_variable(callee.val) or (callee.lref == "" and not (len(callee.val) >= 2 and slice(callee.val, 0, 2) == "v_")) {
         return emit_indirect_call(callee.val, args_c)
     }
@@ -137,6 +173,9 @@ fn emit_call(callee: ExprRes, args_c: list[str], collection: bool) -> ExprRes {
         if fn_name == "Err" and len(args_c) == 1 {
             return bind_call("w_err(" + own_expr(args_c[0]) + ")")
         }
+        if fn_name == "Some" and len(args_c) == 1 {
+            return bind_call("w_enum_payload(\"Option\", \"Some\", " + own_expr(args_c[0]) + ")")
+        }
         if fn_name == "print" {
             if len(args_c) == 0 {
                 return bind_call("w_builtin_print(0, NULL)")
@@ -221,6 +260,8 @@ fn emit_call(callee: ExprRes, args_c: list[str], collection: bool) -> ExprRes {
         if find_class_meta_idx(fn_name) != -1 {
             return bind_call("w_new_" + fn_name + "(" + joined + ")")
         }
+        let generic_type = sem_generic_type(fn_name)
+        if generic_type >= 0 and sem_generic_types[generic_type].kind == "struct" { return emit_struct_constructor(fn_name, args_c) }
         return bind_call(c_fn_name(fn_name) + "(" + joined + ")")
     }
     return ExprRes { val: "w_unit()", lref: "" }
@@ -369,72 +410,108 @@ fn parse_match_expr() -> ExprRes {
     return ExprRes { val: res, lref: "" }
 }
 
+fn parse_pattern_condition(subject: str) -> str {
+    if match_kind("ELSE") { return "true" }
+    if match_kind("NONE") { return "w_is_none(" + subject + ")" }
+    if check_kind("INT") or check_kind("FLOAT") or check_kind("STR") or check_kind("TRUE") or check_kind("FALSE") {
+        let literal = parse_prefix_expr(false)
+        return "w_eq(" + subject + ", " + literal.val + ")"
+    }
+    let name = expect_kind("IDENT").val
+    if name == "_" { return "true" }
+    let mut owner = ""
+    let mut variant = name
+    if match_kind("DOT") {
+        owner = name
+        variant = expect_kind("IDENT").val
+    }
+    let mut enum_owner = owner
+    let mut arity = -1
+    if owner == "Option" and variant == "None" { return "w_is_none(" + subject + ")" }
+    if (owner == "Option" or owner == "") and variant == "Some" { arity = 1 enum_owner = "Option" }
+    if (owner == "Result" or owner == "") and (variant == "Ok" or variant == "Err") { arity = 1 enum_owner = "Result" }
+    if arity < 0 {
+        for i in 0..len(g_enum_variant_names) {
+            if g_enum_variant_names[i] == variant and (owner == "" or g_enum_variant_owners[i] == owner) {
+                arity = g_enum_variant_arities[i]
+                enum_owner = g_enum_variant_owners[i]
+            }
+        }
+    }
+    if arity >= 0 {
+        let mut condition = "true"
+        if enum_owner == "Option" and variant == "Some" { condition = "!w_is_none(" + subject + ")" }
+        elif enum_owner == "Result" and variant == "Ok" { condition = "(" + subject + ").tag == W_OK" }
+        elif enum_owner == "Result" and variant == "Err" { condition = "(" + subject + ").tag == W_ERR" }
+        else { condition = "w_is_enum_variant(" + subject + ", \"" + enum_owner + "\", \"" + variant + "\")" }
+        if match_kind("LPAREN") {
+            let mut index = 0
+            if not check_kind("RPAREN") {
+                let mut payload = "w_peek_enum_payload(" + subject + ")"
+                if enum_owner == "Option" { payload = "w_peek_optional(" + subject + ")" }
+                elif enum_owner == "Result" and variant == "Ok" { payload = "w_peek_ok(" + subject + ")" }
+                elif enum_owner == "Result" and variant == "Err" { payload = "w_peek_err(" + subject + ")" }
+                if arity > 1 { payload = "(" + payload + ").as.tuple->items[0]" }
+                let child = parse_pattern_condition(payload)
+                condition = "(" + condition + ") && (" + child + ")"
+                index = 1
+                while match_kind("COMMA") {
+                    if check_kind("RPAREN") { break }
+                    if index >= arity { report_error("W2001", at_tok().line, at_tok().col, "too many enum pattern elements") }
+                    let mut next_payload = "w_peek_enum_payload(" + subject + ")"
+                    if enum_owner == "Option" { next_payload = "w_peek_optional(" + subject + ")" }
+                    elif enum_owner == "Result" and variant == "Ok" { next_payload = "w_peek_ok(" + subject + ")" }
+                    elif enum_owner == "Result" and variant == "Err" { next_payload = "w_peek_err(" + subject + ")" }
+                    next_payload = "(" + next_payload + ").as.tuple->items[" + str(index) + "]"
+                    let next_condition = parse_pattern_condition(next_payload)
+                    condition = "(" + condition + ") && (" + next_condition + ")"
+                    index = index + 1
+                }
+            }
+            expect_kind("RPAREN")
+            if index != arity { report_error("W2001", at_tok().line, at_tok().col, "enum pattern arity") }
+        } elif arity != 0 {
+            report_error("W2005", at_tok().line, at_tok().col, "enum pattern requires payload")
+        }
+        return condition
+    }
+    if owner != "" { return "w_is_enum_variant(" + subject + ", \"" + owner + "\", \"" + variant + "\")" }
+    g_pattern_bind_lines.append("WVal v_" + name + " = w_clone(" + subject + ");")
+    g_pattern_bind_names.append("v_" + name)
+    return "true"
+}
+
 fn parse_match_arms(subj_tmp: str, res: str) -> unit {
-    let mut cond_c = "true"
-    let mut bind_lines: list[str] = []
-    if match_kind("ELSE") {
-        cond_c = "true"
-    } elif check_kind("IDENT") {
-        let id_tok = advance_tok()
-        if match_kind("DOT") {
-            let var_tok = expect_kind("IDENT")
-            cond_c = "w_eq(" + subj_tmp + ", w_enum(\"" + id_tok.val + "\", \"" + var_tok.val + "\"))"
-        } elif check_kind("COMMA") {
-            let mut t_names: list[str] = [id_tok.val]
-            while match_kind("COMMA") {
-                let nt = expect_kind("IDENT")
-                t_names.append(nt.val)
-            }
-            cond_c = "((" + subj_tmp + ").tag == W_TUPLE && (" + subj_tmp + ").as.tuple->len == " + str(len(t_names)) + ")"
-            for ti in 0..len(t_names) {
-                bind_lines.append("WVal v_" + t_names[ti] + " = w_clone((" + subj_tmp + ").as.tuple->items[" + str(ti) + "]);")
-            }
-        } else {
-            cond_c = "true"
-            bind_lines.append("WVal v_" + id_tok.val + " = w_clone(" + subj_tmp + ");")
-        }
-    } else {
-        let lit_r = parse_prefix_expr(false)
-        cond_c = "w_eq(" + subj_tmp + ", " + lit_r.val + ")"
-    }
-    expect_kind("FAT_ARROW")
-    emit_line("if (" + cond_c + ") {")
-    push_scope("block")
-    let saved = g_cur_stmts
-    let empty: list[str] = []
-    g_cur_stmts = empty
-    for bl in bind_lines {
-        emit_line(bl)
-    }
-    if check_kind("LBRACE") {
-        let arm_v = parse_block_expr()
-        emit_line("w_assign(&" + res + ", " + own_expr(arm_v) + ");")
-    } else {
-        let arm_v = parse_expr(0, true)
-        emit_line("w_assign(&" + res + ", " + own_expr(arm_v.val) + ");")
-    }
-    pop_scope()
-    let arm_lines = g_cur_stmts
-    g_cur_stmts = saved
-    for al in arm_lines {
-        emit_line("    " + al)
-    }
-    emit_line("}")
-    match_kind("COMMA")
-    if not check_kind("RBRACE") and not is_eof() {
-        emit_line("else {")
+    let matched = new_aux("_match_taken")
+    emit_line("bool " + matched + " = false;")
+    while not check_kind("RBRACE") and not is_eof() {
+        let empty_bindings: list[str] = []
+        g_pattern_bind_lines = empty_bindings
+        g_pattern_bind_names = empty_bindings
+        let condition = parse_pattern_condition(subj_tmp)
+        emit_line("if (!" + matched + " && (" + condition + ")) {")
         push_scope("block")
-        let saved_else = g_cur_stmts
-        let empty_else: list[str] = []
-        g_cur_stmts = empty_else
-        parse_match_arms(subj_tmp, res)
-        pop_scope()
-        let else_lines = g_cur_stmts
-        g_cur_stmts = saved_else
-        for el in else_lines {
-            emit_line("    " + el)
+        for binding in g_pattern_bind_lines { emit_line(binding) }
+        for binding_name in g_pattern_bind_names { register_var(binding_name) }
+        let has_guard = match_kind("IF")
+        if has_guard {
+            let guard = parse_expr(0, false)
+            emit_line("if ((" + guard.val + ").as.b) {")
+            push_scope("block")
         }
+        expect_kind("FAT_ARROW")
+        if check_kind("LBRACE") {
+            let arm_value = parse_block_expr()
+            emit_line("w_assign(&" + res + ", " + own_expr(arm_value) + ");")
+        } else {
+            let arm_value = parse_expr(0, true)
+            emit_line("w_assign(&" + res + ", " + own_expr(arm_value.val) + ");")
+        }
+        emit_line(matched + " = true;")
+        if has_guard { pop_scope() emit_line("}") }
+        pop_scope()
         emit_line("}")
+        match_kind("COMMA")
     }
 }
 
@@ -492,6 +569,23 @@ fn parse_prefix_expr(allow_struct: bool) -> ExprRes {
     }
     if match_kind("IDENT") {
         let name = tok.val
+        if name == "None" { return ExprRes { val: "w_none()", lref: "" } }
+        let function_index = sem_function(name)
+        if function_index >= 0 and len(sem_functions[function_index].type_params) > 0 and match_kind("LBRACKET") {
+            while not check_kind("RBRACKET") and not is_eof() {
+                parse_type_ann()
+                if not match_kind("COMMA") { break }
+            }
+            expect_kind("RBRACKET")
+        }
+        let generic_type = sem_generic_type(name)
+        if generic_type >= 0 and match_kind("LBRACKET") {
+            while not check_kind("RBRACKET") and not is_eof() {
+                parse_type_ann()
+                if not match_kind("COMMA") { break }
+            }
+            expect_kind("RBRACKET")
+        }
         if allow_struct and check_kind("LBRACE") {
             let p1 = peek_tok(1)
             let p2 = peek_tok(2)
@@ -531,6 +625,18 @@ fn parse_prefix_expr(allow_struct: bool) -> ExprRes {
         }
         if not check_kind("LPAREN") and not is_bound_variable("v_" + name) and sem_function(name) >= 0 {
             return emit_function_value(name)
+        }
+        if not is_bound_variable("v_" + name) {
+            let mut variant_owner = ""
+            let mut variant_arity = -1
+            for variant_index in 0..len(g_enum_variant_names) {
+                if g_enum_variant_names[variant_index] == name {
+                    variant_owner = g_enum_variant_owners[variant_index]
+                    variant_arity = g_enum_variant_arities[variant_index]
+                }
+            }
+            if variant_arity == 0 { return ExprRes { val: "w_enum(\"" + variant_owner + "\", \"" + name + "\")", lref: "" } }
+            if variant_arity > 0 { return ExprRes { val: "enum::" + variant_owner + "::" + name, lref: "" } }
         }
         return ExprRes { val: "v_" + name, lref: "&v_" + name }
     }
@@ -719,8 +825,17 @@ fn parse_expr(min_prec: int, allow_struct: bool) -> ExprRes {
                 }
                 if len(left.val) >= 2 and slice(left.val, 0, 2) == "v_" {
                     let raw_obj = slice(left.val, 2, len(left.val))
-                    if is_enum_name(raw_obj) {
-                        left = ExprRes { val: "w_enum(\"" + raw_obj + "\", \"" + prop + "\")", lref: "" }
+                    if is_enum_name(raw_obj) or raw_obj == "Option" or raw_obj == "Result" {
+                        if raw_obj == "Option" and prop == "None" { left = ExprRes { val: "w_none()", lref: "" } }
+                        elif (raw_obj == "Option" and prop == "Some") or (raw_obj == "Result" and (prop == "Ok" or prop == "Err")) { left = ExprRes { val: "enum::" + raw_obj + "::" + prop, lref: "" } }
+                        else {
+                            let mut variant_arity = 0
+                            for variant_index in 0..len(g_enum_variant_names) {
+                                if g_enum_variant_names[variant_index] == prop and g_enum_variant_owners[variant_index] == raw_obj { variant_arity = g_enum_variant_arities[variant_index] }
+                            }
+                            if variant_arity > 0 { left = ExprRes { val: "enum::" + raw_obj + "::" + prop, lref: "" } }
+                            else { left = ExprRes { val: "w_enum(\"" + raw_obj + "\", \"" + prop + "\")", lref: "" } }
+                        }
                     } else {
                         left = ExprRes { val: "w_member_get(" + left.val + ", \"" + prop + "\")", lref: "w_member_ref(" + clean_lref(left.lref) + ", \"" + prop + "\")::" + prop + "::" + clean_lref(left.lref) + "::" + left.val }
                     }
@@ -916,6 +1031,9 @@ fn parse_expr(min_prec: int, allow_struct: bool) -> ExprRes {
             }
         }
     }
+    let mut needs_result_lift = false
+    for position in sem_result_lift_positions { if position == expression_start + 1 { needs_result_lift = true } }
+    if needs_result_lift { left = bind_call("w_ok(" + own_expr(left.val) + ")") }
     return left
 }
 

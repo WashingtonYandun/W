@@ -25,6 +25,7 @@ def run_expansion_tests():
         'tests/functions/nested_closures.w': '60\n7\n',
         'tests/functions/captured_function.w': '10\n11\n',
         'tests/functions/indexed_functions.w': '42\n11\n',
+        'tests/functions/option_result_payload_match.w': 'some 42\nerror failed\nnone\nok 7\n',
         'tests/regressions/assignment_order.w': 'index\nvalue\n[7]\n',
         'tests/regressions/assignment_receiver.w': '9 2\n',
         'tests/regressions/dictionary_growth.w': '2001 2000 7 2000\n0 2000\n',

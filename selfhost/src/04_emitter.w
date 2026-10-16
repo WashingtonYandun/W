@@ -208,3 +208,29 @@ fn emit_function_value(name: str) -> ExprRes {
     }
     return bind_call("w_function_new(" + adapter + ", w_unit())")
 }
+
+fn emit_struct_constructor(name: str, values: list[str]) -> ExprRes {
+    let mut keys: list[str] = []
+    let mut field_count = 0
+    for field in sem_fields {
+        if field.owner == name {
+            keys.append("\"" + field.name + "\"")
+            field_count = field_count + 1
+        }
+    }
+    if field_count != len(values) { report_error("W2005", at_tok().line, at_tok().col, "struct constructor arity: " + name) }
+    if field_count == 0 { return bind_call("w_make_struct(\"" + name + "\", 0, NULL, NULL)") }
+    let keys_var = new_aux("_keys")
+    let values_var = new_aux("_values")
+    let mut joined_keys = ""
+    let mut joined_values = ""
+    for i in 0..field_count {
+        if i > 0 { joined_keys = joined_keys + ", " joined_values = joined_values + ", " }
+        joined_keys = joined_keys + keys[i]
+        joined_values = joined_values + values[i]
+    }
+    let count = str(field_count)
+    emit_line("const char* " + keys_var + "[" + count + "] = { " + joined_keys + " };")
+    emit_line("WVal " + values_var + "[" + count + "] = { " + joined_values + " };")
+    return bind_call("w_make_struct(\"" + name + "\", " + count + ", " + keys_var + ", " + values_var + ")")
+}
