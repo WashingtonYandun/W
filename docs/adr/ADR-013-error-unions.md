@@ -26,8 +26,9 @@ exhaustividad.
    El conjunto destino no puede perder alternativas y el payload no se convierte ni se
    envuelve nuevamente.
 5. `else err` liga el payload original con el tipo estático de la unión. Un `match` que
-   produce un valor debe cubrir cada tipo mediante `Tipo(binding)` o `Tipo(_)`. El
-   binding representa el valor de error completo.
+   produce un valor debe cubrir cada tipo mediante `Tipo(binding)` o `Tipo(_)`; los
+   tipos exportados aceptan su calificador de módulo, como `storage.ParseError(error)`.
+   El binding representa el valor de error completo.
 6. Los backends comparan la identidad runtime del valor: tags escalares para primitivos,
    nombre nominal para `struct` y nombre nominal para `enum`. No se añade wrapper ni ABI
    nuevo a Result.

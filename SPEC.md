@@ -379,7 +379,8 @@ entre errores.
 produzca un valor se deben cubrir todas las alternativas con patrones de tipo, por
 ejemplo `ParseError(problem) => ...` e `IoError(problem) => ...`. El patrón acepta un
 binding o `_`; el valor completo del error se conserva y se comprueba por su identidad
-de tipo runtime.
+de tipo runtime. Los nombres cualificados de módulos comprobados también son válidos en
+la firma y en el patrón, por ejemplo `storage.ParseError(problem)`.
 
 ---
 

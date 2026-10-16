@@ -122,7 +122,8 @@ gap: a construct the checker accepted while the HIR backend rejected it.
   rejected consistently; F03 is complete.
 - `T ! E1 | E2` is restricted to the Result error channel. `?` widens an error only when
   the source set is a subset of the declared target set. `else err` patterns check scalar
-  tags or exact nominal struct/enum identity and require exhaustive coverage.
+  tags or exact nominal struct/enum identity, including module-qualified types, and
+  require exhaustive coverage.
 - Generic types, classes, collections, tuples, functions and other compound alternatives
   remain outside the supported contract.
 
