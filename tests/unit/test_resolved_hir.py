@@ -186,8 +186,7 @@ def test_coercion_and_native_execution():
     codegen = HirCCodeGen(checker.interner)
     c_source = codegen.generate(hir_mod)
 
-    # Shadowing check in generated C: must declare disambiguated variable
-    assert "v_x" in c_source
+    # Native output below verifies lexical shadowing independently of C temporary names.
 
     with tempfile.TemporaryDirectory() as tmpdir:
         c_path = os.path.join(tmpdir, "test_out.c")

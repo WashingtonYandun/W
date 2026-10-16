@@ -86,7 +86,7 @@ cada nueva categoría, especialmente clases con herencia y tipos genéricos mono
 
 **What happens.** `selfhost/w1.w` (bundled from `selfhost/src/*.w`) is a compiler with
 its own lexer, recursive-descent parser, token-driven semantic pass with type interning,
-and direct-to-C emitter. It compiles all 158 fixtures in the public corpus, including
+and direct-to-C emitter. It compiles all 161 fixtures in the public corpus, including
 eight F03 error-union fixtures, 15 generic fixtures and the checked-module fixture. Its
 support outside those tested programs is not guaranteed to match W0:
 
@@ -203,13 +203,16 @@ gains either atomics or a "no shared state" discipline with a runtime that enfor
 ## 8. Costes que siguen abiertos tras la auditoría
 
 `WVal` conserva una representación etiquetada: 48 bytes en la ABI arm64 medida. Las
-listas de enteros y los rangos todavía se materializan con ese layout. La caché UTF-8
+listas de enteros y los rangos usados como valores conservan ese layout. Los bucles
+directos sobre rangos usan contadores sin asignar una lista. La caché UTF-8
 elimina rescaneos repetidos en strings con ownership, a cambio de un índice lazy de hasta
-un `size_t` por byte. Los literales prestados no tienen esa caché. `pad_left` y
+un `size_t` por byte; el caso ASCII con longitud cacheada evita esa tabla. Los literales prestados no tienen esa caché. `pad_left` y
 `bytes.decode` construyen listas de partes; eliminar copias cuadráticas no elimina todas
-las asignaciones. No existe un MIR completo ni un backend LLVM directo.
+las asignaciones. El backend principal consume MIR verificado y especializa locales,
+parámetros y retornos `int`, `float` y `bool`. Los contenedores siguen usando `WVal`;
+no existe un backend LLVM directo. Véase `MIR_DESIGN.md` y ADR-018.
 
-El nuevo corpus tiene 158 fixtures, incluidos 28 casos de la auditoría. La paridad
+El nuevo corpus tiene 161 fixtures, incluidos 28 casos de la auditoría. La paridad
 medida no cubre todas las combinaciones del lenguaje. Los recursos FFI `opaque` siguen
 requiriendo disciplina manual y SQLite del sistema no se recompila con sanitizers.
 Véase ADR-017 y `docs/AUDIT_REMEDIATION.md`.

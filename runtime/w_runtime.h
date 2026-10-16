@@ -1138,7 +1138,7 @@ static inline WVal w_make_list(int32_t count, const WVal* elems) {
     WVal v; v.tag = W_LIST; v.as.list = b; return v;
 }
 
-static inline WVal w_make_range(WVal start, WVal end, bool inclusive) {
+static inline int32_t w_range_count(WVal start, WVal end, bool inclusive) {
     int64_t s = start.as.i;
     int64_t e = end.as.i;
     if (inclusive) {
@@ -1153,7 +1153,12 @@ static inline WVal w_make_range(WVal start, WVal end, bool inclusive) {
         fprintf(stderr, "[W4003] RuntimeError: Range length %" PRIu64 " exceeds maximum list capacity\n", diff);
         exit(1);
     }
-    int32_t count = (int32_t)diff;
+    return (int32_t)diff;
+}
+
+static inline WVal w_make_range(WVal start, WVal end, bool inclusive) {
+    int64_t s = start.as.i;
+    int32_t count = w_range_count(start, end, inclusive);
     WListBuf* b = (WListBuf*)w_alloc_safe(sizeof(WListBuf));
     b->refcount = 1;
     b->len = count;
@@ -1395,6 +1400,13 @@ static inline bool w_string_offset(WVal value, int64_t index, size_t* offset, si
     if (index < 0) return false;
     WStringBuf* owner = value.string_owner;
     if (!owner) return w_utf8_cp_offset_n(value.as.s, value.string_length, index, offset, length);
+    /* A cached one-byte-per-codepoint string needs no offset table. */
+    if (owner->codepoint_count == value.string_length) {
+        if ((uint64_t)index > value.string_length) return false;
+        *offset = (size_t)index;
+        *length = (uint64_t)index < value.string_length ? 1 : 0;
+        return *length != 0;
+    }
     if (!owner->codepoint_offsets) {
         if (value.string_length > SIZE_MAX / sizeof(size_t) - 1) {
             fprintf(stderr, "[W4003] RuntimeError: String index too large\n"); exit(1);
@@ -1538,6 +1550,25 @@ static inline WVal* w_member_ref(WVal* obj, const char* prop) {
     fprintf(stderr, "[W4003] RuntimeError: Invalid field '%s'\n", prop);
     exit(1);
 }
+
+/* Physical field offsets resolved and checked before MIR reaches the backend. */
+static inline WVal w_field_get_at(WVal object, int32_t index) {
+    if ((object.tag != W_STRUCT && object.tag != W_OBJECT) || index < 0 || index >= object.as.st->len)
+        w_runtime_fail("W4003", "Invalid physical field read");
+    return object.as.st->vals[index];
+}
+
+static inline WVal* w_field_ref_at(WVal* object, int32_t index) {
+    if ((object->tag != W_STRUCT && object->tag != W_OBJECT) || index < 0 || index >= object->as.st->len)
+        w_runtime_fail("W4003", "Invalid physical field destination");
+    if (object->tag == W_STRUCT) w_struct_detach(object);
+    return &object->as.st->vals[index];
+}
+
+static inline WVal w_not(WVal value) { return w_bool(!value.as.b); }
+static inline WVal w_equal(WVal left, WVal right) { return w_bool(w_eq(left, right)); }
+static inline WVal w_not_equal(WVal left, WVal right) { return w_bool(!w_eq(left, right)); }
+static inline WVal w_enum_payload_owned(WVal value) { return w_clone(w_peek_enum_payload(value)); }
 
 /* Methods on List / Dict */
 static inline WVal w_list_append(WVal* list_val, WVal item) {

@@ -303,6 +303,10 @@ Equality is partitioned cleanly along the value vs reference boundary:
       print(i)
   }
   ```
+  Los límites se evalúan una vez, de izquierda a derecha. Los bucles directos usan
+  contadores sin asignar una lista; un rango usado como valor sigue siendo `list[int]`.
+  Se conserva el límite de 100 millones de elementos y el error de overflow cuando el
+  extremo inclusivo es `INT64_MAX`, incluso si el cuerpo sale inmediatamente.
 * **While loops:**
   ```w
   while condition {
@@ -623,7 +627,7 @@ W distinguishes between two distinct compiler guarantees:
 * **Bootstrap Fixed-Point:** A 3-stage bootstrap self-compilation of `selfhost/w1.w` produces bit-identical C code:
   $$\text{SHA256}(c_0) == \text{SHA256}(c_1) == \text{SHA256}(c_2)$$
   This guarantees determinism and convergence of the self-hosted compiler subset.
-* **Feature Parity:** Documented in `docs/ENGINE_PARITY_MATRIX.md` and measured rather than declared. The release profile passes all 158 fixtures on all four engines, with no unsupported cases. This is corpus evidence, not a claim of universal W0/W1 equivalence; see the feature breakdown and limits in the parity matrix.
+* **Feature Parity:** Documented in `docs/ENGINE_PARITY_MATRIX.md` and measured rather than declared. The release profile passes all 161 fixtures on all four engines, with no unsupported cases. This is corpus evidence, not a claim of universal W0/W1 equivalence; see the feature breakdown and limits in the parity matrix.
 
 ### 14.3 Code Generation Determinism
 Given identical source text and compiler flags:

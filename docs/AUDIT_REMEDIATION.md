@@ -1,5 +1,8 @@
 # Implementación de la auditoría de main
 
+> Informe de la primera fase. ADR-018 y [MIR_DESIGN.md](MIR_DESIGN.md) actualizan
+> el estado de MIR, rangos, ABI escalar y mediciones; los resultados siguientes son históricos.
+
 Base: `ebe2aa38ceb7e092244c53740b7a2eb545314b0d`. Rama:
 `feat/audit-remediation-2026-10-16`. Decisiones: [ADR-017](adr/ADR-017-audit-remediation-and-backend-gates.md).
 

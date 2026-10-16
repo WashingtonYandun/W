@@ -79,6 +79,23 @@ fn parse_while_stmt() -> unit {
     emit_line("}")
 }
 
+fn direct_range_operator() -> str {
+    let mut offset = 0
+    let mut depth = 0
+    while true {
+        let kind = peek_tok(offset).kind
+        if kind == "EOF" or (depth == 0 and (kind == "LBRACE" or kind == "RBRACE")) { return "" }
+        if depth == 0 and (kind == "DOT_DOT" or kind == "DOT_DOT_EQ") { return kind }
+        if kind == "LPAREN" or kind == "LBRACKET" { depth = depth + 1 }
+        elif kind == "RPAREN" or kind == "RBRACKET" {
+            if depth == 0 { return "" }
+            depth = depth - 1
+        }
+        offset = offset + 1
+    }
+    return ""
+}
+
 fn parse_for_stmt() -> unit {
     expect_kind("FOR")
     let pat0 = expect_kind("IDENT")
@@ -93,16 +110,40 @@ fn parse_for_stmt() -> unit {
     let saved_outer = g_cur_stmts
     let empty: list[str] = []
     g_cur_stmts = empty
-    let iter_r = parse_expr(0, false)
-    let iter_tmp = new_temp()
-    let idx_tmp = new_aux("_idx")
-    let item_tmp = new_aux("_item")
-    declare_owned_var(iter_tmp, own_expr(iter_r.val))
-    emit_line("for (int32_t " + idx_tmp + " = 0; " + idx_tmp + " < " + iter_tmp + ".as.list->len; " + idx_tmp + "++) {")
+    let range_kind = direct_range_operator()
+    let mut first = ""
+    let mut iter_tmp = ""
+    let mut count = ""
+    let mut idx_tmp = ""
+    let mut item_tmp = ""
+    if range_kind != "" {
+        let start = parse_expr(op_precedence(range_kind), false)
+        first = snapshot_value(start.val)
+        expect_kind(range_kind)
+        let end = parse_expr(0, false)
+        let last = snapshot_value(end.val)
+        count = new_aux("_count")
+        idx_tmp = new_aux("_idx")
+        item_tmp = new_aux("_item")
+        let inclusive = range_kind == "DOT_DOT_EQ"
+        emit_line("int32_t " + count + " = w_range_count(" + first + ", " + last + ", " + str(inclusive) + ");")
+        emit_line("for (int32_t " + idx_tmp + " = 0; " + idx_tmp + " < " + count + "; " + idx_tmp + "++) {")
+    } else {
+        let iter_r = parse_expr(0, false)
+        iter_tmp = new_temp()
+        idx_tmp = new_aux("_idx")
+        item_tmp = new_aux("_item")
+        declare_owned_var(iter_tmp, own_expr(iter_r.val))
+        emit_line("for (int32_t " + idx_tmp + " = 0; " + idx_tmp + " < " + iter_tmp + ".as.list->len; " + idx_tmp + "++) {")
+    }
     push_scope("loop")
     let saved_loop = g_cur_stmts
     g_cur_stmts = empty
-    emit_line("WVal " + item_tmp + " = " + iter_tmp + ".as.list->data[" + idx_tmp + "];")
+    if range_kind != "" {
+        emit_line("WVal " + item_tmp + " = w_int((" + first + ").as.i + (int64_t)" + idx_tmp + ");")
+    } else {
+        emit_line("WVal " + item_tmp + " = " + iter_tmp + ".as.list->data[" + idx_tmp + "];")
+    }
     if len(pat_names) == 1 {
         declare_owned_var("v_" + pat_names[0], "w_clone(" + item_tmp + ")")
     } else {

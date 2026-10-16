@@ -1,6 +1,7 @@
 # Documentación de W
 
 - [Especificación del lenguaje](../SPEC.md): sintaxis y semántica públicas.
+- [Diseño del MIR](MIR_DESIGN.md): CFG, ownership explícito, layouts y ABI escalar.
 - [Diseño del HIR](HIR_DESIGN.md): representación intermedia y verificación.
 - [Memoria y ownership](OWNERSHIP_LIFETIME.md): ARC, CoW y referencias débiles.
 - [Paridad de motores](ENGINE_PARITY_MATRIX.md): capacidades y límites comprobados.

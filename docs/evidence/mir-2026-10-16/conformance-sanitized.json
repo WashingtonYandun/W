@@ -1,0 +1,287 @@
+{
+  "profile": "release",
+  "passed_cases": 161,
+  "total_cases": 161,
+  "coverage": {
+    "interpreter": {
+      "passed": 161,
+      "failed": 0,
+      "unsupported": 0
+    },
+    "ast": {
+      "passed": 161,
+      "failed": 0,
+      "unsupported": 0
+    },
+    "hir": {
+      "passed": 161,
+      "failed": 0,
+      "unsupported": 0
+    },
+    "w1": {
+      "passed": 161,
+      "failed": 0,
+      "unsupported": 0
+    }
+  },
+  "features": {
+    "core": {
+      "interpreter": {
+        "passed": 137,
+        "failed": 0,
+        "unsupported": 0
+      },
+      "ast": {
+        "passed": 137,
+        "failed": 0,
+        "unsupported": 0
+      },
+      "hir": {
+        "passed": 137,
+        "failed": 0,
+        "unsupported": 0
+      },
+      "w1": {
+        "passed": 137,
+        "failed": 0,
+        "unsupported": 0
+      }
+    },
+    "error_unions": {
+      "interpreter": {
+        "passed": 8,
+        "failed": 0,
+        "unsupported": 0
+      },
+      "ast": {
+        "passed": 8,
+        "failed": 0,
+        "unsupported": 0
+      },
+      "hir": {
+        "passed": 8,
+        "failed": 0,
+        "unsupported": 0
+      },
+      "w1": {
+        "passed": 8,
+        "failed": 0,
+        "unsupported": 0
+      }
+    },
+    "generics": {
+      "interpreter": {
+        "passed": 15,
+        "failed": 0,
+        "unsupported": 0
+      },
+      "ast": {
+        "passed": 15,
+        "failed": 0,
+        "unsupported": 0
+      },
+      "hir": {
+        "passed": 15,
+        "failed": 0,
+        "unsupported": 0
+      },
+      "w1": {
+        "passed": 15,
+        "failed": 0,
+        "unsupported": 0
+      }
+    },
+    "checked_modules": {
+      "interpreter": {
+        "passed": 1,
+        "failed": 0,
+        "unsupported": 0
+      },
+      "ast": {
+        "passed": 1,
+        "failed": 0,
+        "unsupported": 0
+      },
+      "hir": {
+        "passed": 1,
+        "failed": 0,
+        "unsupported": 0
+      },
+      "w1": {
+        "passed": 1,
+        "failed": 0,
+        "unsupported": 0
+      }
+    }
+  },
+  "support_files": {
+    "tests/runtime/math_lib.w": "Imported library exercised by tests/runtime/import_module.w",
+    "tests/modules/checked_session/left.w": "Checked-module fixture dependency exercised by tests/modules/checked_session/main.w",
+    "tests/modules/checked_session/right.w": "Checked-module fixture dependency exercised by tests/modules/checked_session/main.w",
+    "tests/modules/checked_session/shared.w": "Checked-module fixture dependency exercised by tests/modules/checked_session/main.w",
+    "tests/modules/error_union/errors.w": "Exported error types and constructors imported by tests/runtime/error_union_composition.w"
+  },
+  "corpus": [
+    "examples/01_hello_world.w",
+    "examples/02_value_semantics_cow.w",
+    "examples/03_enums_and_match.w",
+    "examples/04_optionals_and_errors.w",
+    "examples/05_utf8_and_algorithms.w",
+    "examples/06_game_of_life.w",
+    "examples/07_oop_polymorphism.w",
+    "tests/errors/invalid_else_err_type.w",
+    "tests/lexer/invalid/bad_float_leading_dot.w",
+    "tests/lexer/invalid/bad_float_trailing_dot.w",
+    "tests/lexer/invalid/bad_numeric_separator.w",
+    "tests/lexer/invalid/invalid_escape.w",
+    "tests/lexer/invalid/invalid_unicode_escape.w",
+    "tests/lexer/invalid/unexpected_character.w",
+    "tests/lexer/invalid/unterminated_string.w",
+    "tests/modules/checked_session/main.w",
+    "tests/parser/invalid/invalid_assignment_target.w",
+    "tests/parser/invalid/invalid_class_decl.w",
+    "tests/parser/invalid/invalid_enum_variant.w",
+    "tests/parser/invalid/invalid_fn_signature.w",
+    "tests/parser/invalid/invalid_match_arm.w",
+    "tests/parser/invalid/invalid_struct_field.w",
+    "tests/parser/invalid/invalid_type_syntax.w",
+    "tests/parser/invalid/missing_brace.w",
+    "tests/parser/invalid/missing_paren.w",
+    "tests/runtime/arithmetic.w",
+    "tests/runtime/assignment_expression.w",
+    "tests/runtime/audit_assignment_index_twice.w",
+    "tests/runtime/audit_bool_conversion.w",
+    "tests/runtime/audit_class_append.w",
+    "tests/runtime/audit_class_get.w",
+    "tests/runtime/audit_closure_handler_shadow.w",
+    "tests/runtime/audit_collection_method_receiver_effect.w",
+    "tests/runtime/audit_empty_nested.w",
+    "tests/runtime/audit_enum_shadow.w",
+    "tests/runtime/audit_field_named_variant.w",
+    "tests/runtime/audit_float_unicode.w",
+    "tests/runtime/audit_keyword_method.w",
+    "tests/runtime/audit_len_tuple.w",
+    "tests/runtime/audit_list_lhs_snapshot.w",
+    "tests/runtime/audit_local_shadow.w",
+    "tests/runtime/audit_match_assign.w",
+    "tests/runtime/audit_nul_container.w",
+    "tests/runtime/audit_param_shadow_builtin.w",
+    "tests/runtime/audit_read_crlf.w",
+    "tests/runtime/audit_str_struct.w",
+    "tests/runtime/audit_struct_field_effect_order.w",
+    "tests/runtime/audit_struct_field_order.w",
+    "tests/runtime/c99_trigraph_strings.w",
+    "tests/runtime/class_alias_rc_cleanup.w",
+    "tests/runtime/class_cycle_limitation.w",
+    "tests/runtime/comparisons.w",
+    "tests/runtime/compiler_builtins.w",
+    "tests/runtime/constructor_short_circuit.w",
+    "tests/runtime/constructor_without_new.w",
+    "tests/runtime/cow_nested_torture.w",
+    "tests/runtime/cow_path_copying_complexity.w",
+    "tests/runtime/cow_telemetry.w",
+    "tests/runtime/dict_cow.w",
+    "tests/runtime/early_return_cleanup.w",
+    "tests/runtime/else_err_handling.w",
+    "tests/runtime/error_union_composition.w",
+    "tests/runtime/error_union_ownership.w",
+    "tests/runtime/generic_domain_err.w",
+    "tests/runtime/generic_enum_option.w",
+    "tests/runtime/generic_enum_result.w",
+    "tests/runtime/generic_error_composition.w",
+    "tests/runtime/generic_function.w",
+    "tests/runtime/generic_match_guards.w",
+    "tests/runtime/generic_pair.w",
+    "tests/runtime/generic_struct.w",
+    "tests/runtime/generic_tree_recursive.w",
+    "tests/runtime/hir_assignment_sequence.w",
+    "tests/runtime/if_expr.w",
+    "tests/runtime/import_module.w",
+    "tests/runtime/list_cow.w",
+    "tests/runtime/loop_break_continue_cleanup.w",
+    "tests/runtime/match_expr.w",
+    "tests/runtime/memory_counters_verification.w",
+    "tests/runtime/mir_range_iteration.w",
+    "tests/runtime/mir_range_limit.w",
+    "tests/runtime/mir_range_overflow.w",
+    "tests/runtime/nested_cow_scope_cleanup.w",
+    "tests/runtime/nested_scope_cleanup.w",
+    "tests/runtime/oop_classes.w",
+    "tests/runtime/optional_propagation.w",
+    "tests/runtime/ownership_control_flow.w",
+    "tests/runtime/panic_dict_key.w",
+    "tests/runtime/panic_division.w",
+    "tests/runtime/panic_entrypoint_error.w",
+    "tests/runtime/panic_index.w",
+    "tests/runtime/panic_modulo.w",
+    "tests/runtime/range_inclusive.w",
+    "tests/runtime/range_loop.w",
+    "tests/runtime/recursion.w",
+    "tests/runtime/recursive_tree_adt.w",
+    "tests/runtime/result_propagation.w",
+    "tests/runtime/return_value_survives_cleanup.w",
+    "tests/runtime/scope_exit_cleanup.w",
+    "tests/runtime/strings.w",
+    "tests/runtime/strings_ownership.w",
+    "tests/runtime/struct_cow.w",
+    "tests/runtime/try_propagation_cleanup.w",
+    "tests/runtime/tuple_values.w",
+    "tests/runtime/utf8_codepoints.w",
+    "tests/runtime/value_semantics_cow.w",
+    "tests/runtime/weak_references.w",
+    "tests/runtime/while_loop.w",
+    "tests/types/invalid/any_escape.w",
+    "tests/types/invalid/audit_closure_missing_return.w",
+    "tests/types/invalid/audit_ctor_match.w",
+    "tests/types/invalid/audit_ctor_partial_match.w",
+    "tests/types/invalid/audit_match_list_crash.w",
+    "tests/types/invalid/audit_match_no_tail.w",
+    "tests/types/invalid/audit_match_return.w",
+    "tests/types/invalid/audit_optional_list.w",
+    "tests/types/invalid/bad_coalesce.w",
+    "tests/types/invalid/bad_optional_propagation.w",
+    "tests/types/invalid/bad_result_propagation.w",
+    "tests/types/invalid/ctor_coalesce_optional_init.w",
+    "tests/types/invalid/ctor_if_constant_false_init.w",
+    "tests/types/invalid/ctor_short_circuit_and_init.w",
+    "tests/types/invalid/ctor_short_circuit_dynamic_init.w",
+    "tests/types/invalid/ctor_short_circuit_or_init.w",
+    "tests/types/invalid/dict_float_key.w",
+    "tests/types/invalid/duplicate_declaration.w",
+    "tests/types/invalid/error_union_class_member.w",
+    "tests/types/invalid/error_union_duplicate_members.w",
+    "tests/types/invalid/error_union_incompatible_propagation.w",
+    "tests/types/invalid/error_union_nested_payload_pattern.w",
+    "tests/types/invalid/error_union_non_exhaustive.w",
+    "tests/types/invalid/error_union_unsupported_member.w",
+    "tests/types/invalid/extra_struct_field.w",
+    "tests/types/invalid/generic_constraint_failure.w",
+    "tests/types/invalid/generic_nominal_constraint_violation.w",
+    "tests/types/invalid/generic_recursive_infinite_layout.w",
+    "tests/types/invalid/generic_struct_recursive_cycle.w",
+    "tests/types/invalid/generic_structural_growth_cycle.w",
+    "tests/types/invalid/immutable_assignment.w",
+    "tests/types/invalid/immutable_list_mutation.w",
+    "tests/types/invalid/immutable_nested_mutation.w",
+    "tests/types/invalid/incompatible_if_branches.w",
+    "tests/types/invalid/incompatible_match_arms.w",
+    "tests/types/invalid/infer_empty_list.w",
+    "tests/types/invalid/infer_none.w",
+    "tests/types/invalid/missing_return.w",
+    "tests/types/invalid/missing_struct_field.w",
+    "tests/types/invalid/missing_super_init.w",
+    "tests/types/invalid/mixed_list_types.w",
+    "tests/types/invalid/non_exhaustive_match.w",
+    "tests/types/invalid/none_to_str.w",
+    "tests/types/invalid/private_member_access.w",
+    "tests/types/invalid/subclass_override_private.w",
+    "tests/types/invalid/subclass_private_access.w",
+    "tests/types/invalid/super_init_not_first.w",
+    "tests/types/invalid/unimplemented_interface.w",
+    "tests/types/invalid/uninitialized_class_field.w",
+    "tests/types/invalid/unknown_identifier.w",
+    "tests/types/invalid/unknown_type.w",
+    "tests/types/invalid/wrong_function_argument.w",
+    "tests/types/invalid/wrong_return_type.w"
+  ]
+}

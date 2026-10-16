@@ -41,33 +41,26 @@ flowchart TD
     E --> F["HIR Lowering (Typed HIR)"]
     F --> G["Monomorphization Pass (v0.2+)"]
     G --> H["L→R Temporary & CoW Path Lowering"]
-    H --> I["W0 HIR Interpreter"]
-    H --> J["C99 Backend (W0 & W1 Self-Hosted)"]
+    H --> I["MIR: CFG, ownership y layouts"]
+    I --> J["Verificador MIR → Backend C99 W0"]
 ```
 
-### Contratos implementados y límite de la representación
+### Contratos implementados y relación con MIR
 
-1. Cada expresión y patrón lleva un `TypeId` del arena comprobado y un `Span`.
-2. Los bindings léxicos llevan `SymbolId`; llamadas directas, builtins, colecciones y
-   métodos virtuales tienen targets distintos. Los slots virtuales se canonicalizan por
-   nombre y aridad, se verifican contra la firma y se consumen en la emisión. Las
-   proyecciones conservan nombres e información de campo: todavía no hay un layout
-   físico completamente bajado ni se eliminó toda resolución textual del backend.
-3. `HirAssignment(target, value, type_id, span)` produce el valor asignado y evita
-   reconstruir el target como lectura. El verificador exige un destino direccionable.
-   `HirAssign` sigue representando la sentencia. `HirSequence` conserva efectos ordenados
-   cuando hace falta; los temporales y el cleanup se materializan en la emisión C.
-4. `CollectionCallTarget` requiere receptor list/dict compatible. `VirtualCallTarget`
-   requiere método, firma, clase y slot coherentes; `super` usa despacho estático.
-5. `HirTryPropagate`, `HirCoalesce`, `HirElseHandle` y los nodos de control conservan
-   estructura de expresiones. No son bloques básicos ni terminadores MIR. El análisis
-   compartido de salidas comprueba fallthrough, incluido match parcial y ausencia de tail.
-6. `CowPath` conserva metadata de las proyecciones; la preparación de destinos del
-   emitter fija índices e identidad antes del RHS y resuelve slots después. El ownership
-   completo todavía no está representado como operaciones de una IR independiente.
+HIR conserva la estructura del programa, tipos del arena, símbolos léxicos, targets de
+llamada y rutas CoW verificadas. `HirAssignment` conserva el valor de la asignación;
+`HirSequence` fija efectos condicionales sin adelantar operandos de cortocircuito.
+El análisis compartido de salidas comprueba retornos y fallthrough.
 
-ADR-017 fija estos contratos. Las secciones de modelo siguientes contienen notación de
-diseño; las clases ejecutables canónicas son `hir/HirNodes.py`.
+El pipeline principal ahora continúa con `mir/Lowering.py`: resuelve layouts físicos,
+convierte control y propagación en bloques básicos y terminadores, y explicita retención,
+transferencia y liberación. `mir/Verifier.py` verifica ese contrato antes de que
+`mir/CCodeGen.py` emita C. `hir/HirCCodeGen.py` es una fachada de compatibilidad; no emite
+expresiones HIR ni tiene fallback al backend AST. `w mir archivo.w` permite inspeccionarlo.
+
+Los modelos de las secciones siguientes describen el nivel HIR. Las clases ejecutables
+canónicas son `hir/HirNodes.py`; [MIR_DESIGN.md](MIR_DESIGN.md) describe el nivel inferior.
+ADR-018 extiende los contratos de ADR-017.
 
 ---
 

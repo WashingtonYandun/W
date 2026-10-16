@@ -540,6 +540,8 @@ def _run_suite_in_repo(repo_root: str) -> None:
     expansion_ok = run_expansion_tests()
     from tests.unit.test_audit_remediation import run_audit_tests
     audit_ok = run_audit_tests()
+    from tests.unit.test_mir import run_mir_tests
+    mir_ok = run_mir_tests()
 
     if os.path.exists(temp_file):
         try:
@@ -595,6 +597,7 @@ def _run_suite_in_repo(repo_root: str) -> None:
         and telemetry_d05_ok
         and expansion_ok
         and audit_ok
+        and mir_ok
         and examples_passed == len(example_files)
         and bootstrap_ok
     )
@@ -604,7 +607,7 @@ def _run_suite_in_repo(repo_root: str) -> None:
             v_lex_passed + i_lex_passed + v_parse_passed + i_parse_passed +
             v_type_passed + i_type_passed + err_passed + fmt_passed + hir_passed +
             runtime_passed + c99_passed + hir_c99_passed + w1_runtime_passed +
-            examples_passed + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1
+            examples_passed + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1
         )
         print(f"ALL {total}/{total} CONFORMANCE, EXAMPLES & SELF-HOSTING TESTS PASSED (100%).")
         sys.exit(0)

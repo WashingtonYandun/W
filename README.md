@@ -88,6 +88,6 @@ The [language specification](SPEC.md) defines W's syntax and semantics. Mileston
 
 ## Known limits
 
-W1 does not yet implement all of W0's generic specialization. The ARC runtime is single-threaded and does not support shared-memory concurrency. Ranges materialize lists and check their size before allocation. The FFI does not support C callbacks, pointer arithmetic, or automatic allocator transfer.
+W1 does not yet implement all of W0's generic specialization. The ARC runtime is single-threaded and does not support shared-memory concurrency. Direct range loops use bounded counters; range values still materialize lists. The FFI does not support C callbacks, pointer arithmetic, or automatic allocator transfer.
 
 W is licensed under the [MIT License](LICENSE). See [CONTRIBUTING.md](CONTRIBUTING.md) to contribute.

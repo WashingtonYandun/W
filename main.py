@@ -28,7 +28,7 @@ def get_repo_root() -> str:
 # stale binary silently invalidates every `--backend=selfhost` comparison.
 SELFHOST_BOOTSTRAP_INPUTS = ("selfhost/w1.w", "runtime/w_runtime.h", "main.py") + tuple(
     os.path.relpath(os.path.join(directory, name), get_repo_root())
-    for package in ("lexer", "parser", "node", "checker", "compiler", "codegen", "common", "error", "hir", "wtokens")
+    for package in ("lexer", "parser", "node", "checker", "compiler", "codegen", "common", "error", "hir", "mir", "wtokens")
     for directory, _, names in os.walk(os.path.join(get_repo_root(), package))
     for name in sorted(names)
     if name.endswith(".py")
@@ -46,6 +46,16 @@ def _bootstrap_source_mtime(repo_root: str) -> float:
 
 
 def ensure_selfhost_w1_binary(repo_root: str) -> str:
+    """Serialize cache rebuilds across independent compiler/test processes."""
+    import fcntl
+    cache_dir = os.path.join(repo_root, ".w_cache")
+    os.makedirs(cache_dir, exist_ok=True)
+    with open(os.path.join(cache_dir, 'bootstrap.lock'), 'a') as lock:
+        fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
+        return _ensure_selfhost_w1_binary_locked(repo_root)
+
+
+def _ensure_selfhost_w1_binary_locked(repo_root: str) -> str:
     cache_dir = os.path.join(repo_root, ".w_cache")
     os.makedirs(cache_dir, exist_ok=True)
     w1_bin = os.path.join(cache_dir, "w1_stage2")
@@ -115,6 +125,7 @@ def run_pipeline(
     sanitize: bool = False,
     show_stats: bool = False,
     link_libraries=(),
+    show_mir: bool = False,
 ) -> int:
     try:
         # Resolve legacy flags if passed explicitly
@@ -183,6 +194,13 @@ def run_pipeline(
             checker = TypeChecker(file=file_name)
             checker.check(ast)
             check_ms = (time.perf_counter() - t_check0) * 1000.0
+
+        if show_mir:
+            from mir.Lowering import Lowering
+            from mir.Nodes import dump
+            module = HirBuilder(checker.interner, file_path=file_name).lower(ast)
+            print(dump(Lowering(checker.interner, file_name).lower(module)), end="")
+            return 0
 
         if check_only:
             if show_stats:
@@ -398,6 +416,7 @@ def print_help() -> None:
     print("  w check [--json] [--stats] <file.w>         # Static typecheck without execution")
     print("  w fmt [--write] <file.w>                    # Canonical deterministic formatter")
     print("  w ast [--json] <file.w>                     # Emit canonical JSON AST (v0.1)")
+    print("  w mir <file.w>                              # Emit verified MIR as JSON")
     print("  w tokens <file.w>                           # Emit lexical token stream")
     print("  w emit-c [--backend=hir|ast|selfhost] [--stats] <file.w> [-o <out.c>] # Transpile W source to C99 (default: hir)")
     print("  w build [--backend=hir|ast|selfhost] [--stats] <file.w> [-o <bin>]    # Compile W source to native binary (default: hir)")
@@ -424,12 +443,13 @@ def main() -> None:
     use_hir = None
     emit_c_path: Optional[str] = None
     build_bin_path: Optional[str] = None
+    show_mir = False
     subcmd: Optional[str] = None
     file_to_run: Optional[str] = None
     sanitize = False
     link_libraries = []
 
-    if args and args[0] in ("run", "check", "fmt", "ast", "tokens", "emit-c", "build", "test", "bench", "version", "repl"):
+    if args and args[0] in ("run", "check", "fmt", "ast", "mir", "tokens", "emit-c", "build", "test", "bench", "version", "repl"):
         subcmd = args[0]
         args = args[1:]
         if subcmd == "bench":
@@ -493,6 +513,8 @@ def main() -> None:
             fmt_only = True
         elif subcmd == "ast":
             show_ast = True
+        elif subcmd == "mir":
+            show_mir = True
         elif subcmd == "tokens":
             show_tokens = True
 
@@ -587,6 +609,7 @@ def main() -> None:
             check_only=check_only,
             show_tokens=show_tokens,
             show_ast=show_ast,
+            show_mir=show_mir,
             json_diagnostics=json_diagnostics,
             fmt_only=fmt_only,
             fmt_write=fmt_write,

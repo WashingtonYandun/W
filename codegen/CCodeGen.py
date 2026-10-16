@@ -138,28 +138,9 @@ class CCodeGen:
             return f"w_fn_{prefix}__{name}"
         return f"w_fn_{name}"
 
-    def escape_c_str(self, s: str) -> str:
-        out: List[str] = ['"']
-        for ch in s:
-            code = ord(ch)
-            if code == 34:
-                out.append('\\"')
-            elif code == 92:
-                out.append("\\\\")
-            elif code == 10:
-                out.append("\\n")
-            elif code == 13:
-                out.append("\\r")
-            elif code == 9:
-                out.append("\\t")
-            elif code == 0:
-                out.append("\\000")
-            elif code == 63:
-                out.append("\\077")
-            else:
-                out.append(ch)
-        out.append('"')
-        return "".join(out)
+    def escape_c_str(self, value: str) -> str:
+        from codegen.CStrings import quote
+        return quote(value)
 
     def generate(self, program: Program) -> str:
         if hasattr(program, "session"):
@@ -567,6 +548,11 @@ class CCodeGen:
             return
 
         if isinstance(stmt, ForStmt):
+            if isinstance(stmt.iterable, RangeExpr):
+                from codegen.RangeLoop import emit_range_loop
+                emit_range_loop(self, stmt.iterable.start, stmt.iterable.end, stmt.iterable.inclusive,
+                                stmt.body, lambda item, lines: self._emit_pattern_bindings(stmt.pattern, item, lines), out)
+                return
             out.append("{")
             self._push_scope("block")
             for_outer: List[str] = []

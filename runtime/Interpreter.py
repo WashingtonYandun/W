@@ -148,13 +148,17 @@ class Interpreter:
             return WUnit()
 
         if isinstance(stmt, ForStmt):
-            iter_val = self.eval_expr(stmt.iterable, env)
-            elements: List[WValue]
+            if isinstance(stmt.iterable, RangeExpr):
+                start, stop = self.range_bounds(stmt.iterable, env)
+                elements = (WInt(value) for value in range(start, stop))
+                iter_val = None
+            else:
+                iter_val = self.eval_expr(stmt.iterable, env)
             if isinstance(iter_val, WList):
                 elements = list(iter_val.storage.data)
             elif isinstance(iter_val, WRange):
-                elements = list(iter_val)
-            else:
+                elements = iter(iter_val)
+            elif iter_val is not None:
                 raise WRuntimeError(
                     message=f"Cannot iterate over type '{type(iter_val).__name__}'",
                     line=stmt.line,
@@ -223,6 +227,18 @@ class Interpreter:
     def eval_expr(self, expr: Expr, env: Environment) -> WValue:
         value = self._eval_expr_impl(expr, env)
         return WOk(value) if hasattr(expr, "force_result_wrap_id") else value
+
+    def range_bounds(self, expression, env):
+        start_val = self.eval_expr(expression.start, env)
+        end_val = self.eval_expr(expression.end, env)
+        if not isinstance(start_val, WInt) or not isinstance(end_val, WInt):
+            raise WRuntimeError("Range bounds must be integers", line=expression.line, col=expression.col, file=self.file)
+        if expression.inclusive and end_val.value == 9223372036854775807:
+            raise WRuntimeError('Range bound overflow at INT64_MAX', file=self.file, line=expression.line, col=expression.col)
+        stop = end_val.value + 1 if expression.inclusive else end_val.value
+        if max(0, stop - start_val.value) > 100000000:
+            raise WRuntimeError('Range length exceeds maximum list capacity', file=self.file, line=expression.line, col=expression.col)
+        return start_val.value, stop
 
     def eval_value(self, expr: Expr, env: Environment) -> WValue:
         """Freeze an evaluated value before later expressions can mutate its owner."""
@@ -378,16 +394,8 @@ class Interpreter:
             return lhs
 
         if isinstance(expr, RangeExpr):
-            start_val = self.eval_expr(expr.start, env)
-            end_val = self.eval_expr(expr.end, env)
-            if not isinstance(start_val, WInt) or not isinstance(end_val, WInt):
-                raise WRuntimeError("Range bounds must be integers", line=expr.line, col=expr.col, file=self.file)
-            if expr.inclusive and end_val.value == 9223372036854775807:
-                raise WRuntimeError('Range bound overflow at INT64_MAX', file=self.file, line=expr.line, col=expr.col)
-            stop = end_val.value + 1 if expr.inclusive else end_val.value
-            if max(0, stop - start_val.value) > 100000000:
-                raise WRuntimeError('Range length exceeds maximum list capacity', file=self.file, line=expr.line, col=expr.col)
-            return WList(elements=[WInt(i) for i in range(start_val.value, stop)])
+            start, stop = self.range_bounds(expr, env)
+            return WList(elements=[WInt(value) for value in range(start, stop)])
 
         if isinstance(expr, PostfixTryExpr):
             val = self.eval_expr(expr.operand, env)

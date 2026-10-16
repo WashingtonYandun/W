@@ -665,9 +665,14 @@ class HirBuilder:
         elif isinstance(expr, ElseErrExpr):
             op_hir = self._lower_expr(expr.operand)
             h_block = getattr(expr, "handler", getattr(expr, "body", None))
-            handler_hir = self._lower_block(h_block)
             err_var = getattr(expr, "err_name", getattr(expr, "err_variable", None))
-            return HirElseHandle(op_hir, err_var, handler_hir, tid, span)
+            self._push_scope()
+            symbol = self._declare_symbol(err_var) if err_var else None
+            handler_hir = self._lower_block(h_block)
+            self._pop_scope()
+            result = HirElseHandle(op_hir, err_var, handler_hir, tid, span)
+            result.symbol_id = symbol
+            return result
         elif isinstance(expr, IfExpr):
             cond_hir = self._lower_expr(expr.condition)
             then_hir = self._lower_block(expr.then_branch)
