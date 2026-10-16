@@ -9,7 +9,7 @@ from hir.HirNodes import (
     HirTryPropagate, HirCoalesce, HirElseHandle, HirIf, HirMatch, HirMatchArm, HirRange,
     SymbolId, FieldId, VariantId, CallTarget, DirectCallTarget, BuiltinCallTarget, VirtualCallTarget,
     CowPath, CowProjection, CowFieldProjection, CowIndexProjection,
-    HirPattern, HirWildcardPattern, HirBindingPattern, HirLiteralPattern, HirEnumPattern, HirTuplePattern,
+    HirPattern, HirWildcardPattern, HirBindingPattern, HirLiteralPattern, HirEnumPattern, HirErrorTypePattern, HirTuplePattern,
     HirCoerce
 )
 from hir.HirBuilder import HirBuilder

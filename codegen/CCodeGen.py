@@ -2,7 +2,7 @@ from typing import Dict, List, Optional, Set, Tuple
 from node.NodeType import (
     LambdaExpr, Program, Stmt, Expr, TypeNode, ResultType,
     GenericType, NamedType, OptionalType as AstOptionalType, ListType as AstListType, DictType as AstDictType,
-    Pattern, IdentifierPattern, TuplePattern, EnumPattern, LiteralPattern, WildcardPattern,
+    Pattern, IdentifierPattern, TuplePattern, EnumPattern, ErrorTypePattern, LiteralPattern, WildcardPattern,
     Block, ExprStmt, Param, FnDecl, StructDecl, EnumDecl, ImportDecl,
     InterfaceDecl, ClassDecl, ClassField, MethodDecl,
     LetDecl, WhileStmt, ForStmt, ReturnStmt, BreakStmt, ContinueStmt,
@@ -599,11 +599,10 @@ class CCodeGen:
             for idx, elem_pat in enumerate(pattern.elements):
                 sub_expr = f"({val_expr}).as.tuple->items[{idx}]"
                 self._emit_pattern_bindings(elem_pat, sub_expr, out)
+        elif isinstance(pattern, ErrorTypePattern):
+            self._emit_pattern_bindings(pattern.binding, val_expr, out)
         elif isinstance(pattern, EnumPattern):
-            if getattr(pattern, "error_type_match", None) is not None:
-                if pattern.args:
-                    self._emit_pattern_bindings(pattern.args[0], val_expr, out)
-            elif pattern.variant in ("None", "none") and (pattern.enum_name is None or pattern.enum_name.split("__", 1)[0] == "Option"):
+            if pattern.variant in ("None", "none") and (pattern.enum_name is None or pattern.enum_name.split("__", 1)[0] == "Option"):
                 pass
             elif pattern.variant == "Some" and (pattern.enum_name is None or pattern.enum_name.split("__", 1)[0] == "Option"):
                 if pattern.args:
@@ -642,10 +641,10 @@ class CCodeGen:
         if isinstance(pattern, LiteralPattern):
             lit_v = self.emit_expr(pattern.literal, out)
             return f"w_eq({val_expr}, {lit_v})"
+        if isinstance(pattern, ErrorTypePattern):
+            kind, name = self._error_type_descriptor(pattern.matched_type)
+            return f"w_value_is_error_type({val_expr}, {self.escape_c_str(kind)}, {self.escape_c_str(name)})"
         if isinstance(pattern, EnumPattern):
-            if getattr(pattern, "error_type_match", None) is not None:
-                kind, name = self._error_type_descriptor(pattern.error_type_match)
-                return f"w_value_is_error_type({val_expr}, {self.escape_c_str(kind)}, {self.escape_c_str(name)})"
             if pattern.variant in ("None", "none") and (pattern.enum_name is None or pattern.enum_name.split("__", 1)[0] == "Option"):
                 return f"(({val_expr}).tag == W_NONE || (({val_expr}).tag == W_ENUM && strcmp(({val_expr}).as.en.enum_name, \"Option\") == 0 && strcmp(({val_expr}).as.en.variant, \"None\") == 0))"
             if pattern.variant == "Some" and (pattern.enum_name is None or pattern.enum_name.split("__", 1)[0] == "Option"):

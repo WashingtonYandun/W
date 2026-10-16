@@ -156,7 +156,8 @@ class HirVerifier:
                 self.active.remove(id(value))
             return
         if isinstance(value, H.HirPattern):
-            if type(value) not in (H.HirWildcardPattern, H.HirBindingPattern, H.HirTuplePattern, H.HirEnumPattern, H.HirLiteralPattern):
+            if type(value) not in (H.HirWildcardPattern, H.HirBindingPattern, H.HirTuplePattern,
+                                   H.HirEnumPattern, H.HirErrorTypePattern, H.HirLiteralPattern):
                 self._fail(value, "Unsupported HIR pattern")
             self._type(value.type_id, value, "pattern type")
             if isinstance(value, H.HirBindingPattern):
@@ -169,22 +170,23 @@ class HirVerifier:
                 }.get(value.literal_kind)
                 if expected is not None and value.type_id != expected:
                     self._fail(value, "Literal pattern type mismatch")
+            elif isinstance(value, H.HirErrorTypePattern):
+                self._type(value.error_type_id, value, "error_type_id")
+                subject = self.interner.get_entry(value.type_id)
+                if (subject.tag != "error_union" or value.error_type_id not in subject.data
+                        or not isinstance(value.binding, (H.HirBindingPattern, H.HirWildcardPattern))
+                        or value.binding.type_id != value.error_type_id):
+                    self._fail(value, "Error type pattern does not match its error union alternative")
             elif isinstance(value, H.HirEnumPattern):
-                if value.error_type_id is not None:
-                    self._type(value.error_type_id, value, "error_type_id")
-                    subject = self.interner.get_entry(value.type_id)
-                    if (subject.tag != "error_union" or value.error_type_id not in subject.data
-                            or len(value.subpatterns) != 1
-                            or value.subpatterns[0].type_id != value.error_type_id
-                            or not isinstance(value.subpatterns[0], (H.HirBindingPattern, H.HirWildcardPattern))):
-                        self._fail(value, "Error type pattern does not match its error union alternative")
-                elif not isinstance(value.variant_id, H.VariantId):
+                if self.interner.get_entry(value.type_id).tag == "error_union":
+                    self._fail(value, "Error union requires an error type pattern, not an enum variant")
+                if not isinstance(value.variant_id, H.VariantId):
                     self._fail(value, "Enum pattern requires VariantId")
             if id(value) in self.active:
                 self._fail(value, "Cyclic HIR pattern")
             self.active.add(id(value))
             try:
-                for field in ("subpatterns", "elements"):
+                for field in ("subpatterns", "elements", "binding"):
                     self._visit(getattr(value, field, []), loop_depth, in_function)
             finally:
                 self.active.remove(id(value))

@@ -5,7 +5,7 @@ from node.NodeType import (
     ErrorUnionType as AstErrorUnionType,
     NamedType, OptionalType as AstOptionalType, ListType as AstListType, DictType as AstDictType,
     GenericType,
-    Pattern, IdentifierPattern, TuplePattern, EnumPattern, LiteralPattern, WildcardPattern,
+    Pattern, IdentifierPattern, TuplePattern, EnumPattern, ErrorTypePattern, LiteralPattern, WildcardPattern,
     Block, ExprStmt, Param, FnDecl, StructDecl, EnumDecl, ImportDecl,
     InterfaceDecl, ClassDecl, ClassField, MethodDecl,
     LetDecl, WhileStmt, ForStmt, ReturnStmt, BreakStmt, ContinueStmt,
@@ -29,7 +29,7 @@ from hir.HirNodes import (
     HirTryPropagate, HirCoalesce, HirElseHandle, HirIf, HirMatch, HirMatchArm, HirRange,
     SymbolId, FieldId, VariantId, CallTarget, DirectCallTarget, BuiltinCallTarget, VirtualCallTarget,
     CowPath, CowProjection, CowFieldProjection, CowIndexProjection,
-    HirPattern, HirWildcardPattern, HirBindingPattern, HirLiteralPattern, HirEnumPattern, HirTuplePattern,
+    HirPattern, HirWildcardPattern, HirBindingPattern, HirLiteralPattern, HirEnumPattern, HirErrorTypePattern, HirTuplePattern,
     HirCoerce
 )
 
@@ -145,20 +145,11 @@ class HirBuilder:
             subtypes = list(entry.data) if entry and entry.tag == "tuple" else [TYPE_ERROR] * len(pat.elements)
             elems = [self._lower_pattern(p, t) for p, t in zip(pat.elements, subtypes)]
             return HirTuplePattern(elems, expected_tid, span)
+        if isinstance(pat, ErrorTypePattern):
+            matched_type_id = self.interner.intern(pat.matched_type)
+            return HirErrorTypePattern(matched_type_id, self._lower_pattern(pat.binding, matched_type_id),
+                                       expected_tid, span, pat.type_name)
         if isinstance(pat, EnumPattern):
-            if getattr(pat, "error_type_match", None) is not None:
-                matched_type_id = self.interner.intern(pat.error_type_match)
-                lowered_args = [self._lower_pattern(arg, matched_type_id) for arg in pat.args]
-                return HirEnumPattern(
-                    "__W_ERROR_TYPE__",
-                    self._error_type_pattern_name(pat.error_type_match),
-                    0,
-                    lowered_args,
-                    expected_tid,
-                    span,
-                    variant_id=VariantId(0, self._error_type_pattern_name(pat.error_type_match)),
-                    error_type_id=matched_type_id
-                )
             variant = pat.variant
             enum_name = pat.enum_name
             if variant in ("Some", "None") and (enum_name is None or enum_name.startswith("Option")):
@@ -189,10 +180,6 @@ class HirBuilder:
             return HirEnumPattern(enum_name, variant, variant_idx, lowered_subs, expected_tid, span,
                                   variant_id=VariantId(variant_idx, variant))
         return HirWildcardPattern(expected_tid, span)
-
-    @staticmethod
-    def _error_type_pattern_name(error_type) -> str:
-        return str(error_type)
 
     def _span(self, node):
         return Span(node.line, node.col, file_path=getattr(node, 'source_file', self.file_path),

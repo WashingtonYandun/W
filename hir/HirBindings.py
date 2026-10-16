@@ -66,7 +66,10 @@ class HirBindings:
             from checker.TypeChecker import TypeChecker
             subject_type = self.interner.to_wtype(node.subject.type_id)
             rows = [[arm.pattern] for arm in node.arms if arm.guard is None]
-            exhaustive = TypeChecker()._pattern_matrix_exhaustive([subject_type], rows)
+            checker = TypeChecker()
+            # HIR pattern TypeIds belong to this module's arena.
+            checker.interner = self.interner
+            exhaustive = checker._pattern_matrix_exhaustive([subject_type], rows)
             return bool(node.arms) and exhaustive and all(self.always_returns(arm.body) for arm in node.arms)
         return False
 
@@ -83,6 +86,8 @@ class HirBindings:
             types = entry.data if entry and entry.tag == 'tuple' else [None] * len(pattern.elements)
             for subpattern, subtype in zip(pattern.elements, types):
                 self.bind(subpattern, scope, subtype)
+        elif isinstance(pattern, H.HirErrorTypePattern):
+            self.bind(pattern.binding, scope)
         elif isinstance(pattern, H.HirEnumPattern):
             for subpattern in pattern.subpatterns:
                 self.bind(subpattern, scope)
@@ -303,6 +308,11 @@ class HirBindings:
         if isinstance(node, H.HirMatch):
             self.visit(node.subject, scope)
             for arm in node.arms:
+                if isinstance(arm.pattern, H.HirErrorTypePattern) and arm.pattern.type_id != node.subject.type_id:
+                    self.verifier._fail(arm.pattern, 'Error type pattern subject does not match the match expression')
+                if (isinstance(arm.pattern, H.HirEnumPattern)
+                        and self.interner.get_entry(node.subject.type_id).tag == 'error_union'):
+                    self.verifier._fail(arm.pattern, 'Error union cannot be matched as an enum variant')
                 inner = dict(scope)
                 self.bind(arm.pattern, inner)
                 self.visit(arm.guard, inner)
