@@ -12,6 +12,10 @@ fn read_missing() -> int ! errors.FileError {
     return Err(errors.file_error())
 }
 
+fn widen_parse_result() -> int ! errors.ParseError | errors.FileError {
+    return parse_value()
+}
+
 fn parse_or_file(route: int) -> int ! errors.ParseError | errors.FileError {
     if route == 0 {
         return parse_value()?
@@ -20,6 +24,9 @@ fn parse_or_file(route: int) -> int ! errors.ParseError | errors.FileError {
 }
 
 fn combined(route: int) -> int ! errors.ParseError | errors.FileError | int {
+    if route == 3 {
+        return widen_parse_result()?
+    }
     if route == 2 {
         return load_value()?
     }
@@ -45,4 +52,4 @@ fn report(route: int) -> int {
     }
 }
 
-print(report(0), report(1), report(2))
+print(report(0), report(1), report(2), report(3))
