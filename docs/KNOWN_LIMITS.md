@@ -215,7 +215,7 @@ no existe un backend LLVM directo. Véase `MIR_DESIGN.md` para el pipeline y sus
 El nuevo corpus tiene 168 fixtures, incluidos 28 casos de la auditoría. La paridad
 medida no cubre todas las combinaciones del lenguaje. Los recursos FFI `opaque` siguen
 requiriendo disciplina manual y SQLite del sistema no se recompila con sanitizers.
-Véase `FFI_VALIDATION.md` para el contrato del piloto y `evidence/` para las mediciones reproducibles.
+Véase `FFI_VALIDATION.md` para el contrato del piloto y las mediciones reproducibles.
 
 Los strings ASCII de un carácter producidos por indexación y chr usan almacenamiento
 inmutable estático, incluido NUL. El resto conserva ownership administrado. Los contadores

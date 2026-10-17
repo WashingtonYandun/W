@@ -214,17 +214,6 @@ Both `gcc` and `clang` are forced by `;`-terminated C99 variable declarations to
 
 ---
 
-## 6. Implementation & Consolidation Status
+## 6. Implementation Status
 
-Typed HIR adoption and stabilization is complete:
-
-1. **Phase A / C02 (`docs/history/C02_COMPLETION.md`):**
-   - Introduced `hir/HirNodes.py`, `hir/HirBuilder.py`, and `hir/HirVerifier.py`.
-   - Full type decoration, SymbolId/FieldId resolution, desugared patterns and control flow.
-2. **Phase C06 (`docs/history/C06_COMPLETION.md`):**
-   - Established Typed HIR (`hir/HirCCodeGen.py`) as the primary default compiler backend for `w build` and `w emit-c`.
-   - Retained AST C codegen as secondary differential oracle (`--backend=ast`).
-3. **Phase D01–D06:**
-   - Enforced byte-for-byte C99 code generation determinism across random hash seeds.
-   - Verified against AddressSanitizer and UndefinedBehaviorSanitizer across 107 fixtures.
-   - Integrated compiler phase telemetry and memory peak reporting.
+Typed HIR is the primary backend for `w build` and `w emit-c`. The builder resolves types, symbols, fields, patterns, and control flow; the verifier checks the resulting representation before code generation. The AST backend remains available as a differential oracle (`--backend=ast`).

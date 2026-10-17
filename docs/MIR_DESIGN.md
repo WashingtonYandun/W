@@ -71,10 +71,8 @@ menos tiempo y 91,5 % menos RSS. Son ejecuciones distintas; no atribuyen cada me
 un cambio aislado ni representan todos los programas W. El binario MIR mide 99.568 bytes
 frente a 37.120 en C. En esa ejecución, la diferencia de tiempo fue 7,7×.
 
-La evidencia está en `docs/evidence/mir-2026-10-16/`. El siguiente trabajo debe perfilar
-parsing, strings y fronteras runtime/FFI antes de decidir especializar contenedores.
-LLVM sigue sin una justificación medida: el MIR habilita un experimento futuro, pero
-cambiar el emitter no elimina los costes de representación y de los helpers.
+Estas mediciones se conservan aquí junto con sus condiciones y límites; no representan todos los programas W. El siguiente trabajo debe perfilar parsing, strings y fronteras runtime/FFI antes de decidir especializar contenedores.
+LLVM sigue sin una justificación medida: el MIR habilita un experimento futuro, pero cambiar el emitter no elimina los costes de representación y de los helpers.
 
 ## Follow-up verification
 
@@ -89,7 +87,7 @@ La diferencia residual de tiempo es 5,57×.
 
 El tokenizer mide 23,026/44,388/86,232 ms para 52/104/208 KB; duplicar entrada en ese
 tramo cuesta aproximadamente 1,93–1,94×. Las entradas pequeñas incluyen un coste fijo
-de proceso. Evidencia: `docs/evidence/audit-completion-2026-10-16/`.
+de proceso. La medición y sus límites quedan documentados aquí.
 
 También se corrige el tail Result[unit, E]: MIR debe conservar Err, mientras que el
 tail implícito de una función unit se evalúa y descarta. El fixture unit_tail_values
