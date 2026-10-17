@@ -21,7 +21,7 @@ class Lowering:
         raise WError(message, file=source.file, line=source.line, col=source.col,
                      code='W9999', stage='mir-lowering')
 
-    def lower(self, hir):
+    def lower(self, hir, optimize=True):
         from hir.HirVerifier import HirVerifier
         from codegen.VirtualDispatch import hir_virtual_method_slots
         HirVerifier(self.interner, self.file).verify(hir)
@@ -77,6 +77,9 @@ class Lowering:
             self.function.return_type = self.slot_by_id[value].type_id
             self.return_value(value)
         self.finish()
+        if optimize:
+            from mir.Ownership import optimize_parameter_reads
+            return optimize_parameter_reads(self.module, self.interner)
         from mir.Verifier import Verifier
         Verifier(self.interner).verify(self.module)
         return self.module

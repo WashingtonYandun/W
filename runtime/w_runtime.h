@@ -492,7 +492,16 @@ static inline WVal w_clone(WVal v) {
  */
 static WVal* w_release_deferred(WVal* slot, int32_t* produced);
 
-static void w_release_graph(WVal v);
+#if defined(_MSC_VER)
+#define W_RUNTIME_NOINLINE __declspec(noinline)
+#elif defined(__GNUC__) || defined(__clang__)
+#define W_RUNTIME_NOINLINE __attribute__((noinline))
+#else
+#define W_RUNTIME_NOINLINE
+#endif
+
+/* Keep the graph work list out of leaf callers, even under automatic inlining. */
+static W_RUNTIME_NOINLINE void w_release_graph(WVal v);
 
 /* Leaf values never need the graph work list, including strings owned by a container. */
 static inline void w_release_string(WStringBuf* buffer) {
@@ -507,12 +516,30 @@ static inline void w_release_string(WStringBuf* buffer) {
     }
 }
 
+static inline bool w_is_leaf(WVal value) {
+    return value.tag <= W_BOOL || value.tag == W_STR || value.tag == W_POINTER;
+}
+
 static inline void w_release(WVal v) {
-    if (v.tag == W_STR) {
-        w_release_string(v.as.string.owner);
+    if (w_is_leaf(v)) {
+        if (v.tag == W_STR) w_release_string(v.as.string.owner);
         return;
     }
-    if (v.tag <= W_BOOL || v.tag == W_POINTER) return;
+    if ((v.tag == W_OK || v.tag == W_ERR) && v.as.box) {
+        WBoxBuf* box = v.as.box;
+        /* Shared boxes and leaf payloads need neither a work list nor child storage. */
+        if (box->refcount != 1 || w_is_leaf(box->val)) {
+            w_check_refcount(box->refcount, "release/box");
+            w_g_release_count++;
+            if (--box->refcount == 0) {
+                WVal inner = box->val;
+                free(box);
+                w_mem_on_free();
+                if (inner.tag == W_STR) w_release_string(inner.as.string.owner);
+            }
+            return;
+        }
+    }
     w_release_graph(v);
 }
 
@@ -696,6 +723,10 @@ static WVal* w_release_deferred(WVal* slot, int32_t* produced) {
             WVal inner = bx->val;
             free(bx);
             w_mem_on_free();
+            if (w_is_leaf(inner)) {
+                if (inner.tag == W_STR) w_release_string(inner.as.string.owner);
+                return NULL;
+            }
             WVal* out = (WVal*)malloc(sizeof(WVal));
             if (!out) { fprintf(stderr, "[W4003] RuntimeError: out of memory\n"); exit(1); }
             out[0] = inner;
@@ -986,7 +1017,7 @@ static inline void w_eq_push(WEqualityPair** items, int32_t* count, int32_t* cap
     (*items)[(*count)++] = (WEqualityPair){left, right};
 }
 
-static bool w_eq_graph(WVal a, WVal b);
+static W_RUNTIME_NOINLINE bool w_eq_graph(WVal a, WVal b);
 
 /* Scalar equality must not create the structural comparison work list. */
 static inline bool w_eq(WVal a, WVal b) {
