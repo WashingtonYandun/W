@@ -1483,18 +1483,10 @@ static inline bool w_utf8_cp_offset_n(const char* s, size_t length, int64_t targ
     return false;
 }
 
-/* Lazily index shared owned strings once; repeated lexer indexing is O(1). */
-static inline bool w_string_offset(WVal value, int64_t index, size_t* offset, size_t* length) {
-    if (index < 0) return false;
+/* Keep UTF-8 decoding and index construction out of cached index callers. */
+static W_RUNTIME_NOINLINE bool w_string_offset_slow(WVal value, int64_t index, size_t* offset, size_t* length) {
     WStringBuf* owner = value.as.string.owner;
     if (!owner) return w_utf8_cp_offset_n(value.as.string.data, value.as.string.length, index, offset, length);
-    /* A cached one-byte-per-codepoint string needs no offset table. */
-    if (owner->codepoint_count == value.as.string.length) {
-        if ((uint64_t)index > value.as.string.length) return false;
-        *offset = (size_t)index;
-        *length = (uint64_t)index < value.as.string.length ? 1 : 0;
-        return *length != 0;
-    }
     if (!owner->codepoint_offsets) {
         if (value.as.string.length > SIZE_MAX / sizeof(size_t) - 1) {
             fprintf(stderr, "[W4003] RuntimeError: String index too large\n"); exit(1);
@@ -1514,6 +1506,25 @@ static inline bool w_string_offset(WVal value, int64_t index, size_t* offset, si
     *offset = owner->codepoint_offsets[index];
     *length = (uint64_t)index < owner->codepoint_count ? owner->codepoint_offsets[index + 1] - *offset : 0;
     return *length != 0;
+}
+
+/* Lazily index shared owned strings once; repeated lexer indexing is O(1). */
+static inline bool w_string_offset(WVal value, int64_t index, size_t* offset, size_t* length) {
+    if (index < 0) return false;
+    WStringBuf* owner = value.as.string.owner;
+    if (owner && owner->codepoint_count == value.as.string.length) {
+        if ((uint64_t)index > value.as.string.length) return false;
+        *offset = (size_t)index;
+        *length = (uint64_t)index < value.as.string.length ? 1 : 0;
+        return *length != 0;
+    }
+    if (owner && owner->codepoint_offsets) {
+        if ((uint64_t)index > owner->codepoint_count) return false;
+        *offset = owner->codepoint_offsets[index];
+        *length = (uint64_t)index < owner->codepoint_count ? owner->codepoint_offsets[index + 1] - *offset : 0;
+        return *length != 0;
+    }
+    return w_string_offset_slow(value, index, offset, length);
 }
 
 /* Owned strings cache counts independently of the lazy random-access index. */
