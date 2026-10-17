@@ -2,15 +2,24 @@
 from contextlib import contextmanager
 import os
 import shlex
+import shutil
 import sys
 import time
 
 
 def compiler_command():
     configured = os.environ.get('CC')
-    if configured and os.path.isfile(configured):
-        return [configured]
-    return shlex.split(configured) if configured else ['clang' if os.name == 'nt' else 'cc']
+    from error.Error import ToolchainError
+    try:
+        command = ([configured] if configured and os.path.isfile(configured) else
+                   shlex.split(configured) if configured else ['clang' if os.name == 'nt' else 'cc'])
+    except ValueError as error:
+        raise ToolchainError('Invalid CC command: ' + str(error)) from error
+    if not command or shutil.which(command[0]) is None:
+        requested = configured if configured else command[0]
+        raise ToolchainError('C compiler is unavailable or not executable: ' + repr(requested) +
+                             '. Install a C99 toolchain or set CC to its compiler path.')
+    return command
 
 
 def executable_name(name):

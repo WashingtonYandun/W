@@ -508,6 +508,8 @@ fn compile(source: str) {
        - `W4001`: Division or modulo by zero
        - `W4002`: Index or key out of bounds
        - `W4003`: Runtime execution error
+     - **`W5xxx` — Host Toolchain Diagnostics:**
+       - `W5001`: C compiler command unavailable or invalid. This is an environment error, not a source type error or compiler invariant failure.
    - `w check --json <file.w>` outputs deterministic machine-readable JSON:
    ```json
    {

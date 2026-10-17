@@ -6,6 +6,7 @@ from typing import Dict
 # W2xxx: Type System, Exhaustiveness & Error Channel Diagnostics
 # W3xxx: Mutability, Ownership & OOP Encapsulation Diagnostics
 # W4xxx: Runtime Execution Diagnostics
+# W5xxx: Host Toolchain Diagnostics
 DIAGNOSTIC_CODES: Dict[str, str] = {
     "W9998": "Compiler accepted a program it cannot lower (compiler bug)",
     "W9999": "Internal compiler invariant violation",
@@ -42,6 +43,8 @@ DIAGNOSTIC_CODES: Dict[str, str] = {
     "W4001": "Division or modulo by zero",
     "W4002": "Index or key out of bounds",
     "W4003": "Runtime execution error",
+    # W5xxx — Host Toolchain
+    "W5001": "C compiler command unavailable or invalid",
 }
 
 LEGACY_CODE_MAP: Dict[str, str] = {
@@ -144,6 +147,11 @@ class WError(Exception):
                 "column": self.col,
             },
         }
+
+
+class ToolchainError(WError):
+    def __init__(self, message: str) -> None:
+        super().__init__(message, file="<toolchain>", code="W5001", stage="toolchain")
 
 
 class LexerError(WError):

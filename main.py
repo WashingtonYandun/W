@@ -48,6 +48,10 @@ def _bootstrap_source_mtime(repo_root: str) -> float:
 
 def ensure_selfhost_w1_binary(repo_root: str) -> str:
     """Serialize cache rebuilds across independent compiler/test processes."""
+    w1_src_path = os.path.join(repo_root, "selfhost", "w1.w")
+    if not os.path.isfile(w1_src_path):
+        from error.Error import TypeError
+        raise TypeError("W1 bootstrap requires a source checkout", file=w1_src_path, code="W2013")
     cache_dir = os.path.join(repo_root, ".w_cache")
     os.makedirs(cache_dir, exist_ok=True)
     with cache_lock(os.path.join(cache_dir, 'bootstrap.lock')):
@@ -481,6 +485,9 @@ def main() -> None:
         subcmd = args[0]
         args = args[1:]
         if subcmd == "bench":
+            if not os.path.isfile(os.path.join(get_repo_root(), "bench", "run_bench.py")):
+                print("w bench requires a source checkout", file=sys.stderr)
+                sys.exit(1)
             update_baseline = "--update-baseline" in args
             repo_root = get_repo_root()
             w1_bin = ensure_selfhost_w1_binary(repo_root)
