@@ -109,7 +109,7 @@ The assignability relation `is_assignable(src: TypeId, dst: TypeId) -> bool` (`s
 3. `S? <: T?` if `S <: T`.
 4. `T <: (T ! E)` (implicit `Ok` wrapping) and `E <: (T ! E)` (implicit `Err` wrapping), provided `T != E`.
 
-### 4.3 Uniones cerradas del canal de error
+### 4.3 Closed error-channel unions
 
 Una unión de error contiene al menos dos tipos distintos y solo puede aparecer como el
 segundo componente de `Result<T, E>`. `ErrorUnionType` se interna con alternativas
