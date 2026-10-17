@@ -25,7 +25,6 @@ HIR reaches MIR. HIR preserves expression order and CoW assignment paths; MIR ma
 control flow, storage layout, and ownership transitions explicit.
 
 ## 2. Core HIR Data Model
-## 3. Core HIR Data Model
 
 ### 3.1 Identifiers & Metadata
 ```text
