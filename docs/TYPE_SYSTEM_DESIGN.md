@@ -146,7 +146,7 @@ For `Dict(key: TypeId, val: TypeId)`:
 
 ## 5. `TypeCapabilities` Matrix (Ownership, CoW & Generic Contracts)
 
-To bridge static types with deterministic Reference Counting (`v0.1.3`) and future monomorphization (), every `TypeId` exposes a precomputed `TypeCapabilities` descriptor:
+Every `TypeId` exposes a precomputed `TypeCapabilities` descriptor for ownership, copy-on-write, and generic constraints:
 
 ```text
 struct TypeCapabilities {
@@ -170,7 +170,7 @@ Value semantics (`is_value`) and heap Reference Counting (`needs_retain` / `need
 | `float` | `true` | `false` | `false` | `false` | **`false` (`W2010`)** | Immediate unboxed `double` in `WVal` |
 | `str` | `true` | `false` | `false` | `true` | `true` | Immutable UTF-8 buffer |
 | `list[T]`, `dict[K, V]` | `true` | `false` | `false` | `true` | `false` (`W2010`) | Refcounted CoW buffer (`WListBuf*`, `WDictBuf*`) |
-| `tuple[T1, ...]` | `true` | `false` | `false` | `true` | `false` (in `v0.1`) | Refcounted buffer (`WTupleBuf*`) |
+| `tuple[T1, ...]` | `true` | `false` | `false` | `true` | `false` | Refcounted buffer (`WTupleBuf*`) |
 | `Point` (`struct`) | `true` | `false` | `false` | `true` | `false` (`W2010`) | Refcounted CoW buffer (`WStructBuf*`) |
 | `User` (`class` / `interface`) | `false` | `true` | `true` | `true` | `false` (`W2010`) | Refcounted identity object (`WStructBuf*` with `W_OBJECT`) |
 | `T?` / `T ! E` | Inherits | Inherits | Inherits | `true` (`WBoxBuf*`) | `false` (`W2010`) | Tagged `WVal` or refcounted `WBoxBuf*` (`W_OK` / `W_ERR`) |
