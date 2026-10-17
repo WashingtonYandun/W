@@ -146,9 +146,7 @@ one release obligation, including when it happens to be an immediate scalar.
 - `w_unwrap_optional`, `w_unwrap_ok`, `w_unwrap_err`, `w_unwrap_success` retain their
   returned payload; the source wrapper may be released independently.
 - `w_index_get_owned` and `w_dict_get` retain their result. Present dictionary
-  values are wrapped, including present None. La indexación de strings devuelve un
-  valor propio: ASCII de un carácter usa almacenamiento estático; los demás caracteres
-  conservan un buffer administrado independiente. El caller libera ambos del mismo modo.
+  values are wrapped, including present None. String indexing returns an owned value: a single ASCII character uses static storage; other characters use an independently managed buffer. The caller releases both the same way.
 - `w_make_list`, `w_make_tuple`, `w_make_dict`, `w_make_struct`, `w_make_object`
   borrow their initializer arrays and clone the stored values. `w_make_range`
   creates an owned list. Field/variant/type names come from static generated C.
@@ -197,11 +195,7 @@ value immediately. Collection initialization evaluates key then value per entry.
 Already-owned temporaries are reused. These snapshots can increase RC/CoW traffic;
 This cost should be measured before changing temporary lifetimes.
 
-Las asignaciones evalúan índices y receptores de clase antes del RHS, una sola vez.
-Después protegen el RHS y resuelven el slot mutable: una lista puede realocarse durante
-el RHS y no debe dejar un puntero guardado a un elemento. Los receptores de clase se
-retienen antes del RHS y conservan identidad. El resultado es el valor asignado, también
-en rutas compuestas. AST, HIR y W1 siguen este contrato.
+Assignments evaluate indices and class receivers exactly once, before the RHS. They then protect the RHS and resolve the mutable slot. A list may reallocate while evaluating the RHS, so the compiler must not keep a pointer to an element. Class receivers are retained before the RHS and preserve identity. The expression returns the assigned value, including in composed paths. AST, HIR, and W1 follow this contract.
 
 Return and propagation protect the escaping value before LIFO cleanup. Break and
 continue clean through the nearest loop; the for iterable belongs to its outer
@@ -269,12 +263,7 @@ The runtime safety checks require:
 
 ## MIR and Scalar ABI
 
-En el backend principal, el ownership deja de ser solamente una convención del emitter:
-MIR contiene operaciones `clone`, `store` con operandos movidos y `release`, más salidas
-explícitas por bloque. Su verificador propaga inicialización definida, valores posiblemente
-vivos y pruebas de narrowing a través de joins y backedges. Rechaza consumir parámetros
-prestados, leer valores consumidos y retornar dejando referencias propias vivas.
-No es una prueba formal del runtime ni un análisis del ownership de recursos C `opaque`.
+In the primary backend, ownership is represented directly in MIR rather than left as an emitter convention. MIR contains `clone`, `store` with moved operands, `release`, and explicit block exits. Its verifier propagates definite initialization, possibly live values, and narrowing proofs across joins and backedges. It rejects consuming borrowed parameters, reading consumed values, and returning while owned references remain live. This is not a formal proof of the runtime or an ownership analysis for C `opaque` resources.
 
 Los locales, parámetros y retornos primitivos usan almacenamiento nativo de 64 bits,
 double o bool; no generan ARC. Globales y valores administrados siguen usando `WVal`.
