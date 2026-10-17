@@ -262,8 +262,3 @@ The runtime safety checks require:
 3. **Deterministic Scope Cleanup:** The `CleanupScope` LIFO unwinding guarantees that memory is released immediately at scope exits across the supported execution engines.
 
 
-## MIR layout notes
-
-The optional MIR representation records ownership directly rather than leaving it as an emitter convention. It contains `clone`, `store` with moved operands, `release`, and explicit block exits. Its verifier propagates definite initialization, possibly live values, and narrowing proofs across joins and backedges. It rejects consuming borrowed parameters, reading consumed values, and returning while owned references remain live. This is not a formal proof of the runtime or an ownership analysis for C `opaque` resources.
-
-Primitive local variables, parameters, and returns use native 64-bit, `double`, or `bool` storage and do not use ARC. Globals and managed values still use `WVal`. Function-value and virtual-dispatch adapters convert at the `WVal` ABI boundary. Fields are projected through verified physical offsets. The AST backend and W1 retain independent implementations and serve as differential oracles.
