@@ -1017,7 +1017,7 @@ static inline void w_eq_push(WEqualityPair** items, int32_t* count, int32_t* cap
     (*items)[(*count)++] = (WEqualityPair){left, right};
 }
 
-static bool w_eq_graph(WVal a, WVal b);
+static W_RUNTIME_NOINLINE bool w_eq_graph(WVal a, WVal b);
 
 /* Scalar equality must not create the structural comparison work list. */
 static inline bool w_eq(WVal a, WVal b) {
