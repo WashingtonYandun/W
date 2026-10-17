@@ -4,7 +4,7 @@
 >
 > **Targets:** `W0` is the reference implementation and the authority on whether a program is valid. `W1` is an experimental self-hosted compiler whose supported subset is measured by the public release corpus. The measured support boundary is documented in [docs/ENGINE_PARITY_MATRIX.md](docs/ENGINE_PARITY_MATRIX.md).
 >
-> **Thesis:** W is a compact, statically typed language for small native tools, with deterministic diagnostics and inspectable C99 output. Expansion beyond this core is documented in [docs/EXPANSION.md](docs/EXPANSION.md).
+> **Thesis:** W is a compact, statically typed language for small native tools, with deterministic diagnostics and inspectable C99 output. This document defines the language syntax and semantics.
 
 ---
 
@@ -206,11 +206,11 @@ class Dog extends Animal implements Describable {
     }
 }
 
-let d: Describable = Dog("Rex", "Husky")  # Preferred constructor syntax (new Dog(...) also valid in v0.1.x)
+let d: Describable = Dog("Rex", "Husky")
 print(d.describe())
 ```
 * **Reference Semantics vs Value Semantics:** `struct` values use Copy-on-Write (`W_STRUCT`), whereas `class` instances allocated via `ClassName(...)` (or `new ClassName(...)`) have reference identity (`W_OBJECT`) managed via deterministic reference counting.
-* **Constructor Syntax Policy:** Direct invocation `ClassName(...)` is the preferred constructor syntax starting in `v0.1.1`. The `new ClassName(...)` form remains valid throughout `v0.1.x` for backwards compatibility and is slated for deprecation in `v0.2`.
+* **Constructor Syntax:** Classes are constructed with `ClassName(...)`.
 * **Functional Programming Synergy:** Interfaces with a single method (`interface`) and `fn(...) -> R` signatures are designed to interoperate seamlessly with functional programming constructs.
 
 ---
