@@ -2,13 +2,7 @@
 
 [![CI](https://github.com/WashingtonYandun/W/actions/workflows/ci.yml/badge.svg)](https://github.com/WashingtonYandun/W/actions/workflows/ci.yml)
 
-<p align="center">
-  <img src="assets/wawi.jpg" alt="Wawi, the mascot of the W programming language" width="180">
-</p>
-
 **W** is an experimental, statically typed language for small native tools and applications. It compiles to portable C99 and combines predictable value semantics, copy-on-write (CoW), deterministic reference counting (ARC), explicit errors, and controlled access to C libraries.
-
-Wawi, W's mascot, is inspired by Ecuador's bioluminescent click beetle, the Ninacuro (*Pyrophorus noctilucus*).
 
 The current alpha version is `0.4.0a1`. W is under active development and does not yet guarantee production stability. W0 is the reference compiler; W1 is a self-hosted compiler with a narrower supported profile. See the [engine parity matrix](docs/ENGINE_PARITY_MATRIX.md), [expansion status](docs/EXPANSION.md), and [known limits](docs/KNOWN_LIMITS.md) for the current boundaries.
 

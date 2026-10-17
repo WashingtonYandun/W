@@ -1,45 +1,33 @@
-# Python cache & artifacts
+# Python cache and artifacts
 *.pyc
 *.pyo
 *.pyd
 __pycache__/
 */__pycache__/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
 
-# IDEs & OS
+# IDEs and operating systems
 .idea/
 .vscode/
 *.log
 .DS_Store
 
-# Build & test outputs
+# Build and test outputs
 dist/
 build/
 *.egg-info/
 .w_cache/
 *.o
 *.out
-
-# Test runtime scratch files
-tests/runtime/temp_file.txt
-
-
-# Private investigation records
-audit/
-
-# Local-only architecture decision records
-docs/adr/
-
-# Local-only research and historical material
-/spec/
-/docs/evidence/
-/docs/history/
-/bench/V0_1_3_COMPARISON.md
-
-# Local scratch and test caches
-scratch/
-.pytest_cache/
-.mypy_cache/
-.ruff_cache/
 .coverage
 htmlcov/
 coverage/
+
+# Local benchmark output
+/bench/BASELINE.md
+
+# Test and local scratch files
+tests/runtime/temp_file.txt
+/scratch/
