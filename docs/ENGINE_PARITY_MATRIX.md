@@ -16,7 +16,7 @@ flowchart TD
         TC --> INTERP["1. W0 Interpreter (AST)"]
         TC --> HIR["HirBuilder & HirVerifier"]
         HIR --> MIR["MIR: CFG, ownership, layouts y verificador"]
-        MIR --> HIR_C["2. W0 C99 desde MIR (Default Backend)"]
+        MIR --> HIR_C["2. W0 C99 from MIR (Default Backend)"]
         TC -.->|Diagnostic Oracle| AST_C["3. W0 AST C99 (Secondary Oracle)"]
     end
 
