@@ -1,0 +1,5 @@
+Node { next: <cycle> }
+Node { next: <cycle> }
+[Node { next: <cycle> }] (Node { next: <cycle> }, Node { next: <cycle> })
+[Node { next: none }, Node { next: none }]
+Node { next: Node { next: <cycle> } }

@@ -9,9 +9,78 @@ def nominal_display_name(name):
     return name
 
 def display_value(value, quote_string=False):
-    while isinstance(value, WEnumValue) and value.enum_name == "Option" and value.variant == "Some" and value.payload:
-        value = value.payload[0]
-    return repr(value) if quote_string and isinstance(value, WStr) else str(value)
+    parts = []
+    active_objects = set()
+    tasks = [("value", value, quote_string)]
+    while tasks:
+        kind, current, quoted = tasks.pop()
+        if kind == "text":
+            parts.append(current)
+            continue
+        if kind == "leave":
+            active_objects.remove(current)
+            continue
+        if isinstance(current, WEnumValue) and current.enum_name == "Option" and current.variant == "Some" and current.payload:
+            tasks.append(("value", current.payload[0], quoted))
+            continue
+        if isinstance(current, WObjectInstance):
+            identity = id(current)
+            if identity in active_objects:
+                parts.append("<cycle>")
+                continue
+            active_objects.add(identity)
+            tasks.append(("leave", identity, False))
+            fields = list(current.fields.items())
+            prefix, suffix = nominal_display_name(current.class_name) + " { ", " }"
+        elif isinstance(current, WStructInstance):
+            fields = list(current.storage.data.items())
+            prefix, suffix = nominal_display_name(current.struct_name) + " { ", " }"
+        else:
+            fields = None
+        if fields is not None:
+            tasks.append(("text", suffix, False))
+            for index in range(len(fields) - 1, -1, -1):
+                name, child = fields[index]
+                tasks.append(("value", child, True))
+                tasks.append(("text", name + ": ", False))
+                if index:
+                    tasks.append(("text", ", ", False))
+            tasks.append(("text", prefix, False))
+            continue
+        if isinstance(current, WList):
+            elements = current.storage.data
+            prefix, suffix = "[", "]"
+        elif isinstance(current, WTuple):
+            elements = current.elements
+            prefix, suffix = "(", ")"
+        elif isinstance(current, WEnumValue) and current.payload:
+            elements = current.payload
+            prefix, suffix = nominal_display_name(current.enum_name) + "." + current.variant + "(", ")"
+        else:
+            elements = None
+        if elements is not None:
+            tasks.append(("text", suffix, False))
+            for index in range(len(elements) - 1, -1, -1):
+                tasks.append(("value", elements[index], True))
+                if index:
+                    tasks.append(("text", ", ", False))
+            tasks.append(("text", prefix, False))
+        elif isinstance(current, WDict):
+            entries = list(current.storage.data.items())
+            tasks.append(("text", "}", False))
+            for index in range(len(entries) - 1, -1, -1):
+                key, child = entries[index]
+                tasks.extend([("value", child, True), ("text", ": ", False), ("value", key, True)])
+                if index:
+                    tasks.append(("text", ", ", False))
+            tasks.append(("text", "{", False))
+        elif isinstance(current, (WOk, WErr)):
+            child = current.value if isinstance(current, WOk) else current.error
+            tasks.extend([("text", ")", False), ("value", child, False),
+                          ("text", "Ok(" if isinstance(current, WOk) else "Err(", False)])
+        else:
+            parts.append(repr(current) if quoted and isinstance(current, WStr) else str(current))
+    return "".join(parts)
 
 class WValue:
     """Base class for all runtime values in W Language v0.1."""
@@ -141,8 +210,7 @@ class WTuple(WValue):
         return isinstance(other, WTuple) and self.elements == other.elements
 
     def __str__(self) -> str:
-        elems = ", ".join(display_value(e, True) for e in self.elements)
-        return f"({elems})"
+        return display_value(self)
 
 
 class WRange(WValue):
@@ -199,11 +267,8 @@ class WEnumValue(WValue):
         return False
 
     def __str__(self) -> str:
-        if self.enum_name == "Option" and self.variant == "Some" and self.payload:
-            return str(self.payload[0])
         if self.payload:
-            args_str = ", ".join(display_value(p, True) for p in self.payload)
-            return f"{nominal_display_name(self.enum_name)}.{self.variant}({args_str})"
+            return display_value(self)
         return f"{nominal_display_name(self.enum_name)}.{self.variant}"
 
 
@@ -231,7 +296,7 @@ class WOk(WResult):
         return False
 
     def __str__(self) -> str:
-        return f"Ok({self.value})"
+        return display_value(self)
 
 class WErr(WResult):
     def __init__(self, error: WValue):
@@ -250,7 +315,7 @@ class WErr(WResult):
         return False
 
     def __str__(self) -> str:
-        return f"Err({self.error})"
+        return display_value(self)
 
 
 # ==========================================
@@ -344,8 +409,7 @@ class WList(CowOwner):
         return isinstance(other, WList) and self.storage.data == other.storage.data
 
     def __str__(self) -> str:
-        elems = ", ".join(display_value(e, True) for e in self.storage.data)
-        return f"[{elems}]"
+        return display_value(self)
 
 
 def dict_key(key):
@@ -400,12 +464,7 @@ class WDict(CowOwner):
         return isinstance(other, WDict) and self.storage.data == other.storage.data
 
     def __str__(self) -> str:
-        items = []
-        for k, v in self.storage.data.items():
-            k_str = display_value(k, True)
-            v_str = display_value(v, True)
-            items.append(f"{k_str}: {v_str}")
-        return "{" + ", ".join(items) + "}"
+        return display_value(self)
 
 
 class WStructInstance(CowOwner):
@@ -442,8 +501,7 @@ class WStructInstance(CowOwner):
         return isinstance(other, WStructInstance) and self.struct_name == other.struct_name and self.storage.data == other.storage.data
 
     def __str__(self) -> str:
-        fields_str = ", ".join(f"{k}: {display_value(v, True)}" for k, v in self.storage.data.items())
-        return f"{nominal_display_name(self.struct_name)} {{ {fields_str} }}"
+        return display_value(self)
 
 
 # ==========================================
@@ -512,8 +570,7 @@ class WObjectInstance(WValue):
         return self is other
 
     def __str__(self) -> str:
-        fields_str = ", ".join(f"{k}: {display_value(v, True)}" for k, v in self.fields.items())
-        return f"{nominal_display_name(self.class_name)} {{ {fields_str} }}"
+        return display_value(self)
 
 
 class WWeak(WValue):

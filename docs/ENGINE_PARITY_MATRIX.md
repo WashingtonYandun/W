@@ -1,170 +1,65 @@
 # Engine Support and Corpus Coverage
 
-This matrix reports tested fixture coverage for the interpreter, AST C99, HIR C99, and W1. MIR is not a separately executable backend.
+W0 is the language authority. Its default native pipeline is checked AST → typed HIR →
+verified MIR → C99 → system compiler. The public backend name remains `hir`.
+The interpreter and AST C99 backend are execution oracles; W1 is an independent
+self-hosted compiler. MIR is an intermediate representation, not a fifth engine.
 
----
+## Measured corpus
 
-## 1. Compiler Engines & Architectural Roles
-
-The W Language toolchain maintains four distinct execution targets, each with a defined architectural role:
-
-```mermaid
-flowchart TD
-    subgraph W0 Reference Pipeline [W0 Reference Pipeline]
-        SRC["W Source Code (*.w)"] --> P["Parser & Lexer"]
-        P --> TC["TypeChecker & TypeInterner"]
-        TC --> INTERP["1. W0 Interpreter (AST)"]
-        TC --> HIR["HirBuilder & HirVerifier"]
-        HIR --> HIR_C["2. W0 HIR C99 (Default Backend)"]
-        HIR -.-> MIR["MIR: verified inspection representation (w mir)"]
-        TC -.->|Diagnostic Oracle| AST_C["3. W0 AST C99 (Secondary Oracle)"]
-    end
-
-    subgraph W1 Self-Hosted Pipeline [W1 Self-Hosted Compiler]
-        SRC2["W Source Code (*.w)"] --> W1_BIN["4. W1 Stage-2 Native Binary (Standalone)"]
-        W1_BIN --> NATIVE_C["Emitted C99"]
-    end
-```
-
-1. **W0 Interpreter (`runtime/Interpreter.py`):** Canonical reference AST tree-walking interpreter.
-2. **W0 HIR C99 (`hir/HirCCodeGen.py`):** Default native backend; it emits portable C99 from verified typed HIR.
-3. **W0 AST C99 (`codegen/CCodeGen.py`):** Secondary C99 backend retained for differential fuzzing and cross-engine verification.
-4. **W1 Self-Hosted (`selfhost/w1.w`):** Native standalone compiler built through the 3-stage bootstrap fixed point.
-
----
-
-## 2. Feature Parity Matrix
-
-The following table summarizes compiler support across the public core corpus. The counts are regenerated from `summary.json` by `tools/ci_conformance.py --matrix`, which reports measurements from the last verified run rather than restating `tests/engine_profiles.json`. Other capabilities have separate contract tests; W1 support outside this corpus is not guaranteed.
+The table comes from an actual `tools/ci_conformance.py --profile=release --sanitize`
+run. It covers the public runtime examples and negative fixtures, with no unsupported
+exclusions. It does not establish universal language parity or measure code coverage.
 
 <!-- GENERATED TABLE START -->
 
-| Feature Category | Fixtures | W0 Interpreter | W0 AST C99 | W0 HIR C99 (Default) | W1 Self-Hosted C99 | Status |
+| Feature Category | Fixtures | W0 Interpreter | W0 AST C99 | W0 Typed HIR (Default) | W1 Self-Hosted C99 | Status / Milestone |
 | :--- | :---: | :---: | :---: | :---: | :---: | :--- |
-| **`core`** | 144 | ✅ 144/144 | ✅ 144/144 | ✅ 144/144 | ✅ 144/144 | Declared supported |
+| **`core`** | 151 | ✅ 151/151 | ✅ 151/151 | ✅ 151/151 | ✅ 151/151 | Declared supported |
 | **`generics`** | 15 | ✅ 15/15 | ✅ 15/15 | ✅ 15/15 | ✅ 15/15 | Declared supported |
 | **`checked_modules`** | 1 | ✅ 1/1 | ✅ 1/1 | ✅ 1/1 | ✅ 1/1 | Declared supported |
 | **`error_unions`** | 8 | ✅ 8/8 | ✅ 8/8 | ✅ 8/8 | ✅ 8/8 | Declared supported |
-| **Total Verified** | **168** | **168/168 (100.0%)** | **168/168 (100.0%)** | **168/168 (100.0%)** | **168/168 (100.0%)** | _measured_ |
-
-Regenerate with `python3 tools/ci_conformance.py --matrix`, which reads `summary.json`
-from an actual run of `python3 tools/ci_conformance.py` over the corpus. These are
-measurements of the four engines, not a restatement of `tests/engine_profiles.json`;
-`--matrix` reports `STALE` if the summary no longer covers the current corpus.
-
-The `error_unions` category exercises subset propagation, runtime identity checks for
-struct, enum and scalar errors, and exhaustive `else err` matching. Six negative fixtures
-cover invalid alternatives, missing alternatives, incompatible propagation and unsupported
-payload subpatterns. The dedicated ownership fixture covers managed error payloads,
-failed guards, CoW copies, direct Result widening and propagation cleanup.
-
-The `core` category includes five fixtures that pin runtime **panic** behaviour
-(`panic_division`, `panic_modulo`, `panic_index`, `panic_dict_key`,
-`panic_entrypoint_error`). Those declare the diagnostic they must raise with a
-`# RUNTIME_PANIC: Wxxxx` marker instead of expected stdout, and every engine must report
-that exact code and terminate non-zero. They exist because panic behaviour was the one
-axis no fixture covered, which is how the interpreter and the two C backends were able to
-disagree on it without any test noticing. `assignment_expression` covers the opposite
-gap: a construct the checker accepted while the HIR backend rejected it.
+| **Total Verified** | **175** | **175/175 (100.0%)** | **175/175 (100.0%)** | **175/175 (100.0%)** | **175/175 (100.0%)** | _measured_ |
 
 <!-- GENERATED TABLE END -->
 
----
+Regenerate after running the corpus with `python3 tools/ci_conformance.py --matrix`.
+The generator reads `summary.json`; it reports missing or stale measurements rather
+than inventing success from `tests/engine_profiles.json`.
 
-## 3. Detailed Feature Breakdown
+The core category includes primitive operations, control flow, tuples, classes,
+copy-on-write, ownership, diagnostics, nested patterns, Result closures and cyclic
+formatting. Panic fixtures require a nonzero exit and their declared diagnostic code.
+Generics include functions, structs, recursive ADTs and rejected invalid layouts.
+Checked modules cover imported specialization. Error unions cover subset propagation,
+nominal error identity, exhaustive handlers and managed payload cleanup.
 
-### 3.1 Core Language & Control Flow (`core`)
-- **Status:** **100% Parity** across all 4 engines.
-- **Coverage:** 144 fixtures (positive runtime fixtures, control flow, functions, OOP contracts, recursion, and error diagnostics).
-- **Features Included:**
-  - Arithmetic, logic, bitwise, and comparison expressions.
-  - While loops, range loops (`for i in 0..10`), break, continue, and scope cleanup.
-  - If/elif/else expressions and statements.
-  - Pattern matching (`match`) over primitives, tuples, and enums.
-  - Native strings with byte-level length and UTF-8 iteration.
-  - First-class tuple indexing and construction.
+## Expansion boundaries
 
-### 3.2 Value Semantics & Copy-on-Write (`core`)
-- **Status:** **100% Parity** across all 4 engines.
-- **Coverage:** Tested under `tests/runtime/list_cow.w`, `struct_cow.w`, `value_semantics_cow.w`, and `cow_telemetry.w`.
-- **Features Included:**
-  - Pure value semantics for `list[T]`, `dict[K, V]`, and user `struct` instances.
-  - Path-copying detach asymptotics: $O(\text{shared path})$ complexity verified across all 4 engines.
+Function values, captures, FFI, generic OOP, the standard library and LSP have separate
+contracts in `tests/unit/test_expansion_contracts.py`. A green core corpus does not
+imply W1 support for every expansion combination. Scoped resources have a separate
+four-engine gate in `tests/unit/test_audit_readiness.py`. The SQLite adapter/application
+also has dedicated checks; see [C interoperability](FFI_VALIDATION.md).
 
-### 3.3 Nominal OOP & Polymorphism (`core`)
-- **Status:** **100% Parity** across all 4 engines.
-- **Coverage:** Tested under `tests/runtime/oop_classes.w` and `examples/07_oop_polymorphism.w`.
-- **Features Included:**
-  - Single inheritance `class` hierarchies with `super` constructor calls.
-  - Nominal `interface` contracts with explicit `implements`.
-  - Dynamic method dispatch via vtables and `WVal` object wrappers.
-  - Field encapsulation (`public` vs `private`).
+W0 shares a checked compilation session and canonical type arena across modules.
+W1 expands and qualifies imports before its own semantic pass. The checked-module
+fixture does not prove equivalence of the two module implementations.
 
-### 3.4 Deterministic Memory & Weak References (`core`)
-- **Status:** **100% Parity** across all 4 engines.
-- **Coverage:** Tested under `tests/runtime/weak_references.w`, `memory_counters_verification.w`, and leak regression tests.
-- **Features Included:**
-  - Deterministic `CleanupScope` ARC with zero tracing garbage collector pauses.
-  - Control block architecture (`WWeakControl`) with separate strong and weak reference counters.
-  - Safe `weak(obj)` handles and `upgrade(w)` returning `Option[T]`.
-  - Verified under AddressSanitizer and LeakSanitizer: 0 memory leaks for acyclic and weak-broken structures.
+## Bootstrap Fixed-Point vs. Core Corpus Parity
 
-### 3.5 Monomorphized Generics & ADTs (`generics`)
-- **Status:** **15/15 corpus fixtures pass on all four engines**.
-- **Coverage:** Generic functions and structs, generic enums and `Option`/`Result`, recursive ADTs, imported generic specialization, and stable constraint/layout-cycle diagnostics (`W2011`, `W2001`).
-- This is measured corpus coverage, not a guarantee that every possible generic program has identical behavior on W0 and W1.
+The three-stage bootstrap requires identical C output hashes when W0 and successive
+native W1 stages compile W1 itself. This proves the recorded deterministic fixed point;
+it cannot prove semantic correctness. Corpus parity separately checks accepted output,
+exit status and rejection diagnostics across four engines.
 
-### 3.6 Checked Compilation Sessions & Modules (`checked_modules`)
-- **Status:** **1/1 corpus fixture passes on all four engines**; 
-- W0 implements whole-program `CompilationSession` with arena deduplication and diamond import caching.
-- W1 loads imports, enforces public names, qualifies module identities, and detects cycles before feeding a flattened token stream to its compiler. This passes the checked-module fixture, including imported generic specialization, but does not provide W0's shared typed declarations or specialization cache.
+## Execution profiles
 
-### 3.7 Closed Error Unions (`error_unions`)
-- **Status:** **8/8 fixtures pass on all four engines**: two runtime fixtures and six
-  invalid fixtures rejected consistently.
-- `T ! E1 | E2` is restricted to the Result error channel. `?` widens an error only when
-  the source set is a subset of the declared target set. `else err` patterns check scalar
-  tags or exact nominal struct/enum identity, including module-qualified types, and
-  require exhaustive coverage.
-- Generic types, classes, collections, tuples, functions and other compound alternatives
-  remain outside the supported contract.
+`--profile=integration` permits only exclusions declared with an actionable reason in
+`tests/engine_profiles.json`. `--profile=release` rejects all exclusions and requires
+every engine to pass every fixture. `--sanitize` instruments native programs with
+ASan/UBSan; Linux additionally enables LSan.
 
----
-
-## 4. Bootstrap Fixed-Point vs. Core Corpus Parity
-
-It is critical to distinguish between two distinct compiler guarantees:
-
-1. **Bootstrap Fixed-Point (Deterministic Code Generation):**
-   - The 3-stage bootstrap fixed-point ($\text{SHA256}(c_0) == \text{SHA256}(c_1) == \text{SHA256}(c_2)$) proves that the self-hosted compiler `selfhost/w1.w` is self-consistent and emits bit-for-bit identical C99 code across successive generations when compiling itself.
-   - It **does not** prove that W1 accepts all language constructs present in W0.
-
-2. **Core Corpus Parity:**
-   - Corpus parity means every fixture in this 168-case public corpus passes on every engine, with no unsupported exclusions.
-   - It reports only this tested corpus and makes no claim about W1 support for other programs.
-
----
-
-## 5. CI Execution Profiles & Quality Gates
-
-The compiler test harness (`tools/ci_conformance.py`) enforces strict behavioral quality gates:
-
-### 5.1 Integration profile (`--profile=integration`)
-- Evaluates all 168 corpus fixtures across all engines.
-- Skips unsupported features on specific engines based strictly on `tests/engine_profiles.json`.
-- **Requirement:** Every unsupported feature must carry an explicit, non-empty reason that identifies the unsupported capability and its support boundary.
-- **Result:** Passes (168/168) if and only if all supported features pass without failure, while accurately reporting unsupported counts.
-
-### 5.2 Release profile (`--profile=release`)
-- Evaluates all 168 corpus fixtures across all engines without allowing any unsupported exclusions.
-- **Requirement:** Every engine must pass 100% of all fixtures.
-- **Result:** Fails on any unsupported fixture or behavioral mismatch. It currently passes all 168 fixtures on all four engines with no exclusions; 
-
----
-
-## 6. Standalone W1 Execution Contract
-
-When invoking W1 via `w build --backend=selfhost <file.w>` or `w build --selfhost <file.w>`:
-- The command executes the native `w1_stage2` binary directly via `subprocess.run([w1_bin, input, output])`.
-- **No W0 pre-check or pre-filtering is performed.**
-- If the source file uses a feature outside W1's measured subset, the native W1 compiler itself parses, validates, and emits its own error messages directly.
+`w build --backend=selfhost` invokes native W1 directly, with no W0 semantic pre-check.
+Unsupported syntax or semantics must be diagnosed by W1. See [known limits](KNOWN_LIMITS.md)
+for runtime and platform boundaries.

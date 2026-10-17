@@ -145,7 +145,7 @@ class CompilationSession:
         from checker.TypeChecker import TypeChecker
         module_id = self.module_id(path)
         if program is None:
-            program = Parser(file=path).parse(source)
+            program = Parser(file=path).parse(source, recover=True)
             self.parse_counts[path] = self.parse_counts.get(path, 0) + 1
         self.validate_names(program, path)
         for node in program.body:

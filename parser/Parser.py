@@ -3,7 +3,7 @@ from typing import List, Optional
 from wtokens.Token import Token
 from wtokens.TokenType import TokenType
 from lexer.Lexer import Lexer
-from error.Error import ParserError
+from error.Error import ParserError, ParserErrors
 from node.NodeType import (
     ExternFnDecl, LambdaExpr, FunctionType as AstFunctionType, Node, Program, Stmt, Expr, TypeNode, Pattern, Block,
     NamedType, GenericType, TypeParam, OptionalType, ListType, DictType, TupleType, ResultType, ErrorUnionType,
@@ -65,15 +65,20 @@ class Parser:
         self.file = file
         self.tokens: List[Token] = []
         self.pos = 0
+        self.recover = False
+        self.diagnostics = []
 
-    def parse(self, source: str, show_tokens: bool = False) -> Program:
-        lexer = Lexer(source, file=self.file)
-        self.tokens = lexer.tokenize()
+    def parse(self, source: str, show_tokens: bool = False, *, tokens=None, recover=False) -> Program:
+        self.tokens = tokens if tokens is not None else Lexer(source, file=self.file).tokenize()
         self.pos = 0
+        self.recover = recover
+        self.diagnostics = []
         if show_tokens:
             print("Tokens:", self.tokens)
         try:
             program = self.produce_ast()
+            if self.diagnostics:
+                raise ParserErrors(self.diagnostics)
             program.source_text = source
             return program
         except RecursionError:
@@ -91,11 +96,50 @@ class Parser:
         body: List[Stmt] = []
 
         while not self.is_at_end():
-            stmt = self.parse_stmt(allow_top_level=True)
+            stmt = self._recover_statement(allow_top_level=True)
             if stmt is not None:
                 body.append(stmt)
 
         return Program(body=body, line=start_line, col=start_col)
+
+    def _recover_statement(self, allow_top_level=False):
+        start = self.pos
+        try:
+            return self.parse_stmt(allow_top_level=allow_top_level)
+        except ParserErrors:
+            raise
+        except ParserError as error:
+            if not self.recover:
+                raise
+            self.diagnostics.append(error)
+            if len(self.diagnostics) >= 100:
+                raise ParserErrors(self.diagnostics)
+            self._synchronize(start, allow_top_level)
+            return None
+
+    def _synchronize(self, start, top_level):
+        starters = {TokenType.LET, TokenType.FN, TokenType.STRUCT, TokenType.ENUM,
+                    TokenType.CLASS, TokenType.INTERFACE, TokenType.IMPORT,
+                    TokenType.WHILE, TokenType.FOR, TokenType.RETURN,
+                    TokenType.BREAK, TokenType.CONTINUE}
+        depth = 0
+        for token in self.tokens[start:self.pos]:
+            if token.type == TokenType.LBRACE:
+                depth += 1
+            elif token.type == TokenType.RBRACE:
+                depth = max(0, depth - 1)
+        while not self.is_at_end():
+            token = self.at()
+            if depth == 0:
+                if self.pos > start and token.type in starters:
+                    return
+                if token.type == TokenType.RBRACE and not top_level:
+                    return
+            if token.type == TokenType.LBRACE:
+                depth += 1
+            elif token.type == TokenType.RBRACE:
+                depth = max(0, depth - 1)
+            self.advance()
 
     # ==========================================
     # Stream Navigation Helpers
@@ -703,8 +747,9 @@ class Parser:
         tail_expr: Optional[Expr] = None
 
         while not self.check(TokenType.RBRACE) and not self.is_at_end():
-            stmt = self.parse_stmt()
-            statements.append(stmt)
+            stmt = self._recover_statement()
+            if stmt is not None:
+                statements.append(stmt)
 
         self.expect(TokenType.RBRACE, code="P007", msg="Unterminated block, expected '}'")
 

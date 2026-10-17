@@ -19,9 +19,10 @@ def test_ascii_allocation_and_lifetime_contract():
     source = r'''#include "runtime/w_runtime.h"
 #include <assert.h>
 int main(void) {
+    assert(W_RUNTIME_ABI_VERSION == 2 && sizeof(WVal) <= 32);
     for (int64_t code = 0; code < 128; code++) {
         WVal character = w_builtin_chr(w_int(code));
-        assert(character.tag == W_STR && character.string_length == 1);
+        assert(character.tag == W_STR && character.as.string.length == 1);
         assert(w_builtin_ord(character).as.i == code);
         WVal retained = w_clone(character);
         w_release(character);
@@ -40,6 +41,32 @@ int main(void) {
     w_release(unicode);
     assert(w_builtin_ord(copied).as.i == 128578);
     w_release(copied);
+    assert(w_eq(w_float(0.0), w_float(-0.0)));
+    assert(!w_eq(w_float(NAN), w_float(NAN)));
+    assert(!w_eq(w_str_n("a\0b", 3), w_str_n("a\0c", 3)));
+    assert(w_eq(w_str_n("a\0b", 3), w_str_n("a\0b", 3)));
+    char* shared_data = malloc(4);
+    assert(shared_data);
+    memcpy(shared_data, "x\0y", 4);
+    WVal shared = w_owned_str_n(shared_data, 3);
+    WVal alias = w_clone(shared);
+    WVal values = w_make_list(2, (WVal[]){shared, w_str("static")});
+    w_release(shared);
+    w_release(values);
+    assert(w_eq(alias, w_str_n("x\0y", 3)));
+    w_release(alias);
+    WVal option = w_enum_payload("Option", "Some", w_int(7));
+    assert(w_eq(option, w_int(7)));
+    w_release(option);
+    int64_t released = w_g_release_count;
+    w_release(w_unit());
+    w_release(w_none());
+    w_release(w_int(7));
+    w_release(w_float(1.5));
+    w_release(w_bool(true));
+    w_release(w_pointer(NULL));
+    w_release(w_str("static"));
+    assert(w_g_release_count == released);
     assert(w_g_alloc_count == w_g_free_count && w_g_live_objects == 0);
     w_runtime_cleanup();
     return 0;

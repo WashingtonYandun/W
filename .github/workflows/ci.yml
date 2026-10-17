@@ -103,6 +103,7 @@ jobs:
           W_SANITIZE=1 python3 -m tests.unit.test_audit_remediation
           W_SANITIZE=1 python3 -m tests.unit.test_mir
           W_SANITIZE=1 python3 -m tests.unit.test_audit_completion
+          W_SANITIZE=1 python3 -m tests.unit.test_audit_readiness
           W_SANITIZE=1 python3 -m tests.unit.test_compilation_session
           python3 -m tests.unit.test_phase_a
           python3 -m tests.unit.test_ownership_control_flow
@@ -124,3 +125,42 @@ jobs:
           path: |
             .w_cache/ci-artifacts/
             .w_cache/compiler*.c
+
+  windows-toolchain:
+    name: Windows CLI and native C99 smoke
+    runs-on: windows-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        shell: pwsh
+    env:
+      CC: clang
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Check sources and build with portable host adapters
+        run: |
+          python main.py check --stats examples/01_hello_world.w
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python main.py build --stats examples/01_hello_world.w -o hello.exe
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          ./hello.exe
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Bootstrap W1 through the Windows cache lock
+        run: |
+          python main.py build --backend=selfhost tests/runtime/readiness_patterns.w -o patterns.exe
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          ./patterns.exe
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Package and verify the native SQLite pilot
+        run: |
+          python tools/package_measurement_pilot.py --output dist/measurement-pilot
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Upload the tested Windows x64 pilot
+        uses: actions/upload-artifact@v4
+        with:
+          name: measurement-pilot-windows-x64
+          path: dist/measurement-pilot/
+          if-no-files-found: error

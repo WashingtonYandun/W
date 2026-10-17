@@ -148,6 +148,7 @@ When modifying compiler frontend, parser, or code generation logic that affects 
 
 ## Coding & Commit Standards
 
+- **Documentation Scope:** Keep `SPEC.md` and `docs/` focused on current public contracts and usage. Maintain ADRs, audit reports, implementation histories, operational roadmaps, and session notes outside the source repository. Update the relevant existing manual instead of adding a completion report. Store generated verification output in local caches or CI artifacts.
 - **Language Policy:**
   - All source code, identifiers, types, comments, documentation, and commit messages must be strictly in **English**.
 - **Code Formatting:**

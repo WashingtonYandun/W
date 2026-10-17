@@ -10,6 +10,8 @@ int32_t pilot_status(void *handle);
 int32_t pilot_begin(void *handle);
 int32_t pilot_insert(void *handle, int64_t id, int64_t value);
 int32_t pilot_commit(void *handle);
+int32_t pilot_record_import(void *handle, int64_t rows, int64_t input_bytes);
+int64_t pilot_import_count(void *handle);
 int32_t pilot_rollback(void *handle);
 int64_t pilot_count(void *handle);
 int64_t pilot_total(void *handle);

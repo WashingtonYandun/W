@@ -568,3 +568,16 @@ not depend on Python's grammar.
   - `d.values() -> list[V]` (returns list of values in insertion order)
 
 ---
+
+## Pattern bindings, cyclic display and recovered diagnostics
+
+Bindings in one pattern must be unique at every depth. An enum pattern's nominal owner
+is checked within tuples and payloads as well as at the root. Grouping does not change
+compatibility. Formatting preserves tuple-pattern grouping.
+
+`str` and printing render an active ancestor class as `<cycle>`. An alias encountered
+in independent branches renders fully. This finite display rule does not collect cycles.
+
+`w check --json` may report multiple syntax errors in `diagnostics`, preserving the
+existing fields of the first error. Recovery is diagnostic only: no recovered tree is
+checked or executed. The diagnostic budget is 100 errors per parse.
