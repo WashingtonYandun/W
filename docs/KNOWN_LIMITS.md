@@ -144,8 +144,7 @@ objects.
 and a strong cycle is silent unless the memory check or an external leak detector is on.
 
 **Decision.** Keep `W_MEM_CHECK` explicitly opt-in in every execution mode. Runtime
-defaults must not change stderr or exit status based on build mode. See
-Native runtime diagnostics remain opt-in through `W_MEM_CHECK`.
+defaults must not change stderr or exit status based on build mode. Native runtime diagnostics remain opt-in through `W_MEM_CHECK`.
 
 ---
 
