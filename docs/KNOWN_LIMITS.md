@@ -82,43 +82,17 @@ cada nueva categoría, especialmente clases con herencia y tipos genéricos mono
 
 ---
 
-## 3. W1 has measured corpus parity, not universal feature parity
+## 3. W1 support is bounded by the tested corpus
 
-**What happens.** `selfhost/w1.w` (bundled from `selfhost/src/*.w`) is a compiler with
-its own lexer, recursive-descent parser, token-driven semantic pass with type interning,
-and direct-to-C emitter. It compiles all 168 fixtures in the public corpus, including
-eight F03 error-union fixtures, 15 generic fixtures and the checked-module fixture. Its
-support outside those tested programs is not guaranteed to match W0:
+W1 is a self-hosted compiler with a narrower supported profile than W0. Its measured
+coverage is maintained in the [engine parity matrix](ENGINE_PARITY_MATRIX.md); passing
+the listed fixtures does not guarantee equivalent behaviour for every W program.
 
-| Area | Verified | Remaining boundary |
-| :--- | :--- | :--- |
-| Generic functions, structs, enums, recursive ADTs and cycle diagnostics | 15/15 core corpus fixtures across all engines | This is fixture coverage, not exhaustive equivalence for every generic program or constraint. |
-| Imports with generic specialization | `checked_modules` fixture passes in W1 | W1 expands modules into tokens; it does not share W0's typed-module cache or canonical declaration arena. |
-| Closed error unions | All 8 release fixtures pass on the four engines: two runtime cases and six negative cases | Only primitive, non-generic struct and non-generic enum alternatives are supported. |
-| Closures, FFI, generic OOP, stdlib and LSP | Separate expansion-suite coverage | No claim of W1 parity; see [EXPANSION.md](EXPANSION.md). |
+W1 expands imported modules into a token stream and qualifies module names, but it does
+not share W0's typed compilation sessions or canonical declaration arena. The bootstrap
+fixed point demonstrates deterministic self-hosting, not universal language parity or
+semantic correctness outside the tested programs.
 
-W1 expands imports into a token stream, qualifies module names, enforces `pub` exports,
-and detects cycles (`selfhost/src/03_modules.w`). The checked-module fixture—including
-its imported generic specialization—passes. This is not W0's `CompilationSession`: W1
-does not maintain a shared typed-module cache or canonical cross-module declaration arena.
-
-**Why it is this way.** W1 is a bootstrap: its purpose is to prove the language can
-describe a compiler and reach a reproducible fixed point, not to duplicate W0.
-
-**Cost.** "Self-hosting" here means "recompiles itself with `cc` and a handwritten C runtime
-header", and it says nothing about the expressiveness of the language subset it uses. The
-three-stage fixed point proves determinism and convergence; it cannot prove correctness,
-because a bug in the semantics is reproduced identically at every stage.
-
-**State.** F01 closed with 114/114 fixtures on 2026-10-15. F03 extended that corpus to
-121/121 cases on all four engines, with zero unsupported fixtures. The H01–H03 critical
-regressions expanded the corpus to 129 cases; the dedicated F03 ownership regression
-at that point brought coverage to 130/130 cases. The latest audit regressions extend the current corpus to 168 cases. The three-stage bootstrap
-also reaches an identical C output hash at every stage. These checks prove the recorded
-corpus and deterministic self-hosting contract; they do not prove universal language
-parity or semantic correctness outside the tested programs.
-
----
 
 ## 4. Native runtime panic locations have a defined supported scope
 
@@ -198,26 +172,3 @@ gains either atomics or a "no shared state" discipline with a runtime that enfor
 | Dictionary keys | `int`, `str`, `bool`, `enum` only; `float` and composites containing it are rejected with `W2010`. |
 | `NetError` | Declared in the prelude (`checker/SymbolTable.py`) and referenced by a parser fixture, but nothing produces one. Either implement a network module or remove the type. |
 | Standard library size | `text` (3 functions), `algorithms` (3), `io` (2), `bytes` (2). `join` cuesta O(bytes de salida + partes), con un builder de dos pasadas. No Unicode normalisation. |
-| Benchmark baselines | `bench/BASELINE.md` has no numbers from any compiler other than W's own engines, so "speedup" only describes how slow the Python interpreter is. El importador SQLite sí tiene una referencia C independiente, tiempos, RSS y tamaño; no extrapolarlo a los microbenchmarks. |
-
-## 8. Costes que siguen abiertos tras la auditoría
-
-`WVal` conserva una representación etiquetada: 48 bytes en la ABI arm64 medida. Las
-listas de enteros y los rangos usados como valores conservan ese layout. Los bucles
-directos sobre rangos usan contadores sin asignar una lista. La caché UTF-8
-elimina rescaneos repetidos en strings con ownership, a cambio de un índice lazy de hasta
-un `size_t` por byte; el caso ASCII con longitud cacheada evita esa tabla. Los literales prestados no tienen esa caché. `pad_left` y
-`bytes.decode` construyen listas de partes; eliminar copias cuadráticas no elimina todas
-las asignaciones. El backend principal consume MIR verificado y especializa locales,
-parámetros y retornos `int`, `float` y `bool`. Los contenedores siguen usando `WVal`;
-no existe un backend LLVM directo. Véase `MIR_DESIGN.md` para el pipeline y sus límites.
-
-El nuevo corpus tiene 168 fixtures, incluidos 28 casos de la auditoría. La paridad
-medida no cubre todas las combinaciones del lenguaje. Los recursos FFI `opaque` siguen
-requiriendo disciplina manual y SQLite del sistema no se recompila con sanitizers.
-Véase `FFI_VALIDATION.md` para el contrato del piloto y las mediciones reproducibles.
-
-Los strings ASCII de un carácter producidos por indexación y chr usan almacenamiento
-inmutable estático, incluido NUL. El resto conserva ownership administrado. Los contadores
-W_MEM_STATS miden buffers lógicos; no todos los malloc ni sus bytes. El runner SQLite
-recoge ese perfil en una ejecución separada de las muestras temporizadas.

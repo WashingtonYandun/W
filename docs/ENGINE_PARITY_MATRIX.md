@@ -1,6 +1,6 @@
-# Engine Feature Parity Matrix & Implementation Boundaries
+# Engine Support and Corpus Coverage
 
-> **Milestone D01 Contract:** W documents measured engine support for every fixture in the public core corpus. This matrix does not claim universal language parity.
+This matrix reports tested fixture coverage for W0 and W1. It does not claim universal language parity.
 
 ---
 
@@ -27,7 +27,7 @@ flowchart TD
 ```
 
 1. **W0 Interpreter (`runtime/Interpreter.py`):** Canonical reference AST tree-walking interpreter.
-2. **W0 Typed HIR (`hir/HirCCodeGen.py`):** Entrada principal; MIR baja HIR a MIR verificado antes de emitir C99.
+2. **W0 MIR C99 (`mir/CCodeGen.py`):** Default native backend; it lowers verified MIR to portable C99.
 3. **W0 AST C99 (`codegen/CCodeGen.py`):** Secondary C99 oracle retained for differential fuzzing and cross-engine verification.
 4. **W1 Self-Hosted (`selfhost/w1.w`):** Native Stage-2 standalone compiler binary compiled via 3-stage bootstrap fixed-point.
 
@@ -35,11 +35,11 @@ flowchart TD
 
 ## 2. Feature Parity Matrix
 
-The following table summarizes compiler support across the public core corpus. The counts are regenerated from `summary.json` by `tools/ci_conformance.py --matrix`, which reports measurements from the last verified run rather than restating `tests/engine_profiles.json`. Closures, FFI, generic OOP, stdlib and the LSP live in a separate expansion suite; see [EXPANSION.md](EXPANSION.md). The matrix describes measured corpus support, not universal language parity.
+The following table summarizes compiler support across the public core corpus. The counts are regenerated from `summary.json` by `tools/ci_conformance.py --matrix`, which reports measurements from the last verified run rather than restating `tests/engine_profiles.json`. Other capabilities have separate contract tests; W1 support outside this corpus is not guaranteed.
 
 <!-- GENERATED TABLE START -->
 
-| Feature Category | Fixtures | W0 Interpreter | W0 AST C99 | W0 Typed HIR (Default) | W1 Self-Hosted C99 | Status / Milestone |
+| Feature Category | Fixtures | W0 Interpreter | W0 AST C99 | W0 MIR C99 (Default) | W1 Self-Hosted C99 | Status |
 | :--- | :---: | :---: | :---: | :---: | :---: | :--- |
 | **`core`** | 144 | ✅ 144/144 | ✅ 144/144 | ✅ 144/144 | ✅ 144/144 | Declared supported |
 | **`generics`** | 15 | ✅ 15/15 | ✅ 15/15 | ✅ 15/15 | ✅ 15/15 | Declared supported |
@@ -56,7 +56,7 @@ The `error_unions` category exercises subset propagation, runtime identity check
 struct, enum and scalar errors, and exhaustive `else err` matching. Six negative fixtures
 cover invalid alternatives, missing alternatives, incompatible propagation and unsupported
 payload subpatterns. The dedicated ownership fixture covers managed error payloads,
-failed guards, CoW copies, direct Result widening and propagation cleanup. F03 passes all eight cases across the four engines.
+failed guards, CoW copies, direct Result widening and propagation cleanup.
 
 The `core` category includes five fixtures that pin runtime **panic** behaviour
 (`panic_division`, `panic_modulo`, `panic_index`, `panic_dict_key`,
@@ -75,7 +75,7 @@ gap: a construct the checker accepted while the HIR backend rejected it.
 
 ### 3.1 Core Language & Control Flow (`core`)
 - **Status:** **100% Parity** across all 4 engines.
-- **Coverage:** 98 fixtures (positive runtime fixtures, control flow, functions, OOP contracts, recursion, and error diagnostics).
+- **Coverage:** 144 fixtures (positive runtime fixtures, control flow, functions, OOP contracts, recursion, and error diagnostics).
 - **Features Included:**
   - Arithmetic, logic, bitwise, and comparison expressions.
   - While loops, range loops (`for i in 0..10`), break, continue, and scope cleanup.
@@ -102,7 +102,7 @@ gap: a construct the checker accepted while the HIR backend rejected it.
 
 ### 3.4 Deterministic Memory & Weak References (`core`)
 - **Status:** **100% Parity** across all 4 engines.
-- **Coverage:** Tested under `tests/runtime/weak_references.w`, `memory_counters_verification.w`, and B03 leak suites.
+- **Coverage:** Tested under `tests/runtime/weak_references.w`, `memory_counters_verification.w`, and leak regression tests.
 - **Features Included:**
   - Deterministic `CleanupScope` ARC with zero tracing garbage collector pauses.
   - Control block architecture (`WWeakControl`) with separate strong and weak reference counters.
@@ -110,18 +110,18 @@ gap: a construct the checker accepted while the HIR backend rejected it.
   - Verified under AddressSanitizer and LeakSanitizer: 0 memory leaks for acyclic and weak-broken structures.
 
 ### 3.5 Monomorphized Generics & ADTs (`generics`)
-- **Status:** **15/15 corpus fixtures pass on all four engines**; F01 is complete.
+- **Status:** **15/15 corpus fixtures pass on all four engines**.
 - **Coverage:** Generic functions and structs, generic enums and `Option`/`Result`, recursive ADTs, imported generic specialization, and stable constraint/layout-cycle diagnostics (`W2011`, `W2001`).
 - This is measured corpus coverage, not a guarantee that every possible generic program has identical behavior on W0 and W1.
 
 ### 3.6 Checked Compilation Sessions & Modules (`checked_modules`)
-- **Status:** **1/1 corpus fixture passes on all four engines**; F01 is complete.
+- **Status:** **1/1 corpus fixture passes on all four engines**; 
 - W0 implements whole-program `CompilationSession` with arena deduplication and diamond import caching.
 - W1 loads imports, enforces public names, qualifies module identities, and detects cycles before feeding a flattened token stream to its compiler. This passes the checked-module fixture, including imported generic specialization, but does not provide W0's shared typed declarations or specialization cache.
 
 ### 3.7 Closed Error Unions (`error_unions`)
 - **Status:** **8/8 fixtures pass on all four engines**: two runtime fixtures and six
-  invalid fixtures rejected consistently; F03 is complete.
+  invalid fixtures rejected consistently.
 - `T ! E1 | E2` is restricted to the Result error channel. `?` widens an error only when
   the source set is a subset of the declared target set. `else err` patterns check scalar
   tags or exact nominal struct/enum identity, including module-qualified types, and
@@ -141,7 +141,7 @@ It is critical to distinguish between two distinct compiler guarantees:
 
 2. **Core Corpus Parity:**
    - Corpus parity means every fixture in this 168-case public corpus passes on every engine, with no unsupported exclusions.
-   - It does not claim W1 parity for the separate E expansion suite or every possible source program. F01 closed the 16 exclusions that previously existed; F03 added measured error-union coverage.
+   - It does not claim W1 parity for separate expansion-suite coverage or every possible source program. The matrix reports only the current tested corpus.
 
 ---
 
@@ -149,16 +149,16 @@ It is critical to distinguish between two distinct compiler guarantees:
 
 The compiler test harness (`tools/ci_conformance.py`) enforces strict behavioral quality gates:
 
-### 5.1 Integration Profile (`--profile=integration`)
-- Evaluates all 130 corpus fixtures across all engines.
+### 5.1 Integration profile (`--profile=integration`)
+- Evaluates all 168 corpus fixtures across all engines.
 - Skips unsupported features on specific engines based strictly on `tests/engine_profiles.json`.
 - **Requirement:** Every unsupported feature must carry an explicit, non-empty reason that identifies the unsupported capability and its support boundary.
 - **Result:** Passes (168/168) if and only if all supported features pass without failure, while accurately reporting unsupported counts.
 
-### 5.2 Release Profile (`--profile=release`)
+### 5.2 Release profile (`--profile=release`)
 - Evaluates all 130 corpus fixtures across all engines without allowing any unsupported exclusions.
 - **Requirement:** Every engine must pass 100% of all fixtures.
-- **Result:** Fails on any unsupported fixture or behavioral mismatch. It currently passes all 130 fixtures on all four engines with no exclusions; F03 is complete.
+- **Result:** Fails on any unsupported fixture or behavioral mismatch. It currently passes all 168 fixtures on all four engines with no exclusions; 
 
 ---
 

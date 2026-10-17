@@ -2,7 +2,7 @@
 
 > **Status:** The current alpha toolchain is `0.4.0a1`. Sections 1–11 describe the frozen core grammar and are normative; sections 12–14 describe implementation contracts.
 >
-> **Targets:** `W0` is the reference implementation and the authority on whether a program is valid. `W1` is an experimental self-hosted compiler whose supported subset is measured by the public release corpus. That corpus now includes generic fixtures, checked modules, `Option`/`Result` patterns and F03 error unions; passing it does not establish universal parity. See [docs/ENGINE_PARITY_MATRIX.md](docs/ENGINE_PARITY_MATRIX.md) and §12.
+> **Targets:** `W0` is the reference implementation and the authority on whether a program is valid. `W1` is an experimental self-hosted compiler whose supported subset is measured by the public release corpus. The measured support boundary is documented in [docs/ENGINE_PARITY_MATRIX.md](docs/ENGINE_PARITY_MATRIX.md).
 >
 > **Thesis:** W is a compact, statically typed language for small native tools, with deterministic diagnostics and inspectable C99 output. Expansion beyond this core is documented in [docs/EXPANSION.md](docs/EXPANSION.md).
 
@@ -405,6 +405,14 @@ la firma y en el patrón, por ejemplo `storage.ParseError(problem)`.
 
 ---
 
+### Nested optional and result semantics
+
+Parenthesized types group constructors: `(T?) ! E` is Result[Option[T],E], `(T ! E)?` is Option[Result[T,E]], and `(T ! E1) ! E2` is Result[Result[T,E1],E2]. Ungrouped `T ! E1 ! E2` associates to the right. Formatting preserves these distinctions.
+
+Postfix `?` handles exactly the outer constructor. A second `?` on an optional payload is invalid inside a function whose outer return type is Result; use an explicit branch/recovery value instead. Error propagation requires the source error set to be a subset of the declared destination set; it never converts or flattens error payloads. A complete `Result[T, E1]` value can be assigned to or returned as `Result[T, E2]` only when `T` is identical and every `E1` alternative is present in `E2`; this preserves the tagged value without wrapping it in another `Ok`. Nested Result layers are never collapsed. Returning an inner Result as a success payload requires preserving its outer success layer. Bare values denote success, including when success and error types coincide.
+
+Optional/Option and fallible/Result spellings share canonical type identity. Optional display is payload-transparent; explicit Some values follow the same display policy as sugar. Some(None) differs from None. Implicit conversions do not add/remove nullable depth; use explicit Some for nested optionality. Guarded match arms do not contribute unconditional coverage. Nested variant payload cases must be exhaustive.
+
 ## 8. Memory Model: Deterministic Reference Counting + Copy-on-Write
 
 > **Core Value Semantics Guarantee:** *"Copying a W value produces a semantically independent value. Internal storage may be shared through copy-on-write as an implementation optimization, but mutations must never be observable through another value alias."*
@@ -432,6 +440,24 @@ la firma y en el patrón, por ejemplo `storage.ParseError(problem)`.
    - Note that a value (such as a `struct` or `list`) may contain a reference to a `class` instance without losing its own value semantics. If a `class` instance holds a field containing a `struct` that references that `class` instance (`Node(class) -> Wrapper(struct) -> Node(class)`), the cycle crosses a reference-type (`class`) identity boundary; the subgraph formed solely by value storage remains strictly acyclic.
 
 ---
+
+### Weak class references
+
+`Weak[C]` is an invariant value handle for a concrete class `C`. `weak(object)`
+creates a non-owning reference; `upgrade(handle)` returns `C?` and acquires strong
+ownership on success. Expired handles return None. Weak values cannot access
+fields or methods directly and cannot be dictionary keys. Weak handles compare by
+stable identity, even after expiration; copies preserve identity, while handles
+for different objects remain distinct. Display is `weak(alive)` or `weak(expired)`.
+
+Default non-optional weak class fields are independent empty expired handles;
+optional weak fields default to None. Empty handles compare equal to their copies
+and never upgrade. There is no implicit Weak[Derived]-to-Weak[Base] conversion.
+
+Strong references still form unreclaimed cycles. Use weak back-references or
+explicitly clear strong edges. The native control block outlives object destruction
+until the last weak handle is released, and invalidates the object before field
+cleanup. This runtime is single-threaded.
 
 ## 9. Module System
 
@@ -546,102 +572,3 @@ cifras Unicode, hexadecimal, sufijos y NUL con `W4003`; no depende de la gramát
   - `d.values() -> list[V]` (returns list of values in insertion order)
 
 ---
-
-## 12. Self-Hosting Bootstrap Pipeline
-
-W includes a self-hosting compiler written entirely in W (`selfhost/w1.w`), bootstrapped from the Python `W0` reference implementation and emitting portable C99:
-
-```text
-Step 1: W0 (Python Host Reference Implementation)
-        └── Full Lexer, Parser, TypeChecker, Formatter, Tree-Walk Interpreter, and C99 Backend.
-        └── Compiles `selfhost/w1.w` -> `compiler0.c` -> `w1_stage1` native binary.
-
-Step 2: Stage-1 Self-Compilation (`w1_stage1`)
-        └── `w1_stage1` (native binary) compiles `selfhost/w1.w` -> `compiler1.c` -> `w1_stage2`.
-
-Step 3: Stage-2 Fixed-Point Verification (`w1_stage2`)
-        └── `w1_stage2` compiles `selfhost/w1.w` -> `compiler2.c`.
-        └── Fixed-point identity verified: SHA256(compiler0.c) == SHA256(compiler1.c) == SHA256(compiler2.c).
-        └── `w1_stage2` natively compiles and passes all runtime conformance tests with zero Python.
-```
-
----
-
-## 13. Language Evolution Roadmap
-
-Reconstructed from what the toolchain actually implements. Every entry below is
-present in the tree and covered by the test suite unless marked otherwise.
-
-* **`v0.1.0` — Core + Self-Host + OOP** ✅
-* **`v0.1.1` — Harden & Oracle** ✅
-* **`v0.1.2` — Diagnostics & Stress** ✅
-* **`v0.1.3` — Ownership & Self-Host Parity** ✅ (deterministic cleanup scopes, W1 semantic and diagnostic parity on the core subset)
-* **`v0.2.0` — Generics, ADTs & Option/Result unification** ✅ (monomorphization for structs, functions, enums and classes)
-* **`v0.2.x` — Copy-on-write telemetry, weak class references, compilation sessions** ✅
-* **`v0.3.0` — Typed HIR as the default backend, `LayoutGraph` finite-layout verification, declaration-order independence** ✅
-* **`v0.3.0` (Phase E) — First-class functions, closures, modules, FFI, stdlib, LSP** ✅
-* **`v0.4.0a1` — first alpha release.** Adds verified MIR with scalar execution and closes the current audit remediation set.
-* **`v0.4` — roadmap in progress.** Candidate work, each gated on the decisions in
-  `docs/EXPANSION.md`:
-  - F03 error composition (`T ! E1 | E2`) is implemented and measured in the four-engine
-    release corpus;
-  - mutable closure captures through shared cells, so a closure can mutate captured state;
-  - concurrency or an explicit statement that the runtime stays single-threaded;
-  - W1 support for expansion-suite features beyond the measured core corpus.
-
-## Phase A error composition clarification
-
-Parenthesized types group constructors: `(T?) ! E` is Result[Option[T],E], `(T ! E)?` is Option[Result[T,E]], and `(T ! E1) ! E2` is Result[Result[T,E1],E2]. Ungrouped `T ! E1 ! E2` associates to the right. Formatting preserves these distinctions.
-
-Postfix `?` handles exactly the outer constructor. A second `?` on an optional payload is invalid inside a function whose outer return type is Result; use an explicit branch/recovery value instead. Error propagation requires the source error set to be a subset of the declared destination set; it never converts or flattens error payloads. A complete `Result[T, E1]` value can be assigned to or returned as `Result[T, E2]` only when `T` is identical and every `E1` alternative is present in `E2`; this preserves the tagged value without wrapping it in another `Ok`. Nested Result layers are never collapsed. Returning an inner Result as a success payload requires preserving its outer success layer. Bare values denote success, including when success and error types coincide.
-
-Optional/Option and fallible/Result spellings share canonical type identity. Optional display is payload-transparent; explicit Some values follow the same display policy as sugar. Some(None) differs from None. Implicit conversions do not add/remove nullable depth; use explicit Some for nested optionality. Guarded match arms do not contribute unconditional coverage. Nested variant payload cases must be exhaustive.
-
-## Weak class references (B03)
-
-`Weak[C]` is an invariant value handle for a concrete class `C`. `weak(object)`
-creates a non-owning reference; `upgrade(handle)` returns `C?` and acquires strong
-ownership on success. Expired handles return None. Weak values cannot access
-fields or methods directly and cannot be dictionary keys. Weak handles compare by
-stable identity, even after expiration; copies preserve identity, while handles
-for different objects remain distinct. Display is `weak(alive)` or `weak(expired)`.
-
-Default non-optional weak class fields are independent empty expired handles;
-optional weak fields default to None. Empty handles compare equal to their copies
-and never upgrade. There is no implicit Weak[Derived]-to-Weak[Base] conversion.
-
-Strong references still form unreclaimed cycles. Use weak back-references or
-explicitly clear strong edges. The native control block outlives object destruction
-until the last weak handle is released, and invalidates the object before field
-cleanup. This runtime is single-threaded. W0/HIR enforce weak argument/type rules;
-W1 supports the concrete operations with dynamic argument checks and its existing
-limited static-checking profile. This does not establish W1 generic parity.
-
----
-
-## 14. Compiler Engine Parity & Determinism Contracts (Phase D)
-
-### 14.1 Four Execution Targets & Architectural Roles
-The W compiler architecture formally defines four execution targets:
-1. **W0 Interpreter (`runtime/Interpreter.py`):** Canonical tree-walking reference implementation over surface AST.
-2. **W0 Typed HIR (`hir/HirCCodeGen.py`):** Default native compilation target (`w build`, `w emit-c`). Operates strictly on type-interned, arena-verified High-Level Intermediate Representation (`HirModule`).
-3. **W0 AST C99 (`codegen/CCodeGen.py`):** Retained secondary native oracle for differential verification (`--backend=ast`).
-4. **W1 Self-Hosted C99 (`selfhost/w1.w`):** Native Stage-2 compiler binary compiled from self-hosted W sources.
-
-### 14.2 Bootstrap Fixed-Point vs. Feature Parity
-W distinguishes between two distinct compiler guarantees:
-* **Bootstrap Fixed-Point:** A 3-stage bootstrap self-compilation of `selfhost/w1.w` produces bit-identical C code:
-  $$\text{SHA256}(c_0) == \text{SHA256}(c_1) == \text{SHA256}(c_2)$$
-  This guarantees determinism and convergence of the self-hosted compiler subset.
-* **Feature Parity:** Documented in `docs/ENGINE_PARITY_MATRIX.md` and measured rather than declared. The release profile passes all 168 fixtures on all four engines, with no unsupported cases. This is corpus evidence, not a claim of universal W0/W1 equivalence; see the feature breakdown and limits in the parity matrix.
-
-### 14.3 Code Generation Determinism
-Given identical source text and compiler flags:
-1. Generated C99 source code is byte-for-byte identical across independent compiler invocations, varied temporary paths, and arbitrary `PYTHONHASHSEED` values.
-2. Emitted declarations (types, functions, global constants) follow deterministic topological and symbol-ordered sequences.
-
-### 14.4 Telemetry & Standard Stream Separation
-Under the `--stats` flag:
-1. Diagnostic telemetry reports phase timings under `timing_ms` (`lex`, `parse`, `check`, `total` for `run`/`build`; `hir` and `codegen` are added when a backend runs), peak RSS (`peak_rss_kb`), and the specialization counters reported by `MonomorphizationTelemetry.to_dict()` (`specialization_requests`, `deduplicated_hits`, `specialized_structs`, `specialized_enums`, `specialized_functions`).
-2. Execution commands (`run --stats`, `build --stats`) write JSON telemetry strictly to `stderr`, leaving program `stdout` unpolluted for exact differential oracle verification. Check commands (`check --stats`) emit JSON telemetry to `stdout`.
-

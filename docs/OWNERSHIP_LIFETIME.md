@@ -1,6 +1,6 @@
-# W Language Architecture: Deterministic Ownership & Lifetime Model (`v0.1.3`)
+# Ownership and Lifetime Model
 
-**Status:** Implemented & Verified Specification (`B01-B04`, `D01-D06`)  
+**Status:** Current runtime and compiler ownership contract  
 **Scope:** `W0 Typed HIR` (default), `W0 AST C99` (oracle), `W1 C99` (`selfhost/w1.w`), and C99 Runtime (`runtime/w_runtime.h`)
 
 ---
@@ -9,7 +9,7 @@
 
 W uses **deterministic single-threaded Reference Counting (RC) + Copy-on-Write (CoW)** without a tracing garbage collector and without exposing user-facing lifetime or borrow annotations.
 
-In `v0.1.3`, the compiler enforces deterministic lifetime management across **all control-flow paths**:
+The compiler enforces deterministic lifetime management across **all control-flow paths**:
 1. Normal lexical block exit (`}`).
 2. Early and final `return expr` statements (preserving returned values across cleanup).
 3. Postfix error/optional propagation (`expr?`) on both `none` and `err` branches.
@@ -109,21 +109,19 @@ memory diagnostics; `W_MEM_CHECK` is not a substitute for those tools.
 
 ---
 
-## 6. Forward Compatibility with `v0.3` Typed HIR
+## 6. Ownership across HIR and MIR
 
-The `CleanupScope` abstraction in `v0.1.3` is directly isomorphic to the explicit lifetime nodes planned for `v0.3` Typed HIR (`docs/HIR_ARCHITECTURE.md`):
-- `CleanupScope` entry/exit $\leftrightarrow$ `HIRScope` + `HIRDrop(local_id)`
-- `_own_expr` (`w_move` / `w_clone`) $\leftrightarrow$ `HIRMove` / `HIRRetain`
-- `return` transfer + scope unwind $\leftrightarrow$ `HIRReturn`
-- Postfix `?` unwind $\leftrightarrow$ `HIRPropagate`
+HIR preserves source-level value semantics and assignment order. MIR makes retain, transfer,
+and release operations explicit and verifies them before C generation. The native emitters
+use lexical cleanup scopes to release owned temporaries on normal exits.
 
-## Phase A managed strings and constructor contracts
+## Managed strings and constructor contracts
 
 The Phase A ownership contract defines the current string ownership extension. `w_str` borrows static storage; `w_owned_str` consumes a heap buffer and creates its RC owner; `w_copy_str` copies borrowed input such as argv. Dynamic strings participate in clone/release and allocation counters. `w_add` and `w_index_get_owned` results are registered owned temporaries in both native backends and W1. The borrowed `w_index_get` remains restricted to internal projection paths; dictionary value queries use the owned optional path.
 
 `w_ok`, `w_err` and `w_enum_payload` consume their payload. Generated constructor calls move registered temporaries or clone borrowed arguments. `w_unwrap_optional`, `w_unwrap_ok`, `w_unwrap_err` and `w_unwrap_success` return owned values; peek helpers borrow. Class fields and collection slots own their stored values. Leak counters include string owners; LSan remains necessary to find allocations outside the instrumented ownership model.
 
-## B01: runtime helper inventory and evaluation contract
+## Runtime helper inventory and evaluation contract
 
 The following contracts supersede older blanket claims in this document. Ownership
 is an emitter convention, not a dedicated HIR ownership type or a formal proof.
@@ -197,7 +195,7 @@ values into registered temporaries. This covers arguments, binary left operands,
 read receivers, collection entries and struct fields. Field reads retain their
 value immediately. Collection initialization evaluates key then value per entry.
 Already-owned temporaries are reused. These snapshots can increase RC/CoW traffic;
-B02 must measure that cost before optimizing lifetimes.
+This cost should be measured before changing temporary lifetimes.
 
 Las asignaciones evalúan índices y receptores de clase antes del RHS, una sola vez.
 Después protegen el RHS y resuelven el slot mutable: una lista puede realocarse durante
@@ -221,13 +219,12 @@ temporary receivers, self-assignment, append of an existing element, nested loop
 exits, optional/result propagation in match, failing assignment targets, handler
 payloads, short-circuit effects, coalesce and discarded constructors.
 
-Strong RC cycles remain unsupported (B03). Explicit process exit and runtime
+Strong reference cycles remain unsupported. Explicit process exit and runtime
 panics terminate the process rather than unwinding lexical scopes; they are not
 zero-leak acyclic success cases. Allocation failure and concurrent RC are outside
-this contract. W1 generic-language exclusions remain unchanged; this fixture uses
-its supported non-generic profile and unqualified Ok/Err constructors.
+this contract. W1 support remains limited to the fixtures documented in the [engine parity matrix](ENGINE_PARITY_MATRIX.md).
 
-## B03: class control blocks and weak handles
+## Weak references and class control blocks
 
 Class ownership is recorded in a control block with strong and weak counts and a
 nullable object pointer. One implicit weak reference protects the block while the
@@ -262,7 +259,7 @@ for the expected-leak process only; it does not suppress leaked allocations.
 
 ---
 
-## 11. Phase D Memory Safety & Sanitizer Gate
+## Runtime memory-safety validation
 
 The Phase D contract requires:
 1. **Continuous Sanitizer Matrix:** The full test suite runs under Clang AddressSanitizer (ASan), UndefinedBehaviorSanitizer (UBSan), and Linux LeakSanitizer (LSan) across 107 test fixtures on every pull request.
