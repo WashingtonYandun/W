@@ -2,28 +2,34 @@
 
 [![CI](https://github.com/WashingtonYandun/W/actions/workflows/ci.yml/badge.svg)](https://github.com/WashingtonYandun/W/actions/workflows/ci.yml)
 
-**W** is an experimental, statically typed language for small native tools and applications. It compiles to portable C99 and combines predictable value semantics, copy-on-write (CoW), deterministic reference counting (ARC), explicit errors, and controlled access to C libraries.
+<p align="center">
+  <img src="assets/wawi.jpg" alt="W language mascot" width="160">
+</p>
 
-The current alpha version is `0.4.0a1`. W is under active development and does not yet guarantee production stability. W0 is the reference compiler; W1 is a self-hosted compiler with a narrower supported profile. See the [engine parity matrix](docs/ENGINE_PARITY_MATRIX.md), [expansion status](docs/EXPANSION.md), and [known limits](docs/KNOWN_LIMITS.md) for the current boundaries.
+W is an experimental, statically typed language for native tools and applications. W0 compiles programs to portable C99 and uses deterministic reference counting, copy-on-write value semantics, explicit error handling, and a controlled C interoperability layer.
 
-## Getting started
+The current release is `0.4.0a1` (alpha). W0 is the reference compiler. W1 is a self-hosted compiler with a narrower, measured support profile. This project is under active development and is not yet production-stable.
 
-You need Python 3.10 or later and a C99 compiler to build native executables.
+## Quick start
+
+Requirements: Python 3.10 or later and a C99 compiler (`clang` or `gcc`).
 
 ```sh
 git clone https://github.com/WashingtonYandun/W.git
 cd W
+./w --version
 ./w run examples/01_hello_world.w
-./w check examples/01_hello_world.w
-./w build examples/01_hello_world.w -o build/hello
 ./w test
 ```
 
-You can also install W0 with `pip install .`. The package includes the frontend, HIR, C runtime, standard library, and LSP. Building the W1 bootstrap and running the development suite require a repository checkout.
+Build a native executable with:
 
-## Language at a glance
+```sh
+./w build examples/01_hello_world.w -o build/hello
+./build/hello
+```
 
-Functions are values, and closures capture values from their surrounding scope:
+## Language example
 
 ```w
 fn apply(transform: fn(int) -> int, value: int) -> int {
@@ -35,52 +41,38 @@ let add: fn(int) -> int = |value| => value + offset
 print(apply(add, 5))
 ```
 
-Closures capture by value: lists, dictionaries, and structs retain independent copy-on-write snapshots, and captured bindings cannot be mutated through the closure. Classes preserve identity and use strong references; use weak references to break strong cycles. See [known limits](docs/KNOWN_LIMITS.md) for current constraints and deferred decisions.
+Closures capture values. Lists, dictionaries, and structs use copy-on-write snapshots; classes keep reference identity. See the [ownership model](docs/OWNERSHIP_LIFETIME.md) and [known limits](docs/KNOWN_LIMITS.md).
 
-## Modules and C interoperability
+## Compiler and tools
 
-Modules expose only declarations marked `pub`:
+W0 provides an interpreter, a secondary AST-to-C backend, and the default typed HIR-to-verified-MIR C99 backend. W1 compiles itself and supports the subset measured in the [engine parity matrix](docs/ENGINE_PARITY_MATRIX.md).
 
-```w
-pub fn double(value: int) -> int { return value * 2 }
-```
-
-```w
-import "math.w" as math
-print(math.double(3))
-
-extern "C" fn sqrt(value: double) -> double
-print(sqrt(81.0))
-```
-
-The initial FFI supports scalar values and opaque handles. `int32` is checked at the C boundary; `int` and `int64` use 64-bit integers. W's `float` and `double` map to C `double`. Use `--link-lib m` when your platform requires linking libm. Opaque handles do not transfer ownership of W-managed memory.
-
-Import standard library modules with `import "std/text" as text`. The library includes `io`, `text`, `bytes`, and `algorithms`; see the [standard library guide](docs/STDLIB.md) for their contracts and limits.
-
-## Tooling
-
+- `./w run path.w`: execute with W0.
+- `./w check path.w`: parse and type-check without execution.
+- `./w build path.w -o program`: compile a native executable.
+- `./w emit-c path.w -o program.c`: emit C99 for inspection.
 - `./w fmt path.w`: format source while preserving comments.
-- `./w emit-c path.w -o program.c`: inspect generated C. Typed HIR is the default backend.
-- `./w build path.w -o program --sanitize`: build with ASan and UBSan instrumentation.
-- `./w lsp`: start the stdio Language Server Protocol server, which shares source snapshots and the type checker.
-- `./w test --differential 25 --seed 1000`: compare execution engines.
+- `./w lsp`: start the stdio language server.
+- `./w test`: run the conformance suite.
 
-If `main` returns an `Err`, W writes diagnostic `W4003` to `stderr` and exits with a non-zero status, so a failed program is distinguishable from a successful one.
+The FFI supports scalar values and opaque handles. It does not transfer ownership of W-managed memory. If `main` returns an `Err`, W emits diagnostic `W4003` and exits non-zero.
+
+## Documentation
+
+- [Language specification](SPEC.md): syntax and language semantics.
+- [Type system](docs/TYPE_SYSTEM_DESIGN.md), [HIR](docs/HIR_DESIGN.md), and [MIR](docs/MIR_DESIGN.md): compiler representations and contracts.
+- [Ownership and lifetimes](docs/OWNERSHIP_LIFETIME.md): ARC, copy-on-write, weak references, and cleanup.
+- [Engine support](docs/ENGINE_PARITY_MATRIX.md) and [known limits](docs/KNOWN_LIMITS.md): tested capabilities and boundaries.
+- [C interoperability](docs/FFI_VALIDATION.md) and [standard library](docs/STDLIB.md).
+- [Contributing](CONTRIBUTING.md) and [security policy](SECURITY.md).
 
 ## Repository layout
 
-- `lexer/`, `parser/`, `node/`, `wtokens/`: frontend and syntax.
-- `checker/`, `compiler/`: types, compilation sessions, modules, and specialization.
-- `hir/`, `codegen/`, `runtime/`: intermediate representation, C generation, and runtime.
-- `selfhost/src/`: modular W1 sources; `selfhost/w1.w` is generated by `python3 tools/bundle_w1.py`.
-- `stdlib/`, `tooling/`, `editors/`: standard library and editor tooling.
-- `tests/unit/`, `tests/runtime/`, `tests/types/`, `tests/fuzz/`: contracts, fixtures, and fuzz tests.
-- `examples/`, `bench/`, `tools/`: examples, benchmarks, and utilities.
+- `lexer/`, `parser/`, `node/`: language frontend.
+- `checker/`, `compiler/`: type checking, modules, and specialization.
+- `hir/`, `mir/`, `codegen/`, `runtime/`: intermediate representations, C generation, and runtime.
+- `selfhost/src/`: modular W1 source; `selfhost/w1.w` is bundled from these files.
+- `stdlib/`, `tooling/`, `editors/`: libraries and developer tooling.
+- `tests/`, `examples/`, `bench/`, `tools/`: regression suites, examples, benchmark workloads, and utilities.
 
-The [language specification](SPEC.md) defines W's syntax and semantics; current compiler contracts and tests define the implemented behavior.
-
-## Known limits
-
-W1 does not yet implement all of W0's generic specialization. The ARC runtime is single-threaded and does not support shared-memory concurrency. Direct range loops use bounded counters; range values still materialize lists. The FFI does not support C callbacks, pointer arithmetic, or automatic allocator transfer.
-
-W is licensed under the [MIT License](LICENSE). See [CONTRIBUTING.md](CONTRIBUTING.md) to contribute.
+W is licensed under the [MIT License](LICENSE).

@@ -1,72 +1,32 @@
-# W Language Architecture: Typed High-Level IR (`HIR`) Design
+# Typed High-Level IR (HIR)
 
-**Status:** Implemented & Default Production Backend (`C06`, `D01-D06`)  
-**Scope:** Compiler Middle-End (`AST → Name Resolution → Type Checking → Typed HIR → HirVerifier → Backends`)
+HIR is W0's typed intermediate representation. It carries canonical types, resolved
+symbols and fields, and explicit control-flow and assignment semantics from the checker
+to the lower-level MIR. The verifier rejects malformed internal representations before
+code generation. See [MIR design](MIR_DESIGN.md) for control-flow blocks, storage layout,
+ownership operations, and the C99 backend.
 
----
+## 1. Compiler pipeline
 
-## 1. Problem Statement & Architectural Motivation
-
-In `W v0.1.0` and `v0.1.1`, both the reference toolchain (`W0` in Python) and the self-hosted compiler (`W1` in `selfhost/w1.w`) operate directly on the surface Abstract Syntax Tree (`AST`):
-
-```text
-Source (.w) ──► Lexer ──► Surface AST ──► TypeChecker ──► Interpreter / C99 CodeGen
-```
-
-While direct AST traversal was sufficient to bootstrap `W1` and validate core semantics, it creates four structural risks as the language evolves toward **Generics (`v0.2`)**, **Function Types (`v0.3`)**, and **Closures (`v0.4`)**:
-
-1. **Repeated Semantic Disambiguation in Backends:**
-   Surface syntax contains overloaded constructs that only become unambiguous after type checking:
-   - `User("Ada")` (constructor call) vs `compute("Ada")` (function call);
-   - `State.Active` (enum variant) vs `user.name` (struct field) vs `account.balance` (class field) vs `math.sin` (module member);
-   - `obj.run()` via concrete class hierarchy vs `intf.run()` via dynamic interface dispatch;
-   - `+` on `int` (wrapping 64-bit two's complement), `float` (IEEE-754 `binary64`), or `str` (UTF-8 concatenation).
-2. **Evaluation-Order & Temporary Lowering Duplication:**
-   In `v0.1.1`, enforcing strict left-to-right (`L→R`) evaluation order across `gcc` (x86_64) and `clang` (ARM64) required manually binding call expressions to statement-level temporaries (`WVal _tN = ...;`) in both `codegen/CCodeGen.py` and `selfhost/w1.w`.
-3. **Copy-on-Write (CoW) Path Semantics:**
-   Deeply nested value mutations (`matrix[0].append(99)` or `grid.rows[1][0] = 5`) must detach every shared value container (`list`, `dict`, `struct`) along the lvalue access path until reaching a `class` reference boundary. Encoding this rule in HIR eliminates the risk of divergence between the interpreter and C99 codegen.
-4. **Monomorphization Target for Generics (`v0.2`):**
-   Monomorphizing generic `struct`, `enum`, `class`, and `fn` templates directly over untyped surface AST nodes is brittle because identifier scopes and method resolutions are not yet bound to canonical `SymbolId` and `TypeId` handles.
-
----
-
-## 2. Target Compiler Pipeline
-
-```mermaid
+¶¶¶mermaid
 flowchart TD
-    A["Source (.w)"] --> B["Lexer (Token Stream)"]
-    B --> C["Parser (Surface AST)"]
-    C --> D["Pass 1: Declaration & Type Collector"]
-    D --> E["Pass 2: Name Resolution & Type Checker"]
-    E --> F["HIR Lowering (Typed HIR)"]
-    F --> G["Monomorphization Pass (v0.2+)"]
-    G --> H["L→R Temporary & CoW Path Lowering"]
-    H --> I["MIR: CFG, ownership y layouts"]
-    I --> J["Verificador MIR → Backend C99 W0"]
-```
+    A["W source"] --> B["Lexer and parser"]
+    B --> C["AST"]
+    C --> D["Declaration collection and type checking"]
+    D --> E["Typed HIR"]
+    E --> F["HIR verification"]
+    F --> G["MIR lowering"]
+    G --> H["MIR verification"]
+    H --> I["C99 emission"]
+¶¶¶
 
-### Contratos implementados y relación con MIR
+The checker resolves overloads, constructors, modules, and generic specializations before
+HIR reaches MIR. HIR preserves expression order and CoW assignment paths; MIR makes
+control flow, storage layout, and ownership transitions explicit.
 
-HIR conserva la estructura del programa, tipos del arena, símbolos léxicos, targets de
-llamada y rutas CoW verificadas. `HirAssignment` conserva el valor de la asignación;
-`HirSequence` fija efectos condicionales sin adelantar operandos de cortocircuito.
-El análisis compartido de salidas comprueba retornos y fallthrough.
+## 2. Core HIR Data Model
 
-El pipeline principal ahora continúa con `mir/Lowering.py`: resuelve layouts físicos,
-convierte control y propagación en bloques básicos y terminadores, y explicita retención,
-transferencia y liberación. `mir/Verifier.py` verifica ese contrato antes de que
-`mir/CCodeGen.py` emita C. `hir/HirCCodeGen.py` es una fachada de compatibilidad; no emite
-expresiones HIR ni tiene fallback al backend AST. `w mir archivo.w` permite inspeccionarlo.
-
-Los modelos de las secciones siguientes describen el nivel HIR. Las clases ejecutables
-canónicas son `hir/HirNodes.py`; [MIR_DESIGN.md](MIR_DESIGN.md) describe el nivel inferior.
-MIR strengthens the audit contracts with verified control flow and explicit ownership transitions.
-
----
-
-## 3. Core HIR Data Model
-
-### 3.1 Identifiers & Metadata
+### 2.1 Identifiers & Metadata
 ```text
 struct Span {
     file_id: u32
@@ -78,7 +38,7 @@ type SymbolId = u32   # Unique per lexical binding (local, param, global fn, mod
 type TypeId   = u32   # Interned canonical type index (see TYPE_SYSTEM_DESIGN.md)
 ```
 
-### 3.2 Top-Level Module & Declarations (`HirModule`)
+### 2.2 Top-Level Module & Declarations (`HirModule`)
 ```text
 struct HirModule {
     file_path: str
@@ -110,7 +70,7 @@ struct HirFnDecl {
 }
 ```
 
-### 3.3 Statements (`HirStmt`)
+### 2.3 Statements (`HirStmt`)
 | HIR Statement Node | Purpose |
 | :--- | :--- |
 | `HirLet(symbol_id, type_id, is_mut, init_expr, span)` | Local variable declaration with resolved `SymbolId` and `TypeId` |
@@ -122,7 +82,7 @@ struct HirFnDecl {
 | `HirBreak(span)` / `HirContinue(span)` | Loop control transfer (statically verified `loop_depth > 0`) |
 | `HirExprStmt(expr, span)` | Expression evaluated for side effects |
 
-### 3.4 Expressions (`HirExpr`)
+### 2.4 Expressions (`HirExpr`)
 Every `HirExpr` contains `{ kind: HirExprKind, type_id: TypeId, span: Span }`:
 
 | `HirExprKind` Variant | Lowered Semantics |
@@ -151,18 +111,18 @@ Every `HirExpr` contains `{ kind: HirExprKind, type_id: TypeId, span: Span }`:
 
 ---
 
-### 3.5 Patrones resueltos de error
+### 2.5 Resolved error patterns
 
-`HirErrorTypePattern(error_type_id, binding, type_id, span, type_name)` representa una
-alternativa de una unión de errores. El TypeId de la alternativa gobierna la comparación
-runtime y el binding recibe ese mismo tipo. `type_name` conserva el texto de fuente
-para el dump; no interviene en la identidad nominal.
+`HirErrorTypePattern(error_type_id, binding, type_id, span, type_name)` represents one
+alternative in an error union. The alternative's `TypeId` controls runtime comparison,
+and the binding receives that same type. `type_name` preserves source text for dumps; it
+does not participate in nominal identity.
 
-`HirEnumPattern` representa variantes enum y constructores Option/Result. No puede
-representar alternativas de una unión de errores. El verificador rechaza mezclas de
-esas representaciones antes de emitir C; el verificador rechaza patrones de error no admitidos.
+`HirEnumPattern` represents enum variants and Option/Result constructors. It cannot
+represent error-union alternatives. The verifier rejects mixed representations and
+unsupported error patterns before C emission.
 
-## 4. Explicit Copy-on-Write (`HirCowPath`) Lowering
+## 3. Explicit Copy-on-Write (`HirCowPath`) Lowering
 
 One of W's defining semantic guarantees is that **mutating a nested value container never mutates aliased value bindings**, whereas mutating a field through a `class` instance mutates the shared reference object.
 
@@ -191,7 +151,7 @@ When the TypeChecker / HIR Builder constructs an lvalue path from an expression 
 
 ---
 
-## 5. Evaluation Order Lowering (`L→R` Sequence Points)
+## 4. Evaluation Order Lowering (`L→R` Sequence Points)
 
 Per `SPEC.md` Section 5.4, W guarantees strict left-to-right evaluation of all sub-expressions. Because C99 leaves function argument and binary operand evaluation order unspecified between sequence points, HIR lowering normalizes compound expressions into ordered statements. Effects that belong to an expression remain in a `Sequence(statements, value)` node and are emitted at that exact expression site. This is required for right operands of `and`, `or`, and `??`: the backend emits those sequences inside the conditional branch that evaluates the operand, so skipped operands cannot mutate state.
 
@@ -214,6 +174,15 @@ Both `gcc` and `clang` are forced by `;`-terminated C99 variable declarations to
 
 ---
 
-## 6. Implementation Status
+## 5. Current role
 
-Typed HIR is the primary backend for `w build` and `w emit-c`. The builder resolves types, symbols, fields, patterns, and control flow; the verifier checks the resulting representation before code generation. The AST backend remains available as a differential oracle (`--backend=ast`).
+W0 lowers typed HIR to verified MIR for native builds and C emission. The AST backend remains available as a differential oracle (`--backend=ast`). `w mir <file.w>` prints the lowered representation.
+
+
+## 6. Verification boundary
+
+HIR validation checks interned type IDs, declarations, parameters, blocks, expression types,
+control-flow exits, lexical references, calls, constructors, enum payloads, and match
+patterns. Generic constraints and synthesized constructors are checked before lowering.
+Invalid internal nodes produce a structured W9999 compiler diagnostic with stage and
+source location; unsupported nodes never silently become unit values.

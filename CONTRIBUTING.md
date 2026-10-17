@@ -113,7 +113,7 @@ CC=clang python3 tools/ci_conformance.py --sanitize
 python3 tools/ci_conformance.py --profile=release
 ```
 
-Integration permits explicitly declared unsupported W1 generic rows while running the other three engines. The release profile fails on every unsupported row until D02 is complete. Linux runs Clang ASan/UBSan/LSan and a separate GCC C99 gate; macOS runs Clang ASan/UBSan. Reports count coverage by engine and feature. Failure artifacts retain source, generated C, commands, diagnostics, signals/timeouts and toolchain versions. See [B04 completion](docs/history/B04_COMPLETION.md).
+The integration profile reports explicitly unsupported engine/fixture combinations; the release profile requires every fixture to pass on every engine. CI reports coverage by engine and feature and retains source, generated C, commands, diagnostics, signals, timeouts, and toolchain versions for failures. See the [engine parity matrix](docs/ENGINE_PARITY_MATRIX.md) for the current tested boundary.
 
 ### 4. Modular Split Verification
 Ensures the modular compiler files in `selfhost/src/` combine loss-lessly to exactly match `selfhost/w1.w`:

@@ -1,6 +1,6 @@
-# W Language Architecture: Deterministic Ownership & Lifetime Model (`v0.1.3`)
+# Ownership and Lifetime Model
 
-**Status:** Implemented & Verified Specification (`B01-B04`, `D01-D06`)  
+**Status:** Current runtime and compiler ownership contract  
 **Scope:** `W0 Typed HIR` (default), `W0 AST C99` (oracle), `W1 C99` (`selfhost/w1.w`), and C99 Runtime (`runtime/w_runtime.h`)
 
 ---
@@ -9,7 +9,7 @@
 
 W uses **deterministic single-threaded Reference Counting (RC) + Copy-on-Write (CoW)** without a tracing garbage collector and without exposing user-facing lifetime or borrow annotations.
 
-In `v0.1.3`, the compiler enforces deterministic lifetime management across **all control-flow paths**:
+The compiler enforces deterministic lifetime management across **all control-flow paths**:
 1. Normal lexical block exit (`}`).
 2. Early and final `return expr` statements (preserving returned values across cleanup).
 3. Postfix error/optional propagation (`expr?`) on both `none` and `err` branches.
@@ -109,21 +109,19 @@ memory diagnostics; `W_MEM_CHECK` is not a substitute for those tools.
 
 ---
 
-## 6. Forward Compatibility with `v0.3` Typed HIR
+## 6. Ownership across HIR and MIR
 
-The `CleanupScope` abstraction in `v0.1.3` is directly isomorphic to the explicit lifetime nodes planned for `v0.3` Typed HIR (`docs/HIR_ARCHITECTURE.md`):
-- `CleanupScope` entry/exit $\leftrightarrow$ `HIRScope` + `HIRDrop(local_id)`
-- `_own_expr` (`w_move` / `w_clone`) $\leftrightarrow$ `HIRMove` / `HIRRetain`
-- `return` transfer + scope unwind $\leftrightarrow$ `HIRReturn`
-- Postfix `?` unwind $\leftrightarrow$ `HIRPropagate`
+HIR preserves source-level value semantics and assignment order. MIR makes retain, transfer,
+and release operations explicit and verifies them before C generation. The native emitters
+use lexical cleanup scopes to release owned temporaries on normal exits.
 
-## Phase A managed strings and constructor contracts
+## Managed strings and constructor contracts
 
-The Phase A ownership contract defines the current string ownership extension. `w_str` borrows static storage; `w_owned_str` consumes a heap buffer and creates its RC owner; `w_copy_str` copies borrowed input such as argv. Dynamic strings participate in clone/release and allocation counters. `w_add` and `w_index_get_owned` results are registered owned temporaries in both native backends and W1. The borrowed `w_index_get` remains restricted to internal projection paths; dictionary value queries use the owned optional path.
+The runtime ownership contract for strings is: `w_str` borrows static storage; `w_owned_str` consumes a heap buffer and creates its RC owner; `w_copy_str` copies borrowed input such as argv. Dynamic strings participate in clone/release and allocation counters. `w_add` and `w_index_get_owned` results are registered owned temporaries in both native backends and W1. The borrowed `w_index_get` remains restricted to internal projection paths; dictionary value queries use the owned optional path.
 
 `w_ok`, `w_err` and `w_enum_payload` consume their payload. Generated constructor calls move registered temporaries or clone borrowed arguments. `w_unwrap_optional`, `w_unwrap_ok`, `w_unwrap_err` and `w_unwrap_success` return owned values; peek helpers borrow. Class fields and collection slots own their stored values. Leak counters include string owners; LSan remains necessary to find allocations outside the instrumented ownership model.
 
-## B01: runtime helper inventory and evaluation contract
+## Runtime helper inventory and evaluation contract
 
 The following contracts supersede older blanket claims in this document. Ownership
 is an emitter convention, not a dedicated HIR ownership type or a formal proof.
@@ -148,9 +146,7 @@ one release obligation, including when it happens to be an immediate scalar.
 - `w_unwrap_optional`, `w_unwrap_ok`, `w_unwrap_err`, `w_unwrap_success` retain their
   returned payload; the source wrapper may be released independently.
 - `w_index_get_owned` and `w_dict_get` retain their result. Present dictionary
-  values are wrapped, including present None. La indexación de strings devuelve un
-  valor propio: ASCII de un carácter usa almacenamiento estático; los demás caracteres
-  conservan un buffer administrado independiente. El caller libera ambos del mismo modo.
+  values are wrapped, including present None. String indexing returns an owned value: a single ASCII character uses static storage; other characters use an independently managed buffer. The caller releases both the same way.
 - `w_make_list`, `w_make_tuple`, `w_make_dict`, `w_make_struct`, `w_make_object`
   borrow their initializer arrays and clone the stored values. `w_make_range`
   creates an owned list. Field/variant/type names come from static generated C.
@@ -197,13 +193,9 @@ values into registered temporaries. This covers arguments, binary left operands,
 read receivers, collection entries and struct fields. Field reads retain their
 value immediately. Collection initialization evaluates key then value per entry.
 Already-owned temporaries are reused. These snapshots can increase RC/CoW traffic;
-B02 must measure that cost before optimizing lifetimes.
+This cost should be measured before changing temporary lifetimes.
 
-Las asignaciones evalúan índices y receptores de clase antes del RHS, una sola vez.
-Después protegen el RHS y resuelven el slot mutable: una lista puede realocarse durante
-el RHS y no debe dejar un puntero guardado a un elemento. Los receptores de clase se
-retienen antes del RHS y conservan identidad. El resultado es el valor asignado, también
-en rutas compuestas. AST, HIR y W1 siguen este contrato.
+Assignments evaluate indices and class receivers exactly once, before the RHS. They then protect the RHS and resolve the mutable slot. A list may reallocate while evaluating the RHS, so the compiler must not keep a pointer to an element. Class receivers are retained before the RHS and preserve identity. The expression returns the assigned value, including in composed paths. AST, HIR, and W1 follow this contract.
 
 Return and propagation protect the escaping value before LIFO cleanup. Break and
 continue clean through the nearest loop; the for iterable belongs to its outer
@@ -221,13 +213,12 @@ temporary receivers, self-assignment, append of an existing element, nested loop
 exits, optional/result propagation in match, failing assignment targets, handler
 payloads, short-circuit effects, coalesce and discarded constructors.
 
-Strong RC cycles remain unsupported (B03). Explicit process exit and runtime
+Strong reference cycles remain unsupported. Explicit process exit and runtime
 panics terminate the process rather than unwinding lexical scopes; they are not
 zero-leak acyclic success cases. Allocation failure and concurrent RC are outside
-this contract. W1 generic-language exclusions remain unchanged; this fixture uses
-its supported non-generic profile and unqualified Ok/Err constructors.
+this contract. W1 support remains limited to the fixtures documented in the [engine parity matrix](ENGINE_PARITY_MATRIX.md).
 
-## B03: class control blocks and weak handles
+## Weak references and class control blocks
 
 Class ownership is recorded in a control block with strong and weak counts and a
 nullable object pointer. One implicit weak reference protects the block while the
@@ -262,25 +253,16 @@ for the expected-leak process only; it does not suppress leaked allocations.
 
 ---
 
-## 11. Phase D Memory Safety & Sanitizer Gate
+## Runtime memory-safety validation
 
-The Phase D contract requires:
-1. **Continuous Sanitizer Matrix:** The full test suite runs under Clang AddressSanitizer (ASan), UndefinedBehaviorSanitizer (UBSan), and Linux LeakSanitizer (LSan) across 107 test fixtures on every pull request.
+The runtime safety checks require:
+1. **Continuous Sanitizer Matrix:** The test suite is exercised with Clang AddressSanitizer (ASan), UndefinedBehaviorSanitizer (UBSan), and LeakSanitizer (LSan) in CI.
 2. **Zero Unintended Leaks:** All acyclic data structures, CoW path-copying mutations, monomorphized generic containers, and weak-reference broken cycles must exhibit zero memory leaks.
-3. **Deterministic Scope Cleanup:** The `CleanupScope` LIFO unwinding guarantees that memory is released immediately at scope exits across all four execution engines.
+3. **Deterministic Scope Cleanup:** The `CleanupScope` LIFO unwinding guarantees that memory is released immediately at scope exits across the supported execution engines.
 
 
 ## MIR and Scalar ABI
 
-En el backend principal, el ownership deja de ser solamente una convención del emitter:
-MIR contiene operaciones `clone`, `store` con operandos movidos y `release`, más salidas
-explícitas por bloque. Su verificador propaga inicialización definida, valores posiblemente
-vivos y pruebas de narrowing a través de joins y backedges. Rechaza consumir parámetros
-prestados, leer valores consumidos y retornar dejando referencias propias vivas.
-No es una prueba formal del runtime ni un análisis del ownership de recursos C `opaque`.
+In the primary backend, ownership is represented directly in MIR rather than left as an emitter convention. MIR contains `clone`, `store` with moved operands, `release`, and explicit block exits. Its verifier propagates definite initialization, possibly live values, and narrowing proofs across joins and backedges. It rejects consuming borrowed parameters, reading consumed values, and returning while owned references remain live. This is not a formal proof of the runtime or an ownership analysis for C `opaque` resources.
 
-Los locales, parámetros y retornos primitivos usan almacenamiento nativo de 64 bits,
-double o bool; no generan ARC. Globales y valores administrados siguen usando `WVal`.
-Los adaptadores de funciones como valores y despacho virtual convierten en la frontera
-con la ABI `WVal`. Los campos se proyectan por offsets físicos verificados. El backend
-AST y W1 conservan su implementación independiente y sirven de oráculos diferenciales.
+Primitive local variables, parameters, and returns use native 64-bit, `double`, or `bool` storage and do not use ARC. Globals and managed values still use `WVal`. Function-value and virtual-dispatch adapters convert at the `WVal` ABI boundary. Fields are projected through verified physical offsets. The AST backend and W1 retain independent implementations and serve as differential oracles.

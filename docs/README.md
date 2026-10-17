@@ -1,20 +1,17 @@
-# W Documentation
+# Documentation
 
-The [language specification](../SPEC.md) defines W's syntax and semantics. The documents below explain the current compiler contracts and measured support boundaries.
+[The language specification](../SPEC.md) defines W syntax and semantics. The documents below describe compiler and runtime contracts.
 
-## Language and compiler
+## Compiler
 
-- [Type system](TYPE_SYSTEM_DESIGN.md): nominal types, generics, invariance, and inference.
-- [HIR design](HIR_DESIGN.md): typed intermediate representation and lowering rules.
-- [MIR design](MIR_DESIGN.md): verified control flow, ownership transitions, and scalar ABI.
-- [Ownership and lifetimes](OWNERSHIP_LIFETIME.md): ARC, copy-on-write, weak references, and cleanup.
-- [Compiler error boundaries](COMPILER_ERROR_BOUNDARIES.md): diagnostic ownership across compiler stages.
-- [HIR type validation](HIR_TYPE_VALIDATION.md): type invariants checked by HIR consumers.
+- [Type system](TYPE_SYSTEM_DESIGN.md): canonical types, assignability, variance, and generic substitution.
+- [HIR](HIR_DESIGN.md): typed representation and verification boundary.
+- [MIR](MIR_DESIGN.md): control flow, ownership operations, layouts, and C99 emission.
+- [Ownership and lifetimes](OWNERSHIP_LIFETIME.md): ARC, CoW, weak references, and cleanup.
+- [Engine support](ENGINE_PARITY_MATRIX.md): tested fixture coverage across W0 and W1.
+- [Known limits](KNOWN_LIMITS.md): supported boundaries and deferred language decisions.
 
-## Runtime and supported capabilities
+## Runtime and libraries
 
-- [Engine parity matrix](ENGINE_PARITY_MATRIX.md): measured support across the interpreter, native backends, and W1.
-- [Known limits](KNOWN_LIMITS.md): current semantic, runtime, and platform boundaries.
-- [Expansion status](EXPANSION.md): functions, closures, modules, FFI, generic OOP, standard library, and LSP.
-- [C FFI validation](FFI_VALIDATION.md): the SQLite pilot, ownership rules, and reproducible measurements.
-- [Standard library](STDLIB.md): public library packages and their current support.
+- [C interoperability](FFI_VALIDATION.md): scalar ABI, opaque handles, and SQLite pilot.
+- [Standard library](STDLIB.md): packages and their current contracts.
