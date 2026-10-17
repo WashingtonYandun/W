@@ -18,9 +18,7 @@ Fields use offsets in the complete layout, including inherited fields. Mutable p
 
 Local variables, parameters, and returns of type `int`, `float`, and `bool` use `int64_t`, `double`, and `bool`. Internal counters and predicates are scalars as well. Globals, strings, lists, tuples, structs, objects, optionals, and results still use `WVal`. Adapters convert at function-value, closure, and virtual-dispatch boundaries; the public helper and FFI ABI remains `WVal`.
 
-No hay listas especializadas ni layouts de payload desempaquetados. El valor etiquetado
-mide 48 bytes en la ABI arm64 medida; convertir un escalar en elemento vuelve a empaquetarlo.
-La clasificación de efectos es conservadora, no un análisis interprocedural de pureza.
+There are no specialized lists or unboxed payload layouts. The tagged value occupies 48 bytes in the measured arm64 ABI; converting a scalar to a collection element boxes it again. Effect classification is conservative and does not perform interprocedural purity analysis.
 
 ## Ranges
 
