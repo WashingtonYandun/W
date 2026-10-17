@@ -28,3 +28,18 @@ audit/
 
 # Local-only architecture decision records
 docs/adr/
+
+# Local-only research and historical material
+/spec/
+/docs/evidence/
+/docs/history/
+/bench/V0_1_3_COMPARISON.md
+
+# Local scratch and test caches
+scratch/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+coverage/

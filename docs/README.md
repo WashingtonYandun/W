@@ -19,8 +19,6 @@ The [language specification](../SPEC.md) defines W's syntax and semantics. The d
 - [C FFI validation](FFI_VALIDATION.md): the SQLite pilot, ownership rules, and reproducible measurements.
 - [Standard library](STDLIB.md): public library packages and their current support.
 
-## Evidence, history, and identity
+## Project identity
 
-- `evidence/`: generated conformance and performance reports. Reproduction commands are documented in the relevant technical pages.
-- `history/`: milestone records that describe the state at the time they were written; they do not override the current specification.
 - [Brand identity](BRAND_IDENTITY.md): Wawi and the visual identity of the project.
