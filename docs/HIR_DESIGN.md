@@ -26,7 +26,7 @@ control flow, storage layout, and ownership transitions explicit.
 
 ## 2. Core HIR Data Model
 
-### 3.1 Identifiers & Metadata
+### 2.1 Identifiers & Metadata
 ```text
 struct Span {
     file_id: u32
@@ -38,7 +38,7 @@ type SymbolId = u32   # Unique per lexical binding (local, param, global fn, mod
 type TypeId   = u32   # Interned canonical type index (see TYPE_SYSTEM_DESIGN.md)
 ```
 
-### 3.2 Top-Level Module & Declarations (`HirModule`)
+### 2.2 Top-Level Module & Declarations (`HirModule`)
 ```text
 struct HirModule {
     file_path: str
@@ -70,7 +70,7 @@ struct HirFnDecl {
 }
 ```
 
-### 3.3 Statements (`HirStmt`)
+### 2.3 Statements (`HirStmt`)
 | HIR Statement Node | Purpose |
 | :--- | :--- |
 | `HirLet(symbol_id, type_id, is_mut, init_expr, span)` | Local variable declaration with resolved `SymbolId` and `TypeId` |
@@ -82,7 +82,7 @@ struct HirFnDecl {
 | `HirBreak(span)` / `HirContinue(span)` | Loop control transfer (statically verified `loop_depth > 0`) |
 | `HirExprStmt(expr, span)` | Expression evaluated for side effects |
 
-### 3.4 Expressions (`HirExpr`)
+### 2.4 Expressions (`HirExpr`)
 Every `HirExpr` contains `{ kind: HirExprKind, type_id: TypeId, span: Span }`:
 
 | `HirExprKind` Variant | Lowered Semantics |
@@ -111,7 +111,7 @@ Every `HirExpr` contains `{ kind: HirExprKind, type_id: TypeId, span: Span }`:
 
 ---
 
-### 3.5 Resolved error patterns
+### 2.5 Resolved error patterns
 
 `HirErrorTypePattern(error_type_id, binding, type_id, span, type_name)` represents one
 alternative in an error union. The alternative's `TypeId` controls runtime comparison,
