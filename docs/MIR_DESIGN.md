@@ -1,6 +1,6 @@
 # W MIR: Executable Contract
 
-The primary backend follows this pipeline: checked AST → verified HIR → verified MIR → C99 → system compiler. `w emit-c` and `w build` use it by default; `--backend=hir` remains available for compatibility. `--backend=ast` and W1 are independent emitters. `w mir path.w` prints verified MIR as JSON.
+W0's default native pipeline is checked AST → typed and verified HIR → C99 → system compiler. `w emit-c` and `w build` use this HIR backend; `--backend=ast` selects the secondary AST emitter, and W1 is an independent self-hosted compiler. The `w mir path.w` command separately lowers checked HIR to MIR, verifies it, and prints the result as JSON. MIR currently has no native C emitter in the default build path.
 
 ## Representation
 
@@ -12,7 +12,7 @@ Fields use offsets in the complete layout, including inherited fields. Mutable p
 
 `clone` retains, `store` moves, and `release` frees. Constructors, calls, reads, writes, and checks have explicit effect categories. Calls declare consumed operands. Managed parameters are borrowed; results are owned. Lowering inserts LIFO cleanup on normal exits, returns, propagation, `break`, and `continue`. Escaping values are protected before cleanup.
 
-`mir/Verifier.py` checks identities, the type arena, signatures, offsets, storage, arity, effects, and successors. Dataflow intersects definitely initialized slots and joins possibly live references at joins and backedges. It rejects reads from consumed values, moves from borrowed values, and returns with owned references still pending. It does not prove the C helpers correct or track external `opaque` handles.
+`mir/Verifier.py` checks identities, the type arena, signatures, offsets, storage, arity, effects, and successors. Dataflow intersects definitely initialized slots and joins possibly live references at joins and backedges. It rejects reads from consumed values, moves from borrowed values, and returns with owned references still pending. This verified representation is exposed by `w mir`; it is not the default native backend and does not prove the C helpers correct or track external `opaque` handles.
 
 ## Storage and ABI
 
@@ -30,4 +30,4 @@ W1 recognizes direct ranges in its parser. A parenthesized range expression may 
 
 `tests/unit/test_mir.py` mutates valid MIR to confirm that the verifier rejects invalid control flow, references, layouts, storage, runtime signatures, effects, and error-union narrowing proofs. The conformance suite covers range bounds and overflow across supported engines. CI runs the compiler matrix described in [Engine Support and Corpus Coverage](ENGINE_PARITY_MATRIX.md).
 
-MIR verification covers compiler-generated structure and ownership flow. It does not prove runtime helper correctness, external `opaque` resource ownership, or behavior outside the tested corpus. Performance measurements are workload and platform dependent; see the repository benchmark tooling for reproducible runs.
+MIR verification covers the compiler-generated representation and its modeled ownership flow. It does not prove runtime helper correctness, external `opaque` resource ownership, or behavior outside the tested corpus. Performance measurements for the executable compiler backends are workload and platform dependent; see the repository benchmark tooling for reproducible runs.
