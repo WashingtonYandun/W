@@ -4,8 +4,6 @@ This file records what W does **not** do, why, and what it would take to change 
 tracks deferred decisions separately from defects. Items marked *open decision* change
 the language surface and need an explicit decision before implementation.
 
-Last reviewed: `2026-10-16`.
-
 ---
 
 ## 1. Closures capture immutable snapshots
