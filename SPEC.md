@@ -112,10 +112,7 @@ Identifiers must start with an ASCII letter (`a-z`, `A-Z`) or underscore `_`, fo
   }
   ```
 
-En funciones y lambdas de bloque declaradas `unit` —incluido el retorno omitido en
-funciones— el tail implícito se evalúa por sus efectos y se descarta. Un `return`
-explícito con un valor incompatible se rechaza. `unit ! E` conserva los errores de su
-tail; un resultado fallido no se convierte en éxito al descartar un valor.
+In block functions and lambdas declared as `unit`—including functions with an omitted return type—the implicit tail expression is evaluated for its effects and discarded. An explicit `return` with an incompatible value is rejected. `unit ! E` preserves errors from its tail; a failed result does not become success when its value is discarded.
 
 A bare `return` is one that is followed by `}`, `)`, `]`, `,`, `else`, `elif` or EOF.
 It is **not** decided by line breaks: `return` followed by an expression on the next
@@ -241,17 +238,17 @@ W guarantees **strict left-to-right ($L \rightarrow R$) evaluation order** acros
 * **Assignments:** In indexed or member assignments (`a()[b()] = c()` or `obj().field = val()`), the target container, index/member, and right-hand value are evaluated deterministically.
 * **Composite Literals:** Elements of `list`, `tuple`, `dict`, and fields of `struct` literals are evaluated in lexical left-to-right appearance order.
 
-Las asignaciones producen el valor asignado, incluso dentro de otra expresión. Los
-índices y los receptores de clase del destino se evalúan una vez, antes del valor de la
-derecha. El slot mutable se resuelve después: no se conserva un puntero a un elemento
-que el RHS puede invalidar al hacer crecer una lista. Un receptor de clase conserva su
-identidad aunque el RHS reasigne la variable que lo nombraba. Los operandos y argumentos
-ya evaluados conservan snapshots de los tipos por valor; las clases conservan identidad.
-Los campos de un literal se evalúan en orden escrito y su layout usa el orden de declaración.
+Assignments produce the assigned value, including inside another expression. Target
+indices and class receivers are evaluated once, before the right-hand side. The mutable
+slot is resolved afterward; no pointer is kept to an element that RHS evaluation could
+invalidate by growing a list. A class receiver preserves its identity even if the RHS
+reassigns the variable that named it. Evaluated operands and arguments retain snapshots
+of value types; classes retain identity. Literal fields are evaluated in source order,
+while their layout follows declaration order.
 
-Un `match` parcial usado como sentencia conserva una salida normal sin coincidencia.
-Esa salida participa en las comprobaciones de retorno e inicialización de constructores.
-Los guards no garantizan cobertura. HIR verifica también las funciones sin expresión final.
+A partial `match` used as a statement has a normal exit when no pattern matches. That
+exit participates in return and constructor-initialization checks. Guards do not count
+as exhaustive coverage. HIR also verifies functions without a final expression.
 
 ### 5.2 Equality Semantics (`==` and `!=`)
 Equality is partitioned cleanly along the value vs reference boundary:
@@ -308,10 +305,10 @@ Equality is partitioned cleanly along the value vs reference boundary:
       print(i)
   }
   ```
-  Los límites se evalúan una vez, de izquierda a derecha. Los bucles directos usan
-  contadores sin asignar una lista; un rango usado como valor sigue siendo `list[int]`.
-  Se conserva el límite de 100 millones de elementos y el error de overflow cuando el
-  extremo inclusivo es `INT64_MAX`, incluso si el cuerpo sale inmediatamente.
+  Bounds are evaluated once, from left to right. Direct loops use counters without
+  allocating a list; a range used as a value remains `list[int]`. The 100-million-element
+  limit and the overflow error for an inclusive `INT64_MAX` endpoint remain in effect,
+  even if the body exits immediately.
 * **While loops:**
   ```w
   while condition {
@@ -376,32 +373,30 @@ Handling strategies:
    }
    ```
 
-### Composición de errores
+### Error union composition
 
-Una firma puede declarar un conjunto cerrado de tipos de error después de `!`:
+A function signature can declare a closed set of error types after `!`:
 
 ```w
 fn parse() -> Config ! ParseError | IoError
 ```
 
-La unión solo existe en el canal de error de `T ! E`; no es un tipo unión general.
-Debe contener al menos dos alternativas distintas. Se admiten `int`, `float`, `bool`,
-`str`, y tipos `struct` o `enum` no genéricos. Se rechazan clases, tipos genéricos y
-tipos compuestos cuya identidad concreta no puede distinguirse en el valor de runtime.
-Las alternativas repetidas se canonicalizan.
+The union exists only in the error channel of `T ! E`; it is not a general union type.
+It must contain at least two distinct alternatives. Supported alternatives are `int`,
+`float`, `bool`, `str`, and non-generic `struct` or `enum` types. Classes, generic types,
+and composite types whose concrete identity cannot be distinguished in the runtime value
+are rejected. Duplicate alternatives are canonicalized.
 
-`?` propaga el valor de error original sin conversión cuando todas las alternativas del
-origen están incluidas en el conjunto de destino. Así, un error `ParseError` puede
-propagarse a `ParseError | IoError`, pero una función que declara solo `ParseError` no
-puede propagar un resultado que también contenga `IoError`. No hay conversiones implícitas
-entre errores.
+`?` propagates the original error value without conversion when every source alternative
+belongs to the destination set. For example, `ParseError` can propagate to
+`ParseError | IoError`, but a function that declares only `ParseError` cannot propagate
+a result that may also contain `IoError`. Errors are not implicitly converted.
 
-`else err` asigna a `err` el conjunto estático del canal de error. Para un `match` que
-produzca un valor se deben cubrir todas las alternativas con patrones de tipo, por
-ejemplo `ParseError(problem) => ...` e `IoError(problem) => ...`. El patrón acepta un
-binding o `_`; el valor completo del error se conserva y se comprueba por su identidad
-de tipo runtime. Los nombres cualificados de módulos comprobados también son válidos en
-la firma y en el patrón, por ejemplo `storage.ParseError(problem)`.
+`else err` binds `err` to the static error-channel set. A value-producing `match` must
+cover every alternative with type patterns, such as `ParseError(problem) => ...` and
+`IoError(problem) => ...`. A pattern accepts a binding or `_`; the full error value is
+preserved and checked by runtime type identity. Qualified names from checked modules are
+valid in signatures and patterns, for example `storage.ParseError(problem)`.
 
 ---
 
@@ -550,16 +545,17 @@ fn compile(source: str) {
 | `ord(s)` | `(str) -> int` | Returns the Unicode code point of the first character in `s` |
 | `chr(c)` | `(int) -> str` | Returns a single-code-point UTF-8 string for code point `c` |
 | `slice(x, a, b)` | `(str \| list[T], int, int) -> str \| list[T]` | Returns code-point substring or sub-list in `[a, b)`. Preserves the container kind; out-of-range bounds are clamped and an empty result is returned when `b <= a` |
-| `join_strings(parts, separator)` | `(list[str], str) -> str` | Concatena con una asignación del resultado, preservando NUL; coste O(bytes de salida + partes) |
+| `join_strings(parts, separator)` | `(list[str], str) -> str` | Joins strings with one result allocation and preserves NUL; O(output bytes + parts) |
 | `bytes(s)` | `(str) -> list[int]` | Returns raw UTF-8 unsigned bytes (`0..=255`) of `s` |
 | `args()` | `() -> list[str]` | Returns command-line arguments passed to the program |
 | `read_file(p)` | `(str) -> str ! IoError` | Reads a UTF-8 file from disk or returns `IoError` |
 | `write_file(p, c)` | `(str, str) -> unit ! IoError` | Writes UTF-8 content `c` to path `p` or returns `IoError` |
 
-`read_file` conserva los saltos LF/CRLF y los NUL del contenido UTF-8. Las conversiones
-numéricas de bool producen 0/1. `float(str)` acepta decimales ASCII, signo, exponente,
-espacios ASCII externos y `nan`, `inf`, `infinity` sin distinguir mayúsculas. Rechaza
-cifras Unicode, hexadecimal, sufijos y NUL con `W4003`; no depende de la gramática de Python.
+`read_file` preserves LF/CRLF line endings and NUL bytes in UTF-8 content. Converting
+bool to a number produces 0 or 1. `float(str)` accepts ASCII decimals, signs, exponents,
+leading and trailing ASCII whitespace, and case-insensitive `nan`, `inf`, or `infinity`.
+It rejects Unicode digits, hexadecimal input, suffixes, and NUL with `W4003`; parsing does
+not depend on Python's grammar.
 
 ### 11.2 Built-in Collection Methods
 * **`list[T]`:**
