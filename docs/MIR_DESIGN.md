@@ -1,4 +1,4 @@
-# W MIR: Executable Contract
+# W MIR: Verified Intermediate Representation
 
 W0's default native pipeline is checked AST → typed and verified HIR → C99 → system compiler. `w emit-c` and `w build` use this HIR backend; `--backend=ast` selects the secondary AST emitter, and W1 is an independent self-hosted compiler. The `w mir path.w` command separately lowers checked HIR to MIR, verifies it, and prints the result as JSON. MIR currently has no native C emitter in the default build path.
 
