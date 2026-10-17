@@ -507,12 +507,30 @@ static inline void w_release_string(WStringBuf* buffer) {
     }
 }
 
+static inline bool w_is_leaf(WVal value) {
+    return value.tag <= W_BOOL || value.tag == W_STR || value.tag == W_POINTER;
+}
+
 static inline void w_release(WVal v) {
-    if (v.tag == W_STR) {
-        w_release_string(v.as.string.owner);
+    if (w_is_leaf(v)) {
+        if (v.tag == W_STR) w_release_string(v.as.string.owner);
         return;
     }
-    if (v.tag <= W_BOOL || v.tag == W_POINTER) return;
+    if ((v.tag == W_OK || v.tag == W_ERR) && v.as.box) {
+        WBoxBuf* box = v.as.box;
+        /* Shared boxes and leaf payloads need neither a work list nor child storage. */
+        if (box->refcount != 1 || w_is_leaf(box->val)) {
+            w_check_refcount(box->refcount, "release/box");
+            w_g_release_count++;
+            if (--box->refcount == 0) {
+                WVal inner = box->val;
+                free(box);
+                w_mem_on_free();
+                if (inner.tag == W_STR) w_release_string(inner.as.string.owner);
+            }
+            return;
+        }
+    }
     w_release_graph(v);
 }
 
@@ -696,6 +714,10 @@ static WVal* w_release_deferred(WVal* slot, int32_t* produced) {
             WVal inner = bx->val;
             free(bx);
             w_mem_on_free();
+            if (w_is_leaf(inner)) {
+                if (inner.tag == W_STR) w_release_string(inner.as.string.owner);
+                return NULL;
+            }
             WVal* out = (WVal*)malloc(sizeof(WVal));
             if (!out) { fprintf(stderr, "[W4003] RuntimeError: out of memory\n"); exit(1); }
             out[0] = inner;

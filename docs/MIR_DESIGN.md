@@ -14,6 +14,8 @@ Fields use offsets in the complete layout, including inherited fields. Mutable p
 
 `mir/Verifier.py` checks identities, the type arena, signatures, offsets, storage, arity, effects, and successors. Dataflow intersects definitely initialized slots and joins possibly live references at joins and backedges. It rejects reads from consumed values, moves from borrowed values, and returns with owned references still pending. The default native emitter consumes this verified representation. Verification does not prove the C helpers correct or track external `opaque` handles. Runtime helpers have explicit arity and operand/result relationships; compatibility uses canonical TypeIds, and enum payload reads retain the resolved variant.
 
+Before emission, an ownership pass removes copies of immutable `str` parameters when the temporary has a single definition and no consuming use, return, or mutable-place use. Read-only uses then borrow the parameter whose lifetime is protected by the caller. Copies that escape through moves keep their ownership; globals, locals, and other parameter types are excluded. MIR is verified before and after this pass, and `w mir` shows the optimized representation.
+
 ## Storage and ABI
 
 Local variables, parameters, and returns of type `int`, `float`, and `bool` use `int64_t`, `double`, and `bool`. Internal counters and predicates are scalars as well. Globals, strings, lists, tuples, structs, objects, optionals, and results still use `WVal`. Adapters convert at function-value, closure, and virtual-dispatch boundaries; runtime helpers use `WVal`; the external scalar/opaque C ABI uses its declared C widths.
