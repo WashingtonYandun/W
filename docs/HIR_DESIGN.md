@@ -16,9 +16,9 @@ flowchart TD
     C --> D["Declaration collection and type checking"]
     D --> E["Typed HIR"]
     E --> F["HIR verification"]
-    F --> G["MIR lowering"]
-    G --> H["MIR verification"]
-    H --> I["C99 emission"]
+    F --> G["HIR C99 emission (default)"]
+    G --> H["Native executable"]
+    F -.-> I["MIR lowering and verification (w mir)"]
 ¶¶¶
 
 The checker resolves overloads, constructors, modules, and generic specializations before
