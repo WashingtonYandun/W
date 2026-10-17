@@ -154,3 +154,13 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           ./patterns.exe
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Package and verify the native SQLite pilot
+        run: |
+          python tools/package_measurement_pilot.py --output dist/measurement-pilot
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Upload the tested Windows x64 pilot
+        uses: actions/upload-artifact@v4
+        with:
+          name: measurement-pilot-windows-x64
+          path: dist/measurement-pilot/
+          if-no-files-found: error

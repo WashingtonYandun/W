@@ -16,10 +16,10 @@ extern "C" fn pilot_live_resources() -> int32
 struct CsvError { line: int, reason: str }
 struct DatabaseError { code: int }
 
-fn decimal(text: str, line: int) -> int ! CsvError {
-    if len(text) == 0 { return Err(CsvError { line: line, reason: "empty integer" }) }
+fn decimal(text: str, start: int, end: int, line: int) -> int ! CsvError {
+    if start == end { return Err(CsvError { line: line, reason: "empty integer" }) }
     let mut value = 0
-    for index in 0..len(text) {
+    for index in start..end {
         let digit = ord(text[index]) - ord("0")
         if digit < 0 or digit > 9 { return Err(CsvError { line: line, reason: "expected ASCII decimal" }) }
         if value > (9223372036854775807 - digit) / 10 {
@@ -30,17 +30,17 @@ fn decimal(text: str, line: int) -> int ! CsvError {
     return value
 }
 
-fn insert_line(handle: opaque, text: str, line: int) -> unit ! CsvError | DatabaseError {
+fn insert_line(handle: opaque, text: str, start: int, end: int, line: int) -> unit ! CsvError | DatabaseError {
     let mut comma = -1
-    for index in 0..len(text) {
+    for index in start..end {
         if text[index] == "," {
             if comma >= 0 { return Err(CsvError { line: line, reason: "expected two columns" }) }
             comma = index
         }
     }
     if comma < 0 { return Err(CsvError { line: line, reason: "expected two columns" }) }
-    let id = decimal(slice(text, 0, comma), line)?
-    let value = decimal(slice(text, comma + 1, len(text)), line)?
+    let id = decimal(text, start, comma, line)?
+    let value = decimal(text, comma + 1, end, line)?
     let status = pilot_insert(handle, id, value)
     if status != 0 { return Err(DatabaseError { code: status }) }
 }
@@ -56,12 +56,11 @@ fn populate(handle: opaque, text: str, commit: bool) -> int ! CsvError | Databas
             if index == len(text) and start == index { break }
             let mut end = index
             if end > start and text[end - 1] == "\r" { end = end - 1 }
-            let content = slice(text, start, end)
             if line == 1 {
-                if content != "id,value" { return Err(CsvError { line: line, reason: "expected id,value header" }) }
+                if slice(text, start, end) != "id,value" { return Err(CsvError { line: line, reason: "expected id,value header" }) }
             } else {
                 if rows >= 100000 { return Err(CsvError { line: line, reason: "row limit exceeded" }) }
-                insert_line(handle, content, line)?
+                insert_line(handle, text, start, end, line)?
                 rows = rows + 1
             }
             line = line + 1

@@ -141,8 +141,22 @@ def run_readiness_tests():
     test_lsp_publishes_recovered_syntax_diagnostics()
     test_native_build_reports_independent_compile_and_link_phases()
     test_parser_recovery_has_a_flat_diagnostic_budget()
+    test_pilot_package_rejects_unverified_sqlite_sources()
     print('Principal audit: patterns, closures, cyclic formatting, MIR signatures and recovery passed')
     return True
+
+
+def test_pilot_package_rejects_unverified_sqlite_sources():
+    from tools.package_measurement_pilot import sqlite_archive
+    with tempfile.TemporaryDirectory(prefix='w-package-integrity-') as directory:
+        archive = Path(directory) / 'sqlite.zip'
+        archive.write_bytes(b'not the pinned SQLite source archive')
+        try:
+            sqlite_archive(archive)
+        except ValueError as failure:
+            assert 'pinned official SHA3-256' in str(failure)
+        else:
+            raise AssertionError('The package builder accepted unverified C source')
 
 
 def test_pretokenized_parser_does_not_lex_twice_without_patch():

@@ -492,7 +492,31 @@ static inline WVal w_clone(WVal v) {
  */
 static WVal* w_release_deferred(WVal* slot, int32_t* produced);
 
+static void w_release_graph(WVal v);
+
+/* Leaf values never need the graph work list, including strings owned by a container. */
+static inline void w_release_string(WStringBuf* buffer) {
+    if (!buffer) return;
+    w_check_refcount(buffer->refcount, "release/string");
+    w_g_release_count++;
+    if (--buffer->refcount == 0) {
+        free(buffer->data);
+        free(buffer->codepoint_offsets);
+        free(buffer);
+        w_mem_on_free();
+    }
+}
+
 static inline void w_release(WVal v) {
+    if (v.tag == W_STR) {
+        w_release_string(v.as.string.owner);
+        return;
+    }
+    if (v.tag <= W_BOOL || v.tag == W_POINTER) return;
+    w_release_graph(v);
+}
+
+static void w_release_graph(WVal v) {
     WVal stack_work[64];
     WVal* work = stack_work;
     int32_t count = 0;
@@ -557,15 +581,7 @@ static WVal* w_release_deferred(WVal* slot, int32_t* produced) {
             }
         }
     } else if (v.tag == W_STR && v.as.string.owner) {
-        WStringBuf* buffer = v.as.string.owner;
-        w_check_refcount(buffer->refcount, "release/string");
-        w_g_release_count++;
-        if (--buffer->refcount == 0) {
-            free(buffer->data);
-            free(buffer->codepoint_offsets);
-            free(buffer);
-            w_mem_on_free();
-        }
+        w_release_string(v.as.string.owner);
     } else if (v.tag == W_LIST && v.as.list) {
         WListBuf* b = v.as.list;
         w_check_refcount(b->refcount, "release/list");
@@ -970,7 +986,29 @@ static inline void w_eq_push(WEqualityPair** items, int32_t* count, int32_t* cap
     (*items)[(*count)++] = (WEqualityPair){left, right};
 }
 
+static bool w_eq_graph(WVal a, WVal b);
+
+/* Scalar equality must not create the structural comparison work list. */
 static inline bool w_eq(WVal a, WVal b) {
+    if (a.tag == b.tag) {
+        switch (a.tag) {
+            case W_UNIT:
+            case W_NONE: return true;
+            case W_INT: return a.as.i == b.as.i;
+            case W_FLOAT: return a.as.f == b.as.f;
+            case W_BOOL: return a.as.b == b.as.b;
+            case W_STR: return a.as.string.length == b.as.string.length &&
+                memcmp(a.as.string.data, b.as.string.data, a.as.string.length) == 0;
+            case W_POINTER: return a.as.pointer == b.as.pointer;
+            case W_OBJECT: return a.as.st == b.as.st;
+            case W_WEAK: return a.as.weak == b.as.weak;
+            default: break;
+        }
+    }
+    return w_eq_graph(a, b);
+}
+
+static bool w_eq_graph(WVal a, WVal b) {
     WEqualityPair local_items[64];
     WEqualityPair* items = local_items;
     int32_t count = 0;

@@ -73,3 +73,14 @@ The wrapper checks the byte cap before execution; the native program checks text
 after loading UTF-8. There is no streaming import, schema migration or record update.
 The application is ready for a scoped trial; external adoption and productivity remain
 unverified. Raw opaque ownership and panic/exit cleanup retain their documented limits.
+
+The Windows CI job builds a standalone x64 pilot and uploads
+`measurement-pilot-windows-x64`. The ZIP contains the executable, sample/error CSVs,
+trial instructions, source/toolchain manifest, checksums and its automated smoke result.
+SQLite and the Microsoft C runtime are linked statically; running this package requires
+neither Python nor a C toolchain. The executable is experimental and unsigned.
+
+`tools/package_measurement_pilot.py` builds the package from a pinned official SQLite
+amalgamation, verifies its SHA3-256, and exercises the exported binary in paths containing
+spaces. Its database oracle checks dry run, partial-batch rollback, overflow and journal
+consistency. Automated CI evidence is distinct from a trial performed on a user's machine.
