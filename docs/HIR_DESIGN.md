@@ -111,16 +111,16 @@ Every `HirExpr` contains `{ kind: HirExprKind, type_id: TypeId, span: Span }`:
 
 ---
 
-### 3.5 Patrones resueltos de error
+### 3.5 Resolved error patterns
 
-`HirErrorTypePattern(error_type_id, binding, type_id, span, type_name)` representa una
-alternativa de una unión de errores. El TypeId de la alternativa gobierna la comparación
-runtime y el binding recibe ese mismo tipo. `type_name` conserva el texto de fuente
-para el dump; no interviene en la identidad nominal.
+`HirErrorTypePattern(error_type_id, binding, type_id, span, type_name)` represents one
+alternative in an error union. The alternative's `TypeId` controls runtime comparison,
+and the binding receives that same type. `type_name` preserves source text for dumps; it
+does not participate in nominal identity.
 
-`HirEnumPattern` representa variantes enum y constructores Option/Result. No puede
-representar alternativas de una unión de errores. El verificador rechaza mezclas de
-esas representaciones antes de emitir C; el verificador rechaza patrones de error no admitidos.
+`HirEnumPattern` represents enum variants and Option/Result constructors. It cannot
+represent error-union alternatives. The verifier rejects mixed representations and
+unsupported error patterns before C emission.
 
 ## 3. Explicit Copy-on-Write (`HirCowPath`) Lowering
 
