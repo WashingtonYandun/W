@@ -492,7 +492,16 @@ static inline WVal w_clone(WVal v) {
  */
 static WVal* w_release_deferred(WVal* slot, int32_t* produced);
 
-static void w_release_graph(WVal v);
+#if defined(_MSC_VER)
+#define W_RUNTIME_NOINLINE __declspec(noinline)
+#elif defined(__GNUC__) || defined(__clang__)
+#define W_RUNTIME_NOINLINE __attribute__((noinline))
+#else
+#define W_RUNTIME_NOINLINE
+#endif
+
+/* Keep the graph work list out of leaf callers, even under automatic inlining. */
+static W_RUNTIME_NOINLINE void w_release_graph(WVal v);
 
 /* Leaf values never need the graph work list, including strings owned by a container. */
 static inline void w_release_string(WStringBuf* buffer) {
