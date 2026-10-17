@@ -1,94 +1,35 @@
-# MIR de W: contrato ejecutable
+# W MIR: Executable Contract
 
-El backend principal sigue esta ruta: AST comprobado → HIR verificado → MIR verificado
-→ C99 → compilador del sistema. `w emit-c` y `w build` la usan por defecto; el nombre
-CLI `--backend=hir` se conserva por compatibilidad. `--backend=ast` y W1 son emisores
-independientes. `w mir archivo.w` imprime el MIR en JSON después de verificarlo.
+The primary backend follows this pipeline: checked AST → verified HIR → verified MIR → C99 → system compiler. `w emit-c` and `w build` use it by default; `--backend=hir` remains available for compatibility. `--backend=ast` and W1 are independent emitters. `w mir path.w` prints verified MIR as JSON.
 
-## Representación
+## Representation
 
-`mir/Nodes.py` define módulos, funciones, slots tipados, layouts físicos, operaciones,
-bloques básicos y terminadores `goto`, `branch`, `return`, `unreachable`. Es una IR de
-slots mutables, **no SSA**. Sus operandos son identidades y proyecciones resueltas, no
-nodos AST/HIR ni fragmentos C. Cada operación conserva su ubicación de fuente.
+`mir/Nodes.py` defines modules, functions, typed slots, physical layouts, operations, basic blocks, and `goto`, `branch`, `return`, and `unreachable` terminators. MIR uses mutable slots; it is **not SSA**. Its operands are resolved identities and projections, not AST/HIR nodes or C fragments. Every operation preserves its source location.
 
-Los campos incluyen offsets sobre el layout completo, incluida la herencia. Las rutas
-mutables capturan índices e identidad de clase antes del RHS y resuelven el slot después;
-no guardan punteros a elementos que una realocación pueda invalidar. Los patrones se
-convierten en predicados y ramas; el narrowing de una unión de errores necesita una
-prueba exitosa que domine su uso.
+Fields use offsets in the complete layout, including inherited fields. Mutable paths capture indices and class identity before evaluating the RHS, then resolve the slot afterward; they do not retain element pointers that a reallocation could invalidate. Patterns become predicates and branches. Narrowing an error union requires a successful check that dominates its use.
 
-## Efectos y propiedad
+## Effects and ownership
 
-`clone` retiene; `store` mueve; `release` libera. Constructores, llamadas, lecturas,
-escrituras y checks tienen categorías de efectos explícitas. Las llamadas declaran sus
-operandos consumidos. Los parámetros administrados son prestados; los resultados son
-propios. La bajada inserta cleanup LIFO en salidas normales, retornos, propagación,
-break y continue. Los valores que escapan se protegen antes del cleanup.
+`clone` retains, `store` moves, and `release` frees. Constructors, calls, reads, writes, and checks have explicit effect categories. Calls declare consumed operands. Managed parameters are borrowed; results are owned. Lowering inserts LIFO cleanup on normal exits, returns, propagation, `break`, and `continue`. Escaping values are protected before cleanup.
 
-`mir/Verifier.py` comprueba identidades, arena de tipos, firmas, offsets, almacenamiento,
-aridad, efectos y sucesores. El análisis de datos intersecta inicialización definida y
-une referencias posiblemente vivas en joins y backedges; rechaza lecturas consumidas,
-movimientos de préstamos y retornos con referencias propias pendientes. No demuestra
-la corrección de los helpers C ni controla los handles externos `opaque`.
+`mir/Verifier.py` checks identities, the type arena, signatures, offsets, storage, arity, effects, and successors. Dataflow intersects definitely initialized slots and joins possibly live references at joins and backedges. It rejects reads from consumed values, moves from borrowed values, and returns with owned references still pending. It does not prove the C helpers correct or track external `opaque` handles.
 
-## Almacenamiento y ABI
+## Storage and ABI
 
-Locales, parámetros y retornos `int`, `float` y `bool` usan `int64_t`, `double` y `bool`.
-Los contadores y predicados internos también son escalares. Globales, strings, listas,
-tuplas, structs, objetos, opcionales y resultados siguen usando `WVal`. Adaptadores
-convierten en fronteras de funciones como valores, closures y despacho virtual; la ABI
-pública de los helpers y de FFI sigue siendo `WVal`.
+Local variables, parameters, and returns of type `int`, `float`, and `bool` use `int64_t`, `double`, and `bool`. Internal counters and predicates are scalars as well. Globals, strings, lists, tuples, structs, objects, optionals, and results still use `WVal`. Adapters convert at function-value, closure, and virtual-dispatch boundaries; the public helper and FFI ABI remains `WVal`.
 
 No hay listas especializadas ni layouts de payload desempaquetados. El valor etiquetado
 mide 48 bytes en la ABI arm64 medida; convertir un escalar en elemento vuelve a empaquetarlo.
 La clasificación de efectos es conservadora, no un análisis interprocedural de pureza.
 
-## Rangos
+## Ranges
 
-`for item in start..end` y `..=` capturan los límites una vez, de izquierda a derecha,
-validan el tamaño y usan un contador sin crear una lista. Se conserva el límite de
-100 millones de elementos aunque el cuerpo ejecute `break` inmediatamente. Un extremo
-inclusivo `INT64_MAX` conserva el error existente. Los rangos usados como valores siguen
-siendo listas con semántica CoW; no se introduce un tipo range nuevo.
+`for item in start..end` and `..=` capture bounds once, from left to right, validate the range size, and use a counter without creating a list. The 100-million-element limit applies even when the loop body immediately executes `break`. An inclusive range ending at `INT64_MAX` keeps the existing error behavior. Ranges used as values remain lists with CoW semantics; W does not add a range type.
 
-W1 reconoce rangos directos en su parser; una expresión de rango envuelta en paréntesis
-puede seguir la ruta materializada. La semántica pública es la misma; la optimización
-sintáctica no es uniforme en todas las formas equivalentes.
+W1 recognizes direct ranges in its parser. A parenthesized range expression may use the materialized-list path. Public semantics are the same, but this optimization is not applied uniformly to equivalent syntax.
 
-## Evidencia y límites
+## Verification and limits
 
-`tests/unit/test_mir.py` altera MIR correcto para probar rechazo de CFG, referencias,
-layout, almacenamiento, firma runtime, efectos y pruebas de narrowing inválidos.
-Tres fixtures prueban límites, overflow y un rango de 100 millones con salida inmediata
-en los cuatro motores. El bootstrap compara C0, C1 y C2; CI incluye GCC/Clang en Linux,
-Clang en macOS y ASan/UBSan, con LSan en Linux.
+`tests/unit/test_mir.py` mutates valid MIR to confirm that the verifier rejects invalid control flow, references, layouts, storage, runtime signatures, effects, and error-union narrowing proofs. The conformance suite covers range bounds and overflow across supported engines. CI runs the compiler matrix described in [Engine Support and Corpus Coverage](ENGINE_PARITY_MATRIX.md).
 
-La primera implementación MIR registró, para 10.000 filas y cinco muestras
-calientes con Clang `-O2` en arm64, 62,651 ms y 2,297 MiB para el backend MIR; C independiente da 8,182 ms y 2,078 MiB.
-La fase anterior midió 87,776 ms y 27,109 MiB con tres muestras: aproximadamente 29 %
-menos tiempo y 91,5 % menos RSS. Son ejecuciones distintas; no atribuyen cada mejora a
-un cambio aislado ni representan todos los programas W. El binario MIR mide 99.568 bytes
-frente a 37.120 en C. En esa ejecución, la diferencia de tiempo fue 7,7×.
-
-Estas mediciones se conservan aquí junto con sus condiciones y límites; no representan todos los programas W. El siguiente trabajo debe perfilar parsing, strings y fronteras runtime/FFI antes de decidir especializar contenedores.
-LLVM sigue sin una justificación medida: el MIR habilita un experimento futuro, pero cambiar el emitter no elimina los costes de representación y de los helpers.
-
-## Follow-up verification
-
-El perfil de buffers identifica asignaciones por caracteres ASCII. Indexación y chr
-reutilizan 128 strings estáticos inmutables, incluido NUL; Unicode conserva ownership.
-10.000 filas y cinco muestras calientes, sin suites concurrentes: MIR 41,972 ms y
-2,250 MiB; C 7,539 ms y 2,078 MiB. La ejecución previa con el mismo runner midió MIR
-63,305 ms. Los buffers administrados bajan de 526.688 a 60.007 (88,6 %); no son
-contadores de todos los malloc. El tiempo baja aproximadamente 33,7 %, pero C también
-varía entre corridas; no atribuir una diferencia temporal exacta a un cambio aislado.
-La diferencia residual de tiempo es 5,57×.
-
-El tokenizer mide 23,026/44,388/86,232 ms para 52/104/208 KB; duplicar entrada en ese
-tramo cuesta aproximadamente 1,93–1,94×. Las entradas pequeñas incluyen un coste fijo
-de proceso. La medición y sus límites quedan documentados aquí.
-
-También se corrige el tail Result[unit, E]: MIR debe conservar Err, mientras que el
-tail implícito de una función unit se evalúa y descarta. El fixture unit_tail_values
-verifica ese límite junto a funciones, métodos, closures, opcionales y cleanup.
+MIR verification covers compiler-generated structure and ownership flow. It does not prove runtime helper correctness, external `opaque` resource ownership, or behavior outside the tested corpus. Performance measurements are workload and platform dependent; see the repository benchmark tooling for reproducible runs.
