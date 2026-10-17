@@ -1,6 +1,6 @@
 # Engine Support and Corpus Coverage
 
-This matrix reports tested fixture coverage for W0 and W1. It does not claim universal language parity.
+This matrix reports tested fixture coverage for the interpreter, AST C99, HIR C99, and W1. MIR is not a separately executable backend.
 
 ---
 
@@ -15,8 +15,8 @@ flowchart TD
         P --> TC["TypeChecker & TypeInterner"]
         TC --> INTERP["1. W0 Interpreter (AST)"]
         TC --> HIR["HirBuilder & HirVerifier"]
-        HIR --> MIR["MIR: CFG, ownership, layouts y verificador"]
-        MIR --> HIR_C["2. W0 C99 from MIR (Default Backend)"]
+        HIR --> HIR_C["2. W0 HIR C99 (Default Backend)"]
+        HIR -.-> MIR["MIR: verified inspection representation (w mir)"]
         TC -.->|Diagnostic Oracle| AST_C["3. W0 AST C99 (Secondary Oracle)"]
     end
 
@@ -27,9 +27,9 @@ flowchart TD
 ```
 
 1. **W0 Interpreter (`runtime/Interpreter.py`):** Canonical reference AST tree-walking interpreter.
-2. **W0 MIR C99 (`mir/CCodeGen.py`):** Default native backend; it lowers verified MIR to portable C99.
-3. **W0 AST C99 (`codegen/CCodeGen.py`):** Secondary C99 oracle retained for differential fuzzing and cross-engine verification.
-4. **W1 Self-Hosted (`selfhost/w1.w`):** Native Stage-2 standalone compiler binary compiled via 3-stage bootstrap fixed-point.
+2. **W0 HIR C99 (`hir/HirCCodeGen.py`):** Default native backend; it emits portable C99 from verified typed HIR.
+3. **W0 AST C99 (`codegen/CCodeGen.py`):** Secondary C99 backend retained for differential fuzzing and cross-engine verification.
+4. **W1 Self-Hosted (`selfhost/w1.w`):** Native standalone compiler built through the 3-stage bootstrap fixed point.
 
 ---
 
@@ -39,7 +39,7 @@ The following table summarizes compiler support across the public core corpus. T
 
 <!-- GENERATED TABLE START -->
 
-| Feature Category | Fixtures | W0 Interpreter | W0 AST C99 | W0 MIR C99 (Default) | W1 Self-Hosted C99 | Status |
+| Feature Category | Fixtures | W0 Interpreter | W0 AST C99 | W0 HIR C99 (Default) | W1 Self-Hosted C99 | Status |
 | :--- | :---: | :---: | :---: | :---: | :---: | :--- |
 | **`core`** | 144 | ✅ 144/144 | ✅ 144/144 | ✅ 144/144 | ✅ 144/144 | Declared supported |
 | **`generics`** | 15 | ✅ 15/15 | ✅ 15/15 | ✅ 15/15 | ✅ 15/15 | Declared supported |
