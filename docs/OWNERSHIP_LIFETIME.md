@@ -1,6 +1,6 @@
 # W Language Architecture: Deterministic Ownership & Lifetime Model (`v0.1.3`)
 
-**Status:** Implemented & Verified Specification (`B01-B04`, `D01-D06` / `ADR-009`)  
+**Status:** Implemented & Verified Specification (`B01-B04`, `D01-D06`)  
 **Scope:** `W0 Typed HIR` (default), `W0 AST C99` (oracle), `W1 C99` (`selfhost/w1.w`), and C99 Runtime (`runtime/w_runtime.h`)
 
 ---
@@ -119,7 +119,7 @@ The `CleanupScope` abstraction in `v0.1.3` is directly isomorphic to the explici
 
 ## Phase A managed strings and constructor contracts
 
-See ADR-006 for the current ownership extension. `w_str` borrows static storage; `w_owned_str` consumes a heap buffer and creates its RC owner; `w_copy_str` copies borrowed input such as argv. Dynamic strings participate in clone/release and allocation counters. `w_add` and `w_index_get_owned` results are registered owned temporaries in both native backends and W1. The borrowed `w_index_get` remains restricted to internal projection paths; dictionary value queries use the owned optional path.
+The Phase A ownership contract defines the current string ownership extension. `w_str` borrows static storage; `w_owned_str` consumes a heap buffer and creates its RC owner; `w_copy_str` copies borrowed input such as argv. Dynamic strings participate in clone/release and allocation counters. `w_add` and `w_index_get_owned` results are registered owned temporaries in both native backends and W1. The borrowed `w_index_get` remains restricted to internal projection paths; dictionary value queries use the owned optional path.
 
 `w_ok`, `w_err` and `w_enum_payload` consume their payload. Generated constructor calls move registered temporaries or clone borrowed arguments. `w_unwrap_optional`, `w_unwrap_ok`, `w_unwrap_err` and `w_unwrap_success` return owned values; peek helpers borrow. Class fields and collection slots own their stored values. Leak counters include string owners; LSan remains necessary to find allocations outside the instrumented ownership model.
 
@@ -203,7 +203,7 @@ Las asignaciones evalúan índices y receptores de clase antes del RHS, una sola
 Después protegen el RHS y resuelven el slot mutable: una lista puede realocarse durante
 el RHS y no debe dejar un puntero guardado a un elemento. Los receptores de clase se
 retienen antes del RHS y conservan identidad. El resultado es el valor asignado, también
-en rutas compuestas. AST, HIR y W1 siguen este contrato; véase ADR-017.
+en rutas compuestas. AST, HIR y W1 siguen este contrato.
 
 Return and propagation protect the escaping value before LIFO cleanup. Break and
 continue clean through the nearest loop; the for iterable belongs to its outer
@@ -262,15 +262,15 @@ for the expected-leak process only; it does not suppress leaked allocations.
 
 ---
 
-## 11. Phase D Memory Safety & Sanitizer Gate (ADR-009)
+## 11. Phase D Memory Safety & Sanitizer Gate
 
-As formalized in `ADR-009-Consolidation-and-Parity-Contracts.md`:
+The Phase D contract requires:
 1. **Continuous Sanitizer Matrix:** The full test suite runs under Clang AddressSanitizer (ASan), UndefinedBehaviorSanitizer (UBSan), and Linux LeakSanitizer (LSan) across 107 test fixtures on every pull request.
 2. **Zero Unintended Leaks:** All acyclic data structures, CoW path-copying mutations, monomorphized generic containers, and weak-reference broken cycles must exhibit zero memory leaks.
 3. **Deterministic Scope Cleanup:** The `CleanupScope` LIFO unwinding guarantees that memory is released immediately at scope exits across all four execution engines.
 
 
-## MIR y ABI escalar (ADR-018)
+## MIR and Scalar ABI
 
 En el backend principal, el ownership deja de ser solamente una convención del emitter:
 MIR contiene operaciones `clone`, `store` con operandos movidos y `release`, más salidas

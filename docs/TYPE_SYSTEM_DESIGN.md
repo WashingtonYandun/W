@@ -1,6 +1,6 @@
 # W Language Architecture: Structured `TypeId` & `TypeInterner` Design
 
-**Status:** Implemented & Canonical Specification (`C01-C05`, `D01-D06` / `ADR-009`)  
+**Status:** Implemented & Canonical Specification (`C01-C05`, `D01-D06`)  
 **Scope:** Static Type Representation, Interning, Subtyping, Invariance, and Generic Substitution
 
 ---
@@ -146,7 +146,7 @@ Concretely, even if `Dog <: Animal`:
 
 **Why Invariance is Required:**
 1. **Soundness of Reference & Mutating Operations:** For reference classes (`Class[T]`), covariance would allow inserting a `Cat` into a `RefCell[Dog]` viewed as a `RefCell[Animal]`, breaking type soundness without runtime type tags.
-2. **Predictable CoW & Monomorphization Layout:** In `v0.2`, generic types are compiled via monomorphization (`docs/adr/ADR-002-generics-monomorphization.md`). Treating `list[Dog]` and `list[Animal]` as invariant ensures every container has an exact, unambiguous static element type.
+2. **Predictable CoW & Monomorphization Layout:** In `v0.2`, generic types are compiled via monomorphization. Treating `list[Dog]` and `list[Animal]` as invariant ensures every container has an exact, unambiguous static element type.
 3. **Explicit List Construction:** Note that a list literal `[Dog(), Cat()]` where both `Dog <: Animal` and `Cat <: Animal` still infers `list[Animal]` at construction time via least-upper-bound (`LUB`) superclass inference on the literal elements, or via explicit annotation `let xs: list[Animal] = [Dog(), Cat()]` (where each element expression is checked against `Animal`).
 
 ### 5.5 Dictionary Key Validity (`is_valid_dict_key`)
@@ -191,7 +191,7 @@ Value semantics (`is_value`) and heap Reference Counting (`needs_retain` / `need
 
 ## 6. Whole-Program Compilation & Type Invariance (Phase C & D Consolidation)
 
-Per `ADR-008` (Compilation Sessions), `C05_COMPLETION.md`, and `ADR-009` (Consolidation & Parity Contracts):
+Across compilation sessions, container invariance, and declaration-order checks:
 1. **Whole-Program TypeInterner Arena:** A single `CompilationSession` manages one shared `TypeInterner` across all imported source files and modules. Type comparison is strictly $O(1)$ by integer `TypeId`.
 2. **Container Invariance:** Generic containers (`list[T]`, `dict[K, V]`, and user `struct` / `enum` instances) are strictly invariant. A `list[Dog]` cannot be assigned to or passed where a `list[Animal]` is expected, preventing silent heap type corruption.
 3. **Inference Bounds:** Contextless empty collection inference (`let d = {}`) is statically rejected (`[W2001]`). Generic parameter inference enforces structural consistency across call arguments.

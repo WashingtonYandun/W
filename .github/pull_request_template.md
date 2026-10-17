@@ -10,7 +10,7 @@ Fixes #(issue)
 - [ ] New feature (non-breaking change adding language or compiler capability)
 - [ ] Breaking change (fix or feature modifying syntax, types, or runtime ABI)
 - [ ] Refactoring (internal restructuring without observable behavioral change)
-- [ ] Documentation / Specs (updates to specifications, README, or ADRs)
+- [ ] Documentation / Specs (updates to the specification, README, or public technical docs)
 - [ ] Performance optimization (compiler throughput or runtime speedup)
 
 ## Quality & Conformance Checklist
@@ -20,5 +20,5 @@ Fixes #(issue)
 - [ ] **Bootstrap Parity:** Fixed-point bootstrap SHA256 is verified (if compiler was modified).
 - [ ] **Code Formatting:** Code is formatted with `./w fmt`.
 - [ ] **Tests Added:** Added corresponding test cases in `tests/` covering new behavior or regressions.
-- [ ] **Documentation Updated:** `SPEC.md`, `README.md`, or `docs/adr/` updated if architectural changes were introduced.
+- [ ] **Documentation Updated:** Update `SPEC.md` or the relevant public docs when user-visible language behavior changes.
 - [ ] **Language Boundary:** Commit messages, comments, identifiers, and docs are strictly in English.

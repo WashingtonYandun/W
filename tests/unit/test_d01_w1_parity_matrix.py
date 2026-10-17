@@ -4,7 +4,7 @@ Public Engine Feature Parity Matrix, Boundary Transparency, and Standalone W1 Va
 
 Invariants verified:
 1. Every fixture in the corpus is classified in tests/engine_profiles.json without stale entries.
-2. Every unsupported engine feature has an explicit, non-empty tracking reason pointing to its milestone.
+2. Every unsupported engine feature has an explicit, non-empty tracking reason with a milestone identifier.
 3. Standalone W1 binary executes directly on core fixtures without W0 pre-filtering.
 4. Standalone W1 binary accepts generic functions directly and emits C without W0 pre-filtering.
 5. ci_conformance.py --matrix generates a valid Markdown parity matrix matching current counts.
@@ -59,16 +59,14 @@ def test_unsupported_reasons_and_milestones():
     core = features.get("core", {})
     assert not core, f"Core feature must have no engine limitations, found: {core}"
 
-    roadmap_text = (ROOT / "docs/ROADMAP.md").read_text()
-    roadmap_milestones = set(re.findall(r"\b[A-Z]\d{2}\b", roadmap_text))
-
-    # Every limitation must point to a milestone that exists in the active roadmap.
+    # Active milestone planning is maintained in the project Brain, not in public docs.
+    # Keep the engine profile self-contained and require actionable identifiers.
+    milestone_pattern = re.compile(r"\b[A-Z]\d{2}\b")
     for feat_name, limitations in features.items():
         for engine, reason in limitations.items():
             assert reason, f"Feature '{feat_name}' engine '{engine}' has empty unsupported reason"
-            reason_milestones = set(re.findall(r"\b[A-Z]\d{2}\b", reason))
-            assert roadmap_milestones.intersection(reason_milestones), (
-                f"Feature '{feat_name}' engine '{engine}' reason must reference roadmap milestone: {reason}"
+            assert milestone_pattern.search(reason), (
+                f"Feature '{feat_name}' engine '{engine}' reason must reference a milestone identifier: {reason}"
             )
 
 
@@ -166,11 +164,6 @@ def test_documentation_consistency():
     expected_error_union_paths += list((ROOT / 'tests/types/invalid').glob('error_union_*.w'))
     expected_error_union_fixtures = {str(path.relative_to(ROOT)) for path in expected_error_union_paths}
     assert set(error_union_fixtures) == expected_error_union_fixtures, "F03 fixtures must be classified together"
-    roadmap = (ROOT / "docs/ROADMAP.md").read_text()
-    assert f"**{corpus_size} fixtures**" in roadmap, "Roadmap must distinguish the current corpus from historical milestones"
-    assert "F01" in roadmap and "114" in roadmap and "Cerrada" in roadmap, (
-        "Roadmap must record completed F01 acceptance"
-    )
     assert "Bootstrap Fixed-Point vs. Core Corpus Parity" in content, (
         "Doc must distinguish bootstrap fixed-point from core-corpus parity"
     )

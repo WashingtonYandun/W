@@ -25,3 +25,6 @@ tests/runtime/temp_file.txt
 
 # Private investigation records
 audit/
+
+# Local-only architecture decision records
+docs/adr/

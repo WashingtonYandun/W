@@ -64,7 +64,7 @@ Tres fixtures prueban límites, overflow y un rango de 100 millones con salida i
 en los cuatro motores. El bootstrap compara C0, C1 y C2; CI incluye GCC/Clang en Linux,
 Clang en macOS y ASan/UBSan, con LSan en Linux.
 
-La primera implementación MIR de ADR-018 registró, para 10.000 filas y cinco muestras
+La primera implementación MIR registró, para 10.000 filas y cinco muestras
 calientes con Clang `-O2` en arm64, 62,651 ms y 2,297 MiB para el backend MIR; C independiente da 8,182 ms y 2,078 MiB.
 La fase anterior midió 87,776 ms y 27,109 MiB con tres muestras: aproximadamente 29 %
 menos tiempo y 91,5 % menos RSS. Son ejecuciones distintas; no atribuyen cada mejora a
@@ -76,7 +76,7 @@ parsing, strings y fronteras runtime/FFI antes de decidir especializar contenedo
 LLVM sigue sin una justificación medida: el MIR habilita un experimento futuro, pero
 cambiar el emitter no elimina los costes de representación y de los helpers.
 
-## Cierre posterior (ADR-019)
+## Follow-up verification
 
 El perfil de buffers identifica asignaciones por caracteres ASCII. Indexación y chr
 reutilizan 128 strings estáticos inmutables, incluido NUL; Unicode conserva ownership.

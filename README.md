@@ -82,7 +82,7 @@ If `main` returns an `Err`, W writes diagnostic `W4003` to `stderr` and exits wi
 - `stdlib/`, `tooling/`, `editors/`: standard library and editor tooling.
 - `tests/unit/`, `tests/runtime/`, `tests/types/`, `tests/fuzz/`: contracts, fixtures, and fuzz tests.
 - `examples/`, `bench/`, `tools/`: examples, benchmarks, and utilities.
-- `docs/adr/`, `docs/history/`: architecture decisions and historical reports.
+- `docs/history/`: historical milestone reports.
 
 The [language specification](SPEC.md) defines W's syntax and semantics. Milestone reports describe the state at the time they were written; current behavior is defined by the specification and tests.
 

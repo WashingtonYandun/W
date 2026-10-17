@@ -1,6 +1,6 @@
 # W Language Architecture: Typed High-Level IR (`HIR`) Design
 
-**Status:** Implemented & Default Production Backend (`C06`, `D01-D06` / `ADR-009`)  
+**Status:** Implemented & Default Production Backend (`C06`, `D01-D06`)  
 **Scope:** Compiler Middle-End (`AST → Name Resolution → Type Checking → Typed HIR → HirVerifier → Backends`)
 
 ---
@@ -60,7 +60,7 @@ expresiones HIR ni tiene fallback al backend AST. `w mir archivo.w` permite insp
 
 Los modelos de las secciones siguientes describen el nivel HIR. Las clases ejecutables
 canónicas son `hir/HirNodes.py`; [MIR_DESIGN.md](MIR_DESIGN.md) describe el nivel inferior.
-ADR-018 extiende los contratos de ADR-017.
+MIR strengthens the audit contracts with verified control flow and explicit ownership transitions.
 
 ---
 
@@ -160,7 +160,7 @@ para el dump; no interviene en la identidad nominal.
 
 `HirEnumPattern` representa variantes enum y constructores Option/Result. No puede
 representar alternativas de una unión de errores. El verificador rechaza mezclas de
-esas representaciones antes de emitir C; ADR-015 registra el contrato.
+esas representaciones antes de emitir C; el verificador rechaza patrones de error no admitidos.
 
 ## 4. Explicit Copy-on-Write (`HirCowPath`) Lowering
 
@@ -224,7 +224,7 @@ Typed HIR adoption and stabilization is complete:
 2. **Phase C06 (`docs/history/C06_COMPLETION.md`):**
    - Established Typed HIR (`hir/HirCCodeGen.py`) as the primary default compiler backend for `w build` and `w emit-c`.
    - Retained AST C codegen as secondary differential oracle (`--backend=ast`).
-3. **Phase D01–D06 / ADR-009 (`docs/adr/ADR-009-Consolidation-and-Parity-Contracts.md`):**
+3. **Phase D01–D06:**
    - Enforced byte-for-byte C99 code generation determinism across random hash seeds.
    - Verified against AddressSanitizer and UndefinedBehaviorSanitizer across 107 fixtures.
    - Integrated compiler phase telemetry and memory peak reporting.

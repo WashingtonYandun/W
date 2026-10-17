@@ -157,7 +157,7 @@ When modifying compiler frontend, parser, or code generation logic that affects 
   - Follow [Conventional Commits](https://www.conventionalcommits.org/):
     - `feat:` New features or language capabilities
     - `fix:` Bug fixes in compiler, runtime, or tools
-    - `docs:` Documentation, specifications, or ADR updates
+    - `docs:` Public documentation or specification updates
     - `test:` Adding or improving test cases
     - `chore:` Maintenance, build setup, or repo chores
     - `refactor:` Code restructuring without behavioral changes

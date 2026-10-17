@@ -113,7 +113,7 @@ because a bug in the semantics is reproduced identically at every stage.
 **State.** F01 closed with 114/114 fixtures on 2026-10-15. F03 extended that corpus to
 121/121 cases on all four engines, with zero unsupported fixtures. The H01–H03 critical
 regressions expanded the corpus to 129 cases; the dedicated F03 ownership regression
-at that point brought coverage to 130/130 cases. ADR-017–ADR-019 extend the current corpus to 168 cases. The three-stage bootstrap
+at that point brought coverage to 130/130 cases. The latest audit regressions extend the current corpus to 168 cases. The three-stage bootstrap
 also reaches an identical C output hash at every stage. These checks prove the recorded
 corpus and deterministic self-hosting contract; they do not prove universal language
 parity or semantic correctness outside the tested programs.
@@ -171,7 +171,7 @@ and a strong cycle is silent unless the memory check or an external leak detecto
 
 **Decision.** Keep `W_MEM_CHECK` explicitly opt-in in every execution mode. Runtime
 defaults must not change stderr or exit status based on build mode. See
-[ADR-012](adr/ADR-012-native-runtime-diagnostics-and-arc-cycle-policy.md).
+Native runtime diagnostics remain opt-in through `W_MEM_CHECK`.
 
 ---
 
@@ -210,12 +210,12 @@ un `size_t` por byte; el caso ASCII con longitud cacheada evita esa tabla. Los l
 `bytes.decode` construyen listas de partes; eliminar copias cuadráticas no elimina todas
 las asignaciones. El backend principal consume MIR verificado y especializa locales,
 parámetros y retornos `int`, `float` y `bool`. Los contenedores siguen usando `WVal`;
-no existe un backend LLVM directo. Véase `MIR_DESIGN.md` y ADR-018.
+no existe un backend LLVM directo. Véase `MIR_DESIGN.md` para el pipeline y sus límites.
 
 El nuevo corpus tiene 168 fixtures, incluidos 28 casos de la auditoría. La paridad
 medida no cubre todas las combinaciones del lenguaje. Los recursos FFI `opaque` siguen
 requiriendo disciplina manual y SQLite del sistema no se recompila con sanitizers.
-Véase ADR-017 y `docs/AUDIT_REMEDIATION.md`.
+Véase `FFI_VALIDATION.md` para el contrato del piloto y `evidence/` para las mediciones reproducibles.
 
 Los strings ASCII de un carácter producidos por indexación y chr usan almacenamiento
 inmutable estático, incluido NUL. El resto conserva ownership administrado. Los contadores
