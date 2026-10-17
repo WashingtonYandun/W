@@ -1,9 +1,8 @@
 # Known Limits and Deferred Decisions
 
-This file records what W does **not** do, why, and what it would take to change it.
-Incluye decisiones diferidas y límites conocidos; no convierte defectos en decisiones. Items
-marked *open decision* change the language surface and therefore need an explicit call
-before any implementation work.
+This file records what W does **not** do, why, and what it would take to change it. It
+tracks deferred decisions separately from defects. Items marked *open decision* change
+the language surface and need an explicit decision before implementation.
 
 Last reviewed: `2026-10-16`.
 
@@ -58,27 +57,27 @@ This is a language change, not a patch.
 
 ---
 
-## 2. Las uniones de error tienen alternativas restringidas
+## 2. Error unions have restricted alternatives
 
-**Qué ocurre.** `T ! E1 | E2` permite propagar distintos errores con `?` y hacer un
-`match` exhaustivo sobre el valor ligado por `else err`. El origen se propaga si su
-conjunto de errores es subconjunto del conjunto declarado por la función destino. No se
-convierten los payloads.
+**Behavior.** `T ! E1 | E2` allows `?` to propagate multiple error types and `match` to
+exhaustively inspect the value bound by `else err`. A source error set can propagate when
+it is a subset of the destination function's declared error set. Payloads are not
+converted.
 
-Las alternativas admitidas son `int`, `float`, `bool`, `str`, `struct` no genéricos y
-`enum` no genéricos. El patrón es `Tipo(error)` o `Tipo(_)` y liga el payload completo.
-Las alternativas repetidas se canonicalizan; la unión necesita al menos dos alternativas
-distintas.
+Supported alternatives are `int`, `float`, `bool`, `str`, non-generic `struct`, and
+non-generic `enum`. Patterns use `Type(error)` or `Type(_)` and bind the full payload.
+Duplicate alternatives are canonicalized; a union must contain at least two distinct
+alternatives.
 
-**Límite.** No se admiten clases, tipos genéricos, colecciones, tuplas, funciones ni otros
-tipos compuestos. Las clases pueden pertenecer a jerarquías superpuestas; colecciones y
-funciones no conservan en `WVal` la identidad concreta de sus parámetros. Permitirlos sin
-un descriptor runtime adicional haría que los patrones no pudieran distinguir las
-alternativas de forma segura. F03 mantiene el payload original y compara su identidad
-runtime; no añade una caja ni una conversión implícita.
+**Limit.** Classes, generic types, collections, tuples, functions, and other composite
+types are not supported. Class hierarchies may overlap, and collections and functions do
+not preserve their concrete parameter identity in `WVal`. Without additional runtime
+type descriptors, patterns could not distinguish these alternatives safely. F03 keeps
+the original payload and compares its runtime identity; it adds no boxing or implicit
+conversion.
 
-**Trabajo futuro.** Ampliar este conjunto requiere un contrato de identidad runtime para
-cada nueva categoría, especialmente clases con herencia y tipos genéricos monomorfizados.
+**Future work.** Expanding the set requires a runtime identity contract for each new
+category, especially inherited classes and monomorphized generic types.
 
 ---
 
@@ -164,10 +163,10 @@ gains either atomics or a "no shared state" discipline with a runtime that enfor
 
 | Item | State |
 | :--- | :--- |
-| Asignación encadenada | HIR usa `HirAssignment`; se conserva el valor y cada índice se evalúa una vez. El límite artificial de profundidad fue eliminado. |
+| Chained assignment | HIR uses `HirAssignment`; the value is preserved and each index is evaluated once. The artificial depth limit was removed. |
 | Parser error recovery | None. The first syntax error aborts the parse, so one diagnostic per run is the maximum. `--json` reports a single object, not an array. |
-| `w fmt` coverage | El gate verifica idempotencia y AST preservado en fixtures, runtime, ejemplos recursivos, stdlib y selfhost; también ejecuta árboles generados antes y después del formato. |
+| `w fmt` coverage | The gate checks idempotence and AST preservation across fixtures, runtime programs, recursive examples, the standard library, and self-hosted sources. It also runs generated trees before and after formatting. |
 | LSP | `initialize`, `didOpen/didChange/didClose`, `definition`, `completion` and `publishDiagnostics`. No hover, references, rename, formatting, signature help, semantic tokens or incremental sync. |
 | Dictionary keys | `int`, `str`, `bool`, `enum` only; `float` and composites containing it are rejected with `W2010`. |
 | `NetError` | Declared in the prelude (`checker/SymbolTable.py`) and referenced by a parser fixture, but nothing produces one. Either implement a network module or remove the type. |
-| Standard library size | `text` (3 functions), `algorithms` (3), `io` (2), `bytes` (2). `join` cuesta O(bytes de salida + partes), con un builder de dos pasadas. No Unicode normalisation. |
+| Standard library size | `text` (3 functions), `algorithms` (3), `io` (2), `bytes` (2). `join` takes O(output bytes + parts) using a two-pass builder. No Unicode normalization. |
