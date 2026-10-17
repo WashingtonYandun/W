@@ -141,7 +141,7 @@ It is critical to distinguish between two distinct compiler guarantees:
 
 2. **Core Corpus Parity:**
    - Corpus parity means every fixture in this 168-case public corpus passes on every engine, with no unsupported exclusions.
-   - It does not claim W1 parity for separate expansion-suite coverage or every possible source program. The matrix reports only the current tested corpus.
+   - It reports only this tested corpus and makes no claim about W1 support for other programs.
 
 ---
 
@@ -156,7 +156,7 @@ The compiler test harness (`tools/ci_conformance.py`) enforces strict behavioral
 - **Result:** Passes (168/168) if and only if all supported features pass without failure, while accurately reporting unsupported counts.
 
 ### 5.2 Release profile (`--profile=release`)
-- Evaluates all 130 corpus fixtures across all engines without allowing any unsupported exclusions.
+- Evaluates all 168 corpus fixtures across all engines without allowing any unsupported exclusions.
 - **Requirement:** Every engine must pass 100% of all fixtures.
 - **Result:** Fails on any unsupported fixture or behavioral mismatch. It currently passes all 168 fixtures on all four engines with no exclusions; 
 
