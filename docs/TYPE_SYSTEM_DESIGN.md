@@ -5,8 +5,7 @@ This document describes W0's canonical type representation and checking rules. A
 use ¶DefId¶ identities. Generic substitution, assignability, variance, and ownership
 capabilities operate on these structured types.
 
-## 1. TypeId and TypeInterner architecture
-## 2. `TypeId` & `TypeInterner` Architecture
+## 1. `TypeId` & `TypeInterner` Architecture
 
 Every static type in the compiler is uniquely represented by a 32-bit integer handle (`TypeId`), managed by a central `TypeInterner`.
 
@@ -111,15 +110,15 @@ The assignability relation `is_assignable(src: TypeId, dst: TypeId) -> bool` (`s
 
 ### 4.3 Closed error-channel unions
 
-Una unión de error contiene al menos dos tipos distintos y solo puede aparecer como el
-segundo componente de `Result<T, E>`. `ErrorUnionType` se interna con alternativas
-ordenadas y sin duplicados. Una alternativa puede ampliarse a una unión que la contenga;
-una unión origen puede propagarse únicamente si cada uno de sus miembros pertenece al
-conjunto destino. No hay conversiones de payload.
+An error union contains at least two distinct types and can appear only as the error
+component of `Result<T, E>`. `ErrorUnionType` is interned with sorted, deduplicated
+alternatives. An alternative can widen to a union that contains it; a source union can
+propagate only if every member belongs to the destination set. Payloads are not
+converted.
 
-Para mantener identidad runtime verificable y evitar conjuntos ambiguos, las alternativas
-admitidas son escalares (`int`, `float`, `bool`, `str`), `struct` no genéricos y `enum`
-no genéricos. Clases, genéricos y tipos compuestos quedan fuera de este contrato.
+To keep runtime identity verifiable and avoid ambiguous sets, alternatives are limited
+to scalars (`int`, `float`, `bool`, `str`), non-generic `struct`, and non-generic `enum`.
+Classes, generic types, and composite types are outside this contract.
 
 ### 4.4 Nominal Class & Interface Subtyping
 1. **Single Inheritance (`extends`):** `NominalClass(sub_def, sub_args) <: NominalClass(sup_def, sup_args)` if and only if walking the `superclass` chain from `sub` (with generic argument substitution) reaches `NominalClass(sup_def, sup_args)`.
