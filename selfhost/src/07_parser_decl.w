@@ -98,12 +98,14 @@ fn direct_range_operator() -> str {
 
 fn parse_for_stmt() -> unit {
     expect_kind("FOR")
+    let grouped = match_kind("LPAREN")
     let pat0 = expect_kind("IDENT")
     let mut pat_names: list[str] = [pat0.val]
     while match_kind("COMMA") {
         let pn = expect_kind("IDENT")
         pat_names.append(pn.val)
     }
+    if grouped { expect_kind("RPAREN") }
     expect_kind("IN")
     emit_line("{")
     push_scope("block")

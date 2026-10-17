@@ -406,6 +406,14 @@ class TypeInterner:
                     self.enum_defs[name].type_args = type_args
                 if template_name:
                     self.enum_defs[name].template_name = template_name
+                cached = self._id_to_wtype.get(tid)
+                if isinstance(cached, EnumType):
+                    definition = self.enum_defs[name]
+                    cached.variants = list(definition.variants)
+                    cached.variant_payloads = {variant: [self.to_wtype(item) for item in payload]
+                                               for variant, payload in definition.variant_payloads.items()}
+                    cached.template_name = definition.template_name
+                    cached.type_args = [self.to_wtype(item) for item in definition.type_args] or None
             return tid
         caps = TypeCapabilities(
             needs_retain=False,
@@ -642,6 +650,44 @@ class TypeInterner:
 
         return False
 
+    def equality_compatible(self, left_id: int, right_id: int) -> bool:
+        """Compare canonical shapes, including unconstrained constructor channels."""
+        pending, seen = [left_id, right_id], set()
+        while pending:
+            type_id = pending.pop()
+            if type_id in seen:
+                continue
+            seen.add(type_id)
+            entry = self.get_entry(type_id)
+            if entry.tag == 'function':
+                return False
+            if entry.tag in ('list', 'optional'):
+                pending.append(entry.data)
+            elif entry.tag in ('tuple', 'result', 'error_union', 'dict'):
+                pending.extend(entry.data)
+            elif entry.tag == 'struct':
+                pending.extend(self.struct_defs[entry.data].fields.values())
+            elif entry.tag == 'enum':
+                pending.extend(item for payload in self.enum_defs[entry.data].variant_payloads.values() for item in payload)
+        return self._equality_shapes(left_id, right_id)
+
+    def _equality_shapes(self, left_id: int, right_id: int) -> bool:
+        if self.is_assignable(left_id, right_id) or self.is_assignable(right_id, left_id):
+            return True
+        left, right = self.get_entry(left_id), self.get_entry(right_id)
+        if left.tag != right.tag:
+            return False
+        if left.tag in ('list', 'optional'):
+            return self._equality_shapes(left.data, right.data)
+        if left.tag in ('tuple', 'result', 'error_union'):
+            return len(left.data) == len(right.data) and all(
+                self._equality_shapes(a, b) for a, b in zip(left.data, right.data))
+        if left.tag == 'enum':
+            a, b = self.enum_defs[left.data], self.enum_defs[right.data]
+            return bool(a.template_name) and a.template_name == b.template_name and len(a.type_args) == len(b.type_args) and all(
+                self._equality_shapes(x, y) for x, y in zip(a.type_args, b.type_args))
+        return False
+
     def is_error_channel_assignable(self, src_id: int, dst_id: int) -> bool:
         """Return whether every source error alternative exists in the target set.
 
@@ -848,12 +894,19 @@ class TypeInterner:
             res = FunctionType([self.to_wtype(p) for p in params], self.to_wtype(ret), is_mut)
         elif entry.tag == "struct":
             sdef = self.struct_defs.get(entry.data)
-            f_wtypes = {fname: self.to_wtype(fid) for fname, fid in sdef.fields.items()} if sdef else {}
-            res = StructType(entry.data, f_wtypes)
+            res = StructType(entry.data, {})
+            self._id_to_wtype[type_id] = res
+            res.fields = {fname: self.to_wtype(fid) for fname, fid in sdef.fields.items()} if sdef else {}
         elif entry.tag == "enum":
             edef = self.enum_defs.get(entry.data)
             v_list = edef.variants if edef else []
             res = EnumType(entry.data, v_list)
+            self._id_to_wtype[type_id] = res
+            if edef:
+                res.variant_payloads = {variant: [self.to_wtype(item) for item in payload]
+                                        for variant, payload in edef.variant_payloads.items()}
+                res.template_name = edef.template_name
+                res.type_args = [self.to_wtype(item) for item in edef.type_args] or None
         elif entry.tag == "interface":
             idef = self.interface_defs.get(entry.data)
             m_wtypes = {mname: self.to_wtype(mid) for mname, mid in idef.methods.items()} if idef else {}

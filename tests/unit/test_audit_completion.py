@@ -19,9 +19,10 @@ def test_ascii_allocation_and_lifetime_contract():
     source = r'''#include "runtime/w_runtime.h"
 #include <assert.h>
 int main(void) {
+    assert(W_RUNTIME_ABI_VERSION == 2 && sizeof(WVal) <= 32);
     for (int64_t code = 0; code < 128; code++) {
         WVal character = w_builtin_chr(w_int(code));
-        assert(character.tag == W_STR && character.string_length == 1);
+        assert(character.tag == W_STR && character.as.string.length == 1);
         assert(w_builtin_ord(character).as.i == code);
         WVal retained = w_clone(character);
         w_release(character);

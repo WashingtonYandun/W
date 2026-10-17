@@ -16,6 +16,7 @@ from hir.HirCCodeGen import HirCCodeGen
 from error.Error import WError
 
 from common.Version import W_VERSION
+from common.Platform import cache_lock, compiler_command, executable_name, peak_rss_kb
 
 
 def get_repo_root() -> str:
@@ -47,18 +48,16 @@ def _bootstrap_source_mtime(repo_root: str) -> float:
 
 def ensure_selfhost_w1_binary(repo_root: str) -> str:
     """Serialize cache rebuilds across independent compiler/test processes."""
-    import fcntl
     cache_dir = os.path.join(repo_root, ".w_cache")
     os.makedirs(cache_dir, exist_ok=True)
-    with open(os.path.join(cache_dir, 'bootstrap.lock'), 'a') as lock:
-        fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
+    with cache_lock(os.path.join(cache_dir, 'bootstrap.lock')):
         return _ensure_selfhost_w1_binary_locked(repo_root)
 
 
 def _ensure_selfhost_w1_binary_locked(repo_root: str) -> str:
     cache_dir = os.path.join(repo_root, ".w_cache")
     os.makedirs(cache_dir, exist_ok=True)
-    w1_bin = os.path.join(cache_dir, "w1_stage2")
+    w1_bin = os.path.join(cache_dir, executable_name("w1_stage2"))
     w1_src_path = os.path.join(repo_root, "selfhost", "w1.w")
 
     needs_rebuild = not os.path.exists(w1_bin)
@@ -77,13 +76,13 @@ def _ensure_selfhost_w1_binary_locked(repo_root: str) -> str:
 
         c0_path = os.path.join(cache_dir, "compiler0.c")
         c1_path = os.path.join(cache_dir, "compiler1.c")
-        s1_bin = os.path.join(cache_dir, "w1_stage1")
+        s1_bin = os.path.join(cache_dir, executable_name("w1_stage1"))
 
         with open(c0_path, "w", encoding="utf-8") as cf:
             cf.write(c0_code)
 
         subprocess.run(
-            [os.environ.get("CC", "cc"), "-std=c99", "-O2", f"-I{repo_root}", c0_path, "-o", s1_bin],
+            compiler_command() + ["-std=c99", "-O2", f"-I{repo_root}", c0_path, "-o", s1_bin],
             check=True,
             timeout=120,
             capture_output=True,
@@ -98,7 +97,7 @@ def _ensure_selfhost_w1_binary_locked(repo_root: str) -> str:
             cwd=repo_root,
         )
         subprocess.run(
-            [os.environ.get("CC", "cc"), "-std=c99", "-O2", f"-I{repo_root}", c1_path, "-o", w1_bin],
+            compiler_command() + ["-std=c99", "-O2", f"-I{repo_root}", c1_path, "-o", w1_bin],
             check=True,
             timeout=120,
             capture_output=True,
@@ -136,7 +135,6 @@ def run_pipeline(
         elif use_hir is True:
             backend = "hir"
 
-        import resource
         import time
 
         t_start = time.perf_counter()
@@ -172,7 +170,7 @@ def run_pipeline(
             # 2. Parsing
             t_parse0 = time.perf_counter()
             parser = Parser(file=file_name)
-            ast = parser.parse(source_code)
+            ast = parser.parse(source_code, tokens=tokens, recover=check_only)
             parse_ms = (time.perf_counter() - t_parse0) * 1000.0
         if show_ast:
             print(json.dumps(ast.to_dict(), indent=2))
@@ -204,8 +202,6 @@ def run_pipeline(
 
         if check_only:
             if show_stats:
-                rusage = resource.getrusage(resource.RUSAGE_SELF)
-                peak_rss_kb = rusage.ru_maxrss if sys.platform != "darwin" else rusage.ru_maxrss // 1024
                 stat_obj = {
                     "status": "ok",
                     "file": file_name,
@@ -217,7 +213,7 @@ def run_pipeline(
                             "check": round(check_ms, 2),
                             "total": round((time.perf_counter() - t_start) * 1000.0, 2),
                         },
-                        "peak_rss_kb": peak_rss_kb,
+                        "peak_rss_kb": peak_rss_kb(),
                     }
                 }
                 print(json.dumps(stat_obj, indent=2))
@@ -231,6 +227,7 @@ def run_pipeline(
         if emit_c_path is not None or build_bin_path is not None:
             repo_root = get_repo_root()
             codegen_inst = None
+            hir_ms = None
             if backend == "selfhost" and file_name != "<stdin>":
                 w1_bin = ensure_selfhost_w1_binary(repo_root)
                 abs_input = os.path.abspath(file_name)
@@ -244,6 +241,7 @@ def run_pipeline(
                         capture_output=True,
                         text=True,
                         cwd=input_dir,
+                        timeout=120,
                     )
                     codegen_ms = (time.perf_counter() - t_w10) * 1000.0
                     if w1_proc.returncode != 0:
@@ -271,9 +269,10 @@ def run_pipeline(
                 c_code = codegen_inst.generate(hir_mod)
                 codegen_ms = (time.perf_counter() - t_cg0) * 1000.0
 
-            if show_stats:
-                rusage = resource.getrusage(resource.RUSAGE_SELF)
-                peak_rss_kb = rusage.ru_maxrss if sys.platform != "darwin" else rusage.ru_maxrss // 1024
+            c_compile_ms = link_ms = 0.0
+            def report_codegen_stats():
+                if not show_stats:
+                    return
                 stat_obj = {
                     "status": "ok",
                     "file": file_name,
@@ -284,11 +283,15 @@ def run_pipeline(
                             "lex": round(lex_ms, 2),
                             "parse": round(parse_ms, 2),
                             "check": round(check_ms, 2),
-                            "hir": round(hir_ms, 2) if "hir_ms" in locals() else None,
-                            "codegen": round(codegen_ms, 2) if "codegen_ms" in locals() else None,
+                            "hir": round(hir_ms, 2) if hir_ms is not None else None,
+                            "codegen": round(codegen_ms, 2),
+                            "mir": round(getattr(codegen_inst, 'phase_ms', {}).get('mir', 0), 2),
+                            "c_emit": round(getattr(codegen_inst, 'phase_ms', {}).get('c_emit', 0), 2),
+                            "c_compile": round(c_compile_ms, 2),
+                            "link": round(link_ms, 2),
                             "total": round((time.perf_counter() - t_start) * 1000.0, 2),
                         },
-                        "peak_rss_kb": peak_rss_kb,
+                        "peak_rss_kb": peak_rss_kb(),
                     }
                 }
                 print(json.dumps(stat_obj, indent=2), file=sys.stderr)
@@ -297,6 +300,7 @@ def run_pipeline(
                 with open(emit_c_path, "w", encoding="utf-8") as f:
                     f.write(c_code)
                 if build_bin_path is None:
+                    report_codegen_stats()
                     return 0
 
             if build_bin_path is not None:
@@ -305,20 +309,43 @@ def run_pipeline(
                     tmp_c_path = tmp_c.name
                 try:
                     san_flags = ["-fsanitize=address,undefined", "-fno-omit-frame-pointer"] if sanitize else []
-                    cmd = [os.environ.get("CC", "cc"), "-std=c99", "-O2", f"-I{repo_root}"] + san_flags + [tmp_c_path, "-o", build_bin_path] + [flag for library in link_libraries for flag in [library if "/" in library else "-l" + library]]
-                    proc = subprocess.run(cmd, capture_output=True, text=True)
+                    build_bin_path = executable_name(build_bin_path)
+                    object_path = tmp_c_path + ('.obj' if os.name == 'nt' else '.o')
+                    source_objects = {library: object_path + '.' + str(index) + ('.obj' if os.name == 'nt' else '.o')
+                                      for index, library in enumerate(link_libraries)
+                                      if library.lower().endswith('.c') and os.path.isfile(library)}
+                    base = compiler_command() + ["-std=c99", "-O2", f"-I{repo_root}"] + san_flags
+                    started = time.perf_counter()
+                    for c_source, c_object in [(tmp_c_path, object_path)] + list(source_objects.items()):
+                        proc = subprocess.run(base + ['-c', c_source, '-o', c_object],
+                                              capture_output=True, text=True, timeout=120)
+                        if proc.returncode != 0:
+                            print(f"[C Compiler Error]\n{proc.stderr}", file=sys.stderr)
+                            return 1
+                    c_compile_ms = (time.perf_counter() - started) * 1000
+                    libraries = [flag for library in link_libraries for flag in
+                                 [source_objects[library] if library in source_objects else
+                                  library if '/' in library or '\\' in library else '-l' + library]]
+                    started = time.perf_counter()
+                    proc = subprocess.run(base + [object_path, '-o', build_bin_path] + libraries,
+                                          capture_output=True, text=True, timeout=120)
+                    link_ms = (time.perf_counter() - started) * 1000
                     if proc.returncode != 0:
-                        print(f"[C Compiler Error]\n{proc.stderr}", file=sys.stderr)
+                        print(f"[C Linker Error]\n{proc.stderr}", file=sys.stderr)
                         return 1
                 finally:
                     if os.path.exists(tmp_c_path):
                         os.remove(tmp_c_path)
+                    if 'object_path' in locals() and os.path.exists(object_path):
+                        os.remove(object_path)
+                    for c_object in locals().get('source_objects', {}).values():
+                        if os.path.exists(c_object):
+                            os.remove(c_object)
+                report_codegen_stats()
                 return 0
 
         # 5. Runtime Interpretation
         if show_stats:
-            rusage = resource.getrusage(resource.RUSAGE_SELF)
-            peak_rss_kb = rusage.ru_maxrss if sys.platform != "darwin" else rusage.ru_maxrss // 1024
             print(json.dumps({
                 "status": "ok",
                 "file": file_name,
@@ -330,7 +357,7 @@ def run_pipeline(
                         "check": round(check_ms, 2),
                         "total": round((time.perf_counter() - t_start) * 1000.0, 2),
                     },
-                    "peak_rss_kb": peak_rss_kb,
+                    "peak_rss_kb": peak_rss_kb(),
                 }
             }, indent=2), file=sys.stderr)
         interp = Interpreter(file=file_name)
@@ -346,7 +373,8 @@ def run_pipeline(
         if json_diagnostics:
             print(json.dumps(err.to_dict(), indent=2))
         else:
-            print(str(err), file=sys.stderr)
+            for diagnostic in getattr(err, 'diagnostics', (err,)):
+                print(str(diagnostic), file=sys.stderr)
         return 1
     except Exception as exc:
         if json_diagnostics:
@@ -460,6 +488,9 @@ def main() -> None:
             ok = run_benchmark_suite(repo_root, w1_bin, update_baseline=update_baseline)
             sys.exit(0 if ok else 1)
         elif subcmd == "test":
+            if args in (["--help"], ["-h"]):
+                print_help()
+                return
             if not os.path.isdir(os.path.join(get_repo_root(), "tests", "unit")):
                 print("w test requires a source checkout", file=sys.stderr)
                 sys.exit(1)

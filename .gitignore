@@ -30,3 +30,9 @@ coverage/
 # Test and local scratch files
 tests/runtime/temp_file.txt
 /scratch/
+
+# Local investigation and planning records
+audit/
+docs/adr/
+docs/history/
+docs/evidence/

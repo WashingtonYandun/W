@@ -816,8 +816,10 @@ class TypeChecker:
                 old_scope = self.current_scope
                 old_ret_type = self.current_fn_ret_type
                 old_loop_depth = self.loop_depth
+                old_expected = self.expected_type
                 self.current_scope = fn_scope
                 self.current_fn_ret_type = fn_type.ret
+                self.expected_type = fn_type.ret
                 self.loop_depth = 0
                 try:
                     # Also bind 'self' as an alias to 'this' inside methods
@@ -850,6 +852,7 @@ class TypeChecker:
                     self.current_scope = old_scope
                     self.current_fn_ret_type = old_ret_type
                     self.loop_depth = old_loop_depth
+                    self.expected_type = old_expected
         finally:
             self.current_class = old_class
 
@@ -869,9 +872,11 @@ class TypeChecker:
         old_scope = self.current_scope
         old_ret_type = self.current_fn_ret_type
         old_loop_depth = self.loop_depth
+        old_expected = self.expected_type
 
         self.current_scope = fn_scope
         self.current_fn_ret_type = fn_type.ret
+        self.expected_type = fn_type.ret
         self.loop_depth = 0
 
         try:
@@ -902,6 +907,7 @@ class TypeChecker:
             self.current_scope = old_scope
             self.current_fn_ret_type = old_ret_type
             self.loop_depth = old_loop_depth
+            self.expected_type = old_expected
 
     def _expr_has_return(self, expr: Expr) -> bool:
         from common.ControlFlow import exits, NORMAL, RETURN
@@ -1554,13 +1560,15 @@ class TypeChecker:
             return self.current_class.superclass
 
         if isinstance(expr, NewExpr):
+            class_t = None
             if "." in expr.class_name and not getattr(expr, "type_args", None):
-                expr.class_name = self._resolve_type_node(NamedType(expr.class_name, expr.line, expr.col)).name
+                class_t = self._resolve_type_node(NamedType(expr.class_name, expr.line, expr.col))
+                expr.class_name = class_t.name
             if getattr(expr, 'type_args', None):
                 expression_type = self._resolve_type_node(GenericType(expr.class_name, expr.type_args, expr.line, expr.col))
                 expr.class_name = expression_type.name
                 expr.type_args = None
-            class_t = self.current_scope.lookup_type(expr.class_name)
+            class_t = class_t or self.current_scope.lookup_type(expr.class_name)
             if class_t is None or not isinstance(class_t, ClassType):
                 raise TypeError(
                     message=f"Unknown class type '{expr.class_name}'",
@@ -2821,32 +2829,7 @@ class TypeChecker:
 
                 elif isinstance(arm.pattern, EnumPattern):
                     v_name = arm.pattern.variant
-                    if arm.pattern.enum_name:
-                        if isinstance(subject_t, EnumType):
-                            if arm.pattern.enum_name != subject_t.name and arm.pattern.enum_name != getattr(subject_t, "template_name", None):
-                                raise TypeError(
-                                    message=f"Pattern '{arm.pattern.enum_name}.{v_name}' is incompatible with match subject '{subject_t}'",
-                                    line=arm.line,
-                                    col=arm.col,
-                                    file=self.file,
-                                    code="T003"
-                                )
-                        elif isinstance(subject_t, OptionalType) and arm.pattern.enum_name != "Option":
-                            raise TypeError(
-                                message=f"Pattern '{arm.pattern.enum_name}.{v_name}' is incompatible with optional subject '{subject_t}'",
-                                line=arm.line,
-                                col=arm.col,
-                                file=self.file,
-                                code="T003"
-                            )
-                        elif isinstance(subject_t, ResultType) and arm.pattern.enum_name != "Result":
-                            raise TypeError(
-                                message=f"Pattern '{arm.pattern.enum_name}.{v_name}' is incompatible with result subject '{subject_t}'",
-                                line=arm.line,
-                                col=arm.col,
-                                file=self.file,
-                                code="T003"
-                            )
+                    self._validate_pattern_owner(arm.pattern, subject_t)
 
                     if expected_variants is not None and v_name not in expected_variants:
                         raise TypeError(
@@ -2911,7 +2894,7 @@ class TypeChecker:
                 # error. A statement-position match may legitimately fall through.
                 yields_value = (
                     any(at != UnitType for at in arm_types)
-                    or (outer_expected is not None and outer_expected != UnitType)
+                    or (not is_statement_context and outer_expected is not None and outer_expected != UnitType)
                 )
                 if yields_value and not has_wildcard:
                     raise TypeError(
@@ -2982,9 +2965,28 @@ class TypeChecker:
             return error_type.name
         return str(error_type)
 
+    def _validate_pattern_owner(self, pattern: EnumPattern, expected_type: WType) -> None:
+        if not pattern.enum_name:
+            return
+        owners = set()
+        if isinstance(expected_type, EnumType):
+            owners.add(expected_type.name)
+            owners.add(getattr(expected_type, "template_name", None))
+        elif isinstance(expected_type, OptionalType):
+            owners.add("Option")
+        elif isinstance(expected_type, ResultType):
+            owners.add("Result")
+        if pattern.enum_name not in owners:
+            raise TypeError(
+                message=f"Pattern '{pattern.enum_name}.{pattern.variant}' is incompatible with match subject '{expected_type}'",
+                line=pattern.line, col=pattern.col, file=self.file, code="T003")
+
     def _bind_pattern_type(self, pattern: Pattern, expected_type: WType, bindings: Dict[str, WType], line: int, col: int) -> None:
         pattern.inferred_type_id = self.interner.intern(expected_type)
         if isinstance(pattern, IdentifierPattern):
+            if pattern.name in bindings:
+                raise TypeError(message=f"Duplicate pattern binding '{pattern.name}'",
+                                line=pattern.line, col=pattern.col, file=self.file, code="W1002")
             bindings[pattern.name] = expected_type
         elif isinstance(pattern, WildcardPattern):
             pass
@@ -3000,6 +3002,7 @@ class TypeChecker:
             for sub_p, sub_t in zip(pattern.elements, expected_type.elements):
                 self._bind_pattern_type(sub_p, sub_t, bindings, line, col)
         elif isinstance(pattern, EnumPattern):
+            self._validate_pattern_owner(pattern, expected_type)
             optional = self._builtin_arguments(expected_type, "Option")
             result = self._builtin_arguments(expected_type, "Result")
             if optional:
@@ -3748,6 +3751,10 @@ class TypeChecker:
 
             enum_t.variants = variant_names
             enum_t.variant_payloads = variant_payloads
+            self.interner.mk_enum(mangled, variant_names,
+                {name: [self.interner.from_wtype(payload) for payload in payloads]
+                 for name, payloads in variant_payloads.items()},
+                type_args=type_ids, template_name=template.name)
 
             concrete_decl = EnumDecl(name=mangled, variants=new_variants, type_params=[], line=template.ast_decl.line, col=template.ast_decl.col)
             self.monomorphized_enum_decls.append(concrete_decl)

@@ -5,6 +5,8 @@ extern "C" fn pilot_status(handle: opaque) -> int32
 extern "C" fn pilot_begin(handle: opaque) -> int32
 extern "C" fn pilot_insert(handle: opaque, id: int64, value: int64) -> int32
 extern "C" fn pilot_commit(handle: opaque) -> int32
+extern "C" fn pilot_record_import(handle: opaque, rows: int64, input_bytes: int64) -> int32
+extern "C" fn pilot_import_count(handle: opaque) -> int64
 extern "C" fn pilot_rollback(handle: opaque) -> int32
 extern "C" fn pilot_count(handle: opaque) -> int64
 extern "C" fn pilot_total(handle: opaque) -> int64
@@ -43,7 +45,7 @@ fn insert_line(handle: opaque, text: str, line: int) -> unit ! CsvError | Databa
     if status != 0 { return Err(DatabaseError { code: status }) }
 }
 
-fn populate(handle: opaque, text: str) -> int ! CsvError | DatabaseError {
+fn populate(handle: opaque, text: str, commit: bool) -> int ! CsvError | DatabaseError {
     let started = pilot_begin(handle)
     if started != 0 { return Err(DatabaseError { code: started }) }
     let mut start = 0
@@ -70,6 +72,13 @@ fn populate(handle: opaque, text: str) -> int ! CsvError | DatabaseError {
     let total = pilot_total(handle)
     let summary_status = pilot_status(handle)
     if summary_status != 0 { return Err(DatabaseError { code: summary_status }) }
+    if not commit {
+        let status = pilot_rollback(handle)
+        if status != 0 { return Err(DatabaseError { code: status }) }
+        return rows
+    }
+    let recorded = pilot_record_import(handle, rows, len(text))
+    if recorded != 0 { return Err(DatabaseError { code: recorded }) }
     let status = pilot_commit(handle)
     if status != 0 { return Err(DatabaseError { code: status }) }
     return rows
@@ -80,10 +89,18 @@ fn run() -> int {
     if len(arguments) == 2 and arguments[1] == "--version" { print(pilot_version())
         return 0
     }
-    if len(arguments) != 2 { print("usage: import_csv measurements.csv (W_SQLITE_DB selects database)")
+    let checking = len(arguments) == 3 and arguments[1] == "--check"
+    let status_only = len(arguments) == 2 and arguments[1] == "--status"
+    if len(arguments) != 2 and not checking {
+        print("usage: import_csv [--check] measurements.csv | --status (W_SQLITE_DB selects database)")
         return 2
     }
-    let text = read_file(arguments[1]) else error { print("io error", error)
+    let text = if status_only { "" } else {
+        read_file(arguments[if checking { 2 } else { 1 }]) else error { print("io error", error)
+            return 2
+        }
+    }
+    if len(text) > 8388608 { print("csv error 0 input size limit exceeded")
         return 2
     }
     let handle = pilot_open()
@@ -93,7 +110,23 @@ fn run() -> int {
         print("resources", pilot_live_resources())
         return 1
     }
-    let imported = populate(handle, text) else error {
+    if status_only {
+        let count = pilot_count(handle)
+        let count_status = pilot_status(handle)
+        let total = pilot_total(handle)
+        let total_status = pilot_status(handle)
+        let imports = pilot_import_count(handle)
+        let import_status = pilot_status(handle)
+        let status = if count_status != 0 { count_status } elif total_status != 0 { total_status } else { import_status }
+        let closed = pilot_dispose(handle)
+        if status != 0 or closed != 0 { print("database error", if status != 0 { status } else { closed })
+            return 1
+        }
+        print("status", count, total, imports)
+        print("resources", pilot_live_resources())
+        return 0
+    }
+    let imported = populate(handle, text, not checking) else error {
         match error {
             CsvError(detail) => { print("csv error", detail.line, detail.reason) },
             DatabaseError(detail) => { print("database error", detail.code) }
@@ -103,7 +136,10 @@ fn run() -> int {
         let failure = -1
         failure
     }
-    if imported >= 0 { print("imported", imported, pilot_count(handle), pilot_total(handle)) }
+    if imported >= 0 {
+        if checking { print("validated", imported) }
+        else { print("imported", imported, pilot_count(handle), pilot_total(handle)) }
+    }
     let closed = pilot_dispose(handle)
     print("resources", pilot_live_resources())
     if closed != 0 or imported < 0 { return 1 }

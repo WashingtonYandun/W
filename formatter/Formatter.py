@@ -110,7 +110,7 @@ class Formatter:
         if isinstance(p, LiteralPattern):
             return self.format_expr(p.literal, 0)
         if isinstance(p, TuplePattern):
-            return ", ".join([self.format_pattern(e) for e in p.elements])
+            return "(" + ", ".join(self.format_pattern(e) for e in p.elements) + ")"
         return "else"
 
     # ==========================================

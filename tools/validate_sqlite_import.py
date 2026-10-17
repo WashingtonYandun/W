@@ -28,6 +28,11 @@ def snapshot(path):
         return connection.execute('SELECT id, value FROM measurements ORDER BY id').fetchall()
 
 
+def journal(path):
+    with closing(sqlite3.connect(path)) as connection:
+        return connection.execute('SELECT row_count, input_bytes FROM imports ORDER BY id').fetchall()
+
+
 def measured(binary, source, database, sanitize, allocation_profile=False):
     environment = dict(os.environ, W_SQLITE_DB=str(database), W_MEM_CHECK='1')
     environment.pop('W_MEM_STATS', None)
@@ -36,8 +41,9 @@ def measured(binary, source, database, sanitize, allocation_profile=False):
     if sanitize:
         environment['ASAN_OPTIONS'] = 'detect_leaks=' + ('1' if sys.platform.startswith('linux') else '0')
         environment['UBSAN_OPTIONS'] = 'halt_on_error=1:print_stacktrace=1'
+    arguments = [str(argument) for argument in source] if isinstance(source, (list, tuple)) else [str(source)]
     result = execute([sys.executable, str(ROOT / 'tools/measure_process.py'), '--',
-                      str(binary), str(source)], environment)
+                      str(binary)] + arguments, environment)
     record = json.loads(result.stdout)
     if allocation_profile:
         match = re.fullmatch(r'\[W_MEM_STATS\] alloc=(\d+) free=(\d+) retain=(\d+) release=(\d+) live=(\d+)\n',
@@ -103,15 +109,22 @@ def validate(rows=10000, samples=3, sanitize=False):
                 assert record['exit_code'] == 0, (backend, record)
                 assert record['stdout'] == f'imported {rows} {rows} {total}\nresources 0\n', record
                 assert snapshot(database) == values, backend
+                assert journal(database) == [(rows, csv.stat().st_size)], backend
                 if sample:
                     runs.append(record)
             baseline = directory / f'{backend}-baseline.sqlite'
             shutil.copyfile(database, baseline)
             append = directory / 'append.csv'
             append.write_text(f'id,value\n{rows},7')
+            checked = measured(binary, ['--check', append], database, sanitize)
+            assert checked['exit_code'] == 0 and checked['stdout'] == 'validated 1\nresources 0\n', checked
+            assert snapshot(database) == values and journal(database) == [(rows, csv.stat().st_size)], backend
+            status = measured(binary, '--status', database, sanitize)
+            assert status['exit_code'] == 0 and status['stdout'] == f'status {rows} {total} 1\nresources 0\n', status
             record = measured(binary, append, database, sanitize)
             assert record['exit_code'] == 0 and record['stdout'] == f'imported 1 {rows + 1} {total + 7}\nresources 0\n', record
             assert snapshot(database) == values + [(rows, 7)], backend
+            assert journal(database) == [(rows, csv.stat().st_size), (1, append.stat().st_size)], backend
             # The valid first row must also roll back when a later row fails.
             cases = {
                 'duplicate_batch': (f'id,value\n{rows},7\n{rows},9\n', 'database error 19'),
@@ -136,6 +149,7 @@ def validate(rows=10000, samples=3, sanitize=False):
                 record = measured(binary, source_csv, target, sanitize)
                 assert record['exit_code'] == 1 and record['stdout'] == expected + '\nresources 0\n', (backend, name, record)
                 assert snapshot(target) == values, (backend, name, 'failed import changed persisted rows')
+                assert journal(target) == [(rows, csv.stat().st_size)], (backend, name, 'failed import changed its journal')
             bad_database = directory / 'missing' / 'database.sqlite'
             record = measured(binary, csv, bad_database, sanitize)
             assert record['exit_code'] == 1 and record['stdout'] == 'database error 14\nresources 0\n', record
@@ -154,6 +168,7 @@ def validate(rows=10000, samples=3, sanitize=False):
                 'peak_memory_bytes': memory, 'median_peak_memory_bytes': statistics.median(memory),
                 'binary_bytes': binary.stat().st_size, 'input_bytes': csv.stat().st_size,
                 'persisted_rows': rows, 'persisted_total': total, 'live_adapter_resources': 0,
+                'dry_run_rollback': True, 'transactional_journal': True, 'status_command': True,
                 'failure_cases': list(cases) + ['open', 'missing_file'], 'link_command': command}
     assert len({engine['sqlite_version_number'] for engine in report['engines'].values()}) == 1
     return report

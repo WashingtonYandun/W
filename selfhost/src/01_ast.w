@@ -112,3 +112,8 @@ let mut sem_result_lift_positions: list[int] = []
 let mut sem_error_pattern_positions: list[int] = []
 let mut sem_error_pattern_kinds: list[str] = []
 let mut sem_error_pattern_names: list[str] = []
+
+struct SemPattern { name: str, children: list[int] }
+struct SemConstructor { name: str, payloads: list[int] }
+let mut sem_patterns: list[SemPattern] = []
+let mut sem_last_pattern = -1

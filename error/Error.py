@@ -216,3 +216,15 @@ class WRuntimeError(WError):
 # Backward compatibility aliases
 Error = WError
 RuntimeError = WRuntimeError
+
+class ParserErrors(ParserError):
+    """A bounded syntax diagnostic batch; no recovered tree reaches execution."""
+    def __init__(self, diagnostics):
+        first = diagnostics[0]
+        super().__init__(first.message, first.line, first.col, first.file, first.code)
+        self.diagnostics = tuple(diagnostics)
+
+    def to_dict(self):
+        result = super().to_dict()
+        result['diagnostics'] = [error.to_dict() for error in self.diagnostics]
+        return result

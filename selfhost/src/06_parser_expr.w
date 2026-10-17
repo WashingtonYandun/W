@@ -412,6 +412,21 @@ fn parse_match_expr() -> ExprRes {
 }
 
 fn parse_pattern_condition(subject: str) -> str {
+    if match_kind("LPAREN") {
+        let mut index = 0
+        let mut condition = "true"
+        if not check_kind("RPAREN") {
+            while true {
+                let element = "(" + subject + ").as.tuple->items[" + str(index) + "]"
+                let child = parse_pattern_condition(element)
+                condition = "(" + condition + ") && (" + child + ")"
+                index = index + 1
+                if not match_kind("COMMA") or check_kind("RPAREN") { break }
+            }
+        }
+        expect_kind("RPAREN")
+        return "(" + subject + ").tag == W_TUPLE && (" + subject + ").as.tuple->len == " + str(index) + " && (" + condition + ")"
+    }
     let pattern_position = g_pos + 1
     let mut error_pattern_kind = ""
     let mut error_pattern_name = ""

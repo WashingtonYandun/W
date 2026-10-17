@@ -15,6 +15,7 @@ fn module_normalize(path: str) -> str {
     for i in 0..len(path) + 1 {
         let mut ch = "/"
         if i < len(path) { ch = path[i] }
+        if ch == "\\" { ch = "/" }
         if ch == "/" {
             if part == ".." and len(parts) > 0 { parts.pop() }
             elif part != "" and part != "." { parts.append(part) }
@@ -39,6 +40,22 @@ fn module_name(index: int, name: str) -> str { return "__w1_m" + str(index) + "_
 fn module_contains(names: list[str], name: str) -> bool {
     for candidate in names { if candidate == name { return true } }
     return false
+}
+fn module_stdlib_path(requested: str) -> str {
+    let relative = "stdlib/" + slice(requested, 4, len(requested)) + ".w"
+    let local = read_file(relative) else error { "" }
+    if local != "" { return relative }
+    let arguments = args()
+    let mut directory = module_directory(module_normalize(arguments[0]))
+    while directory != "" {
+        let candidate = module_normalize(directory + relative)
+        let content = read_file(candidate) else error { "" }
+        if content != "" { return candidate }
+        let parent = module_directory(slice(directory, 0, len(directory) - 1))
+        if parent == directory { break }
+        directory = parent
+    }
+    return relative
 }
 fn module_expand(src: str, path: str, entry: bool) -> int {
     let canonical = module_normalize(path)
@@ -90,7 +107,7 @@ fn module_expand(src: str, path: str, entry: bool) -> int {
             if public_import and len(body) > 0 and body[len(body) - 1].kind == "PUB" { body.pop() }
             let requested = tokens[position + 1].val
             let mut resolved = module_normalize(module_directory(canonical) + requested)
-            if len(requested) >= 4 and slice(requested, 0, 4) == "std/" { resolved = "stdlib/" + slice(requested, 4, len(requested)) + ".w" }
+            if len(requested) >= 4 and slice(requested, 0, 4) == "std/" { resolved = module_stdlib_path(requested) }
             let mut content = read_file(resolved) else err { "" }
             if content == "" {
                 resolved = module_normalize(requested)

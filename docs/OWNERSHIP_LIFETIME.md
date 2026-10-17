@@ -113,8 +113,8 @@ memory diagnostics; `W_MEM_CHECK` is not a substitute for those tools.
 
 HirCCodeGen is the default native emitter; the AST emitter and W1 are independent
 implementations. Each uses lexical cleanup scopes to release owned temporaries on normal
-exits. The optional MIR representation makes retain, transfer, and release operations
-explicit and verifies them for inspection, but it does not generate the default C output.
+exits. MIR makes retain, transfer, and release operations explicit, verifies them, and feeds
+the default C99 emitter.
 
 ## Managed strings and constructor contracts
 
@@ -262,3 +262,18 @@ The runtime safety checks require:
 3. **Deterministic Scope Cleanup:** The `CleanupScope` LIFO unwinding guarantees that memory is released immediately at scope exits across the supported execution engines.
 
 
+
+## Cyclic formatting and runtime ABI
+
+Formatting uses an iterative traversal. A class already active on the current ancestor
+path renders as `<cycle>`; aliases reached in independent branches render fully. This
+prevents recursive formatting from failing to terminate, but does not collect ARC cycles.
+
+Runtime ABI v2 places string data, owner and byte length inside the string variant.
+WVal occupies 32 bytes on the checked arm64 ABI. Generated C and adapters that depend
+on its internal layout must be rebuilt with the matching header. The scalar/opaque
+external C ABI keeps its declared signatures.
+
+`std/resources` provides checked borrowing, idempotent close and explicit scopes.
+Raw aliases remain unsafe after close. Panic, exit and process termination do not unwind
+resource scopes. See [Standard library](STDLIB.md).

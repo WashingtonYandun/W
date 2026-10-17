@@ -16,9 +16,14 @@ class HirCCodeGen:
         if self.interner is None:
             raise WError('HIR emission requires a type interner', file=self.file_path,
                          code='W9999', stage='hir-verification')
+        import time
+        started = time.perf_counter()
         self.mir = Lowering(self.interner, self.file_path).lower(module)
+        lowered = time.perf_counter()
         generator = CCodeGen(self.interner)
         result = generator.generate(self.mir)
+        self.phase_ms = {'mir': (lowered - started) * 1000,
+                         'c_emit': (time.perf_counter() - lowered) * 1000}
         self.telemetry = generator.telemetry
         return result
 

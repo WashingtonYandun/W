@@ -1,15 +1,14 @@
 # Validating W's C Interoperability
 
 - **Status:** The SQLite pilot and CSV import flow are implemented; a production profile has not been approved.
-- **Date:** 2026-10-16
 
 ## Pilot workflow
 
 `examples/ffi/sqlite/import_csv.w` imports measurements into a persistent local database. It validates columns, 64-bit ASCII integers, and bounds; uses a transaction; returns data or SQLite errors; and closes its resources. `import_reference.c` independently implements the same contract with the same C adapter and library. There is not yet a real user workload or a measured time saving; product validation remains open.
 
-The input format requires the exact header `id,value` and accepts up to 100,000 rows. Both columns are non-negative decimal integers in `[0, INT64_MAX]`. The parser accepts LF, CRLF, and a final line without a newline. It rejects quotes, empty fields, signs, Unicode digits, NUL, and extra columns; this is not a general CSV parser. The identifier is a primary key, so duplicates in the batch or database abort the whole batch. The aggregate sum must also fit in int64; it is checked before commit, and SQLite overflow rolls back the import.
+The input format requires the exact header `id,value` and accepts up to 100,000 rows and an input of at most 8 MiB. Both columns are non-negative decimal integers in `[0, INT64_MAX]`. The parser accepts LF, CRLF, and a final line without a newline. It rejects quotes, empty fields, signs, Unicode digits, NUL, and extra columns; this is not a general CSV parser. The identifier is a primary key, so duplicates in the batch or database abort the whole batch. The aggregate sum must also fit in int64; it is checked before commit, and SQLite overflow rolls back the import.
 
-A valid import persists its rows. An invalid import preserves the exact set of rows that existed before the batch. Data and SQLite errors return exit status 1; usage or read errors return 2; success returns 0. `--version` prints the linked SQLite version.
+A valid import persists its rows and an `imports(row_count, input_bytes, imported_at)` journal entry in the same transaction. An invalid import preserves both the rows and journal that existed before the batch. Data and SQLite errors return exit status 1; usage or read errors return 2; success returns 0. `--version` prints the linked SQLite version.
 
 ## Ownership and adapter costs
 
@@ -46,3 +45,31 @@ Each JSON report records the compiler, platform, linked SQLite version, flags, c
 `tools/measure_process.py` runs exactly one child in a fresh measurement process, so `ru_maxrss` does not inherit peaks from previous runs. Darwin reports bytes and Linux reports KiB; both are converted to bytes. Time includes process startup, SQLite, and I/O, but excludes launching the Python helper. RSS and binary size depend on platform, flags, and SDK. These numbers describe the full workflow, not the isolated cost of the FFI.
 
 W provides typed errors and control flow, but this pilot still needs a manual adapter and has higher representation costs than C. It validates one concrete integration path; it does not establish a general performance advantage or production readiness.
+
+## Application commands
+
+Python builds and launches the native W application. Data commands require an explicit
+SQLite path; no data is sent to a service.
+
+```sh
+python3 tools/measurement_ingest.py build --output build/measurement-ingest
+python3 tools/measurement_ingest.py --database measurements.sqlite check measurements.csv
+python3 tools/measurement_ingest.py --database measurements.sqlite import measurements.csv
+python3 tools/measurement_ingest.py --database measurements.sqlite status
+```
+
+`check` runs the insertion validation in a transaction, then rolls it back. It persists
+neither rows nor journal entries; opening a new database can create its file and schema.
+`status` reports row count, sum and import count. Duplicate imports fail rather than
+silently deduplicating. `--json` returns structured command output, and
+`--backend=hir|ast|selfhost` selects the compiler path. Exported binaries have a build
+manifest; the build cache includes sources, backend and C toolchain identity.
+
+Native use: `W_SQLITE_DB=measurements.sqlite build/measurement-ingest [--check] file.csv`
+or `--status`. On Windows use the shell's environment syntax and the `.exe` filename;
+the SQLite pilot also requires C headers and a linkable library on that host.
+
+The wrapper checks the byte cap before execution; the native program checks text length
+after loading UTF-8. There is no streaming import, schema migration or record update.
+The application is ready for a scoped trial; external adoption and productivity remain
+unverified. Raw opaque ownership and panic/exit cleanup retain their documented limits.
