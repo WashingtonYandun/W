@@ -265,8 +265,4 @@ The runtime safety checks require:
 
 In the primary backend, ownership is represented directly in MIR rather than left as an emitter convention. MIR contains `clone`, `store` with moved operands, `release`, and explicit block exits. Its verifier propagates definite initialization, possibly live values, and narrowing proofs across joins and backedges. It rejects consuming borrowed parameters, reading consumed values, and returning while owned references remain live. This is not a formal proof of the runtime or an ownership analysis for C `opaque` resources.
 
-Los locales, parámetros y retornos primitivos usan almacenamiento nativo de 64 bits,
-double o bool; no generan ARC. Globales y valores administrados siguen usando `WVal`.
-Los adaptadores de funciones como valores y despacho virtual convierten en la frontera
-con la ABI `WVal`. Los campos se proyectan por offsets físicos verificados. El backend
-AST y W1 conservan su implementación independiente y sirven de oráculos diferenciales.
+Primitive local variables, parameters, and returns use native 64-bit, `double`, or `bool` storage and do not use ARC. Globals and managed values still use `WVal`. Function-value and virtual-dispatch adapters convert at the `WVal` ABI boundary. Fields are projected through verified physical offsets. The AST backend and W1 retain independent implementations and serve as differential oracles.
