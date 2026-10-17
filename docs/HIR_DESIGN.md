@@ -1,10 +1,11 @@
 # Typed High-Level IR (HIR)
 
-HIR is W0's typed intermediate representation. It carries canonical types, resolved
-symbols and fields, and explicit control-flow and assignment semantics from the checker
-to the lower-level MIR. The verifier rejects malformed internal representations before
-code generation. See [MIR design](MIR_DESIGN.md) for control-flow blocks, storage layout,
-ownership operations, and the C99 backend.
+HIR is W0's typed intermediate representation and the input to the default C99 backend.
+It carries canonical types, resolved symbols and fields, and explicit control-flow and
+assignment semantics from the checker. The verifier rejects malformed internal
+representations before code generation. W also has a separately verified MIR
+representation for inspecting control flow, ownership operations, and storage layouts;
+see [MIR design](MIR_DESIGN.md).
 
 ## 1. Compiler pipeline
 
@@ -15,14 +16,15 @@ flowchart TD
     C --> D["Declaration collection and type checking"]
     D --> E["Typed HIR"]
     E --> F["HIR verification"]
-    F --> G["MIR lowering"]
-    G --> H["MIR verification"]
-    H --> I["C99 emission"]
+    F --> G["HIR C99 emission (default)"]
+    G --> H["Native executable"]
+    F -.-> I["MIR lowering and verification (w mir)"]
 ¶¶¶
 
 The checker resolves overloads, constructors, modules, and generic specializations before
-HIR reaches MIR. HIR preserves expression order and CoW assignment paths; MIR makes
-control flow, storage layout, and ownership transitions explicit.
+HIR reaches code generation. HIR preserves expression order and CoW assignment paths.
+The optional MIR lowering makes control flow, storage layout, and ownership transitions
+explicit for inspection.
 
 ## 2. Core HIR Data Model
 
@@ -176,7 +178,7 @@ Both `gcc` and `clang` are forced by `;`-terminated C99 variable declarations to
 
 ## 5. Current role
 
-W0 lowers typed HIR to verified MIR for native builds and C emission. The AST backend remains available as a differential oracle (`--backend=ast`). `w mir <file.w>` prints the lowered representation.
+W0 uses verified typed HIR for native builds and C emission. The AST backend remains available as a differential oracle (`--backend=ast`). `w mir <file.w>` separately lowers HIR to verified MIR and prints the representation as JSON; MIR does not currently emit native C.
 
 
 ## 6. Verification boundary

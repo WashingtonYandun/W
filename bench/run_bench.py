@@ -3,7 +3,7 @@ bench/run_bench.py - W Language Benchmark Harness v0.2.0.
 
 Benchmarks:
 1. W0 Interpreter
-2. W0 Typed HIR C99 Native (Default C06 backend)
+2. W0 Typed HIR C99 Native (default W0 native backend)
 3. W1 Self-Hosted Stage-2 Native
 
 Runs warmups and computes median timings across multiple samples to eliminate OS scheduling jitter.
@@ -201,7 +201,7 @@ def run_benchmark_suite(repo_root: str, w1_bin: str, update_baseline: bool = Fal
             "- **C99 Optimization Flag:** `-std=c99 -O2`",
             "- **W0 Backend:** Default Typed HIR C99 (`hir/HirCCodeGen.py`)",
             "- **Equivalence Check:** `stdout(W0 Interpreter) == stdout(W0 Typed HIR C99) == stdout(W1 C99)` verified on all 10 benchmarks.",
-            "- **Timing Methodology:** Median of 3 iterations with separate warmup run to eliminate OS scheduling jitter.",
+            f"- **Timing Methodology:** Median of {SAMPLES} samples after one warmup run per benchmark.",
             "",
             "| Benchmark | W0 Interp (ms) | W0 Compile (ms) | W0 HIR C99 Exec (ms) | W1 Compile (ms) | W1 C99 Exec (ms) | Native Binary (KB) | Native Speedup |",
             "| :--- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",

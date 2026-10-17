@@ -111,9 +111,10 @@ memory diagnostics; `W_MEM_CHECK` is not a substitute for those tools.
 
 ## 6. Ownership across HIR and MIR
 
-HIR preserves source-level value semantics and assignment order. MIR makes retain, transfer,
-and release operations explicit and verifies them before C generation. The native emitters
-use lexical cleanup scopes to release owned temporaries on normal exits.
+HirCCodeGen is the default native emitter; the AST emitter and W1 are independent
+implementations. Each uses lexical cleanup scopes to release owned temporaries on normal
+exits. The optional MIR representation makes retain, transfer, and release operations
+explicit and verifies them for inspection, but it does not generate the default C output.
 
 ## Managed strings and constructor contracts
 
@@ -261,8 +262,3 @@ The runtime safety checks require:
 3. **Deterministic Scope Cleanup:** The `CleanupScope` LIFO unwinding guarantees that memory is released immediately at scope exits across the supported execution engines.
 
 
-## MIR and Scalar ABI
-
-In the primary backend, ownership is represented directly in MIR rather than left as an emitter convention. MIR contains `clone`, `store` with moved operands, `release`, and explicit block exits. Its verifier propagates definite initialization, possibly live values, and narrowing proofs across joins and backedges. It rejects consuming borrowed parameters, reading consumed values, and returning while owned references remain live. This is not a formal proof of the runtime or an ownership analysis for C `opaque` resources.
-
-Primitive local variables, parameters, and returns use native 64-bit, `double`, or `bool` storage and do not use ARC. Globals and managed values still use `WVal`. Function-value and virtual-dispatch adapters convert at the `WVal` ABI boundary. Fields are projected through verified physical offsets. The AST backend and W1 retain independent implementations and serve as differential oracles.

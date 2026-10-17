@@ -45,7 +45,7 @@ Closures capture values. Lists, dictionaries, and structs use copy-on-write snap
 
 ## Compiler and tools
 
-W0 provides an interpreter, a secondary AST-to-C backend, and the default typed HIR-to-verified-MIR C99 backend. W1 compiles itself and supports the subset measured in the [engine parity matrix](docs/ENGINE_PARITY_MATRIX.md).
+W0 provides an interpreter, a secondary AST-to-C backend, and a default typed HIR-to-C99 backend. The verified MIR representation can be inspected with `./w mir`; it is not the native code-generation backend. W1 compiles itself and supports the subset measured in the [engine parity matrix](docs/ENGINE_PARITY_MATRIX.md).
 
 - `./w run path.w`: execute with W0.
 - `./w check path.w`: parse and type-check without execution.

@@ -86,7 +86,7 @@ cd W
 W adheres to strict conformance and correctness invariants. **All conformance tests must pass before submitting code.**
 
 ### 1. Conformance Test Suite
-Runs all 13 stages of verification including lexer, parser, static type checker, formatter, Typed HIR lowering, C99 backend, runtime execution, and modular self-hosting:
+Runs the conformance checks for the lexer, parser, type checker, formatter, HIR C99 backend, runtime, and modular self-hosted compiler:
 ```bash
 ./w test
 ```
@@ -168,12 +168,11 @@ When modifying compiler frontend, parser, or code generation logic that affects 
 ## Pull Request Workflow
 
 1. **Branching Model:**
-   - `main`: Stable release branch. Direct commits are forbidden.
-   - `develop`: Integration branch. **All Pull Requests must target `develop`**.
-   - Create your working branch off `develop`:
+   - `main` is the repository's default integration branch.
+   - Create a short-lived working branch from the latest `main` and submit a pull request targeting `main`:
      ```bash
-     git checkout develop
-     git pull origin develop
+     git checkout main
+     git pull origin main
      git checkout -b feat/your-feature-name
      ```
 2. **Commit Your Changes:**
@@ -182,7 +181,7 @@ When modifying compiler frontend, parser, or code generation logic that affects 
    - Ensure `./w test` passes 100%.
    - Ensure `./w test --sanitize` passes without memory errors or leaks.
 4. **Submit Pull Request:**
-   - Open a PR from your branch to `develop`.
+   - Open a PR from your branch to `main`.
    - Fill out the [Pull Request Template](.github/pull_request_template.md).
    - Ensure all GitHub Actions CI checks pass.
 
