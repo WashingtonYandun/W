@@ -154,6 +154,8 @@ def test_mir_inspection_and_default_backend():
 
 def test_bootstrap_cache_serializes_processes():
     with tempfile.TemporaryDirectory(prefix='w-bootstrap-lock-') as directory:
+        (Path(directory) / 'selfhost').mkdir()
+        (Path(directory) / 'selfhost' / 'w1.w').write_text('print(0)\n')
         script = """import sys, time
 from pathlib import Path
 import main

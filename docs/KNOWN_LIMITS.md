@@ -90,6 +90,13 @@ not share W0's typed compilation sessions or canonical declaration arena. The bo
 fixed point demonstrates deterministic self-hosting, not universal language parity or
 semantic correctness outside the tested programs.
 
+Installed wheels contain W0, its C runtime header and the standard library; Python
+remains a prerequisite. W1 bootstrap, `w test` and `w bench` require a source checkout.
+Missing W1 sources produce `W2013` before any bootstrap-cache write. W0 native builds
+require a host C99 toolchain; an unavailable or invalid compiler command produces
+`W5001` with stage `toolchain`, rather than an internal compiler error. This checks
+command availability, not the completeness of a host SDK or external FFI libraries.
+
 
 ## 4. Native runtime panic locations have a defined supported scope
 
