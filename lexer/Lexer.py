@@ -74,7 +74,7 @@ class Lexer:
                     line=start_line,
                     col=start_col,
                     file=self.file,
-                    code="E002"
+                    code="W0002"
                 )
 
             # Negative integer literals. `-9223372036854775808` is representable as
@@ -154,7 +154,7 @@ class Lexer:
                         line=self.line,
                         col=self.col,
                         file=self.file,
-                        code="E002"
+                        code="W0002"
                     )
                 # Next char must be digit or '.'
                 nxt = self.peek(1)
@@ -164,7 +164,7 @@ class Lexer:
                         line=self.line,
                         col=self.col,
                         file=self.file,
-                        code="E002"
+                        code="W0002"
                     )
                 num_str += c
                 self.advance()
@@ -187,7 +187,7 @@ class Lexer:
                         line=self.line,
                         col=self.col,
                         file=self.file,
-                        code="E002"
+                        code="W0002"
                     )
 
                 if prev_was_underscore:
@@ -196,7 +196,7 @@ class Lexer:
                         line=self.line,
                         col=self.col,
                         file=self.file,
-                        code="E002"
+                        code="W0002"
                     )
 
                 is_float = True
@@ -213,7 +213,7 @@ class Lexer:
                 line=start_line,
                 col=start_col,
                 file=self.file,
-                code="E002"
+                code="W0002"
             )
 
         clean_str = num_str.replace("_", "")
@@ -270,7 +270,7 @@ class Lexer:
                     line=start_line,
                     col=start_col,
                     file=self.file,
-                    code="E003"
+                    code="W0003"
                 )
 
             if ch == '\n':
@@ -279,7 +279,7 @@ class Lexer:
                     line=start_line,
                     col=start_col,
                     file=self.file,
-                    code="E003"
+                    code="W0003"
                 )
 
             if ch == '"':
@@ -296,7 +296,7 @@ class Lexer:
                         line=start_line,
                         col=start_col,
                         file=self.file,
-                        code="E004"
+                        code="W0004"
                     )
 
                 if esc == 'n':
@@ -326,7 +326,7 @@ class Lexer:
                         line=self.line,
                         col=self.col,
                         file=self.file,
-                        code="E004"
+                        code="W0004"
                     )
             else:
                 val += ch
@@ -341,7 +341,7 @@ class Lexer:
                 line=self.line,
                 col=self.col,
                 file=self.file,
-                code="E005"
+                code="W0005"
             )
         self.advance()  # consume '{'
 
@@ -357,7 +357,7 @@ class Lexer:
                     line=self.line,
                     col=self.col,
                     file=self.file,
-                    code="E005"
+                    code="W0005"
                 )
 
         if self.peek() != '}':
@@ -366,7 +366,7 @@ class Lexer:
                 line=self.line,
                 col=self.col,
                 file=self.file,
-                code="E005"
+                code="W0005"
             )
         self.advance()  # consume '}'
 
@@ -376,7 +376,7 @@ class Lexer:
                 line=start_line,
                 col=start_col,
                 file=self.file,
-                code="E005"
+                code="W0005"
             )
 
         code_point = int(hex_str, 16)
@@ -387,7 +387,7 @@ class Lexer:
                 line=start_line,
                 col=start_col,
                 file=self.file,
-                code="E005"
+                code="W0005"
             )
 
         return chr(code_point)
@@ -500,5 +500,5 @@ class Lexer:
             line=start_line,
             col=start_col,
             file=self.file,
-            code="E001"
+            code="W0001"
         )

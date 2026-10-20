@@ -177,7 +177,7 @@ class Parser:
                 return True
         return False
 
-    def expect(self, type_: TokenType, code: str = "P002", msg: str = None) -> Token:
+    def expect(self, type_: TokenType, code: str = "W0001", msg: str = None) -> Token:
         if self.check(type_):
             return self.advance()
         token = self.at()
@@ -202,7 +202,7 @@ class Parser:
             return AstFunctionType(params, self.parse_type(), token.line, token.col)
         if self.match(TokenType.LPAREN):
             inner_type = self.parse_type()
-            self.expect(TokenType.RPAREN, code="P006", msg="Expected ')' after grouped type")
+            self.expect(TokenType.RPAREN, code="W0006", msg="Expected ')' after grouped type")
             return self._parse_type_suffix(inner_type, token.line, token.col)
         if not self.check(TokenType.IDENTIFIER):
             raise ParserError(
@@ -210,7 +210,7 @@ class Parser:
                 line=token.line,
                 col=token.col,
                 file=self.file,
-                code="P006"
+                code="W0006"
             )
 
         name_tok = self.advance()
@@ -224,13 +224,13 @@ class Parser:
         if self.match(TokenType.LBRACKET):
             if name == "list":
                 elem_type = self.parse_type()
-                self.expect(TokenType.RBRACKET, code="P006", msg="Expected ']' after list type")
+                self.expect(TokenType.RBRACKET, code="W0006", msg="Expected ']' after list type")
                 inner_type = ListType(element_type=elem_type, line=line, col=col)
             elif name == "dict":
                 key_type = self.parse_type()
-                self.expect(TokenType.COMMA, code="P006", msg="Expected ',' between dict key and value types")
+                self.expect(TokenType.COMMA, code="W0006", msg="Expected ',' between dict key and value types")
                 val_type = self.parse_type()
-                self.expect(TokenType.RBRACKET, code="P006", msg="Expected ']' after dict types")
+                self.expect(TokenType.RBRACKET, code="W0006", msg="Expected ']' after dict types")
                 inner_type = DictType(key_type=key_type, value_type=val_type, line=line, col=col)
             elif name == "tuple":
                 elem_types: List[TypeNode] = []
@@ -240,7 +240,7 @@ class Parser:
                         if self.check(TokenType.RBRACKET):
                             break
                         elem_types.append(self.parse_type())
-                self.expect(TokenType.RBRACKET, code="P006", msg="Expected ']' after tuple types")
+                self.expect(TokenType.RBRACKET, code="W0006", msg="Expected ']' after tuple types")
                 inner_type = TupleType(element_types=elem_types, line=line, col=col)
             else:
                 # Generic custom type: Box[T], Pair[A, B], etc.
@@ -249,7 +249,7 @@ class Parser:
                     if self.check(TokenType.RBRACKET):
                         break
                     type_args.append(self.parse_type())
-                self.expect(TokenType.RBRACKET, code="P006", msg="Expected ']' after generic type")
+                self.expect(TokenType.RBRACKET, code="W0006", msg="Expected ']' after generic type")
                 inner_type = GenericType(name=name, type_args=type_args, line=line, col=col)
         else:
             inner_type = NamedType(name=name, line=line, col=col)
@@ -356,7 +356,7 @@ class Parser:
             line=token.line,
             col=token.col,
             file=self.file,
-            code="P003"
+            code="W0006"
         )
 
     # ==========================================
@@ -495,19 +495,19 @@ class Parser:
         type_params: List[TypeParam] = []
         if self.match(TokenType.LBRACKET):
             while not self.check(TokenType.RBRACKET) and not self.is_at_end():
-                p_tok = self.expect(TokenType.IDENTIFIER, code="P004", msg="Expected type parameter identifier")
+                p_tok = self.expect(TokenType.IDENTIFIER, code="W0006", msg="Expected type parameter identifier")
                 constraint: Optional[TypeNode] = None
                 if self.match(TokenType.COLON):
                     constraint = self.parse_type()
                 type_params.append(TypeParam(p_tok.value, constraint, line=p_tok.line, col=p_tok.col))
                 if not self.match(TokenType.COMMA):
                     break
-            self.expect(TokenType.RBRACKET, code="P006", msg="Expected ']' after type parameters")
+            self.expect(TokenType.RBRACKET, code="W0006", msg="Expected ']' after type parameters")
         return type_params
 
     def parse_fn_decl(self) -> FnDecl:
-        start_tok = self.expect(TokenType.FN, code="P004", msg="Expected 'fn'")
-        name_tok = self.expect(TokenType.IDENTIFIER, code="P004", msg="Expected function name after 'fn'")
+        start_tok = self.expect(TokenType.FN, code="W0006", msg="Expected 'fn'")
+        name_tok = self.expect(TokenType.IDENTIFIER, code="W0006", msg="Expected function name after 'fn'")
         type_params = self._parse_type_params()
         self.expect(TokenType.LPAREN, code="W0006", msg="Expected '(' after function name")
         params = self._parse_param_list(allow_receiver=False)
@@ -522,16 +522,16 @@ class Parser:
         return FnDecl(name=name_tok.value, params=params, return_type=return_type, body=body, type_params=type_params, line=start_tok.line, col=start_tok.col)
 
     def parse_interface_decl(self) -> InterfaceDecl:
-        start_tok = self.expect(TokenType.INTERFACE, code="P004", msg="Expected 'interface'")
-        name_tok = self.expect(TokenType.IDENTIFIER, code="P004", msg="Expected interface name")
+        start_tok = self.expect(TokenType.INTERFACE, code="W0006", msg="Expected 'interface'")
+        name_tok = self.expect(TokenType.IDENTIFIER, code="W0006", msg="Expected interface name")
         type_params = self._parse_type_params()
         self.expect(TokenType.LBRACE, code="W0006", msg="Expected '{' to start interface body")
 
         methods: List[InterfaceMethod] = []
         while not self.check(TokenType.RBRACE) and not self.is_at_end():
             self.match(TokenType.PUBLIC)
-            fn_tok = self.expect(TokenType.FN, code="P004", msg="Expected 'fn' in interface method declaration")
-            m_name = self.expect(TokenType.IDENTIFIER, code="P004", msg="Expected method name after 'fn'")
+            fn_tok = self.expect(TokenType.FN, code="W0006", msg="Expected 'fn' in interface method declaration")
+            m_name = self.expect(TokenType.IDENTIFIER, code="W0006", msg="Expected method name after 'fn'")
             self.expect(TokenType.LPAREN, code="W0006", msg="Expected '(' after interface method name")
             params = self._parse_param_list(allow_receiver=True)
             self.expect(TokenType.RPAREN, code="W0006", msg="Expected ')' after interface method parameters")
@@ -540,17 +540,17 @@ class Parser:
                 ret_type = self.parse_type()
             methods.append(InterfaceMethod(name=m_name.value, params=params, return_type=ret_type, line=fn_tok.line, col=fn_tok.col))
 
-        self.expect(TokenType.RBRACE, code="P007", msg="Unterminated interface body, expected '}'")
+        self.expect(TokenType.RBRACE, code="W0006", msg="Unterminated interface body, expected '}'")
         return InterfaceDecl(name=name_tok.value, methods=methods, line=start_tok.line, col=start_tok.col, type_params=type_params)
 
     def parse_class_decl(self) -> ClassDecl:
-        start_tok = self.expect(TokenType.CLASS, code="P004", msg="Expected 'class'")
-        name_tok = self.expect(TokenType.IDENTIFIER, code="P004", msg="Expected class name")
+        start_tok = self.expect(TokenType.CLASS, code="W0006", msg="Expected 'class'")
+        name_tok = self.expect(TokenType.IDENTIFIER, code="W0006", msg="Expected class name")
         type_params = self._parse_type_params()
 
         superclass: Optional[str] = None
         if self.match(TokenType.EXTENDS):
-            sup_tok = self.expect(TokenType.IDENTIFIER, code="P004", msg="Expected superclass name after 'extends'")
+            sup_tok = self.expect(TokenType.IDENTIFIER, code="W0006", msg="Expected superclass name after 'extends'")
             superclass = sup_tok.value
             if self.check(TokenType.LBRACKET):
                 self.pos -= 1
@@ -558,13 +558,13 @@ class Parser:
 
         interfaces: List[str] = []
         if self.match(TokenType.IMPLEMENTS):
-            first_intf = self.expect(TokenType.IDENTIFIER, code="P004", msg="Expected interface name after 'implements'")
+            first_intf = self.expect(TokenType.IDENTIFIER, code="W0006", msg="Expected interface name after 'implements'")
             interfaces.append(first_intf.value)
             if self.check(TokenType.LBRACKET):
                 self.pos -= 1
                 interfaces[-1] = self.parse_type()
             while self.match(TokenType.COMMA):
-                next_intf = self.expect(TokenType.IDENTIFIER, code="P004", msg="Expected interface name after ','")
+                next_intf = self.expect(TokenType.IDENTIFIER, code="W0006", msg="Expected interface name after ','")
                 interfaces.append(next_intf.value)
                 if self.check(TokenType.LBRACKET):
                     self.pos -= 1
@@ -584,7 +584,7 @@ class Parser:
 
             if self.check(TokenType.FN):
                 fn_tok = self.advance()
-                m_name = self.expect(TokenType.IDENTIFIER, code="P004", msg="Expected method name after 'fn'")
+                m_name = self.expect(TokenType.IDENTIFIER, code="W0006", msg="Expected method name after 'fn'")
                 self.expect(TokenType.LPAREN, code="W0006", msg="Expected '(' after method name")
                 params = self._parse_param_list(allow_receiver=True)
                 self.expect(TokenType.RPAREN, code="W0006", msg="Expected ')' after method parameters")
@@ -604,13 +604,13 @@ class Parser:
                     )
                 )
             else:
-                f_name = self.expect(TokenType.IDENTIFIER, code="P004", msg="Expected class field or method declaration")
-                self.expect(TokenType.COLON, code="P004", msg="Expected ':' after class field name")
+                f_name = self.expect(TokenType.IDENTIFIER, code="W0006", msg="Expected class field or method declaration")
+                self.expect(TokenType.COLON, code="W0006", msg="Expected ':' after class field name")
                 f_type = self.parse_type()
                 fields.append(ClassField(name=f_name.value, type_ann=f_type, is_public=is_public, line=f_name.line, col=f_name.col))
                 self.match(TokenType.COMMA)
 
-        self.expect(TokenType.RBRACE, code="P007", msg="Unterminated class body, expected '}'")
+        self.expect(TokenType.RBRACE, code="W0006", msg="Unterminated class body, expected '}'")
         return ClassDecl(
             name=name_tok.value,
             superclass=superclass,
@@ -623,46 +623,46 @@ class Parser:
         )
 
     def parse_let_decl(self) -> LetDecl:
-        start_tok = self.expect(TokenType.LET, code="P004", msg="Expected 'let'")
+        start_tok = self.expect(TokenType.LET, code="W0006", msg="Expected 'let'")
         is_mut = self.match(TokenType.MUT)
 
-        name_tok = self.expect(TokenType.IDENTIFIER, code="P004", msg="Expected variable name after 'let'")
+        name_tok = self.expect(TokenType.IDENTIFIER, code="W0006", msg="Expected variable name after 'let'")
         type_ann: Optional[TypeNode] = None
         if self.match(TokenType.COLON):
             type_ann = self.parse_type()
 
-        self.expect(TokenType.ASSIGN, code="P004", msg="Expected '=' after variable declaration")
+        self.expect(TokenType.ASSIGN, code="W0006", msg="Expected '=' after variable declaration")
         initializer = self.parse_expr()
 
         self._require_statement_end()
         return LetDecl(name=name_tok.value, is_mut=is_mut, type_ann=type_ann, initializer=initializer, line=start_tok.line, col=start_tok.col)
 
     def parse_struct_decl(self) -> StructDecl:
-        start_tok = self.expect(TokenType.STRUCT, code="P004", msg="Expected 'struct'")
-        name_tok = self.expect(TokenType.IDENTIFIER, code="P004", msg="Expected struct name")
+        start_tok = self.expect(TokenType.STRUCT, code="W0006", msg="Expected 'struct'")
+        name_tok = self.expect(TokenType.IDENTIFIER, code="W0006", msg="Expected struct name")
         type_params = self._parse_type_params()
         self.expect(TokenType.LBRACE, code="W0006", msg="Expected '{' to start struct body")
 
         fields: List[StructField] = []
         while not self.check(TokenType.RBRACE) and not self.is_at_end():
-            f_name = self.expect(TokenType.IDENTIFIER, code="P004", msg="Expected struct field name")
-            self.expect(TokenType.COLON, code="P004", msg="Expected ':' after struct field name")
+            f_name = self.expect(TokenType.IDENTIFIER, code="W0006", msg="Expected struct field name")
+            self.expect(TokenType.COLON, code="W0006", msg="Expected ':' after struct field name")
             f_type = self.parse_type()
             fields.append(StructField(f_name.value, f_type, line=f_name.line, col=f_name.col))
             self.match(TokenType.COMMA)
 
-        self.expect(TokenType.RBRACE, code="P007", msg="Unterminated struct body, expected '}'")
+        self.expect(TokenType.RBRACE, code="W0006", msg="Unterminated struct body, expected '}'")
         return StructDecl(name=name_tok.value, fields=fields, type_params=type_params, line=start_tok.line, col=start_tok.col)
 
     def parse_enum_decl(self) -> EnumDecl:
-        start_tok = self.expect(TokenType.ENUM, code="P004", msg="Expected 'enum'")
-        name_tok = self.expect(TokenType.IDENTIFIER, code="P004", msg="Expected enum name")
+        start_tok = self.expect(TokenType.ENUM, code="W0006", msg="Expected 'enum'")
+        name_tok = self.expect(TokenType.IDENTIFIER, code="W0006", msg="Expected enum name")
         type_params = self._parse_type_params()
         self.expect(TokenType.LBRACE, code="W0006", msg="Expected '{' to start enum body")
 
         variants: List[VariantDecl] = []
         while not self.check(TokenType.RBRACE) and not self.is_at_end():
-            v_tok = self.expect(TokenType.IDENTIFIER, code="P004", msg="Expected enum variant identifier")
+            v_tok = self.expect(TokenType.IDENTIFIER, code="W0006", msg="Expected enum variant identifier")
             payload_types: List[TypeNode] = []
             if self.match(TokenType.LPAREN):
                 if not self.check(TokenType.RPAREN):
@@ -675,12 +675,12 @@ class Parser:
             variants.append(VariantDecl(name=v_tok.value, payload_types=payload_types, line=v_tok.line, col=v_tok.col))
             self.match(TokenType.COMMA)
 
-        self.expect(TokenType.RBRACE, code="P007", msg="Unterminated enum body, expected '}'")
+        self.expect(TokenType.RBRACE, code="W0006", msg="Unterminated enum body, expected '}'")
         return EnumDecl(name=name_tok.value, variants=variants, type_params=type_params, line=start_tok.line, col=start_tok.col)
 
     def parse_import_decl(self) -> ImportDecl:
-        start_tok = self.expect(TokenType.IMPORT, code="P004", msg="Expected 'import'")
-        path_tok = self.expect(TokenType.STR, code="P004", msg="Expected string path for import")
+        start_tok = self.expect(TokenType.IMPORT, code="W0006", msg="Expected 'import'")
+        path_tok = self.expect(TokenType.STR, code="W0006", msg="Expected string path for import")
 
         # Derive namespace from filename (e.g. "lexer.w" -> "lexer")
         raw_path = str(path_tok.value)
@@ -693,13 +693,13 @@ class Parser:
         return ImportDecl(path=raw_path, namespace=namespace, line=start_tok.line, col=start_tok.col)
 
     def parse_while_stmt(self) -> WhileStmt:
-        start_tok = self.expect(TokenType.WHILE, code="P004", msg="Expected 'while'")
+        start_tok = self.expect(TokenType.WHILE, code="W0006", msg="Expected 'while'")
         condition = self.parse_expr(allow_struct_init=False)
         body = self.parse_block()
         return WhileStmt(condition=condition, body=body, line=start_tok.line, col=start_tok.col)
 
     def parse_for_stmt(self) -> ForStmt:
-        start_tok = self.expect(TokenType.FOR, code="P004", msg="Expected 'for'")
+        start_tok = self.expect(TokenType.FOR, code="W0006", msg="Expected 'for'")
         pattern = self.parse_pattern()
         if not isinstance(pattern, (IdentifierPattern, TuplePattern)):
             raise ParserError(
@@ -709,7 +709,7 @@ class Parser:
                 file=self.file,
                 code="W0006",
             )
-        self.expect(TokenType.IN, code="P004", msg="Expected 'in' after for loop pattern")
+        self.expect(TokenType.IN, code="W0006", msg="Expected 'in' after for loop pattern")
         iterable = self.parse_expr(allow_struct_init=False)
         body = self.parse_block()
         return ForStmt(pattern=pattern, iterable=iterable, body=body, line=start_tok.line, col=start_tok.col)
@@ -735,7 +735,7 @@ class Parser:
         return token.type in _EXPRESSION_STARTERS
 
     def parse_return_stmt(self) -> ReturnStmt:
-        start_tok = self.expect(TokenType.RETURN, code="P004", msg="Expected 'return'")
+        start_tok = self.expect(TokenType.RETURN, code="W0006", msg="Expected 'return'")
         if not self._starts_expression():
             return ReturnStmt(value=None, line=start_tok.line, col=start_tok.col)
         val = self.parse_expr()
@@ -751,7 +751,7 @@ class Parser:
             if stmt is not None:
                 statements.append(stmt)
 
-        self.expect(TokenType.RBRACE, code="P007", msg="Unterminated block, expected '}'")
+        self.expect(TokenType.RBRACE, code="W0006", msg="Unterminated block, expected '}'")
 
         # If the last statement is an ExprStmt, it serves as the tail expression of the block
         if statements and isinstance(statements[-1], ExprStmt):
@@ -855,7 +855,7 @@ class Parser:
                         line=op_tok.line,
                         col=op_tok.col,
                         file=self.file,
-                        code="P005"
+                        code="W2002"
                     )
                 left = AssignmentExpr(target=left, value=right, line=op_tok.line, col=op_tok.col)
 
@@ -977,7 +977,7 @@ class Parser:
             return SuperExpr(line=token.line, col=token.col)
 
         if self.match(TokenType.NEW):
-            cls_tok = self.expect(TokenType.IDENTIFIER, code="P004", msg="Expected class name after 'new'")
+            cls_tok = self.expect(TokenType.IDENTIFIER, code="W0006", msg="Expected class name after 'new'")
             class_name = cls_tok.value
             while self.match(TokenType.DOT):
                 class_name += "." + self.expect(TokenType.IDENTIFIER).value
@@ -1036,7 +1036,7 @@ class Parser:
                         f_val = self.parse_expr()
                         fields.append(FieldInit(name=f_tok.value, value=f_val, line=f_tok.line, col=f_tok.col))
                         self.match(TokenType.COMMA)
-                    self.expect(TokenType.RBRACE, code="P007", msg="Unterminated struct initializer, expected '}'")
+                    self.expect(TokenType.RBRACE, code="W0006", msg="Unterminated struct initializer, expected '}'")
                     return StructInitExpr(struct_name=ident_name, fields=fields, type_args=type_args, line=token.line, col=token.col)
 
             return IdentExpr(name=ident_name, line=token.line, col=token.col)
@@ -1108,7 +1108,7 @@ class Parser:
                     self.expect(TokenType.COLON, code="W0001", msg="Expected ':' after dict key")
                     v = self.parse_expr()
                     entries.append(DictEntry(key=k, value=v, line=k.line, col=k.col))
-            self.expect(TokenType.RBRACE, code="P007", msg="Unterminated dict literal, expected '}'")
+            self.expect(TokenType.RBRACE, code="W0006", msg="Unterminated dict literal, expected '}'")
             return DictExpr(entries=entries, line=token.line, col=token.col)
 
 
@@ -1124,11 +1124,11 @@ class Parser:
             line=token.line,
             col=token.col,
             file=self.file,
-            code="P001"
+            code="W0001"
         )
 
     def parse_if_expr(self) -> IfExpr:
-        start_tok = self.expect(TokenType.IF, code="P004", msg="Expected 'if'")
+        start_tok = self.expect(TokenType.IF, code="W0006", msg="Expected 'if'")
         condition = self.parse_expr(allow_struct_init=False)
         then_branch = self.parse_block()
 
@@ -1153,7 +1153,7 @@ class Parser:
         )
 
     def parse_match_expr(self) -> MatchExpr:
-        start_tok = self.expect(TokenType.MATCH, code="P004", msg="Expected 'match'")
+        start_tok = self.expect(TokenType.MATCH, code="W0006", msg="Expected 'match'")
         subject = self.parse_expr(allow_struct_init=False)
         self.expect(TokenType.LBRACE, code="W0006", msg="Expected '{' after match subject")
 
@@ -1183,5 +1183,5 @@ class Parser:
             self.match(TokenType.COMMA)
             arms.append(MatchArm(pattern=pattern, body=body, guard=guard, line=arm_tok.line, col=arm_tok.col))
 
-        self.expect(TokenType.RBRACE, code="P007", msg="Unterminated match body, expected '}'")
+        self.expect(TokenType.RBRACE, code="W0006", msg="Unterminated match body, expected '}'")
         return MatchExpr(subject=subject, arms=arms, line=start_tok.line, col=start_tok.col)

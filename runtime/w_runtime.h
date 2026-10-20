@@ -126,10 +126,10 @@ static inline bool w_value_is_error_type(WVal value, const char* kind, const cha
     if (strcmp(kind, "bool") == 0) return value.tag == W_BOOL;
     if (strcmp(kind, "str") == 0) return value.tag == W_STR;
     if (strcmp(kind, "struct") == 0) {
-        return value.tag == W_STRUCT && value.as.st && strcmp(value.as.st->name, name) == 0;
+        return value.tag == W_STRUCT && value.as.st && (value.as.st->name == name || strcmp(value.as.st->name, name) == 0);
     }
     if (strcmp(kind, "enum") == 0) {
-        return value.tag == W_ENUM && value.as.en.enum_name && strcmp(value.as.en.enum_name, name) == 0;
+        return value.tag == W_ENUM && value.as.en.enum_name && (value.as.en.enum_name == name || strcmp(value.as.en.enum_name, name) == 0);
     }
     return false;
 }
@@ -1029,7 +1029,7 @@ static inline bool w_eq(WVal a, WVal b) {
             case W_FLOAT: return a.as.f == b.as.f;
             case W_BOOL: return a.as.b == b.as.b;
             case W_STR: return a.as.string.length == b.as.string.length &&
-                memcmp(a.as.string.data, b.as.string.data, a.as.string.length) == 0;
+                (a.as.string.data == b.as.string.data || memcmp(a.as.string.data, b.as.string.data, a.as.string.length) == 0);
             case W_POINTER: return a.as.pointer == b.as.pointer;
             case W_OBJECT: return a.as.st == b.as.st;
             case W_WEAK: return a.as.weak == b.as.weak;
@@ -1086,7 +1086,7 @@ static bool w_eq_graph(WVal a, WVal b) {
             const char* variant = (left.tag == W_OK || right.tag == W_OK) ? "Ok" : "Err";
             if (left_result && right.tag == W_ENUM &&
                 strcmp(right.as.en.enum_name, "Result") == 0 &&
-                strcmp(right.as.en.variant, variant) == 0 &&
+                (right.as.en.variant == variant || strcmp(right.as.en.variant, variant) == 0) &&
                 left.as.box && right.as.en.box) {
                 w_eq_push(&items, &count, &capacity, &heap_items,
                           left.as.box->val, right.as.en.box->val);
@@ -1094,7 +1094,7 @@ static bool w_eq_graph(WVal a, WVal b) {
             }
             if (right_result && left.tag == W_ENUM &&
                 strcmp(left.as.en.enum_name, "Result") == 0 &&
-                strcmp(left.as.en.variant, variant) == 0 &&
+                (left.as.en.variant == variant || strcmp(left.as.en.variant, variant) == 0) &&
                 left.as.en.box && right.as.box) {
                 w_eq_push(&items, &count, &capacity, &heap_items,
                           left.as.en.box->val, right.as.box->val);
@@ -1125,11 +1125,11 @@ static bool w_eq_graph(WVal a, WVal b) {
                 break;
             case W_STR:
                 equal = left.as.string.length == right.as.string.length &&
-                    memcmp(left.as.string.data, right.as.string.data, left.as.string.length) == 0;
+                    (left.as.string.data == right.as.string.data || memcmp(left.as.string.data, right.as.string.data, left.as.string.length) == 0);
                 break;
             case W_ENUM:
-                if (strcmp(left.as.en.enum_name, right.as.en.enum_name) != 0 ||
-                    strcmp(left.as.en.variant, right.as.en.variant) != 0 ||
+                if ((left.as.en.enum_name != right.as.en.enum_name && strcmp(left.as.en.enum_name, right.as.en.enum_name) != 0) ||
+                    (left.as.en.variant != right.as.en.variant && strcmp(left.as.en.variant, right.as.en.variant) != 0) ||
                     (!!left.as.en.box != !!right.as.en.box)) {
                     equal = false;
                 } else if (left.as.en.box) {
@@ -1173,17 +1173,17 @@ static bool w_eq_graph(WVal a, WVal b) {
                 }
                 break;
             case W_STRUCT:
-                if (strcmp(left.as.st->name, right.as.st->name) != 0 ||
+                if ((left.as.st->name != right.as.st->name && strcmp(left.as.st->name, right.as.st->name) != 0) ||
                     left.as.st->len != right.as.st->len) {
                     equal = false;
                     break;
                 }
                 for (int32_t i = 0; i < left.as.st->len && equal; i++) {
                     int32_t found = i;
-                    if (strcmp(left.as.st->keys[i], right.as.st->keys[i]) != 0) {
+                    if (left.as.st->keys[i] != right.as.st->keys[i] && strcmp(left.as.st->keys[i], right.as.st->keys[i]) != 0) {
                         found = -1;
                         for (int32_t j = 0; j < right.as.st->len; j++) {
-                            if (strcmp(left.as.st->keys[i], right.as.st->keys[j]) == 0) { found = j; break; }
+                            if (left.as.st->keys[i] == right.as.st->keys[j] || strcmp(left.as.st->keys[i], right.as.st->keys[j]) == 0) { found = j; break; }
                         }
                     }
                     if (found < 0) equal = false;
@@ -1488,6 +1488,18 @@ static W_RUNTIME_NOINLINE bool w_string_offset_slow(WVal value, int64_t index, s
     WStringBuf* owner = value.as.string.owner;
     if (!owner) return w_utf8_cp_offset_n(value.as.string.data, value.as.string.length, index, offset, length);
     if (!owner->codepoint_offsets) {
+        size_t ascii_pos = 0;
+        const unsigned char* bytes = (const unsigned char*)value.as.string.data;
+        while (ascii_pos < value.as.string.length && bytes[ascii_pos] < 0x80) {
+            ascii_pos++;
+        }
+        if (ascii_pos == value.as.string.length) {
+            owner->codepoint_count = value.as.string.length;
+            if ((uint64_t)index > value.as.string.length) return false;
+            *offset = (size_t)index;
+            *length = (uint64_t)index < value.as.string.length ? 1 : 0;
+            return *length != 0;
+        }
         if (value.as.string.length > SIZE_MAX / sizeof(size_t) - 1) {
             fprintf(stderr, "[W4003] RuntimeError: String index too large\n"); exit(1);
         }
@@ -1625,7 +1637,7 @@ static inline WVal* w_index_ref_at(WVal* obj, WVal idx, const char* file, int32_
 static inline WVal w_member_get(WVal obj, const char* prop) {
     if (obj.tag == W_STRUCT || obj.tag == W_OBJECT) {
         for (int32_t i = 0; i < obj.as.st->len; i++) {
-            if (strcmp(obj.as.st->keys[i], prop) == 0) {
+            if (obj.as.st->keys[i] == prop || strcmp(obj.as.st->keys[i], prop) == 0) {
                 return obj.as.st->vals[i];
             }
         }
@@ -1637,13 +1649,13 @@ static inline WVal* w_member_ref(WVal* obj, const char* prop) {
     if (obj->tag == W_STRUCT) {
         w_struct_detach(obj);
         for (int32_t i = 0; i < obj->as.st->len; i++) {
-            if (strcmp(obj->as.st->keys[i], prop) == 0) {
+            if (obj->as.st->keys[i] == prop || strcmp(obj->as.st->keys[i], prop) == 0) {
                 return &obj->as.st->vals[i];
             }
         }
     } else if (obj->tag == W_OBJECT) {
         for (int32_t i = 0; i < obj->as.st->len; i++) {
-            if (strcmp(obj->as.st->keys[i], prop) == 0) {
+            if (obj->as.st->keys[i] == prop || strcmp(obj->as.st->keys[i], prop) == 0) {
                 return &obj->as.st->vals[i];
             }
         }
