@@ -6,6 +6,7 @@ from unittest.mock import patch
 import zipfile
 
 from common.Platform import compiler_command
+from compiler.CompilationSession import CompilationSession
 from tools.package_windows import assemble, download, extract
 from tools.validate_windows_install import isolated_environment
 
@@ -18,6 +19,24 @@ def test_windows_client_isolation_preserves_case_insensitive_system_root():
         assert environment['SYSTEMROOT'] == temporary
         assert environment['PATH'] == str(Path(temporary) / 'System32')
         assert 'CC' not in environment and 'PYTHONPATH' not in environment
+
+
+def test_modules_on_other_windows_volumes_keep_distinct_stable_identities():
+    with tempfile.TemporaryDirectory() as temporary:
+        root = Path(temporary).resolve()
+        first = root / 'first/library.w'
+        second = root / 'second/library.w'
+        session = CompilationSession(project_root=str(root))
+        assert session.module_id(str(first)) == 'first/library.w'
+        assert session.module_id('<stdin>') == '<stdin>'
+        with patch('compiler.CompilationSession.os.path.relpath', side_effect=ValueError('different mounts')):
+            assert session.module_id(str(first)) == first.as_uri()
+            assert session.module_id(str(second)) == second.as_uri()
+            assert session.module_id(str(first)) != session.module_id(str(second))
+            source = 'import "std/text" as text\nprint(text.join(["cross", "volume"], " "))\n'
+            unit = session.check_source(source, str(first))
+            assert unit.module_id == first.as_uri()
+            assert len(unit.dependencies) == 1
 
 
 def test_windows_bundle_compiler_and_explicit_override():
@@ -86,6 +105,7 @@ def test_bundle_never_replaces_existing_installation():
 
 if __name__ == '__main__':
     test_windows_client_isolation_preserves_case_insensitive_system_root()
+    test_modules_on_other_windows_volumes_keep_distinct_stable_identities()
     test_windows_bundle_compiler_and_explicit_override()
     test_bundle_extraction_rejects_cross_platform_path_traversal()
     test_component_checksum_failure_precedes_network_and_extraction()
