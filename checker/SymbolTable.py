@@ -35,7 +35,7 @@ class Scope:
                 line=symbol.line,
                 col=symbol.col,
                 file=file,
-                code="T008"
+                code="W1002"
             )
         symbol.file = file
         self.symbols[symbol.name] = symbol
@@ -54,7 +54,7 @@ class Scope:
                 line=line,
                 col=col,
                 file=file,
-                code="T008"
+                code="W1002"
             )
         self.types[name] = wtype
 
