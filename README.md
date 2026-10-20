@@ -12,6 +12,47 @@ The current release is `0.4.0a1` (alpha). W0 is the reference compiler. W1 is a 
 
 ## Quick start
 
+### Windows: instalador autónomo
+
+En las [descargas de W](https://github.com/WashingtonYandun/W/releases), busca el archivo
+`w-<version>-windows-x64-setup.exe` de la versión que incluya el instalador.
+El wheel `.whl` es una distribución alternativa para usuarios de Python.
+
+1. Descarga y abre el archivo `-setup.exe`.
+2. Instala para tu usuario y conserva la opción de agregar W al PATH.
+3. Abre **W Language** desde Inicio, o abre una terminal nueva y ejecuta:
+
+```powershell
+w version
+```
+
+Para probarlo, guarda `print("Hola, W")` en `hello.w` y ejecuta:
+
+```powershell
+w run hello.w
+w build hello.w -o hello.exe
+.\hello.exe
+```
+
+El instalador incluye Python y una toolchain C privada: no necesitas instalar Python,
+usar pip, crear/activar entornos virtuales ni instalar Visual Studio. Funciona sin
+administrador y sin conexión después de descargarlo. El primer build puede tardar más
+porque prepara la caché del compilador C. El alcance inicial es Windows 10/11 x64 y W0;
+W1, `w test` y `w bench` requieren el repositorio fuente. Las bibliotecas C externas
+usadas mediante FFI se proporcionan por separado.
+
+Si una terminal estaba abierta durante la instalación, ciérrala y abre otra. También
+puedes usar el acceso directo del menú Inicio, que prepara su propia terminal. Si `w`
+coincide con otro comando instalado, usa `wlang`. Para reparar archivos, ejecuta otra
+vez el instalador. Para quitar W, usa **Aplicaciones instaladas** en Windows; se elimina
+únicamente la entrada del PATH creada por W y se conservan tus proyectos.
+
+Los builds de CI generan el instalador y su informe de pruebas. Un artefacto generado
+no equivale a una release publicada ni a un instalador firmado; la firma pública y la
+experiencia de SmartScreen se verifican por separado.
+
+### Source checkout and other platforms
+
 Requirements: Python 3.10 or later and a C99 compiler (`clang` or `gcc`).
 
 ```sh

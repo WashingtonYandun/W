@@ -12,7 +12,7 @@ from compiler.ModuleNames import DECLARATIONS, ModuleNames, PREFIX
 
 
 class ModuleId(str):
-    """Project-relative canonical path; independent of arena allocation order."""
+    """Project-relative path, or an absolute file URI across Windows volumes."""
 
 
 class DeclId(tuple):
@@ -76,7 +76,14 @@ class CompilationSession:
         return path if path.startswith('<') else os.path.realpath(path)
 
     def module_id(self, path):
-        return ModuleId(path if path.startswith('<') else Path(os.path.relpath(path, self.project_root)).as_posix())
+        if path.startswith('<'):
+            return ModuleId(path)
+        try:
+            identity = Path(os.path.relpath(path, self.project_root)).as_posix()
+        except ValueError:
+            # Windows has no relative path between different drives or UNC shares.
+            identity = Path(path).as_uri()
+        return ModuleId(identity)
 
     def prepare(self, path, source):
         self.sources.batch = {path: source}

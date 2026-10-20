@@ -11,8 +11,14 @@ def compiler_command():
     configured = os.environ.get('CC')
     from error.Error import ToolchainError
     try:
-        command = ([configured] if configured and os.path.isfile(configured) else
-                   shlex.split(configured) if configured else ['clang' if os.name == 'nt' else 'cc'])
+        bundled = os.path.join(os.path.dirname(os.path.dirname(os.path.realpath(__file__))),
+                               'toolchain', 'zig', 'zig.exe')
+        if configured:
+            command = [configured] if os.path.isfile(configured) else shlex.split(configured)
+        elif os.name == 'nt' and os.path.isfile(bundled):
+            command = [bundled, 'cc', '-target', 'x86_64-windows-gnu', '-mcpu=baseline']
+        else:
+            command = ['clang' if os.name == 'nt' else 'cc']
     except ValueError as error:
         raise ToolchainError('Invalid CC command: ' + str(error)) from error
     if not command or shutil.which(command[0]) is None:
