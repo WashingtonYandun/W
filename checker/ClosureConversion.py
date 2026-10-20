@@ -1,6 +1,6 @@
 """Convert lexical lambdas into explicit snapshot environments and free functions."""
-import copy
 from node import NodeType as A
+from node.NodeType import clone_ast
 from checker.WType import FunctionType, StructType
 from checker.SymbolTable import Scope, Symbol
 from error.Error import TypeError
@@ -55,7 +55,7 @@ def convert_lambda(checker, expression):
         for symbol in current.symbols.values():
             outer_symbols[id(symbol)] = symbol
         current = current.parent
-    body = copy.deepcopy(expression.body, dict(outer_symbols))
+    body = clone_ast(expression.body, dict(outer_symbols))
     # The counter lives on the compilation session, not on the checker. A checker is
     # created per module, so a per-checker counter restarted at 1 in every module and
     # two importing modules each holding one lambda both produced `_W_Closure_1_Env`.

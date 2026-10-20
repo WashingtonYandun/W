@@ -207,6 +207,8 @@ class HirBuilder:
                 payloads = {variant.name: [self._get_type_id_from_node(type_) for type_ in variant.payload_types]
                             for variant in stmt.variants if hasattr(variant, "payload_types")}
                 self.enum_payloads[stmt.name] = payloads
+                self.interner.mk_enum(stmt.name,
+                    [variant.name for variant in stmt.variants], payloads)
                 for v in stmt.variants:
                     v_name = v.name if hasattr(v, "name") else str(v)
                     self.enum_variants[v_name] = stmt.name
@@ -267,9 +269,9 @@ class HirBuilder:
 
     def _lower_enum_decl(self, decl: EnumDecl) -> HirEnumDecl:
         variants = [variant.name if hasattr(variant, "name") else variant for variant in decl.variants]
-        tid = self.interner.mk_enum(decl.name, variants)
         payloads = {variant.name: [self._get_type_id_from_node(type_) for type_ in variant.payload_types]
                     for variant in decl.variants if hasattr(variant, "payload_types")}
+        tid = self.interner.mk_enum(decl.name, variants, payloads)
         return HirEnumDecl(decl.name, tid, variants, self._span(decl), payloads)
 
     def _lower_interface_decl(self, decl: InterfaceDecl) -> HirInterfaceDecl:

@@ -1,6 +1,7 @@
 """Execute explicitly declared scalar/opaque C functions in the reference engine."""
 import ctypes
 import ctypes.util
+import os
 from error.Error import WRuntimeError
 from runtime.Values import WInt, WFloat, WBool, WUnit, WPointer
 
@@ -15,7 +16,7 @@ def bind_foreign(declaration, libraries=()):
     name = getattr(declaration, 'source_name', declaration.name)
     handles = [ctypes.CDLL(None)]
     for library in list(libraries) + ['m']:
-        path = library if '/' in library else ctypes.util.find_library(library)
+        path = library if os.path.isfile(library) else ctypes.util.find_library(library)
         if path:
             handles.append(ctypes.CDLL(path))
     function = next((getattr(handle, name) for handle in handles if hasattr(handle, name)), None)

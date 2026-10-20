@@ -90,6 +90,18 @@ not share W0's typed compilation sessions or canonical declaration arena. The bo
 fixed point demonstrates deterministic self-hosting, not universal language parity or
 semantic correctness outside the tested programs.
 
+Installed wheels contain W0, its C runtime header and the standard library; Python
+remains a prerequisite. W1 bootstrap, `w test` and `w bench` require a source checkout.
+El instalador autónomo de Windows incluye un runtime Python privado y Zig como
+toolchain C99 para W0; no necesita un entorno virtual ni un SDK C del host. Se prueba
+por separado del wheel, incluida instalación, reparación y desinstalación. Su alcance
+inicial es Windows 10/11 x64; las bibliotecas FFI externas no se incluyen. La generación
+en CI no establece por sí sola una release publicada, firma o validación manual.
+Missing W1 sources produce `W2013` before any bootstrap-cache write. W0 native builds
+require a host C99 toolchain; an unavailable or invalid compiler command produces
+`W5001` with stage `toolchain`, rather than an internal compiler error. This checks
+command availability, not the completeness of a host SDK or external FFI libraries.
+
 
 ## 4. Native runtime panic locations have a defined supported scope
 
@@ -162,9 +174,16 @@ gains either atomics or a "no shared state" discipline with a runtime that enfor
 | Item | State |
 | :--- | :--- |
 | Chained assignment | HIR uses `HirAssignment`; the value is preserved and each index is evaluated once. The artificial depth limit was removed. |
-| Parser error recovery | None. The first syntax error aborts the parse, so one diagnostic per run is the maximum. `--json` reports a single object, not an array. |
+| Parser error recovery | Check and LSP recover up to 100 syntax diagnostics. JSON preserves the first error and adds `diagnostics`; recovered programs never execute. |
 | `w fmt` coverage | The gate checks idempotence and AST preservation across fixtures, runtime programs, recursive examples, the standard library, and self-hosted sources. It also runs generated trees before and after formatting. |
 | LSP | `initialize`, `didOpen/didChange/didClose`, `definition`, `completion` and `publishDiagnostics`. No hover, references, rename, formatting, signature help, semantic tokens or incremental sync. |
 | Dictionary keys | `int`, `str`, `bool`, `enum` only; `float` and composites containing it are rejected with `W2010`. |
 | `NetError` | Declared in the prelude (`checker/SymbolTable.py`) and referenced by a parser fixture, but nothing produces one. Either implement a network module or remove the type. |
 | Standard library size | `text` (3 functions), `algorithms` (3), `io` (2), `bytes` (2). `join` takes O(output bytes + parts) using a two-pass builder. No Unicode normalization. |
+
+The CLI has POSIX and Windows adapters for cache locks, compiler processes, executable
+names and RSS telemetry. The Windows smoke job must pass on that host before support
+is announced. A successful macOS run does not establish Windows compatibility.
+
+Class cycles format finitely as `<cycle>` but still require Weak or explicit breaking
+to be reclaimed. `std/resources` does not make raw opaque aliases safe or unwind panic.

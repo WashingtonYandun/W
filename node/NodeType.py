@@ -1013,3 +1013,44 @@ class ExternFnDecl(FnDecl):
         value["abi"] = self.extern_abi
         value.pop("body", None)
         return value
+
+
+def clone_ast(node: Any, memo: Optional[dict] = None) -> Any:
+    """
+    High-performance specialized AST cloner.
+    Replaces generic copy.deepcopy by avoiding pickle dispatch, reflection,
+    and unnecessary memoization on immutable scalars.
+    Preserves node identities registered in `memo` (e.g. outer symbols).
+    """
+    if node is None:
+        return None
+    if memo is not None and id(node) in memo:
+        return memo[id(node)]
+    if isinstance(node, (int, float, str, bool)):
+        return node
+    if isinstance(node, list):
+        res = [clone_ast(item, memo) for item in node]
+        if memo is not None:
+            memo[id(node)] = res
+        return res
+    if isinstance(node, tuple):
+        res = tuple(clone_ast(item, memo) for item in node)
+        if memo is not None:
+            memo[id(node)] = res
+        return res
+    if isinstance(node, dict):
+        res = {k: clone_ast(v, memo) for k, v in node.items()}
+        if memo is not None:
+            memo[id(node)] = res
+        return res
+    if isinstance(node, Node):
+        cls = node.__class__
+        new_node = cls.__new__(cls)
+        if memo is not None:
+            memo[id(node)] = new_node
+        for k, v in node.__dict__.items():
+            new_node.__dict__[k] = clone_ast(v, memo)
+        return new_node
+    import copy
+    return copy.deepcopy(node, memo)
+

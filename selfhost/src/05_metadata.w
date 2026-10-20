@@ -103,6 +103,7 @@ fn parse_type_ann() -> bool {
 }
 
 fn parse_field_default() -> str {
+    if check_kind("FN") { parse_type_ann() return "w_none()" }
     let tname = at_tok().val
     let mut def_c = "w_none()"
     if tname == "Weak" {

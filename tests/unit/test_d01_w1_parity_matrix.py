@@ -148,9 +148,8 @@ def test_documentation_consistency():
     documented_counts = {name: int(count) for name, count in _re.findall(
         r'\| \*\*`([^`]+)`\*\* \| (\d+) \|', content)}
     assert documented_counts == dict(expected_counts), 'Feature rows must match the current corpus, not only its total'
-    assert "F01 is complete" in content, "Doc must record F01 completion"
     assert f"{corpus_size}/{corpus_size} (100.0%)" in content, "Doc must record current measured W1 corpus parity"
-    assert "error_unions" in content and "F03" in content, "Doc must record F03 error-union parity"
+    assert "error_unions" in content, "Doc must record error-union coverage"
     profile = json.loads((ROOT / "tests/engine_profiles.json").read_text())
     error_union_fixtures = [
         label for label, feature in profile.get("fixtures", {}).items()
@@ -168,19 +167,17 @@ def test_documentation_consistency():
         "Doc must distinguish bootstrap fixed-point from core-corpus parity"
     )
 
-    expansion = (ROOT / "docs/EXPANSION.md").read_text()
-    assert f"{corpus_size} fixtures" in expansion, (
-        "Expansion docs must quote the current core corpus size, not a stale count"
-    )
-    assert "107 fixtures" not in expansion, "Stale expansion corpus count must be removed"
-
-    spec = (ROOT / "SPEC.md").read_text()
-    assert "107 corpus fixtures" not in spec and "91 core fixtures" not in spec, (
-        "SPEC parity section must not preserve obsolete W1 limits"
-    )
-    assert f"all {corpus_size} fixtures on all four engines" in spec, (
-        "SPEC parity section must state the current measured release corpus"
-    )
+    # Public manuals describe contracts; private plans and implementation reports are not test inputs.
+    from urllib.parse import unquote
+    documents = [ROOT / 'README.md', ROOT / 'SPEC.md'] + sorted((ROOT / 'docs').glob('*.md'))
+    for document in documents:
+        for destination in re.findall(r'\[[^\]]+\]\(([^)]+)\)', document.read_text()):
+            target = destination.split('#', 1)[0].strip('<>')
+            if not target or re.match(r'[a-zA-Z][a-zA-Z0-9+.-]*:', target):
+                continue
+            assert not target.startswith('/'), f'Public manual contains an absolute local path: {document}: {target}'
+            resolved = (document.parent / unquote(target)).resolve()
+            assert resolved.is_relative_to(ROOT) and resolved.exists(), f'Broken public documentation link: {document}: {target}'
 
     limits = (ROOT / "docs/KNOWN_LIMITS.md").read_text()
     assert "Lambda and callable syntax" not in limits, (

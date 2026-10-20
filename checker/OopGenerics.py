@@ -1,8 +1,8 @@
 """Nominal class/interface specialization in the shared type arena."""
-import copy
 from checker.WType import WType
 from error.Error import TypeError
 from node import NodeType as A
+from node.NodeType import clone_ast
 
 
 class GenericOopTemplate(WType):
@@ -31,7 +31,7 @@ def specialize(template, arguments, line, col):
     for parameter, argument in zip(template.type_params, arguments):
         checker._check_type_constraint(argument, parameter.constraint, line, col)
     from checker.TypeChecker import mangle_generic_name
-    declaration = copy.deepcopy(template.ast_decl)
+    declaration = clone_ast(template.ast_decl)
     declaration.name = mangle_generic_name(template.name, arguments)
     declaration.type_params = []
     substitution = {parameter.name: argument for parameter, argument in zip(template.type_params, arguments)}

@@ -21,7 +21,9 @@ void *pilot_open(void) {
     if (handle->database) live_resources++;
     if (handle->status == SQLITE_OK) {
         handle->status = sqlite3_exec(handle->database,
-            "CREATE TABLE IF NOT EXISTS measurements(id INTEGER PRIMARY KEY, value INTEGER NOT NULL CHECK(value >= 0))",
+            "CREATE TABLE IF NOT EXISTS measurements(id INTEGER PRIMARY KEY, value INTEGER NOT NULL CHECK(value >= 0));"
+            "CREATE TABLE IF NOT EXISTS imports(id INTEGER PRIMARY KEY, imported_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, "
+            "row_count INTEGER NOT NULL CHECK(row_count > 0), input_bytes INTEGER NOT NULL CHECK(input_bytes > 0))",
             NULL, NULL, NULL);
     }
     if (handle->status == SQLITE_OK) {
@@ -51,6 +53,27 @@ static int execute(PilotDatabase *handle, const char *sql) {
 int32_t pilot_begin(void *handle) { return execute(handle, "BEGIN"); }
 int32_t pilot_commit(void *handle) { return execute(handle, "COMMIT"); }
 int32_t pilot_rollback(void *handle) { return execute(handle, "ROLLBACK"); }
+
+int32_t pilot_record_import(void *pointer, int64_t rows, int64_t input_bytes) {
+    PilotDatabase *handle = pointer;
+    if (!handle || !handle->database || sqlite3_get_autocommit(handle->database) || rows <= 0 || input_bytes <= 0)
+        return SQLITE_MISUSE;
+    sqlite3_stmt *statement = NULL;
+    int status = sqlite3_prepare_v2(handle->database,
+        "INSERT INTO imports(row_count, input_bytes) VALUES(?1, ?2)", -1, &statement, NULL);
+    if (statement) live_resources++;
+    if (status == SQLITE_OK) status = sqlite3_bind_int64(statement, 1, rows);
+    if (status == SQLITE_OK) status = sqlite3_bind_int64(statement, 2, input_bytes);
+    if (status == SQLITE_OK) status = sqlite3_step(statement);
+    if (status == SQLITE_DONE) status = SQLITE_OK;
+    if (statement) {
+        int finalized = sqlite3_finalize(statement);
+        live_resources--;
+        if (status == SQLITE_OK) status = finalized;
+    }
+    handle->status = status;
+    return status;
+}
 
 int32_t pilot_insert(void *pointer, int64_t id, int64_t value) {
     PilotDatabase *handle = pointer;
@@ -87,6 +110,8 @@ static int64_t scalar(PilotDatabase *handle, const char *sql) {
     handle->status = status;
     return status == SQLITE_OK ? value : -1;
 }
+
+int64_t pilot_import_count(void *handle) { return scalar(handle, "SELECT count(*) FROM imports"); }
 
 int64_t pilot_count(void *handle) { return scalar(handle, "SELECT count(*) FROM measurements"); }
 int64_t pilot_total(void *handle) { return scalar(handle, "SELECT coalesce(sum(value), 0) FROM measurements"); }

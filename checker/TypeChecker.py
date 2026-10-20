@@ -3,6 +3,7 @@ import copy
 from enum import Enum
 from typing import Any, Dict, List, Optional, Set, Tuple, NamedTuple, Sequence
 from node.NodeType import (
+    clone_ast,
     ExternFnDecl, LambdaExpr, FunctionType as AstFunctionType, Node, Program, Stmt, Expr, TypeNode, Pattern, Block,
     NamedType, OptionalType as AstOptionalType, ListType as AstListType,
     DictType as AstDictType, TupleType as AstTupleType, ResultType as AstResultType,
@@ -421,7 +422,7 @@ class TypeChecker:
                             line=stmt.line,
                             col=stmt.col,
                             file=self.file,
-                            code="T008"
+                            code="W1002"
                         )
                     seen_variants.add(v_name)
                     variant_names.append(v_name)
@@ -461,7 +462,7 @@ class TypeChecker:
                                 line=f.line,
                                 col=f.col,
                                 file=self.file,
-                                code="T014"
+                                code="W1002"
                             )
                         seen_fields.add(f.name)
                     struct_type = StructType(name=stmt.name, fields={})
@@ -516,7 +517,7 @@ class TypeChecker:
                             line=m.line,
                             col=m.col,
                             file=self.file,
-                            code="T008"
+                            code="W1002"
                         )
                     p_types = [self._resolve_type_node(p.type_ann) for p in m.params]
                     r_type = self._resolve_type_node(m.return_type)
@@ -541,7 +542,7 @@ class TypeChecker:
                             line=stmt.line,
                             col=stmt.col,
                             file=self.file,
-                            code="T002"
+                            code="W1001"
                         )
                     if sup_t.name == stmt.name or sup_t.is_subclass_of(stmt.name):
                         raise TypeError(
@@ -561,7 +562,7 @@ class TypeChecker:
                             line=stmt.line,
                             col=stmt.col,
                             file=self.file,
-                            code="T002"
+                            code="W1001"
                         )
                     cls_type.interfaces.append(intf_t)
 
@@ -574,7 +575,7 @@ class TypeChecker:
                             line=f.line,
                             col=f.col,
                             file=self.file,
-                            code="T014"
+                            code="W1002"
                         )
                     seen_own_fields.add(f.name)
                     f_type = self._resolve_type_node(f.type_ann)
@@ -588,7 +589,7 @@ class TypeChecker:
                             line=m.line,
                             col=m.col,
                             file=self.file,
-                            code="T008"
+                            code="W1002"
                         )
                     seen_own_methods.add(m.name)
                     p_types = [self._resolve_type_node(p.type_ann) for p in m.params]
@@ -734,7 +735,7 @@ class TypeChecker:
                     line=stmt.condition.line,
                     col=stmt.condition.col,
                     file=self.file,
-                    code="T003"
+                    code="W2001"
                 )
             self.loop_depth += 1
             try:
@@ -761,7 +762,7 @@ class TypeChecker:
                     line=stmt.line,
                     col=stmt.col,
                     file=self.file,
-                    code="T006"
+                    code="W2004"
                 )
 
             self._mark_result_lift(stmt.value, self.current_fn_ret_type)
@@ -816,8 +817,10 @@ class TypeChecker:
                 old_scope = self.current_scope
                 old_ret_type = self.current_fn_ret_type
                 old_loop_depth = self.loop_depth
+                old_expected = self.expected_type
                 self.current_scope = fn_scope
                 self.current_fn_ret_type = fn_type.ret
+                self.expected_type = fn_type.ret
                 self.loop_depth = 0
                 try:
                     # Also bind 'self' as an alias to 'this' inside methods
@@ -844,12 +847,13 @@ class TypeChecker:
                                 line=m.line,
                                 col=m.col,
                                 file=self.file,
-                                code="T006"
+                                code="W2004"
                             )
                 finally:
                     self.current_scope = old_scope
                     self.current_fn_ret_type = old_ret_type
                     self.loop_depth = old_loop_depth
+                    self.expected_type = old_expected
         finally:
             self.current_class = old_class
 
@@ -869,9 +873,11 @@ class TypeChecker:
         old_scope = self.current_scope
         old_ret_type = self.current_fn_ret_type
         old_loop_depth = self.loop_depth
+        old_expected = self.expected_type
 
         self.current_scope = fn_scope
         self.current_fn_ret_type = fn_type.ret
+        self.expected_type = fn_type.ret
         self.loop_depth = 0
 
         try:
@@ -896,12 +902,13 @@ class TypeChecker:
                         line=stmt.line,
                         col=stmt.col,
                         file=self.file,
-                        code="T006"
+                        code="W2004"
                     )
         finally:
             self.current_scope = old_scope
             self.current_fn_ret_type = old_ret_type
             self.loop_depth = old_loop_depth
+            self.expected_type = old_expected
 
     def _expr_has_return(self, expr: Expr) -> bool:
         from common.ControlFlow import exits, NORMAL, RETURN
@@ -964,7 +971,7 @@ class TypeChecker:
                     line=line,
                     col=col,
                     file=self.file,
-                    code="T015"
+                    code="W2005"
                 )
             for i, (a_expr, p_type) in enumerate(zip(args, expected_params)):
                 a_type = self._check_expr(a_expr)
@@ -974,7 +981,7 @@ class TypeChecker:
                         line=a_expr.line,
                         col=a_expr.col,
                         file=self.file,
-                        code="T003"
+                        code="W2001"
                     )
         else:
             if len(args) != 0:
@@ -983,7 +990,7 @@ class TypeChecker:
                     line=line,
                     col=col,
                     file=self.file,
-                    code="T015"
+                    code="W2005"
                 )
         return class_t
 
@@ -1026,7 +1033,7 @@ class TypeChecker:
                 line=stmt.line,
                 col=stmt.col,
                 file=self.file,
-                code="T011"
+                code="W2001"
             )
 
         if isinstance(stmt.initializer, NoneLiteral) and stmt.type_ann is None:
@@ -1035,7 +1042,7 @@ class TypeChecker:
                 line=stmt.line,
                 col=stmt.col,
                 file=self.file,
-                code="T011"
+                code="W2001"
             )
 
         if isinstance(stmt.initializer, DictExpr) and len(stmt.initializer.entries) == 0 and stmt.type_ann is None:
@@ -1044,7 +1051,7 @@ class TypeChecker:
                 line=stmt.line,
                 col=stmt.col,
                 file=self.file,
-                code="T011"
+                code="W2001"
             )
 
 
@@ -1066,7 +1073,7 @@ class TypeChecker:
                     line=stmt.line,
                     col=stmt.col,
                     file=self.file,
-                    code="T003"
+                    code="W2001"
                 )
             var_type = expected_type
         else:
@@ -1091,7 +1098,7 @@ class TypeChecker:
                 line=stmt.iterable.line,
                 col=stmt.iterable.col,
                 file=self.file,
-                code="T003"
+                code="W2001"
             )
 
         self._bind_pattern_type(stmt.pattern, elem_t, {}, stmt.line, stmt.col)
@@ -1113,7 +1120,7 @@ class TypeChecker:
                         line=stmt.pattern.line,
                         col=stmt.pattern.col,
                         file=self.file,
-                        code="T003"
+                        code="W2001"
                     )
                 for p_var, p_type in zip(stmt.pattern.elements, elem_t.elements):
                     assert isinstance(p_var, IdentifierPattern)
@@ -1253,7 +1260,7 @@ class TypeChecker:
                 line=expr.line,
                 col=expr.col,
                 file=self.file,
-                code="T001"
+                code="W1001"
             )
 
         if isinstance(expr, UnaryExpr):
@@ -1266,7 +1273,7 @@ class TypeChecker:
                     line=expr.line,
                     col=expr.col,
                     file=self.file,
-                    code="T005"
+                    code="W2001"
                 )
             if expr.op == "not":
                 if operand_t == BoolType:
@@ -1276,7 +1283,7 @@ class TypeChecker:
                     line=expr.line,
                     col=expr.col,
                     file=self.file,
-                    code="T005"
+                    code="W2001"
                 )
 
         if isinstance(expr, BinaryExpr):
@@ -1296,7 +1303,7 @@ class TypeChecker:
                     line=expr.line,
                     col=expr.col,
                     file=self.file,
-                    code="T005"
+                    code="W2001"
                 )
 
             if op in ("-", "*", "/"):
@@ -1309,7 +1316,7 @@ class TypeChecker:
                     line=expr.line,
                     col=expr.col,
                     file=self.file,
-                    code="T005"
+                    code="W2001"
                 )
 
             if op == "%":
@@ -1320,7 +1327,7 @@ class TypeChecker:
                     line=expr.line,
                     col=expr.col,
                     file=self.file,
-                    code="T005"
+                    code="W2001"
                 )
 
             if op in ("==", "!="):
@@ -1348,7 +1355,7 @@ class TypeChecker:
                         line=expr.line,
                         col=expr.col,
                         file=self.file,
-                        code="T005"
+                        code="W2001"
                     )
                 return BoolType
 
@@ -1362,7 +1369,7 @@ class TypeChecker:
                     line=expr.line,
                     col=expr.col,
                     file=self.file,
-                    code="T005"
+                    code="W2001"
                 )
 
             if op in ("and", "or"):
@@ -1373,7 +1380,7 @@ class TypeChecker:
                     line=expr.line,
                     col=expr.col,
                     file=self.file,
-                    code="T005"
+                    code="W2001"
                 )
 
         if isinstance(expr, RangeExpr):
@@ -1385,7 +1392,7 @@ class TypeChecker:
                     line=expr.line,
                     col=expr.col,
                     file=self.file,
-                    code="T005"
+                    code="W2001"
                 )
             return ListType(IntType)
 
@@ -1405,7 +1412,7 @@ class TypeChecker:
                     line=expr.line,
                     col=expr.col,
                     file=self.file,
-                    code="T009"
+                    code="W2006"
                 )
             rhs_t = self._check_payload(expr.right, opt_inner)
             if not is_assignable(rhs_t, opt_inner):
@@ -1414,7 +1421,7 @@ class TypeChecker:
                     line=expr.line,
                     col=expr.col,
                     file=self.file,
-                    code="T003"
+                    code="W2001"
                 )
 
             return opt_inner
@@ -1430,7 +1437,7 @@ class TypeChecker:
                         line=expr.line,
                         col=expr.col,
                         file=self.file,
-                        code="T010"
+                        code="W2006"
                     )
                 expr.propagation_kind = "optional"
                 return opt_inner
@@ -1445,7 +1452,7 @@ class TypeChecker:
                         line=expr.line,
                         col=expr.col,
                         file=self.file,
-                        code="T010"
+                        code="W2006"
                     )
                 cur_err = self.current_fn_ret_type.err if isinstance(self.current_fn_ret_type, ResultType) else self.current_fn_ret_type.type_args[1]
                 if not is_error_channel_assignable(res_err, cur_err):
@@ -1454,7 +1461,7 @@ class TypeChecker:
                         line=expr.line,
                         col=expr.col,
                         file=self.file,
-                        code="T010"
+                        code="W2006"
                     )
                 expr.propagation_kind = "result"
                 return res_ok
@@ -1464,7 +1471,7 @@ class TypeChecker:
                 line=expr.line,
                 col=expr.col,
                 file=self.file,
-                code="T009"
+                code="W2006"
             )
 
         if isinstance(expr, ElseErrExpr):
@@ -1482,7 +1489,7 @@ class TypeChecker:
                         line=expr.line,
                         col=expr.col,
                         file=self.file,
-                        code="T009"
+                        code="W2006"
                     )
                 unwrapped_t = operand_t.inner if isinstance(operand_t, OptionalType) else operand_t.type_args[0]
             else:
@@ -1491,7 +1498,7 @@ class TypeChecker:
                     line=expr.line,
                     col=expr.col,
                     file=self.file,
-                    code="T009"
+                    code="W2006"
                 )
 
             handler_scope = Scope(parent=self.current_scope)
@@ -1518,7 +1525,7 @@ class TypeChecker:
                         line=expr.line,
                         col=expr.col,
                         file=self.file,
-                        code="T003"
+                        code="W2001"
                     )
 
             return unwrapped_t
@@ -1554,20 +1561,22 @@ class TypeChecker:
             return self.current_class.superclass
 
         if isinstance(expr, NewExpr):
+            class_t = None
             if "." in expr.class_name and not getattr(expr, "type_args", None):
-                expr.class_name = self._resolve_type_node(NamedType(expr.class_name, expr.line, expr.col)).name
+                class_t = self._resolve_type_node(NamedType(expr.class_name, expr.line, expr.col))
+                expr.class_name = class_t.name
             if getattr(expr, 'type_args', None):
                 expression_type = self._resolve_type_node(GenericType(expr.class_name, expr.type_args, expr.line, expr.col))
                 expr.class_name = expression_type.name
                 expr.type_args = None
-            class_t = self.current_scope.lookup_type(expr.class_name)
+            class_t = class_t or self.current_scope.lookup_type(expr.class_name)
             if class_t is None or not isinstance(class_t, ClassType):
                 raise TypeError(
                     message=f"Unknown class type '{expr.class_name}'",
                     line=expr.line,
                     col=expr.col,
                     file=self.file,
-                    code="T002"
+                    code="W1001"
                 )
             return self._check_class_instantiation(class_t, expr.args, expr.line, expr.col)
 
@@ -1583,7 +1592,7 @@ class TypeChecker:
                         line=expr.target.line,
                         col=expr.target.col,
                         file=self.file,
-                        code="T001"
+                        code="W1001"
                     )
                 if not sym.is_mut:
                     raise TypeError(
@@ -1591,7 +1600,7 @@ class TypeChecker:
                         line=expr.line,
                         col=expr.col,
                         file=self.file,
-                        code="T004"
+                        code="W3001"
                     )
                 if not is_assignable(val_t, sym.type):
                     raise TypeError(
@@ -1599,7 +1608,7 @@ class TypeChecker:
                         line=expr.line,
                         col=expr.col,
                         file=self.file,
-                        code="T003"
+                        code="W2001"
                     )
                 self._mark_result_lift(expr.value, sym.type, force=True)
                 expr.target.inferred_type = sym.type
@@ -1615,7 +1624,7 @@ class TypeChecker:
                         line=expr.line,
                         col=expr.col,
                         file=self.file,
-                        code="T004"
+                        code="W3001"
                     )
                 obj_t = self._check_expr(expr.target.object)
                 idx_t = self._check_expr(expr.target.index)
@@ -1626,7 +1635,7 @@ class TypeChecker:
                             line=expr.target.index.line,
                             col=expr.target.index.col,
                             file=self.file,
-                            code="T003"
+                            code="W2001"
                         )
                     if not is_assignable(val_t, obj_t.element):
                         raise TypeError(
@@ -1634,7 +1643,7 @@ class TypeChecker:
                             line=expr.line,
                             col=expr.col,
                             file=self.file,
-                            code="T003"
+                            code="W2001"
                         )
                     self._mark_result_lift(expr.value, obj_t.element, force=True)
                     expr.target.inferred_type = obj_t.element
@@ -1648,7 +1657,7 @@ class TypeChecker:
                             line=expr.target.index.line,
                             col=expr.target.index.col,
                             file=self.file,
-                            code="T003"
+                            code="W2001"
                         )
                     if not is_assignable(val_t, obj_t.value):
                         raise TypeError(
@@ -1656,7 +1665,7 @@ class TypeChecker:
                             line=expr.line,
                             col=expr.col,
                             file=self.file,
-                            code="T003"
+                            code="W2001"
                         )
                     self._mark_result_lift(expr.value, obj_t.value, force=True)
                     expr.target.inferred_type = obj_t.value
@@ -1668,7 +1677,7 @@ class TypeChecker:
                     line=expr.line,
                     col=expr.col,
                     file=self.file,
-                    code="T005"
+                    code="W2001"
                 )
 
 
@@ -1682,7 +1691,7 @@ class TypeChecker:
                             line=expr.target.line,
                             col=expr.target.col,
                             file=self.file,
-                            code="T012"
+                            code="W3002"
                         )
                     if not f_info.is_public and (self.current_class is None or self.current_class.name != f_info.owner_class):
                         raise TypeError(
@@ -1698,7 +1707,7 @@ class TypeChecker:
                             line=expr.line,
                             col=expr.col,
                             file=self.file,
-                            code="T003"
+                            code="W2001"
                         )
                     self._mark_result_lift(expr.value, f_info.type, force=True)
                     expr.target.inferred_type = f_info.type
@@ -1712,7 +1721,7 @@ class TypeChecker:
                         line=expr.line,
                         col=expr.col,
                         file=self.file,
-                        code="T004"
+                        code="W3001"
                     )
                 if not isinstance(obj_t, StructType):
                     raise TypeError(
@@ -1720,7 +1729,7 @@ class TypeChecker:
                         line=expr.line,
                         col=expr.col,
                         file=self.file,
-                        code="T012"
+                        code="W3002"
                     )
                 if expr.target.property not in obj_t.fields:
                     raise TypeError(
@@ -1728,7 +1737,7 @@ class TypeChecker:
                         line=expr.target.line,
                         col=expr.target.col,
                         file=self.file,
-                        code="T012"
+                        code="W3002"
                     )
                 field_t = obj_t.fields[expr.target.property]
                 if not is_assignable(val_t, field_t):
@@ -1737,7 +1746,7 @@ class TypeChecker:
                         line=expr.line,
                         col=expr.col,
                         file=self.file,
-                        code="T003"
+                        code="W2001"
                     )
                 self._mark_result_lift(expr.value, field_t, force=True)
                 expr.target.inferred_type = field_t
@@ -1766,7 +1775,7 @@ class TypeChecker:
                             line=expr.line,
                             col=expr.col,
                             file=self.file,
-                            code="T001"
+                            code="W1001"
                         )
                     if enum_t.variant_payloads.get(expr.property):
                         raise TypeError(f"Variant '{expr.property}' requires a payload", file=self.file,
@@ -1781,7 +1790,7 @@ class TypeChecker:
                             line=expr.line,
                             col=expr.col,
                             file=self.file,
-                            code="T001"
+                            code="W1001"
                         )
                     if tmpl.name == "Option" and expr.property in ("None", "none"):
                         return NoneType
@@ -1833,7 +1842,7 @@ class TypeChecker:
                     line=expr.line,
                     col=expr.col,
                     file=self.file,
-                    code="T012"
+                    code="W3002"
                 )
 
             if isinstance(obj_t, InterfaceType):
@@ -1844,7 +1853,7 @@ class TypeChecker:
                     line=expr.line,
                     col=expr.col,
                     file=self.file,
-                    code="T012"
+                    code="W3002"
                 )
 
             if isinstance(obj_t, StructType):
@@ -1854,7 +1863,7 @@ class TypeChecker:
                         line=expr.line,
                         col=expr.col,
                         file=self.file,
-                        code="T012"
+                        code="W3002"
                     )
                 return obj_t.fields[expr.property]
 
@@ -1890,7 +1899,7 @@ class TypeChecker:
                     line=expr.line,
                     col=expr.col,
                     file=self.file,
-                    code="T001"
+                    code="W1001"
                 )
 
             if isinstance(obj_t, AnyType):
@@ -1901,7 +1910,7 @@ class TypeChecker:
                 line=expr.line,
                 col=expr.col,
                 file=self.file,
-                code="T012"
+                code="W3002"
             )
 
 
@@ -1915,7 +1924,7 @@ class TypeChecker:
                         line=expr.index.line,
                         col=expr.index.col,
                         file=self.file,
-                        code="T003"
+                        code="W2001"
                     )
                 return obj_t.element
 
@@ -1926,7 +1935,7 @@ class TypeChecker:
                         line=expr.index.line,
                         col=expr.index.col,
                         file=self.file,
-                        code="T003"
+                        code="W2001"
                     )
                 return StrType
             if isinstance(obj_t, DictType):
@@ -1936,7 +1945,7 @@ class TypeChecker:
                         line=expr.index.line,
                         col=expr.index.col,
                         file=self.file,
-                        code="T003"
+                        code="W2001"
                     )
                 # `d[k]` yields V and panics with W4002 when the key is absent (SPEC
                 # 10.2). The optional form is `d.get(k)`, which returns V?. Returning
@@ -1948,7 +1957,7 @@ class TypeChecker:
                 line=expr.line,
                 col=expr.col,
                 file=self.file,
-                code="T005"
+                code="W2001"
             )
 
         if isinstance(expr, CallExpr):
@@ -2045,7 +2054,7 @@ class TypeChecker:
                                 line=expr.line,
                                 col=expr.col,
                                 file=self.file,
-                                code="T015"
+                                code="W2005"
                             )
                         type_params_set = {p.name if hasattr(p, "name") else str(p) for p in template.type_params}
                         bindings: Dict[str, WType] = {}
@@ -2067,7 +2076,7 @@ class TypeChecker:
                                     line=expr.line,
                                     col=expr.col,
                                     file=self.file,
-                                    code="T003"
+                                    code="W2001"
                                 )
                         concrete_args = self._concrete_type_args(template, bindings)
 
@@ -2087,7 +2096,7 @@ class TypeChecker:
                                 line=expr.line,
                                 col=expr.col,
                                 file=self.file,
-                                code="T015"
+                                code="W2005"
                             )
                         type_params_set = {p.name if hasattr(p, "name") else str(p) for p in template.type_params}
                         bindings = {}
@@ -2110,7 +2119,7 @@ class TypeChecker:
                                     line=expr.line,
                                     col=expr.col,
                                     file=self.file,
-                                    code="T003"
+                                    code="W2001"
                                 )
                         concrete_args = self._concrete_type_args(template, bindings)
 
@@ -2127,7 +2136,7 @@ class TypeChecker:
                             line=expr.line,
                             col=expr.col,
                             file=self.file,
-                            code="T015"
+                            code="W2005"
                         )
                     context = self._builtin_arguments(self.expected_type or self.current_fn_ret_type, "Option")
                     arg_t = self._check_payload(expr.args[0], context[0] if context else None)
@@ -2142,7 +2151,7 @@ class TypeChecker:
                             line=expr.line,
                             col=expr.col,
                             file=self.file,
-                            code="T015"
+                            code="W2005"
                         )
                     ctx_t = self.expected_type or self.current_fn_ret_type
                     context = self._builtin_arguments(ctx_t, "Result")
@@ -2163,7 +2172,7 @@ class TypeChecker:
                             line=expr.line,
                             col=expr.col,
                             file=self.file,
-                            code="T015"
+                            code="W2005"
                         )
                     ctx_t = self.expected_type or self.current_fn_ret_type
                     context = self._builtin_arguments(ctx_t, "Result")
@@ -2198,7 +2207,7 @@ class TypeChecker:
                                 line=expr.line,
                                 col=expr.col,
                                 file=self.file,
-                                code="T015"
+                                code="W2005"
                             )
                         type_params_set = {p.name if hasattr(p, "name") else str(p) for p in found_tmpl.type_params}
                         bindings = {}
@@ -2213,7 +2222,7 @@ class TypeChecker:
                                     line=expr.line,
                                     col=expr.col,
                                     file=self.file,
-                                    code="T003"
+                                    code="W2001"
                                 )
                         concrete_args = self._concrete_type_args(found_tmpl, bindings)
                         enum_t = self._monomorphize_enum(found_tmpl, concrete_args, expr.line, expr.col)
@@ -2234,7 +2243,7 @@ class TypeChecker:
                             line=expr.line,
                             col=expr.col,
                             file=self.file,
-                            code="T002"
+                            code="W1001"
                         )
 
                     if self.current_scope.lookup_symbol(expr.callee.name) is None:
@@ -2254,7 +2263,7 @@ class TypeChecker:
                         line=expr.line,
                         col=expr.col,
                         file=self.file,
-                        code="T001"
+                        code="W1001"
                     )
                 payload_types = getattr(var_decl, "payload_types", [])
                 if len(expr.args) != len(payload_types):
@@ -2263,7 +2272,7 @@ class TypeChecker:
                         line=expr.line,
                         col=expr.col,
                         file=self.file,
-                        code="T015"
+                        code="W2005"
                     )
                 if expr.type_args:
                     concrete_args = [self._resolve_type_node(a) for a in expr.type_args]
@@ -2317,7 +2326,7 @@ class TypeChecker:
                                 line=expr.line,
                                 col=expr.col,
                                 file=self.file,
-                                code="T003"
+                                code="W2001"
                             )
                     concrete_args = self._concrete_type_args(template, bindings)
 
@@ -2338,7 +2347,7 @@ class TypeChecker:
                             line=expr.line,
                             col=expr.col,
                             file=self.file,
-                            code="T001"
+                            code="W1001"
                         )
                     expected_payloads = enum_t.variant_payloads.get(variant_name, [])
                     if len(expr.args) != len(expected_payloads):
@@ -2347,7 +2356,7 @@ class TypeChecker:
                             line=expr.line,
                             col=expr.col,
                             file=self.file,
-                            code="T015"
+                            code="W2005"
                         )
                     for i, (a_expr, p_type) in enumerate(zip(expr.args, expected_payloads)):
                         a_type = self._check_expr(a_expr)
@@ -2357,7 +2366,7 @@ class TypeChecker:
                                 line=a_expr.line,
                                 col=a_expr.col,
                                 file=self.file,
-                                code="T003"
+                                code="W2001"
                             )
                     return enum_t
 
@@ -2373,7 +2382,7 @@ class TypeChecker:
                                 line=expr.line,
                                 col=expr.col,
                                 file=self.file,
-                                code="T004"
+                                code="W3001"
                             )
                 else:
                     callee_t = self._check_expr(expr.callee)
@@ -2394,7 +2403,7 @@ class TypeChecker:
                     line=expr.line,
                     col=expr.col,
                     file=self.file,
-                    code="T015"
+                    code="W2005"
                 )
 
 
@@ -2415,32 +2424,32 @@ class TypeChecker:
                 name = expr.callee.name
                 if name == "len":
                     if len(expr.args) != 1:
-                        raise TypeError(message="len() takes exactly 1 argument", line=expr.line, col=expr.col, file=self.file, code="T015")
+                        raise TypeError(message="len() takes exactly 1 argument", line=expr.line, col=expr.col, file=self.file, code="W2005")
                     a_t = self._check_expr(expr.args[0])
                     if not (isinstance(a_t, (ListType, DictType, TupleType)) or a_t == StrType):
-                        raise TypeError(message=f"len() expects list, dict, or str, found '{a_t}'", line=expr.line, col=expr.col, file=self.file, code="T003")
+                        raise TypeError(message=f"len() expects list, dict, or str, found '{a_t}'", line=expr.line, col=expr.col, file=self.file, code="W2001")
                     return IntType
 
                 if name == "str":
                     if len(expr.args) != 1:
-                        raise TypeError(message="str() takes exactly 1 argument", line=expr.line, col=expr.col, file=self.file, code="T015")
+                        raise TypeError(message="str() takes exactly 1 argument", line=expr.line, col=expr.col, file=self.file, code="W2005")
                     self._check_expr(expr.args[0])
                     return StrType
 
                 if name == "int":
                     if len(expr.args) != 1:
-                        raise TypeError(message="int() takes exactly 1 argument", line=expr.line, col=expr.col, file=self.file, code="T015")
+                        raise TypeError(message="int() takes exactly 1 argument", line=expr.line, col=expr.col, file=self.file, code="W2005")
                     a_t = self._check_expr(expr.args[0])
                     if a_t not in (IntType, FloatType, BoolType, StrType):
-                        raise TypeError(message=f"int() expects int, float, or str, found '{a_t}'", line=expr.line, col=expr.col, file=self.file, code="T003")
+                        raise TypeError(message=f"int() expects int, float, or str, found '{a_t}'", line=expr.line, col=expr.col, file=self.file, code="W2001")
                     return IntType
 
                 if name == "float":
                     if len(expr.args) != 1:
-                        raise TypeError(message="float() takes exactly 1 argument", line=expr.line, col=expr.col, file=self.file, code="T015")
+                        raise TypeError(message="float() takes exactly 1 argument", line=expr.line, col=expr.col, file=self.file, code="W2005")
                     a_t = self._check_expr(expr.args[0])
                     if a_t not in (IntType, FloatType, BoolType, StrType):
-                        raise TypeError(message=f"float() expects int, float, or str, found '{a_t}'", line=expr.line, col=expr.col, file=self.file, code="T003")
+                        raise TypeError(message=f"float() expects int, float, or str, found '{a_t}'", line=expr.line, col=expr.col, file=self.file, code="W2001")
                     return FloatType
 
                 if name == "slice":
@@ -2449,7 +2458,7 @@ class TypeChecker:
                     # because the result type depends on the argument type.
                     if len(expr.args) != 3:
                         raise TypeError(message="slice() takes exactly 3 arguments (value, start, end)",
-                                        line=expr.line, col=expr.col, file=self.file, code="T015")
+                                        line=expr.line, col=expr.col, file=self.file, code="W2005")
                     a_t = self._check_expr(expr.args[0])
                     for index in (1, 2):
                         b_t = self._check_expr(expr.args[index])
@@ -2457,29 +2466,29 @@ class TypeChecker:
                             raise TypeError(
                                 message=f"slice() bound {index} expects int, found '{b_t}'",
                                 line=expr.args[index].line, col=expr.args[index].col,
-                                file=self.file, code="T003")
+                                file=self.file, code="W2001")
                     if a_t == StrType:
                         return StrType
                     if isinstance(a_t, ListType):
                         return a_t
                     raise TypeError(
                         message=f"slice() expects str or list, found '{a_t}'",
-                        line=expr.line, col=expr.col, file=self.file, code="T003")
+                        line=expr.line, col=expr.col, file=self.file, code="W2001")
 
                 if name == "enumerate":
                     if len(expr.args) != 1:
-                        raise TypeError(message="enumerate() takes exactly 1 argument", line=expr.line, col=expr.col, file=self.file, code="T015")
+                        raise TypeError(message="enumerate() takes exactly 1 argument", line=expr.line, col=expr.col, file=self.file, code="W2005")
                     a_t = self._check_expr(expr.args[0])
                     if not isinstance(a_t, ListType):
-                        raise TypeError(message=f"enumerate() expects list, found '{a_t}'", line=expr.line, col=expr.col, file=self.file, code="T003")
+                        raise TypeError(message=f"enumerate() expects list, found '{a_t}'", line=expr.line, col=expr.col, file=self.file, code="W2001")
                     return ListType(TupleType([IntType, a_t.element]))
 
                 if name == "dict_items":
                     if len(expr.args) != 1:
-                        raise TypeError(message="dict_items() takes exactly 1 argument", line=expr.line, col=expr.col, file=self.file, code="T015")
+                        raise TypeError(message="dict_items() takes exactly 1 argument", line=expr.line, col=expr.col, file=self.file, code="W2005")
                     a_t = self._check_expr(expr.args[0])
                     if not isinstance(a_t, DictType):
-                        raise TypeError(message=f"dict_items() expects dict, found '{a_t}'", line=expr.line, col=expr.col, file=self.file, code="T003")
+                        raise TypeError(message=f"dict_items() expects dict, found '{a_t}'", line=expr.line, col=expr.col, file=self.file, code="W2001")
                     return ListType(TupleType([a_t.key, a_t.value]))
 
             if expr.type_args:
@@ -2499,7 +2508,7 @@ class TypeChecker:
                     line=expr.line,
                     col=expr.col,
                     file=self.file,
-                    code="T015"
+                    code="W2005"
                 )
 
             for i, (a_expr, p_type) in enumerate(zip(expr.args, callee_t.params)):
@@ -2510,7 +2519,7 @@ class TypeChecker:
                         line=a_expr.line,
                         col=a_expr.col,
                         file=self.file,
-                        code="T003"
+                        code="W2001"
                     )
                 self._mark_result_lift(a_expr, p_type, force=True)
             return callee_t.ret
@@ -2544,7 +2553,7 @@ class TypeChecker:
                                 line=expr.line,
                                 col=expr.col,
                                 file=self.file,
-                                code="T003"
+                                code="W2001"
                             )
                     concrete_args = self._concrete_type_args(template, bindings)
 
@@ -2558,7 +2567,7 @@ class TypeChecker:
                         line=expr.line,
                         col=expr.col,
                         file=self.file,
-                        code="T002"
+                        code="W1001"
                     )
                 struct_t = self.current_scope.lookup_type(expr.struct_name)
                 if struct_t is None or not isinstance(struct_t, StructType):
@@ -2567,7 +2576,7 @@ class TypeChecker:
                         line=expr.line,
                         col=expr.col,
                         file=self.file,
-                        code="T002"
+                        code="W1001"
                     )
 
             seen_fields: Set[str] = set()
@@ -2578,7 +2587,7 @@ class TypeChecker:
                         line=f.line,
                         col=f.col,
                         file=self.file,
-                        code="T014"
+                        code="W1002"
                     )
                 seen_fields.add(f.name)
 
@@ -2589,7 +2598,7 @@ class TypeChecker:
                         line=expr.line,
                         col=expr.col,
                         file=self.file,
-                        code="T013"
+                        code="W2007"
                     )
 
             for f in expr.fields:
@@ -2599,7 +2608,7 @@ class TypeChecker:
                         line=f.line,
                         col=f.col,
                         file=self.file,
-                        code="T012"
+                        code="W3002"
                     )
                 expected_f_type = struct_t.fields[f.name]
                 actual_f_type = self._check_expr(f.value)
@@ -2609,7 +2618,7 @@ class TypeChecker:
                         line=f.line,
                         col=f.col,
                         file=self.file,
-                        code="T003"
+                        code="W2001"
                     )
                 self._mark_result_lift(f.value, expected_f_type, force=True)
             return struct_t
@@ -2642,7 +2651,7 @@ class TypeChecker:
                     line=expr.line,
                     col=expr.col,
                     file=self.file,
-                    code="T003"
+                    code="W2001"
                 )
             return ListType(common_t)
 
@@ -2681,7 +2690,7 @@ class TypeChecker:
                         line=entry.key.line,
                         col=entry.key.col,
                         file=self.file,
-                        code="T003"
+                        code="W2001"
                     )
                 if not is_assignable(vt, first_val_t):
                     raise TypeError(
@@ -2689,7 +2698,7 @@ class TypeChecker:
                         line=entry.value.line,
                         col=entry.value.col,
                         file=self.file,
-                        code="T003"
+                        code="W2001"
                     )
             return DictType(first_key_t, first_val_t)
 
@@ -2702,14 +2711,14 @@ class TypeChecker:
                     line=expr.condition.line,
                     col=expr.condition.col,
                     file=self.file,
-                    code="T003"
+                    code="W2001"
                 )
             then_t = self._check_block(expr.then_branch, is_statement_context=is_statement_context) or UnitType
 
             for elif_b in expr.elif_branches:
                 e_cond_t = self._check_expr(elif_b.condition)
                 if e_cond_t != BoolType:
-                    raise TypeError(message=f"Condition of 'elif' must be bool, found '{e_cond_t}'", line=elif_b.condition.line, col=elif_b.condition.col, file=self.file, code="T003")
+                    raise TypeError(message=f"Condition of 'elif' must be bool, found '{e_cond_t}'", line=elif_b.condition.line, col=elif_b.condition.col, file=self.file, code="W2001")
                 e_then_t = self._check_block(elif_b.body, is_statement_context=is_statement_context) or UnitType
                 if not is_statement_context and not is_assignable(e_then_t, then_t):
                     raise TypeError(
@@ -2717,7 +2726,7 @@ class TypeChecker:
                         line=elif_b.line,
                         col=elif_b.col,
                         file=self.file,
-                        code="T003"
+                        code="W2001"
                     )
 
             if expr.else_branch is not None:
@@ -2728,7 +2737,7 @@ class TypeChecker:
                         line=expr.else_branch.line,
                         col=expr.else_branch.col,
                         file=self.file,
-                        code="T003"
+                        code="W2001"
                     )
                 return UnitType if is_statement_context else then_t
             else:
@@ -2738,7 +2747,7 @@ class TypeChecker:
                         line=expr.line,
                         col=expr.col,
                         file=self.file,
-                        code="T003"
+                        code="W2001"
                     )
                 return UnitType
 
@@ -2808,45 +2817,20 @@ class TypeChecker:
                                 line=arm.line,
                                 col=arm.col,
                                 file=self.file,
-                                code="T003"
+                                code="W2001"
                             )
 
                 elif isinstance(arm.pattern, ErrorTypePattern):
                     if not isinstance(subject_t, ErrorUnionType):
                         raise TypeError(message="Error type pattern requires an error union", line=arm.line,
-                                        col=arm.col, file=self.file, code="T003")
+                                        col=arm.col, file=self.file, code="W2001")
                     self._bind_pattern_type(arm.pattern.binding, arm.pattern.matched_type,
                                             arm_bindings, arm.line, arm.col)
                     covered_variants.add(self._error_pattern_name(arm.pattern.matched_type))
 
                 elif isinstance(arm.pattern, EnumPattern):
                     v_name = arm.pattern.variant
-                    if arm.pattern.enum_name:
-                        if isinstance(subject_t, EnumType):
-                            if arm.pattern.enum_name != subject_t.name and arm.pattern.enum_name != getattr(subject_t, "template_name", None):
-                                raise TypeError(
-                                    message=f"Pattern '{arm.pattern.enum_name}.{v_name}' is incompatible with match subject '{subject_t}'",
-                                    line=arm.line,
-                                    col=arm.col,
-                                    file=self.file,
-                                    code="T003"
-                                )
-                        elif isinstance(subject_t, OptionalType) and arm.pattern.enum_name != "Option":
-                            raise TypeError(
-                                message=f"Pattern '{arm.pattern.enum_name}.{v_name}' is incompatible with optional subject '{subject_t}'",
-                                line=arm.line,
-                                col=arm.col,
-                                file=self.file,
-                                code="T003"
-                            )
-                        elif isinstance(subject_t, ResultType) and arm.pattern.enum_name != "Result":
-                            raise TypeError(
-                                message=f"Pattern '{arm.pattern.enum_name}.{v_name}' is incompatible with result subject '{subject_t}'",
-                                line=arm.line,
-                                col=arm.col,
-                                file=self.file,
-                                code="T003"
-                            )
+                    self._validate_pattern_owner(arm.pattern, subject_t)
 
                     if expected_variants is not None and v_name not in expected_variants:
                         raise TypeError(
@@ -2854,7 +2838,7 @@ class TypeChecker:
                             line=arm.line,
                             col=arm.col,
                             file=self.file,
-                            code="T003"
+                            code="W2001"
                         )
                     if isinstance(subject_t, EnumType) and getattr(subject_t, "template_name", None) not in ("Option", "Result"):
                         arm.pattern.enum_name = subject_t.name
@@ -2866,7 +2850,7 @@ class TypeChecker:
                             line=arm.line,
                             col=arm.col,
                             file=self.file,
-                            code="T015"
+                            code="W2005"
                         )
                     for arg_pat, arg_type in zip(arm.pattern.args, expected_payloads):
                         self._bind_pattern_type(arg_pat, arg_type, arm_bindings, arm.line, arm.col)
@@ -2885,7 +2869,7 @@ class TypeChecker:
                                 line=arm.guard.line,
                                 col=arm.guard.col,
                                 file=self.file,
-                                code="T003"
+                                code="W2001"
                             )
                     finally:
                         self.current_scope = old_s
@@ -2911,7 +2895,7 @@ class TypeChecker:
                 # error. A statement-position match may legitimately fall through.
                 yields_value = (
                     any(at != UnitType for at in arm_types)
-                    or (outer_expected is not None and outer_expected != UnitType)
+                    or (not is_statement_context and outer_expected is not None and outer_expected != UnitType)
                 )
                 if yields_value and not has_wildcard:
                     raise TypeError(
@@ -2932,7 +2916,7 @@ class TypeChecker:
                             line=expr.line,
                             col=expr.col,
                             file=self.file,
-                            code="T003"
+                            code="W2001"
                         )
                 return first_t
             return UnitType
@@ -2965,13 +2949,13 @@ class TypeChecker:
             type_name = getattr(pattern, 'source_name', type_name)
         if matched is None:
             raise TypeError(message=f"Pattern '{type_name}(...)' is not an alternative of error union '{subject}'",
-                            line=pattern.line, col=pattern.col, file=self.file, code="T003")
+                            line=pattern.line, col=pattern.col, file=self.file, code="W2001")
         if len(bindings) != 1:
             raise TypeError(message=f"Error type pattern '{type_name}(...)' requires exactly one binding pattern",
-                            line=pattern.line, col=pattern.col, file=self.file, code="T015")
+                            line=pattern.line, col=pattern.col, file=self.file, code="W2005")
         if not isinstance(bindings[0], (IdentifierPattern, WildcardPattern)):
             raise TypeError(message="Error type patterns accept one binding or wildcard, such as 'ParseError(err)'",
-                            line=pattern.line, col=pattern.col, file=self.file, code="T015")
+                            line=pattern.line, col=pattern.col, file=self.file, code="W2005")
         return ErrorTypePattern(type_name, bindings[0], matched, pattern.line, pattern.col)
 
     @staticmethod
@@ -2982,9 +2966,28 @@ class TypeChecker:
             return error_type.name
         return str(error_type)
 
+    def _validate_pattern_owner(self, pattern: EnumPattern, expected_type: WType) -> None:
+        if not pattern.enum_name:
+            return
+        owners = set()
+        if isinstance(expected_type, EnumType):
+            owners.add(expected_type.name)
+            owners.add(getattr(expected_type, "template_name", None))
+        elif isinstance(expected_type, OptionalType):
+            owners.add("Option")
+        elif isinstance(expected_type, ResultType):
+            owners.add("Result")
+        if pattern.enum_name not in owners:
+            raise TypeError(
+                message=f"Pattern '{pattern.enum_name}.{pattern.variant}' is incompatible with match subject '{expected_type}'",
+                line=pattern.line, col=pattern.col, file=self.file, code="W2001")
+
     def _bind_pattern_type(self, pattern: Pattern, expected_type: WType, bindings: Dict[str, WType], line: int, col: int) -> None:
         pattern.inferred_type_id = self.interner.intern(expected_type)
         if isinstance(pattern, IdentifierPattern):
+            if pattern.name in bindings:
+                raise TypeError(message=f"Duplicate pattern binding '{pattern.name}'",
+                                line=pattern.line, col=pattern.col, file=self.file, code="W1002")
             bindings[pattern.name] = expected_type
         elif isinstance(pattern, WildcardPattern):
             pass
@@ -2995,11 +2998,12 @@ class TypeChecker:
                     line=line,
                     col=col,
                     file=self.file,
-                    code="T003"
+                    code="W2001"
                 )
             for sub_p, sub_t in zip(pattern.elements, expected_type.elements):
                 self._bind_pattern_type(sub_p, sub_t, bindings, line, col)
         elif isinstance(pattern, EnumPattern):
+            self._validate_pattern_owner(pattern, expected_type)
             optional = self._builtin_arguments(expected_type, "Option")
             result = self._builtin_arguments(expected_type, "Result")
             if optional:
@@ -3024,7 +3028,7 @@ class TypeChecker:
                     line=line,
                     col=col,
                     file=self.file,
-                    code="T003"
+                    code="W2001"
                 )
 
     # ==========================================
@@ -3337,7 +3341,7 @@ class TypeChecker:
                         line=line,
                         col=col,
                         file=self.file,
-                        code="T024"
+                        code="W2001"
                     )
             else:
                 raise TypeError(
@@ -3345,7 +3349,7 @@ class TypeChecker:
                     line=line,
                     col=col,
                     file=self.file,
-                    code="T024"
+                    code="W2001"
                 )
 
     def _type_complexity(self, t: WType) -> int:
@@ -3446,7 +3450,7 @@ class TypeChecker:
                 line=line,
                 col=col,
                 file=self.file,
-                code="T003"
+                code="W2001"
             )
 
         type_ids = tuple(self.interner.intern(a) for a in concrete_args)
@@ -3573,7 +3577,7 @@ class TypeChecker:
                 line=line,
                 col=col,
                 file=self.file,
-                code="T003"
+                code="W2001"
             )
 
         type_ids = tuple(self.interner.intern(a) for a in concrete_args)
@@ -3617,7 +3621,7 @@ class TypeChecker:
 
         mangled = mangle_generic_name(template.name, concrete_args, module_id)
 
-        cloned_fn = copy.deepcopy(template.ast_decl)
+        cloned_fn = clone_ast(template.ast_decl)
         cloned_fn.name = mangled
         cloned_fn.type_params = []
         previous_subst = self._active_type_subst
@@ -3670,7 +3674,7 @@ class TypeChecker:
                 line=line,
                 col=col,
                 file=self.file,
-                code="T003"
+                code="W2001"
             )
 
         type_ids = tuple(self.interner.intern(a) for a in concrete_args)
@@ -3748,6 +3752,10 @@ class TypeChecker:
 
             enum_t.variants = variant_names
             enum_t.variant_payloads = variant_payloads
+            self.interner.mk_enum(mangled, variant_names,
+                {name: [self.interner.from_wtype(payload) for payload in payloads]
+                 for name, payloads in variant_payloads.items()},
+                type_args=type_ids, template_name=template.name)
 
             concrete_decl = EnumDecl(name=mangled, variants=new_variants, type_params=[], line=template.ast_decl.line, col=template.ast_decl.col)
             self.monomorphized_enum_decls.append(concrete_decl)
@@ -3834,14 +3842,14 @@ class TypeChecker:
                         line=node.line,
                         col=node.col,
                         file=self.file,
-                        code="T003"
+                        code="W2001"
                     )
                 raise TypeError(
                     message=f"Unknown type '{node.name}'",
                     line=node.line,
                     col=node.col,
                     file=self.file,
-                    code="T002"
+                    code="W1001"
                 )
             if isinstance(resolved, (GenericStructTemplate, GenericEnumTemplate, GenericOopTemplate)):
                 raise TypeError(
@@ -3849,7 +3857,7 @@ class TypeChecker:
                     line=node.line,
                     col=node.col,
                     file=self.file,
-                    code="T003"
+                    code="W2001"
                 )
             return resolved
 
@@ -3884,7 +3892,7 @@ class TypeChecker:
                 line=node.line,
                 col=node.col,
                 file=self.file,
-                code="T002"
+                code="W1001"
             )
 
         if isinstance(node, AstOptionalType):
@@ -3931,13 +3939,13 @@ class TypeChecker:
             line=node.line,
             col=node.col,
             file=self.file,
-            code="T002"
+            code="W1001"
         )
 
     def _resolve_error_union_node(self, node: AstErrorUnionType) -> ErrorUnionType:
         if len(node.error_types) < 2:
             raise TypeError("An error union requires at least two alternatives", line=node.line,
-                            col=node.col, file=self.file, code="T003")
+                            col=node.col, file=self.file, code="W2001")
 
         alternatives = [self._resolve_type_node(member) for member in node.error_types]
         for alternative, source_node in zip(alternatives, node.error_types):
@@ -3950,11 +3958,11 @@ class TypeChecker:
                     line=source_node.line,
                     col=source_node.col,
                     file=self.file,
-                    code="T003"
+                    code="W2001"
                 )
 
         union = ErrorUnionType(alternatives)
         if len(union.alternatives) < 2:
             raise TypeError("An error union must contain at least two distinct alternatives",
-                            line=node.line, col=node.col, file=self.file, code="T003")
+                            line=node.line, col=node.col, file=self.file, code="W2001")
         return union

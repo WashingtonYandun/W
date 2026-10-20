@@ -532,6 +532,8 @@ def _run_suite_in_repo(repo_root: str) -> None:
     mir_ok = run_mir_tests()
     from tests.unit.test_audit_completion import run_completion_tests
     completion_ok = run_completion_tests()
+    from tests.unit.test_audit_readiness import run_readiness_tests
+    readiness_ok = run_readiness_tests()
 
     if os.path.exists(temp_file):
         try:
@@ -589,6 +591,7 @@ def _run_suite_in_repo(repo_root: str) -> None:
         and audit_ok
         and mir_ok
         and completion_ok
+        and readiness_ok
         and examples_passed == len(example_files)
         and bootstrap_ok
     )
@@ -598,7 +601,7 @@ def _run_suite_in_repo(repo_root: str) -> None:
             v_lex_passed + i_lex_passed + v_parse_passed + i_parse_passed +
             v_type_passed + i_type_passed + err_passed + fmt_passed + hir_passed +
             runtime_passed + c99_passed + hir_c99_passed + w1_runtime_passed +
-            examples_passed + 17
+            examples_passed + 18
         )
         print(f"ALL {total}/{total} CONFORMANCE, EXAMPLES & SELF-HOSTING TESTS PASSED (100%).")
         sys.exit(0)

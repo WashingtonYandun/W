@@ -6,6 +6,7 @@ from typing import Dict
 # W2xxx: Type System, Exhaustiveness & Error Channel Diagnostics
 # W3xxx: Mutability, Ownership & OOP Encapsulation Diagnostics
 # W4xxx: Runtime Execution Diagnostics
+# W5xxx: Host Toolchain Diagnostics
 DIAGNOSTIC_CODES: Dict[str, str] = {
     "W9998": "Compiler accepted a program it cannot lower (compiler bug)",
     "W9999": "Internal compiler invariant violation",
@@ -42,6 +43,8 @@ DIAGNOSTIC_CODES: Dict[str, str] = {
     "W4001": "Division or modulo by zero",
     "W4002": "Index or key out of bounds",
     "W4003": "Runtime execution error",
+    # W5xxx — Host Toolchain
+    "W5001": "C compiler command unavailable or invalid",
 }
 
 LEGACY_CODE_MAP: Dict[str, str] = {
@@ -146,6 +149,11 @@ class WError(Exception):
         }
 
 
+class ToolchainError(WError):
+    def __init__(self, message: str) -> None:
+        super().__init__(message, file="<toolchain>", code="W5001", stage="toolchain")
+
+
 class LexerError(WError):
     def __init__(self, message: str, line: int = 1, col: int = 1, file: str = "<stdin>", code: str = "W0001") -> None:
         super().__init__(
@@ -216,3 +224,15 @@ class WRuntimeError(WError):
 # Backward compatibility aliases
 Error = WError
 RuntimeError = WRuntimeError
+
+class ParserErrors(ParserError):
+    """A bounded syntax diagnostic batch; no recovered tree reaches execution."""
+    def __init__(self, diagnostics):
+        first = diagnostics[0]
+        super().__init__(first.message, first.line, first.col, first.file, first.code)
+        self.diagnostics = tuple(diagnostics)
+
+    def to_dict(self):
+        result = super().to_dict()
+        result['diagnostics'] = [error.to_dict() for error in self.diagnostics]
+        return result

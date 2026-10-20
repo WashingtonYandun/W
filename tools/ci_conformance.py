@@ -10,6 +10,7 @@ import tempfile
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
+from common.Platform import executable_name
 from tests.engine_harness import ENGINES, PROFILES, corpus_paths, execute, verify_case
 
 
@@ -157,7 +158,7 @@ def main():
     if bootstrap['returncode']:
         print(bootstrap['stderr'])
         return 1
-    w1 = ROOT / '.w_cache/w1_stage2'
+    w1 = ROOT / '.w_cache' / executable_name('w1_stage2')
     support_files = PROFILES['support_files']
     positives, negatives = corpus_paths()
     fixtures = positives + negatives

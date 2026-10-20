@@ -112,6 +112,11 @@ let mut sem_result_lift_positions: list[int] = []
 let mut sem_error_pattern_positions: list[int] = []
 let mut sem_error_pattern_kinds: list[str] = []
 let mut sem_error_pattern_names: list[str] = []
+
+struct SemPattern { name: str, children: list[int] }
+struct SemConstructor { name: str, payloads: list[int] }
+let mut sem_patterns: list[SemPattern] = []
+let mut sem_last_pattern = -1
 fn report_error(code: str, line: int, col: int, msg: str) -> unit {
     eprint("[" + code + "] " + g_in_path + ":" + str(line) + ":" + str(col) + " - " + msg)
     exit(1)
@@ -579,6 +584,7 @@ fn module_normalize(path: str) -> str {
     for i in 0..len(path) + 1 {
         let mut ch = "/"
         if i < len(path) { ch = path[i] }
+        if ch == "\\" { ch = "/" }
         if ch == "/" {
             if part == ".." and len(parts) > 0 { parts.pop() }
             elif part != "" and part != "." { parts.append(part) }
@@ -603,6 +609,22 @@ fn module_name(index: int, name: str) -> str { return "__w1_m" + str(index) + "_
 fn module_contains(names: list[str], name: str) -> bool {
     for candidate in names { if candidate == name { return true } }
     return false
+}
+fn module_stdlib_path(requested: str) -> str {
+    let relative = "stdlib/" + slice(requested, 4, len(requested)) + ".w"
+    let local = read_file(relative) else error { "" }
+    if local != "" { return relative }
+    let arguments = args()
+    let mut directory = module_directory(module_normalize(arguments[0]))
+    while directory != "" {
+        let candidate = module_normalize(directory + relative)
+        let content = read_file(candidate) else error { "" }
+        if content != "" { return candidate }
+        let parent = module_directory(slice(directory, 0, len(directory) - 1))
+        if parent == directory { break }
+        directory = parent
+    }
+    return relative
 }
 fn module_expand(src: str, path: str, entry: bool) -> int {
     let canonical = module_normalize(path)
@@ -654,7 +676,7 @@ fn module_expand(src: str, path: str, entry: bool) -> int {
             if public_import and len(body) > 0 and body[len(body) - 1].kind == "PUB" { body.pop() }
             let requested = tokens[position + 1].val
             let mut resolved = module_normalize(module_directory(canonical) + requested)
-            if len(requested) >= 4 and slice(requested, 0, 4) == "std/" { resolved = "stdlib/" + slice(requested, 4, len(requested)) + ".w" }
+            if len(requested) >= 4 and slice(requested, 0, 4) == "std/" { resolved = module_stdlib_path(requested) }
             let mut content = read_file(resolved) else err { "" }
             if content == "" {
                 resolved = module_normalize(requested)
@@ -1086,6 +1108,7 @@ fn parse_type_ann() -> bool {
 }
 
 fn parse_field_default() -> str {
+    if check_kind("FN") { parse_type_ann() return "w_none()" }
     let tname = at_tok().val
     let mut def_c = "w_none()"
     if tname == "Weak" {
@@ -1651,6 +1674,21 @@ fn parse_match_expr() -> ExprRes {
 }
 
 fn parse_pattern_condition(subject: str) -> str {
+    if match_kind("LPAREN") {
+        let mut index = 0
+        let mut condition = "true"
+        if not check_kind("RPAREN") {
+            while true {
+                let element = "(" + subject + ").as.tuple->items[" + str(index) + "]"
+                let child = parse_pattern_condition(element)
+                condition = "(" + condition + ") && (" + child + ")"
+                index = index + 1
+                if not match_kind("COMMA") or check_kind("RPAREN") { break }
+            }
+        }
+        expect_kind("RPAREN")
+        return "(" + subject + ").tag == W_TUPLE && (" + subject + ").as.tuple->len == " + str(index) + " && (" + condition + ")"
+    }
     let pattern_position = g_pos + 1
     let mut error_pattern_kind = ""
     let mut error_pattern_name = ""
@@ -2492,12 +2530,14 @@ fn direct_range_operator() -> str {
 
 fn parse_for_stmt() -> unit {
     expect_kind("FOR")
+    let grouped = match_kind("LPAREN")
     let pat0 = expect_kind("IDENT")
     let mut pat_names: list[str] = [pat0.val]
     while match_kind("COMMA") {
         let pn = expect_kind("IDENT")
         pat_names.append(pn.val)
     }
+    if grouped { expect_kind("RPAREN") }
     expect_kind("IN")
     emit_line("{")
     push_scope("block")
@@ -4045,7 +4085,7 @@ fn sem_prefix(allow_struct: bool, statement: bool) -> SemValue {
         return sem_value(sem_intern("dict", "", [key, value]))
     }
     if sem_is("IF") { return sem_if(statement) }
-    if sem_is("MATCH") { return sem_match_expression() }
+    if sem_is("MATCH") { return sem_match_expression(statement) }
     if sem_is("THIS") or sem_is("SUPER") {
         if sem_capture_depth >= 0 { sem_error("W2001", "capture receiver through explicit local binding") }
         let is_super = sem_take().kind == "SUPER"
@@ -4243,7 +4283,11 @@ fn sem_expression(minimum: int, allow_struct: bool) -> SemValue {
                     sem_check_generic_constraints(function_index, args, call_line, call_col)
                 }
             }
-            left = sem_value(sem_check_call(left.type_id, args))
+            let actual = sem_check_call(left.type_id, args)
+            let result_kind = sem_kind(actual)
+            if sem_expected >= 0 and sem_kind(sem_expected) == "result" and (result_kind == "ok" or result_kind == "err") and sem_assignable(actual, sem_expected) {
+                left = sem_value(sem_expected)
+            } else { left = sem_value(actual) }
         } elif sem_match("DOT") {
             if sem_kind(left.type_id) == "class" { sem_class_projection_positions.append(call_position) }
             let name = sem_expect("IDENT").val
@@ -4401,13 +4445,84 @@ fn sem_if(statement: bool) -> SemValue {
     # Keep a common value type; incompatible discarded branches already yield unit.
     return SemValue { type_id: common, root: "", writable: -1, terminates: all_return }
 }
+fn sem_record_pattern(name: str, children: list[int]) -> str {
+    sem_patterns.append(SemPattern { name: name, children: children })
+    sem_last_pattern = len(sem_patterns) - 1
+    return name
+}
+fn sem_leaf_pattern(name: str) -> str {
+    let empty: list[int] = []
+    return sem_record_pattern(name, empty)
+}
+fn sem_constructors(subject: int) -> list[SemConstructor] {
+    let type_ = sem_types[subject]
+    let mut constructors: list[SemConstructor] = []
+    let empty: list[int] = []
+    if type_.kind == "tuple" { constructors.append(SemConstructor { name: "tuple", payloads: type_.args }) }
+    elif type_.kind == "bool" {
+        constructors.append(SemConstructor { name: "literal:true", payloads: empty })
+        constructors.append(SemConstructor { name: "literal:false", payloads: empty })
+    } elif type_.kind == "optional" {
+        constructors.append(SemConstructor { name: "Some", payloads: [type_.args[0]] })
+        constructors.append(SemConstructor { name: "None", payloads: empty })
+    } elif type_.kind == "result" {
+        constructors.append(SemConstructor { name: "Ok", payloads: [type_.args[0]] })
+        constructors.append(SemConstructor { name: "Err", payloads: [type_.args[1]] })
+    } elif type_.kind == "error_union" {
+        for alternative in type_.args { constructors.append(SemConstructor { name: sem_error_type_name(alternative), payloads: [alternative] }) }
+    } elif type_.kind == "enum" {
+        let generic = sem_generic_type(type_.name)
+        for i in 0..len(sem_variants) {
+            if sem_same_type_declaration(sem_variant_types[i], subject) {
+                let mut payloads = sem_variant_payloads[i]
+                if generic >= 0 and len(type_.args) == len(sem_generic_types[generic].params) {
+                    let mut concrete: list[int] = []
+                    for payload in payloads { concrete.append(sem_substitute_type(payload, sem_generic_types[generic].params, type_.args)) }
+                    payloads = concrete
+                }
+                constructors.append(SemConstructor { name: sem_variants[i], payloads: payloads })
+            }
+        }
+    }
+    return constructors
+}
+fn sem_pattern_matrix(types: list[int], rows: list[list[int]]) -> bool {
+    if len(types) == 0 { return len(rows) > 0 }
+    if len(rows) == 0 { return false }
+    let tail = slice(types, 1, len(types))
+    let mut defaults: list[list[int]] = []
+    for row in rows { if sem_patterns[row[0]].name == "*" { defaults.append(slice(row, 1, len(row))) } }
+    if len(defaults) > 0 and sem_pattern_matrix(tail, defaults) { return true }
+    let constructors = sem_constructors(types[0])
+    if len(constructors) == 0 { return false }
+    for constructor in constructors {
+        let mut specialized: list[list[int]] = []
+        for row in rows {
+            let pattern = sem_patterns[row[0]]
+            let mut children: list[int] = []
+            let mut matches = false
+            if pattern.name == "*" {
+                for payload in constructor.payloads { sem_leaf_pattern("*") children.append(sem_last_pattern) }
+                matches = true
+            } elif pattern.name == constructor.name { children = pattern.children matches = true }
+            if matches {
+                for element in slice(row, 1, len(row)) { children.append(element) }
+                specialized.append(children)
+            }
+        }
+        let mut next_types = constructor.payloads
+        for type_id in tail { next_types.append(type_id) }
+        if not sem_pattern_matrix(next_types, specialized) { return false }
+    }
+    return true
+}
 fn sem_pattern(subject: int) -> str {
-    if sem_match("ELSE") { return "*" }
-    if sem_match("NONE") { return "None" }
+    if sem_match("ELSE") { return sem_leaf_pattern("*") }
+    if sem_match("NONE") { return sem_leaf_pattern("None") }
     if sem_match("MINUS") {
         let literal = sem_expect("INT")
         sem_require(sem_int, subject, "W2001")
-        return "literal:-" + literal.val
+        return sem_leaf_pattern("literal:-" + literal.val)
     }
     if sem_is("INT") or sem_is("FLOAT") or sem_is("STR") or sem_is("TRUE") or sem_is("FALSE") {
         let token = sem_take()
@@ -4416,12 +4531,28 @@ fn sem_pattern(subject: int) -> str {
         elif token.kind == "FLOAT" { type_id = sem_float }
         elif token.kind == "STR" { type_id = sem_str }
         sem_require(type_id, subject, "W2001")
-        return "literal:" + token.val
+        return sem_leaf_pattern("literal:" + token.val)
+    }
+    if sem_match("LPAREN") {
+        if sem_kind(subject) != "tuple" { sem_error("W2001", "tuple pattern requires a tuple") }
+        let elements = sem_types[subject].args
+        let mut children: list[int] = []
+        if not sem_is("RPAREN") {
+            while true {
+                if len(children) >= len(elements) { sem_error("W2001", "too many tuple pattern elements") }
+                sem_pattern(elements[len(children)])
+                children.append(sem_last_pattern)
+                if not sem_match("COMMA") or sem_is("RPAREN") { break }
+            }
+        }
+        sem_expect("RPAREN")
+        if len(children) != len(elements) { sem_error("W2001", "tuple pattern arity") }
+        return sem_record_pattern("tuple", children)
     }
     let pattern_position = sem_pos + sem_token_offset
     let mut owner = ""
     let mut name = sem_expect("IDENT").val
-    if name == "_" { return "*" }
+    if name == "_" { return sem_leaf_pattern("*") }
     if sem_match("DOT") { owner = name name = sem_expect("IDENT").val }
     let kind = sem_kind(subject)
     if sem_match("LPAREN") {
@@ -4445,7 +4576,7 @@ fn sem_pattern(subject: int) -> str {
             sem_error_pattern_positions.append(pattern_position)
             sem_error_pattern_kinds.append(sem_kind(error_type))
             sem_error_pattern_names.append(sem_error_type_name(error_type))
-            return sem_error_type_name(error_type)
+            return sem_record_pattern(sem_error_type_name(error_type), [sem_last_pattern])
         }
         let mut payload_types: list[int] = []
         let mut valid = false
@@ -4475,36 +4606,39 @@ fn sem_pattern(subject: int) -> str {
         }
         if not valid { sem_error("W2001", "payload pattern") }
         let mut count = 0
+        let mut children: list[int] = []
         if not sem_is("RPAREN") {
             if count >= len(payload_types) { sem_error("W2001", "too many enum pattern bindings") }
             sem_pattern(payload_types[count])
+            children.append(sem_last_pattern)
             count = count + 1
             while sem_match("COMMA") {
                 if sem_is("RPAREN") { break }
                 if count >= len(payload_types) { sem_error("W2001", "too many enum pattern bindings") }
                 sem_pattern(payload_types[count])
+                children.append(sem_last_pattern)
                 count = count + 1
             }
         }
         sem_expect("RPAREN")
         if count != len(payload_types) { sem_error("W2001", "enum pattern arity") }
-        return name
+        return sem_record_pattern(name, children)
     }
     if kind == "enum" {
         if owner != "" and owner != sem_types[subject].name { sem_error("W2001", "pattern enum identity") }
         let mut valid = false
         for i in 0..len(sem_variants) { if sem_variants[i] == name and sem_types[sem_variant_types[i]].name == sem_types[subject].name and len(sem_variant_payloads[i]) == 0 { valid = true } }
-        if valid { return name }
+        if valid { return sem_leaf_pattern(name) }
         if owner != "" { sem_error("W1001", "unknown enum pattern") }
         sem_declare(name, subject, false)
-        return "*"
+        return sem_leaf_pattern("*")
     }
-    if name == "None" and (kind == "optional" or owner == "Option") { return "None" }
+    if name == "None" and (kind == "optional" or owner == "Option") { return sem_leaf_pattern("None") }
     if owner != "" { sem_error("W2001", "qualified enum pattern required") }
     sem_declare(name, subject, false)
-    return "*"
+    return sem_leaf_pattern("*")
 }
-fn sem_match_expression() -> SemValue {
+fn sem_match_expression(statement: bool) -> SemValue {
     sem_expect("MATCH")
     # Preserve syntax-error priority before resolving an atomic subject's name.
     # A bare pattern followed by a block always lacks its required arrow.
@@ -4520,7 +4654,7 @@ fn sem_match_expression() -> SemValue {
     }
     let subject = sem_expression(0, false).type_id
     sem_expect("LBRACE")
-    let mut covered: list[str] = []
+    let mut covered: list[list[int]] = []
     let mut all_return = true
     let mut common = -1
     let mut wildcard = false
@@ -4531,7 +4665,8 @@ fn sem_match_expression() -> SemValue {
         let saved_variables = sem_variables
         sem_initialized = initial
         sem_depth = sem_depth + 1
-        let pattern = sem_pattern(subject)
+        sem_pattern(subject)
+        let pattern = sem_last_pattern
         let mut guarded = false
         if sem_match("IF") { guarded = true sem_require(sem_expression(0, false).type_id, sem_bool, "W2001") }
         if not sem_match("FAT_ARROW") { sem_error("W0001", "expected '=>' after match pattern") }
@@ -4539,8 +4674,8 @@ fn sem_match_expression() -> SemValue {
         if sem_is("LBRACE") { branch = sem_block(false) }
         else { let value = sem_expression(0, true) branch = SemFlow { type_id: value.type_id, terminates: value.terminates } }
         if not guarded {
-            covered.append(pattern)
-            if pattern == "*" { wildcard = true }
+            covered.append([pattern])
+            if sem_patterns[pattern].name == "*" { wildcard = true }
         }
         if not branch.terminates {
             if live_branches == 0 { initialized = sem_initialized } else { initialized = sem_intersect(initialized, sem_initialized) }
@@ -4553,31 +4688,15 @@ fn sem_match_expression() -> SemValue {
         sem_match("COMMA")
     }
     sem_expect("RBRACE")
-    if not wildcard and sem_kind(subject) == "enum" {
-        for i in 0..len(sem_variants) {
-            if sem_variant_types[i] == subject {
-                let mut found = false
-                for variant in covered { if variant == sem_variants[i] { found = true } }
-                if not found { sem_error("W2003", "non-exhaustive match") }
-            }
-        }
-    }
-    if not wildcard {
-        let kind = sem_kind(subject)
-        let mut required: list[str] = []
-        if kind == "bool" { required = ["literal:true", "literal:false"] }
-        elif kind == "optional" { required = ["Some", "None"] }
-        elif kind == "result" { required = ["Ok", "Err"] }
-        elif kind == "error_union" {
-            for alternative in sem_types[subject].args { required.append(sem_error_type_name(alternative)) }
-        }
-        elif kind != "enum" {
-            if common >= 0 and common != sem_unit { sem_error("W2003", "value match requires exhaustive patterns") }
-            if sem_expected >= 0 and sem_expected != sem_unit { sem_error("W2003", "value match requires exhaustive patterns") }
-            initialized = sem_intersect(initialized, initial)
-            all_return = false
-        }
-        for name in required { if not module_contains(covered, name) { sem_error("W2003", "non-exhaustive match") } }
+    let kind = sem_kind(subject)
+    let closed = kind == "enum" or kind == "optional" or kind == "result" or kind == "error_union" or kind == "bool" or kind == "tuple"
+    let exhaustive = sem_pattern_matrix([subject], covered)
+    if closed and not exhaustive { sem_error("W2003", "non-exhaustive match") }
+    if not closed and not exhaustive {
+        if common >= 0 and common != sem_unit { sem_error("W2003", "value match requires exhaustive patterns") }
+        if not statement and sem_expected >= 0 and sem_expected != sem_unit { sem_error("W2003", "value match requires exhaustive patterns") }
+        initialized = sem_intersect(initialized, initial)
+        all_return = false
     }
     sem_initialized = initialized
     if common < 0 { common = sem_unit }
@@ -4634,8 +4753,10 @@ fn sem_block(statement: bool) -> SemFlow {
             sem_loop = sem_loop - 1
             tail = sem_unit
         } elif sem_match("FOR") {
+            let grouped = sem_match("LPAREN")
             let mut bindings: list[str] = [sem_expect("IDENT").val]
             while sem_match("COMMA") { bindings.append(sem_expect("IDENT").val) }
+            if grouped { sem_expect("RPAREN") }
             sem_expect("IN")
             let iterable = sem_expression(0, false).type_id
             if sem_kind(iterable) != "list" { sem_error("W2001", "for requires list or range") }
@@ -4676,6 +4797,7 @@ fn sem_check_function(function: SemFunction) {
     let variables = sem_variables
     let owner = sem_owner
     let returned = sem_return
+    let previous_expected = sem_expected
     let current_function = sem_current_function
     let initial = sem_initializing
     let initialized = sem_initialized
@@ -4691,6 +4813,7 @@ fn sem_check_function(function: SemFunction) {
     sem_depth = 1
     let signature = sem_types[function.type_id].args
     sem_return = signature[len(signature) - 1]
+    sem_expected = sem_return
     sem_initializing = sem_owner != "" and function.name == sem_owner + ".init"
     let empty: list[str] = []
     sem_initialized = empty
@@ -4711,6 +4834,7 @@ fn sem_check_function(function: SemFunction) {
     sem_variables = variables
     sem_owner = owner
     sem_return = returned
+    sem_expected = previous_expected
     sem_current_function = current_function
     sem_initializing = initial
     sem_initialized = initialized
@@ -4976,6 +5100,7 @@ fn sem_lambda() -> SemValue {
     if sem_match("ARROW") { returned = sem_type() }
     elif expected >= 0 and sem_kind(expected) == "function" { returned = sem_types[expected].args[len(sem_types[expected].args) - 1] }
     sem_return = returned
+    sem_expected = returned
     sem_loop = 0
     if sem_match("FAT_ARROW") {
         sem_expected = returned

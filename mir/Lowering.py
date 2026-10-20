@@ -21,7 +21,7 @@ class Lowering:
         raise WError(message, file=source.file, line=source.line, col=source.col,
                      code='W9999', stage='mir-lowering')
 
-    def lower(self, hir):
+    def lower(self, hir, optimize=True):
         from hir.HirVerifier import HirVerifier
         from codegen.VirtualDispatch import hir_virtual_method_slots
         HirVerifier(self.interner, self.file).verify(hir)
@@ -77,6 +77,9 @@ class Lowering:
             self.function.return_type = self.slot_by_id[value].type_id
             self.return_value(value)
         self.finish()
+        if optimize:
+            from mir.Ownership import optimize_parameter_reads
+            return optimize_parameter_reads(self.module, self.interner)
         from mir.Verifier import Verifier
         Verifier(self.interner).verify(self.module)
         return self.module
@@ -617,16 +620,20 @@ class Lowering:
             return [('identity', None, pattern.binding)]
         return []
 
-    def payload(self, channel, index, child, value):
+    def payload(self, channel, index, child, value, pattern):
         if channel == 'identity':
             return self.op('clone', self.slot(child.type_id), [value])
         if channel in ('tuple', 'enum_tuple'):
             if channel == 'enum_tuple':
                 value = self.runtime('w_enum_payload_owned', [value], self.interner.mk_tuple(
                     tuple(part.type_id for _, _, part in self.pattern_children_cache)), child)
+                self.current.operations[-1].data['variant'] = pattern.variant_name
             return self.op('tuple_get', self.slot(child.type_id), [value], {'index': index})
         helper = {'optional': 'w_unwrap_optional', 'ok': 'w_unwrap_ok', 'err': 'w_unwrap_err', 'enum': 'w_enum_payload_owned'}[channel]
-        return self.runtime(helper, [value], child.type_id, child)
+        result = self.runtime(helper, [value], child.type_id, child)
+        if channel == 'enum':
+            self.current.operations[-1].data['variant'] = pattern.variant_name
+        return result
 
     def pattern_condition(self, pattern, value):
         if isinstance(pattern, H.HirWildcardPattern) or isinstance(pattern, H.HirBindingPattern) and pattern.name not in ('None', 'none'):
@@ -665,7 +672,7 @@ class Lowering:
             self.branch(base, yes, done)
             self.current = yes
             self.pattern_children_cache = children
-            payload = self.payload(channel, payload_index, child, value)
+            payload = self.payload(channel, payload_index, child, value, pattern)
             base = self.pattern_condition(child, payload)
         self.op('store', result, [base], data={'scalar': True})
         self.jump(done)
@@ -688,7 +695,7 @@ class Lowering:
         children = self.pattern_children(pattern, value)
         for channel, index, child in children:
             self.pattern_children_cache = children
-            payload = self.payload(channel, index, child, value)
+            payload = self.payload(channel, index, child, value, pattern)
             self.bind_pattern(child, payload)
 
     def match(self, node):

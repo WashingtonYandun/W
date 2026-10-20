@@ -1,0 +1,24 @@
+import "std/resources" as resources
+extern "C" fn audit_open() -> opaque
+extern "C" fn audit_dispose(handle: opaque) -> int32
+extern "C" fn audit_fail_close() -> unit
+extern "C" fn audit_live() -> int32
+
+fn exercise(fail: bool, close_failure: bool) -> unit {
+    let resource = new resources.Resource(audit_open(), |handle: opaque| -> int { audit_dispose(handle) })
+    let body: fn(resources.Resource) -> int ! resources.ResourceError = |owner: resources.Resource| -> int ! resources.ResourceError {
+        let borrowed = owner.borrow()?
+        if fail { return Err(resources.error("body failed")) }
+        return 9
+    }
+    if close_failure { audit_fail_close() }
+    let outcome = resources.scope[int, resources.ResourceError](resource, body)
+    match outcome { (result, close_status) => print(result, close_status, audit_live()) }
+    print(resource.close(), audit_live())
+    resource.borrow() else error { print(error.message)
+        return
+    }
+}
+exercise(false, false)
+exercise(true, false)
+exercise(true, true)

@@ -18,10 +18,35 @@ SEEDS = (0, 1, 2, 3, 5, 8, 13, 21)
 def test_ascii_allocation_and_lifetime_contract():
     source = r'''#include "runtime/w_runtime.h"
 #include <assert.h>
+
+static WVal copy_bytes(const char* bytes, size_t count) {
+    char* buffer = malloc(count + 1);
+    assert(buffer);
+    memcpy(buffer, bytes, count);
+    buffer[count] = 0;
+    return w_owned_str_n(buffer, count);
+}
+
+static void check_offsets(WVal text, const size_t* offsets, const size_t* widths, size_t count) {
+    for (int pass = 0; pass < 2; pass++) {
+        size_t offset = 0, width = 0;
+        assert(!w_string_offset(text, INT64_MIN, &offset, &width));
+        assert(!w_string_offset(text, -1, &offset, &width));
+        for (size_t index = 0; index < count; index++) {
+            assert(w_string_offset(text, (int64_t)index, &offset, &width));
+            assert(offset == offsets[index] && width == widths[index]);
+        }
+        assert(!w_string_offset(text, (int64_t)count, &offset, &width));
+        assert(!w_string_offset(text, INT64_MAX, &offset, &width));
+        assert(w_string_length(text) == (int64_t)count);
+    }
+}
+
 int main(void) {
+    assert(W_RUNTIME_ABI_VERSION == 2 && sizeof(WVal) <= 32);
     for (int64_t code = 0; code < 128; code++) {
         WVal character = w_builtin_chr(w_int(code));
-        assert(character.tag == W_STR && character.string_length == 1);
+        assert(character.tag == W_STR && character.as.string.length == 1);
         assert(w_builtin_ord(character).as.i == code);
         WVal retained = w_clone(character);
         w_release(character);
@@ -40,6 +65,59 @@ int main(void) {
     w_release(unicode);
     assert(w_builtin_ord(copied).as.i == 128578);
     w_release(copied);
+    assert(w_eq(w_float(0.0), w_float(-0.0)));
+    assert(!w_eq(w_float(NAN), w_float(NAN)));
+    assert(!w_eq(w_str_n("a\0b", 3), w_str_n("a\0c", 3)));
+    assert(w_eq(w_str_n("a\0b", 3), w_str_n("a\0b", 3)));
+    char* shared_data = malloc(4);
+    assert(shared_data);
+    memcpy(shared_data, "x\0y", 4);
+    WVal shared = w_owned_str_n(shared_data, 3);
+    WVal alias = w_clone(shared);
+    WVal values = w_make_list(2, (WVal[]){shared, w_str("static")});
+    w_release(shared);
+    w_release(values);
+    assert(w_eq(alias, w_str_n("x\0y", 3)));
+    w_release(alias);
+    const size_t mixed_offsets[] = {0, 1, 3, 7, 8};
+    const size_t mixed_widths[] = {1, 2, 4, 1, 1};
+    WVal mixed = w_str_n("A\xc3\xa9\xf0\x9f\x99\x82\0Z", 9);
+    check_offsets(mixed, mixed_offsets, mixed_widths, 5);
+    WVal owned_mixed = copy_bytes(mixed.as.string.data, mixed.as.string.length);
+    check_offsets(owned_mixed, mixed_offsets, mixed_widths, 5);
+    WVal escaped = w_index_get_owned(owned_mixed, w_int(2));
+    w_release(owned_mixed);
+    assert(w_builtin_ord(escaped).as.i == 128578);
+    w_release(escaped);
+    const size_t byte_offsets[] = {0, 1, 2};
+    const size_t byte_widths[] = {1, 1, 1};
+    WVal cached = copy_bytes("A\0Z", 3);
+    assert(w_string_length(cached) == 3);
+    alias = w_clone(cached);
+    w_release(cached);
+    check_offsets(alias, byte_offsets, byte_widths, 3);
+    assert(alias.as.string.owner->codepoint_offsets == NULL);
+    w_release(alias);
+    const char invalid[] = {(char)0x80, (char)0xc0, (char)0xaf};
+    WVal invalid_owned = copy_bytes(invalid, sizeof(invalid));
+    check_offsets(invalid_owned, byte_offsets, byte_widths, 3);
+    w_release(invalid_owned);
+    check_offsets(w_str(""), NULL, NULL, 0);
+    WVal empty_owned = w_copy_str("");
+    check_offsets(empty_owned, NULL, NULL, 0);
+    w_release(empty_owned);
+    WVal option = w_enum_payload("Option", "Some", w_int(7));
+    assert(w_eq(option, w_int(7)));
+    w_release(option);
+    int64_t released = w_g_release_count;
+    w_release(w_unit());
+    w_release(w_none());
+    w_release(w_int(7));
+    w_release(w_float(1.5));
+    w_release(w_bool(true));
+    w_release(w_pointer(NULL));
+    w_release(w_str("static"));
+    assert(w_g_release_count == released);
     assert(w_g_alloc_count == w_g_free_count && w_g_live_objects == 0);
     w_runtime_cleanup();
     return 0;

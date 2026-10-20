@@ -16,6 +16,23 @@ RUNTIME = {
     'w_builtin_read_file', 'w_builtin_write_file', 'w_builtin_join_strings', 'w_builtin_weak_owned',
     'w_builtin_upgrade',
 }
+RUNTIME_ARITIES = {
+    **dict.fromkeys(('w_neg', 'w_not', 'w_ok', 'w_err', 'w_enum_payload', 'w_wrap_result',
+                     'w_unwrap_optional', 'w_unwrap_ok', 'w_unwrap_err', 'w_unwrap_success',
+                     'w_enum_payload_owned', 'w_dict_keys', 'w_dict_values', 'w_builtin_len',
+                     'w_builtin_str', 'w_builtin_int', 'w_builtin_float', 'w_builtin_ord',
+                     'w_builtin_chr', 'w_builtin_bytes', 'w_builtin_exit', 'w_builtin_enumerate',
+                     'w_builtin_dict_items', 'w_builtin_read_file', 'w_builtin_weak_owned',
+                     'w_builtin_upgrade'), 1),
+    **dict.fromkeys(('w_add', 'w_sub', 'w_mul', 'w_div_at', 'w_mod_at', 'w_lt', 'w_le',
+                     'w_gt', 'w_ge', 'w_equal', 'w_not_equal', 'w_make_range',
+                     'w_index_get_owned_at', 'w_dict_get', 'w_builtin_write_file',
+                     'w_builtin_join_strings'), 2),
+    'w_builtin_slice': 3, 'w_builtin_args': 0, 'w_enum': 0, 'w_empty_weak': 0,
+    'w_builtin_print': None, 'w_builtin_eprint': None,
+}
+assert set(RUNTIME_ARITIES) == RUNTIME, 'Every MIR runtime helper requires a signature'
+
 CONSUMING = {'w_ok': (0,), 'w_err': (0,), 'w_enum_payload': (0,),
              'w_wrap_result': (0,), 'w_builtin_weak_owned': (0,)}
 
@@ -29,9 +46,7 @@ class Verifier:
                      col=getattr(source, 'col', 1), code='W9999', stage='mir-verification')
 
     def compatible(self, source, target):
-        from checker.WType import is_assignable
-        return self.interner.is_assignable(source, target) or is_assignable(
-            self.interner.to_wtype(source), self.interner.to_wtype(target))
+        return self.interner.is_assignable(source, target)
 
     def verify(self, module):
         if module.arena_id != self.interner.arena_id:
@@ -99,63 +114,123 @@ class Verifier:
         name = operation.data['name']
         types = [arg.type_id for arg in args]
         returned = self.interner.get_entry(result.type_id)
+
         def require(condition):
             if not condition:
                 self.fail('MIR runtime operand/result types mismatch: ' + name, operation.source)
-        unary = {'w_neg', 'w_not', 'w_unwrap_optional', 'w_unwrap_ok', 'w_unwrap_err',
-                 'w_unwrap_success', 'w_enum_payload_owned', 'w_ok', 'w_err', 'w_enum_payload',
-                 'w_wrap_result', 'w_dict_keys', 'w_dict_values'}
-        unary |= {item for item in RUNTIME if item.startswith('w_builtin_') and item not in
-                  ('w_builtin_args', 'w_builtin_print', 'w_builtin_eprint', 'w_builtin_slice',
-                   'w_builtin_write_file', 'w_builtin_join_strings')}
-        binary = {'w_add', 'w_sub', 'w_mul', 'w_div_at', 'w_mod_at', 'w_lt', 'w_le', 'w_gt', 'w_ge',
-                  'w_equal', 'w_not_equal', 'w_dict_get', 'w_make_range', 'w_index_get_owned_at',
-                  'w_builtin_write_file', 'w_builtin_join_strings'}
-        if name in unary:
-            require(len(args) == 1)
-        elif name in binary:
-            require(len(args) == 2)
-        elif name == 'w_builtin_slice':
-            require(len(args) == 3)
-        elif name not in ('w_builtin_print', 'w_builtin_eprint'):
-            require(not args)
+
+        def entry(index):
+            return self.interner.get_entry(types[index])
+
+        def list_of(type_id):
+            return returned.tag == 'list' and returned.data == type_id
+
+        arity = RUNTIME_ARITIES[name]
+        require(arity is None or len(args) == arity)
         if name in ('w_neg', 'w_not'):
-            require(types[0] == result.type_id and types[0] in ((TYPE_BOOL,) if name == 'w_not' else (TYPE_INT, TYPE_FLOAT)))
-        if name in ('w_add', 'w_sub', 'w_mul', 'w_div_at', 'w_mod_at', 'w_lt', 'w_le', 'w_gt', 'w_ge'):
-            allowed = (TYPE_INT, TYPE_FLOAT, TYPE_STR) if name == 'w_add' else (TYPE_INT, TYPE_FLOAT)
+            require(types[0] == result.type_id and types[0] in
+                    ((TYPE_BOOL,) if name == 'w_not' else (TYPE_INT, TYPE_FLOAT)))
+        elif name in ('w_add', 'w_sub', 'w_mul', 'w_div_at', 'w_mod_at', 'w_lt', 'w_le', 'w_gt', 'w_ge'):
+            allowed = (TYPE_INT, TYPE_FLOAT, TYPE_STR) if name == 'w_add' else (TYPE_INT,) if name == 'w_mod_at' else (TYPE_INT, TYPE_FLOAT)
             comparison = name in ('w_lt', 'w_le', 'w_gt', 'w_ge')
-            require(types[0] == types[1] and types[0] in allowed and result.type_id == (TYPE_BOOL if comparison else types[0]))
-        if name in ('w_equal', 'w_not_equal'):
-            require(result.type_id == TYPE_BOOL)
-        if name == 'w_make_range':
-            require(types == [TYPE_INT, TYPE_INT] and returned.tag == 'list' and returned.data == TYPE_INT
-                    and isinstance(operation.data.get('inclusive'), bool))
-        if name == 'w_builtin_len':
-            require(result.type_id == TYPE_INT and (types[0] == TYPE_STR or self.interner.get_entry(types[0]).tag in ('list', 'dict', 'tuple')))
-        if name in ('w_builtin_int', 'w_builtin_float'):
+            require(types[0] == types[1] and types[0] in allowed and
+                    result.type_id == (TYPE_BOOL if comparison else types[0]))
+        elif name in ('w_equal', 'w_not_equal'):
+            require(result.type_id == TYPE_BOOL and
+                    self.interner.equality_compatible(types[0], types[1]))
+        elif name == 'w_make_range':
+            require(types == [TYPE_INT, TYPE_INT] and list_of(TYPE_INT) and
+                    isinstance(operation.data.get('inclusive'), bool))
+        elif name == 'w_builtin_len':
+            require(result.type_id == TYPE_INT and (types[0] == TYPE_STR or entry(0).tag in ('list', 'dict', 'tuple')))
+        elif name in ('w_builtin_int', 'w_builtin_float'):
             require(types[0] in (TYPE_INT, TYPE_FLOAT, TYPE_BOOL, TYPE_STR) and
                     result.type_id == (TYPE_INT if name == 'w_builtin_int' else TYPE_FLOAT))
-        if name == 'w_builtin_str':
+        elif name == 'w_builtin_ord':
+            require(types == [TYPE_STR] and result.type_id == TYPE_INT)
+        elif name == 'w_builtin_chr':
+            require(types == [TYPE_INT] and result.type_id == TYPE_STR)
+        elif name == 'w_builtin_str':
             require(result.type_id == TYPE_STR)
-        if name == 'w_builtin_join_strings':
-            require(self.interner.get_entry(types[0]).tag == 'list' and
-                    self.interner.get_entry(types[0]).data == TYPE_STR and types[1] == TYPE_STR and result.type_id == TYPE_STR)
-        if name in ('w_builtin_print', 'w_builtin_eprint'):
+        elif name == 'w_builtin_bytes':
+            require(types == [TYPE_STR] and list_of(TYPE_INT))
+        elif name == 'w_builtin_args':
+            require(list_of(TYPE_STR))
+        elif name == 'w_builtin_exit':
+            require(types == [TYPE_INT] and result.type_id == TYPE_UNIT)
+        elif name == 'w_builtin_slice':
+            require(types[1:] == [TYPE_INT, TYPE_INT] and types[0] == result.type_id and
+                    (types[0] == TYPE_STR or entry(0).tag == 'list'))
+        elif name == 'w_builtin_join_strings':
+            require(entry(0).tag == 'list' and entry(0).data == TYPE_STR and
+                    types[1] == TYPE_STR and result.type_id == TYPE_STR)
+        elif name in ('w_builtin_print', 'w_builtin_eprint'):
             require(result.type_id == TYPE_UNIT)
-        if name in ('w_dict_get', 'w_dict_keys', 'w_dict_values'):
-            dictionary = self.interner.get_entry(types[0])
+        elif name in ('w_dict_get', 'w_dict_keys', 'w_dict_values', 'w_builtin_dict_items'):
+            dictionary = entry(0)
             require(dictionary.tag == 'dict')
             if name == 'w_dict_get':
-                require(self.compatible(types[1], dictionary.data[0]) and returned.tag == 'optional'
-                        and returned.data == dictionary.data[1])
+                require(self.compatible(types[1], dictionary.data[0]) and returned.tag == 'optional' and returned.data == dictionary.data[1])
+            elif name == 'w_builtin_dict_items':
+                require(returned.tag == 'list')
+                pair = self.interner.get_entry(returned.data)
+                require(pair.tag == 'tuple' and tuple(pair.data) == tuple(dictionary.data))
             else:
-                require(returned.tag == 'list' and returned.data == dictionary.data[0 if name == 'w_dict_keys' else 1])
-        if name == 'w_index_get_owned_at':
-            container = self.interner.get_entry(types[0])
+                require(list_of(dictionary.data[0 if name == 'w_dict_keys' else 1]))
+        elif name == 'w_builtin_enumerate':
+            require(entry(0).tag == 'list' and returned.tag == 'list')
+            pair = self.interner.get_entry(returned.data)
+            require(pair.tag == 'tuple' and tuple(pair.data) == (TYPE_INT, entry(0).data))
+        elif name == 'w_index_get_owned_at':
+            container = entry(0)
             require(container.tag in ('list', 'dict') or types[0] == TYPE_STR)
             expected = container.data[0] if container.tag == 'dict' else TYPE_INT
             value = container.data[1] if container.tag == 'dict' else container.data if container.tag == 'list' else TYPE_STR
             require(self.compatible(types[1], expected) and result.type_id == value)
+        elif name in ('w_builtin_read_file', 'w_builtin_write_file'):
+            require(types == ([TYPE_STR] if name == 'w_builtin_read_file' else [TYPE_STR, TYPE_STR]))
+            require(returned.tag == 'result' and returned.data[0] ==
+                    (TYPE_STR if name == 'w_builtin_read_file' else TYPE_UNIT))
+            error = self.interner.get_entry(returned.data[1])
+            require(error.tag == 'struct' and error.data == 'IoError')
+        elif name == 'w_builtin_weak_owned':
+            require(entry(0).tag == 'class' and returned.tag == 'weak' and returned.data == types[0])
+        elif name == 'w_empty_weak':
+            require(returned.tag == 'weak' and self.interner.get_entry(returned.data).tag == 'class')
+        elif name == 'w_builtin_upgrade':
+            require(entry(0).tag == 'weak' and returned.tag == 'optional' and returned.data == entry(0).data)
+        elif name in ('w_ok', 'w_err'):
+            require(returned.tag == 'result' and self.compatible(types[0], returned.data[0 if name == 'w_ok' else 1]))
+        elif name == 'w_wrap_result':
+            require(returned.tag == 'result' and self.compatible(types[0], result.type_id) and
+                    isinstance(operation.data.get('error_type'), str))
+        elif name in ('w_unwrap_optional', 'w_unwrap_ok', 'w_unwrap_err', 'w_unwrap_success'):
+            source = entry(0)
+            allowed = ('optional',) if name == 'w_unwrap_optional' else ('result',) if name in ('w_unwrap_ok', 'w_unwrap_err') else ('optional', 'result')
+            require(source.tag in allowed)
+            expected = source.data if source.tag == 'optional' else source.data[1 if name == 'w_unwrap_err' else 0]
+            require(result.type_id == expected)
+        elif name in ('w_enum', 'w_enum_payload', 'w_enum_payload_owned'):
+            source = entry(0) if name == 'w_enum_payload_owned' else returned
+            variant = operation.data.get('variant')
+            if source.tag == 'optional':
+                require(name == 'w_enum_payload' and operation.data.get('enum', '').split('__', 1)[0] == 'Option' and variant == 'Some' and self.compatible(types[0], source.data))
+            else:
+                require(source.tag == 'enum')
+                definition = self.interner.enum_defs.get(source.data)
+                require(definition is not None and variant in definition.variants)
+                payload = definition.variant_payloads.get(variant, [])
+                if name == 'w_enum':
+                    require(not payload and operation.data.get('enum') == source.data)
+                else:
+                    expected = payload[0] if len(payload) == 1 else self.interner.mk_tuple(tuple(payload))
+                    require(bool(payload))
+                    actual = result.type_id if name == 'w_enum_payload_owned' else types[0]
+                    require(self.compatible(actual, expected))
+                    if name == 'w_enum_payload':
+                        require(operation.data.get('enum') == source.data)
+        else:
+            self.fail('Missing MIR runtime signature: ' + name, operation.source)
 
     def operation(self, operation, slots):
         if operation.opcode not in EFFECTS or operation.effect != EFFECTS[operation.opcode]:
@@ -381,7 +456,7 @@ class Verifier:
                     _, place_reads = self.place(operation.data['place'], slots)
                     reads.extend(place_reads)
                 if kind != 'release' and any(operand not in defined for operand in reads):
-                    self.fail('MIR reads an uninitialized or consumed value', operation.source)
+                    self.fail('MIR reads an uninitialized or consumed value: ' + str([operand for operand in reads if operand not in defined]), operation.source)
                 if kind == 'narrow':
                     witness = operation.data['witness']
                     proof = tests.get(witness)

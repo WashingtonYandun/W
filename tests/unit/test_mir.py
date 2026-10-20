@@ -21,12 +21,12 @@ from tests.engine_harness import verify
 ROOT = Path(__file__).resolve().parents[2]
 
 
-def lower(source):
+def lower(source, optimize=True):
     ast = Parser(file='mir-contract.w').parse(source)
     checker = TypeChecker(file='mir-contract.w')
     checker.check(ast)
     hir = HirBuilder(checker.interner, file_path='mir-contract.w').lower(ast)
-    return Lowering(checker.interner, 'mir-contract.w').lower(hir), checker.interner
+    return Lowering(checker.interner, 'mir-contract.w').lower(hir, optimize=optimize), checker.interner
 
 
 def operations(module):
@@ -154,6 +154,8 @@ def test_mir_inspection_and_default_backend():
 
 def test_bootstrap_cache_serializes_processes():
     with tempfile.TemporaryDirectory(prefix='w-bootstrap-lock-') as directory:
+        (Path(directory) / 'selfhost').mkdir()
+        (Path(directory) / 'selfhost' / 'w1.w').write_text('print(0)\n')
         script = """import sys, time
 from pathlib import Path
 import main
@@ -183,6 +185,8 @@ def run_mir_tests():
     test_range_iteration_and_limits_across_engines()
     test_mir_inspection_and_default_backend()
     test_bootstrap_cache_serializes_processes()
+    from tests.unit.test_mir_ownership import run_ownership_optimization_tests
+    run_ownership_optimization_tests()
     print('MIR CFG, ownership, layout, narrowing and range contracts passed')
     return True
 

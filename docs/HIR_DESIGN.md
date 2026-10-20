@@ -3,28 +3,28 @@
 HIR is W0's typed intermediate representation and the input to the default C99 backend.
 It carries canonical types, resolved symbols and fields, and explicit control-flow and
 assignment semantics from the checker. The verifier rejects malformed internal
-representations before code generation. W also has a separately verified MIR
-representation for inspecting control flow, ownership operations, and storage layouts;
+representations before lowering to verified MIR. MIR makes control flow, ownership
+operations, and storage layouts explicit before C99 emission;
 see [MIR design](MIR_DESIGN.md).
 
 ## 1. Compiler pipeline
 
-¶¶¶mermaid
+```mermaid
 flowchart TD
     A["W source"] --> B["Lexer and parser"]
     B --> C["AST"]
     C --> D["Declaration collection and type checking"]
     D --> E["Typed HIR"]
     E --> F["HIR verification"]
-    F --> G["HIR C99 emission (default)"]
+    F --> I["MIR lowering and verification"]
+    I --> G["MIR C99 emission (default)"]
     G --> H["Native executable"]
-    F -.-> I["MIR lowering and verification (w mir)"]
-¶¶¶
+```
 
 The checker resolves overloads, constructors, modules, and generic specializations before
 HIR reaches code generation. HIR preserves expression order and CoW assignment paths.
-The optional MIR lowering makes control flow, storage layout, and ownership transitions
-explicit for inspection.
+MIR lowering makes control flow, storage layout, and ownership transitions
+explicit before C99 emission.
 
 ## 2. Core HIR Data Model
 
@@ -178,7 +178,7 @@ Both `gcc` and `clang` are forced by `;`-terminated C99 variable declarations to
 
 ## 5. Current role
 
-W0 uses verified typed HIR for native builds and C emission. The AST backend remains available as a differential oracle (`--backend=ast`). `w mir <file.w>` separately lowers HIR to verified MIR and prints the representation as JSON; MIR does not currently emit native C.
+W0 lowers verified typed HIR to verified MIR for native builds and C emission. The AST backend remains available as a differential oracle (`--backend=ast`). `w mir <file.w>` prints the verified MIR representation as JSON.
 
 
 ## 6. Verification boundary

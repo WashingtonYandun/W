@@ -19,7 +19,7 @@ static bool decimal(const unsigned char *text, size_t length, int64_t *value, Im
     return true;
 }
 
-static int64_t populate(void *handle, const unsigned char *text, size_t length, ImportError *error) {
+static int64_t populate(void *handle, const unsigned char *text, size_t length, ImportError *error, bool commit) {
     error->database = pilot_begin(handle);
     if (error->database) return -1;
     size_t start = 0;
@@ -54,16 +54,34 @@ static int64_t populate(void *handle, const unsigned char *text, size_t length, 
     (void)pilot_total(handle);
     error->database = pilot_status(handle);
     if (error->database) return -1;
+    if (!commit) { error->database = pilot_rollback(handle); return error->database ? -1 : rows; }
+    error->database = pilot_record_import(handle, rows, (int64_t)length);
+    if (error->database) return -1;
     error->database = pilot_commit(handle);
     return error->database ? -1 : rows;
 }
 
 int main(int argc, char **argv) {
     if (argc == 2 && !strcmp(argv[1], "--version")) { printf("%d\n", pilot_version()); return 0; }
-    if (argc != 2) {
-        puts("usage: import_csv measurements.csv (W_SQLITE_DB selects database)"); return 2;
+    bool checking = argc == 3 && !strcmp(argv[1], "--check");
+    if (argc == 2 && !strcmp(argv[1], "--status")) {
+        void *handle = pilot_open();
+        if (!pilot_is_open(handle)) { printf("database error %d\n", pilot_status(handle)); pilot_dispose(handle); return 1; }
+        int64_t count = pilot_count(handle);
+        int32_t status = pilot_status(handle);
+        int64_t total = pilot_total(handle);
+        int32_t total_status = pilot_status(handle);
+        int64_t imports = pilot_import_count(handle);
+        if (!status) status = total_status ? total_status : pilot_status(handle);
+        int32_t closed = pilot_dispose(handle);
+        if (status || closed) { printf("database error %d\n", status ? status : closed); return 1; }
+        printf("status %lld %lld %lld\nresources %d\n", (long long)count, (long long)total, (long long)imports, pilot_live_resources());
+        return 0;
     }
-    FILE *input = fopen(argv[1], "rb");
+    if (argc != 2 && !checking) {
+        puts("usage: import_csv [--check] measurements.csv | --status (W_SQLITE_DB selects database)"); return 2;
+    }
+    FILE *input = fopen(argv[checking ? 2 : 1], "rb");
     if (!input) { puts("io error"); return 2; }
     if (fseek(input, 0, SEEK_END)) { fclose(input); puts("io error"); return 2; }
     long size = ftell(input);
@@ -74,6 +92,7 @@ int main(int argc, char **argv) {
     int failed = ferror(input) || length != (size_t)size;
     if (fclose(input)) failed = 1;
     if (failed) { free(text); puts("io error"); return 2; }
+    if (length > 8388608) { free(text); puts("csv error 0 input size limit exceeded"); return 2; }
     void *handle = pilot_open();
     if (!pilot_is_open(handle)) {
         printf("database error %d\n", pilot_status(handle));
@@ -81,7 +100,7 @@ int main(int argc, char **argv) {
         printf("resources %d\n", pilot_live_resources()); return 1;
     }
     ImportError error = {0, NULL, 0};
-    int64_t rows = populate(handle, text, length, &error);
+    int64_t rows = populate(handle, text, length, &error, !checking);
     free(text);
     if (rows < 0) {
         if (error.database) printf("database error %d\n", error.database);
@@ -91,7 +110,8 @@ int main(int argc, char **argv) {
     } else {
         int64_t count = pilot_count(handle);
         int64_t total = pilot_total(handle);
-        printf("imported %lld %lld %lld\n", (long long)rows, (long long)count, (long long)total);
+        if (checking) printf("validated %lld\n", (long long)rows);
+        else printf("imported %lld %lld %lld\n", (long long)rows, (long long)count, (long long)total);
     }
     int32_t closed = pilot_dispose(handle);
     printf("resources %d\n", pilot_live_resources());
