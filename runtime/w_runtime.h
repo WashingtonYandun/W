@@ -121,15 +121,15 @@ struct WVal {
 };
 
 static inline bool w_value_is_error_type(WVal value, const char* kind, const char* name) {
-    if (strcmp(kind, "int") == 0) return value.tag == W_INT;
-    if (strcmp(kind, "float") == 0) return value.tag == W_FLOAT;
-    if (strcmp(kind, "bool") == 0) return value.tag == W_BOOL;
-    if (strcmp(kind, "str") == 0) return value.tag == W_STR;
-    if (strcmp(kind, "struct") == 0) {
-        return value.tag == W_STRUCT && value.as.st && strcmp(value.as.st->name, name) == 0;
+    if (kind == "int" || strcmp(kind, "int") == 0) return value.tag == W_INT;
+    if (kind == "float" || strcmp(kind, "float") == 0) return value.tag == W_FLOAT;
+    if (kind == "bool" || strcmp(kind, "bool") == 0) return value.tag == W_BOOL;
+    if (kind == "str" || strcmp(kind, "str") == 0) return value.tag == W_STR;
+    if (kind == "struct" || strcmp(kind, "struct") == 0) {
+        return value.tag == W_STRUCT && value.as.st && (value.as.st->name == name || strcmp(value.as.st->name, name) == 0);
     }
-    if (strcmp(kind, "enum") == 0) {
-        return value.tag == W_ENUM && value.as.en.enum_name && strcmp(value.as.en.enum_name, name) == 0;
+    if (kind == "enum" || strcmp(kind, "enum") == 0) {
+        return value.tag == W_ENUM && value.as.en.enum_name && (value.as.en.enum_name == name || strcmp(value.as.en.enum_name, name) == 0);
     }
     return false;
 }
@@ -1488,6 +1488,18 @@ static W_RUNTIME_NOINLINE bool w_string_offset_slow(WVal value, int64_t index, s
     WStringBuf* owner = value.as.string.owner;
     if (!owner) return w_utf8_cp_offset_n(value.as.string.data, value.as.string.length, index, offset, length);
     if (!owner->codepoint_offsets) {
+        size_t ascii_pos = 0;
+        const unsigned char* bytes = (const unsigned char*)value.as.string.data;
+        while (ascii_pos < value.as.string.length && bytes[ascii_pos] < 0x80) {
+            ascii_pos++;
+        }
+        if (ascii_pos == value.as.string.length) {
+            owner->codepoint_count = value.as.string.length;
+            if ((uint64_t)index > value.as.string.length) return false;
+            *offset = (size_t)index;
+            *length = (uint64_t)index < value.as.string.length ? 1 : 0;
+            return *length != 0;
+        }
         if (value.as.string.length > SIZE_MAX / sizeof(size_t) - 1) {
             fprintf(stderr, "[W4003] RuntimeError: String index too large\n"); exit(1);
         }
@@ -1625,7 +1637,7 @@ static inline WVal* w_index_ref_at(WVal* obj, WVal idx, const char* file, int32_
 static inline WVal w_member_get(WVal obj, const char* prop) {
     if (obj.tag == W_STRUCT || obj.tag == W_OBJECT) {
         for (int32_t i = 0; i < obj.as.st->len; i++) {
-            if (strcmp(obj.as.st->keys[i], prop) == 0) {
+            if (obj.as.st->keys[i] == prop || strcmp(obj.as.st->keys[i], prop) == 0) {
                 return obj.as.st->vals[i];
             }
         }
@@ -1637,13 +1649,13 @@ static inline WVal* w_member_ref(WVal* obj, const char* prop) {
     if (obj->tag == W_STRUCT) {
         w_struct_detach(obj);
         for (int32_t i = 0; i < obj->as.st->len; i++) {
-            if (strcmp(obj->as.st->keys[i], prop) == 0) {
+            if (obj->as.st->keys[i] == prop || strcmp(obj->as.st->keys[i], prop) == 0) {
                 return &obj->as.st->vals[i];
             }
         }
     } else if (obj->tag == W_OBJECT) {
         for (int32_t i = 0; i < obj->as.st->len; i++) {
-            if (strcmp(obj->as.st->keys[i], prop) == 0) {
+            if (obj->as.st->keys[i] == prop || strcmp(obj->as.st->keys[i], prop) == 0) {
                 return &obj->as.st->vals[i];
             }
         }
