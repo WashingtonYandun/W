@@ -13,7 +13,7 @@ def isolated_environment():
     # os.environ is case-insensitive on Windows, but a copied dict is not.
     environment = {name.upper(): value for name, value in os.environ.items()}
     for name in ('CC', 'PYTHONHOME', 'PYTHONPATH', 'VIRTUAL_ENV', 'INCLUDE', 'LIB', 'LIBPATH',
-                 'VCINSTALLDIR', 'VCToolsInstallDir', 'WindowsSdkDir', 'WindowsSDKVersion'):
+                 'VCINSTALLDIR', 'VCTOOLSINSTALLDIR', 'WINDOWSSDKDIR', 'WINDOWSSDKVERSION'):
         environment.pop(name, None)
     environment['PATH'] = str(Path(environment['SYSTEMROOT']) / 'System32')
     return environment

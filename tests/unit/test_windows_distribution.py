@@ -14,11 +14,14 @@ from tools.validate_windows_install import isolated_environment
 def test_windows_client_isolation_preserves_case_insensitive_system_root():
     with tempfile.TemporaryDirectory() as temporary:
         with patch.dict(os.environ, {'SystemRoot': temporary, 'Path': 'host-python-and-compiler',
-                                     'CC': 'host-compiler', 'PythonPath': 'host-packages'}, clear=True):
+                                     'CC': 'host-compiler', 'PythonPath': 'host-packages',
+                                     'VCToolsInstallDir': 'host-vc-tools', 'WindowsSdkDir': 'host-sdk',
+                                     'WindowsSDKVersion': 'host-sdk-version'}, clear=True):
             environment = isolated_environment()
         assert environment['SYSTEMROOT'] == temporary
         assert environment['PATH'] == str(Path(temporary) / 'System32')
         assert 'CC' not in environment and 'PYTHONPATH' not in environment
+        assert not {'VCTOOLSINSTALLDIR', 'WINDOWSSDKDIR', 'WINDOWSSDKVERSION'} & environment.keys()
 
 
 def test_modules_on_other_windows_volumes_keep_distinct_stable_identities():
