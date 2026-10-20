@@ -7,6 +7,17 @@ import zipfile
 
 from common.Platform import compiler_command
 from tools.package_windows import assemble, download, extract
+from tools.validate_windows_install import isolated_environment
+
+
+def test_windows_client_isolation_preserves_case_insensitive_system_root():
+    with tempfile.TemporaryDirectory() as temporary:
+        with patch.dict(os.environ, {'SystemRoot': temporary, 'Path': 'host-python-and-compiler',
+                                     'CC': 'host-compiler', 'PythonPath': 'host-packages'}, clear=True):
+            environment = isolated_environment()
+        assert environment['SYSTEMROOT'] == temporary
+        assert environment['PATH'] == str(Path(temporary) / 'System32')
+        assert 'CC' not in environment and 'PYTHONPATH' not in environment
 
 
 def test_windows_bundle_compiler_and_explicit_override():
@@ -74,6 +85,7 @@ def test_bundle_never_replaces_existing_installation():
 
 
 if __name__ == '__main__':
+    test_windows_client_isolation_preserves_case_insensitive_system_root()
     test_windows_bundle_compiler_and_explicit_override()
     test_bundle_extraction_rejects_cross_platform_path_traversal()
     test_component_checksum_failure_precedes_network_and_extraction()

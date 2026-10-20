@@ -9,15 +9,21 @@ import subprocess
 import tempfile
 
 
+def isolated_environment():
+    # os.environ is case-insensitive on Windows, but a copied dict is not.
+    environment = {name.upper(): value for name, value in os.environ.items()}
+    for name in ('CC', 'PYTHONHOME', 'PYTHONPATH', 'VIRTUAL_ENV', 'INCLUDE', 'LIB', 'LIBPATH',
+                 'VCINSTALLDIR', 'VCToolsInstallDir', 'WindowsSdkDir', 'WindowsSDKVersion'):
+        environment.pop(name, None)
+    environment['PATH'] = str(Path(environment['SYSTEMROOT']) / 'System32')
+    return environment
+
+
 def validate(installation, report):
     installation = Path(installation).resolve()
     cli = installation / 'w.exe'
     manifest = json.loads((installation / 'windows-bundle.json').read_text(encoding='utf-8'))
-    environment = dict(os.environ)
-    for name in ('CC', 'PYTHONHOME', 'PYTHONPATH', 'VIRTUAL_ENV', 'INCLUDE', 'LIB', 'LIBPATH',
-                 'VCINSTALLDIR', 'VCToolsInstallDir', 'WindowsSdkDir', 'WindowsSDKVersion'):
-        environment.pop(name, None)
-    environment['PATH'] = str(Path(environment['SystemRoot']) / 'System32')
+    environment = isolated_environment()
     checks = report['checks']
     with tempfile.TemporaryDirectory(prefix='w installed project á ') as temporary:
         work = Path(temporary)
