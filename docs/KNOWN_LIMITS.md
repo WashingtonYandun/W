@@ -92,6 +92,11 @@ semantic correctness outside the tested programs.
 
 Installed wheels contain W0, its C runtime header and the standard library; Python
 remains a prerequisite. W1 bootstrap, `w test` and `w bench` require a source checkout.
+El instalador autónomo de Windows incluye un runtime Python privado y Zig como
+toolchain C99 para W0; no necesita un entorno virtual ni un SDK C del host. Se prueba
+por separado del wheel, incluida instalación, reparación y desinstalación. Su alcance
+inicial es Windows 10/11 x64; las bibliotecas FFI externas no se incluyen. La generación
+en CI no establece por sí sola una release publicada, firma o validación manual.
 Missing W1 sources produce `W2013` before any bootstrap-cache write. W0 native builds
 require a host C99 toolchain; an unavailable or invalid compiler command produces
 `W5001` with stage `toolchain`, rather than an internal compiler error. This checks
