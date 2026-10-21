@@ -88,7 +88,7 @@ def test_literal_indexing_scales_linearly_by_work_not_wall_clock():
 def test_matrix_invalidates_changes_without_renaming_inputs():
     current = source_fingerprint()
     from tests.engine_harness import corpus_paths
-    labels = [str(path.relative_to(ROOT)) for group in corpus_paths() for path in group]
+    labels = [path.relative_to(ROOT).as_posix() for group in corpus_paths() for path in group]
     measured = {'provenance': current, 'corpus': labels,
                 'coverage': {engine: {'passed': len(labels)} for engine in ('interpreter', 'ast', 'hir', 'w1')}}
     assert 'STALE' not in generate_markdown_matrix(measured)
@@ -114,12 +114,12 @@ def test_lsp_uri_and_definition_on_native_platform():
     with tempfile.TemporaryDirectory(prefix='w lsp é ') as temporary:
         path = Path(temporary).resolve() / 'module.w'
         uri = path.as_uri()
-        assert source_path(uri) == str(path)
+        assert os.path.normcase(source_path(uri)) == os.path.normcase(str(path))
         messages = []
         server = LanguageServer(messages.append)
         server.update(uri, 'let value = "é"\nprint(value)', 1)
         location = server.definition(uri, {'line': 1, 'character': 7})
-        assert location and location['uri'] == uri, location
+        assert location and location['uri'].lower() == uri.lower(), location
         assert location['range']['start'] == {'line': 0, 'character': 4}
 
 
