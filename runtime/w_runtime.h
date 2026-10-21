@@ -87,6 +87,12 @@ struct WWeakControl {
     WStructBuf* object;
 };
 
+typedef struct WPointerOwner {
+    int32_t refcount;
+    int64_t (*close)(void*);
+    void* address;
+} WPointerOwner;
+
 typedef struct WBoxBuf WBoxBuf;
 typedef struct WFunctionBuf WFunctionBuf;
 
@@ -139,6 +145,7 @@ struct WVal {
         WWeakControl* weak;
         WFunctionBuf* function;
         void* pointer;
+        struct { void* address; WPointerOwner* owner; } handle;
     } as;
 };
 
@@ -343,7 +350,8 @@ static inline WVal w_int(int64_t x) {
 }
 
 static inline WVal w_pointer(void* pointer) {
-    WVal value = w_unit(); value.tag = W_POINTER; value.as.pointer = pointer; return value;
+    WVal value = w_unit(); value.tag = W_POINTER;
+    value.as.handle.address = pointer; value.as.handle.owner = NULL; return value;
 }
 
 static inline int32_t w_ffi_int32(WVal value) {
@@ -496,9 +504,26 @@ static inline WVal w_wrap_result(WVal v, const char* err_type) {
     return w_ok(v);
 }
 
+static WVal w_discard_result_value(WVal value);
+
+/* Internal resource owners carry only a trusted host closer, never user code. */
+static WVal w_managed_pointer(void* address, int64_t (*close)(void*)) {
+    WVal value = w_pointer(address);
+    if (!address) return value;
+    WPointerOwner* owner = (WPointerOwner*)w_alloc_safe(sizeof(WPointerOwner));
+    owner->refcount = 1; owner->close = close; owner->address = address;
+    value.as.handle.owner = owner;
+    w_mem_on_alloc();
+    return value;
+}
+
 /* Deterministic RC + Copy-on-Write */
 static inline WVal w_clone(WVal v) {
-    if (v.tag == W_FUNCTION) {
+    if (v.tag == W_POINTER && v.as.handle.owner) {
+        w_check_refcount(v.as.handle.owner->refcount, "retain/resource");
+        v.as.handle.owner->refcount++;
+        w_g_retain_count++;
+    } else if (v.tag == W_FUNCTION) {
         w_check_refcount(v.as.function->refcount, "retain/function");
         v.as.function->refcount++;
         w_g_retain_count++;
@@ -577,7 +602,7 @@ static inline void w_release_string(WStringBuf* buffer) {
 }
 
 static inline bool w_is_leaf(WVal value) {
-    return value.tag <= W_BOOL || value.tag == W_STR || value.tag == W_POINTER;
+    return value.tag <= W_BOOL || value.tag == W_STR || (value.tag == W_POINTER && !value.as.handle.owner);
 }
 
 static inline void w_release(WVal v) {
@@ -652,7 +677,16 @@ static WVal* w_release_deferred(WVal* slot, int32_t* produced) {
      */
     WVal v = *slot;
     *produced = 0;
-    if (v.tag == W_FUNCTION) {
+    if (v.tag == W_POINTER && v.as.handle.owner) {
+        WPointerOwner* owner = v.as.handle.owner;
+        w_check_refcount(owner->refcount, "release/resource");
+        w_g_release_count++;
+        if (--owner->refcount == 0) {
+            owner->close(owner->address);
+            free(owner);
+            w_mem_on_free();
+        }
+    } else if (v.tag == W_FUNCTION) {
         w_check_refcount(v.as.function->refcount, "release/function");
         w_g_release_count++;
         if (--v.as.function->refcount == 0) {
@@ -826,6 +860,12 @@ static inline WVal w_call(WVal function, int32_t argc, const WVal* argv) {
         fprintf(stderr, "[W4003] RuntimeError: Indirect call requires function\n"); exit(1);
     }
     return function.as.function->invoke(function.as.function->environment, argc, argv);
+}
+
+static WVal w_discard_result_value(WVal value) {
+    if (value.tag == W_ERR) return value;
+    w_release(value);
+    return w_ok(w_unit());
 }
 
 static inline void w_release_array(int32_t count, WVal* arr) {

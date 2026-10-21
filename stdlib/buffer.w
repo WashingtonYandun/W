@@ -3,6 +3,7 @@ extern "C" fn w_host_buffer_size(handle: opaque) -> int
 extern "C" fn w_host_buffer_get(handle: opaque, index: int) -> int
 extern "C" fn w_host_buffer_append(handle: opaque, value: int) -> int
 extern "C" fn w_host_close(handle: opaque) -> int
+extern "C" fn w_host_borrow(handle: opaque) -> opaque
 
 pub struct BufferError { message: str }
 
@@ -23,7 +24,7 @@ pub class Bytes {
     }
     public fn close() -> int { return w_host_close(this.handle) }
     # Internal interoperability boundary; retaining the ID does not extend its lifetime.
-    public fn borrow() -> opaque { return this.handle }
+    public fn borrow() -> opaque { return w_host_borrow(this.handle) }
 }
 
 pub fn from_text(text: str) -> Bytes {

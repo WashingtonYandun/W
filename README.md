@@ -100,41 +100,34 @@ Compiling to a native executable:
 Errors are first-class values and must be handled explicitly with `else` blocks:
 
 ```w
-import std/parse
+import "std/parse"
 
 fn compute_ratio(raw: str, divisor: int) -> int ! str {
-    let value = parse.parse_int(raw) else error {
-        return Err("Invalid number format")
-    }
-    if divisor == 0 {
-        return Err("Division by zero")
-    }
-    return Ok(value / divisor)
+    let value = parse.parse_int(raw) else error { return Err("Invalid number format") }
+    if divisor == 0 { return Err("Division by zero") }
+    return value / divisor
 }
 
-let result = compute_ratio("42", 2) else error {
-    print("Error:", error)
-    return
+fn show_ratio() {
+    let result = compute_ratio("42", 2) else error { print(error) return }
+    print("Ratio:", result)
 }
-print("Ratio:", result)
+show_ratio()
 ```
 
 ### 2. Algebraic Data Types & Pattern Matching
 
 ```w
-enum Status {
-    Active,
-    Suspended(reason: str),
-    Terminated(code: int, message: str)
-}
+enum Status { Active, Suspended(str), Terminated(int, str) }
 
-fn describe(s: Status) -> str {
-    match s {
+fn describe(status: Status) -> str {
+    return match status {
         Status.Active => "Account is currently active",
         Status.Suspended(reason) => "Suspended: " + reason,
         Status.Terminated(code, message) => "Terminated (" + str(code) + "): " + message
     }
 }
+print(describe(Status.Active))
 ```
 
 ### 3. Copy-on-Write (CoW) & Memory Management
@@ -143,29 +136,25 @@ Collections (lists, dictionaries, and structs) provide value semantics with zero
 
 ```w
 let original = [1, 2, 3, 4]
-let copy = original       // Shares underlying buffer via ARC (O(1))
-
-copy.append(5)            // CoW detach occurs only on mutation!
-print(original)           // [1, 2, 3, 4] - untouched
-print(copy)               // [1, 2, 3, 4, 5]
+let mut copy = original   # Shares storage until mutation
+copy.append(5)
+print(original)           # [1, 2, 3, 4]
+print(copy)               # [1, 2, 3, 4, 5]
 ```
 
 ### 4. Bounded Binary I/O & Scoped Resources
 
 ```w
-import std/files
-import std/resources
+import "std/files"
 
-let file = files.open("data.bin", files.MODE_READ) else error {
-    print("Could not open file:", error.operation)
-    return
-}
-
-// Scoped lifecycle guarantees file closure even on errors:
-resources.scope(file, |handle| => {
-    let chunk = handle.read(4096) else error { return }
+fn inspect_file(path: str) -> unit ! files.FileError {
+    let file = files.open(path, 0)?  # 0 read, 1 truncate/write, 2 append
+    let chunk = file.read(4096)?
     print("Read bytes:", chunk.size())
-})
+    # File and Bytes release their host storage with their last owner.
+    # Use close() explicitly when its status matters.
+}
+inspect_file("README.md") else error { print(error.operation, error.code) }
 ```
 
 ---
@@ -176,13 +165,13 @@ W provides a focused, high-performance standard library:
 
 | Module | Description | Key Functions & Types |
 | :--- | :--- | :--- |
-| **`std/buffer`** | Fast bounded byte storage | `Buffer`, `size()`, `get()`, `append()`, `close()` |
+| **`std/buffer`** | Fast bounded byte storage | `Bytes`, `size()`, `get()`, `append()`, `close()` |
 | **`std/files`** | Streaming file I/O | `File`, `open()`, `read()`, `write()`, `is_open()`, `close()` |
 | **`std/fs`** | Portable filesystem operations | `exists()`, `size()`, `mkdir()`, `remove()`, `rename()` |
-| **`std/parse`** | Strict string parsing | `parse_int()`, `parse_float()`, `parse_bool()` |
-| **`std/text`** | String transformation utilities | `split()`, `join()`, `replace()`, `trim()`, `contains()` |
-| **`std/path`** | Cross-platform path handling | `join()`, `dirname()`, `basename()`, `ext()` |
-| **`std/resources`** | Deterministic resource scopes | `Resource`, `scope()`, `borrow()`, `close()` |
+| **`std/parse`** | Strict string parsing | `parse_int()`, `parse_float()` |
+| **`std/text`** | String transformation utilities | `split()`, `join()`, `replace()`, `trim()`, `find()` |
+| **`std/path`** | Cross-platform path handling | `join()`, `dirname()`, `basename()` |
+| **`std/resources`** | Deterministic resource scopes | `Resource`, `acquire()`, `scope()`, `borrow()`, `close()` |
 | **`std/algorithms`** | Functional primitives | `map`, `fold`, `sort` |
 
 See [docs/STDLIB.md](docs/STDLIB.md) for full API reference and examples.

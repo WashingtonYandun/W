@@ -187,3 +187,8 @@ is announced. A successful macOS run does not establish Windows compatibility.
 
 Class cycles format finitely as `<cycle>` but still require Weak or explicit breaking
 to be reclaimed. `std/resources` does not make raw opaque aliases safe or unwind panic.
+
+Standard File/Bytes owners now release host storage at last reference; they do not
+extend that guarantee to arbitrary FFI pointers or strong cycles. IO remains
+synchronous. JSON, task isolation, cancellation and nonblocking networking require
+the acceptance contracts in [Service foundations](SERVICE_FOUNDATIONS.md).

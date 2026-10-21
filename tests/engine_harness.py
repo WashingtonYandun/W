@@ -106,7 +106,7 @@ def execute(command, directory, phase, timeout, env=None):
     return record
 
 
-def run_engine(engine, source, label, w1_bin, directory, sanitize=False):
+def run_engine(engine, source, label, w1_bin, directory, sanitize=False, run_timeout=30):
     directory = Path(directory) / engine
     directory.mkdir(parents=True, exist_ok=True)
     source_path = directory / 'source.w'
@@ -122,7 +122,7 @@ def run_engine(engine, source, label, w1_bin, directory, sanitize=False):
         command = driver + ['emit-c', '--backend=ast', str(source_path), '-o', str(c_path)]
     elif engine == 'hir':
         command = driver + ['emit-c', '--backend=hir', str(source_path), '-o', str(c_path)]
-    front = execute(command, directory, 'frontend', 120)
+    front = execute(command, directory, 'frontend', max(120, run_timeout) if engine == 'interpreter' else 120)
     result = EngineResult(engine)
     failure = ('timeout' in front or 'launch_error' in front or front['returncode'] < 0)
     if engine == 'interpreter' or front['returncode'] != 0:
@@ -145,7 +145,7 @@ def run_engine(engine, source, label, w1_bin, directory, sanitize=False):
     if sanitize:
         env['ASAN_OPTIONS'] = 'detect_leaks=' + ('1' if sys.platform.startswith('linux') else '0')
         env['UBSAN_OPTIONS'] = 'halt_on_error=1:print_stacktrace=1'
-    ran = execute([str(binary)], directory, 'run', 30, env)
+    ran = execute([str(binary)], directory, 'run', run_timeout, env)
     result.stdout, result.stderr, result.exit_code = ran['stdout'], ran['stderr'], ran['returncode']
     result.diag_code = diagnostic(result.stderr)
     result.runtime_ok = result.exit_code == 0
@@ -190,7 +190,7 @@ def compare(results, expected=None):
     return True, 'OK'
 
 
-def verify_case(source, label, w1_bin, work_dir, expected=None, sanitize=False, strict=False, expect_rejection=False):
+def verify_case(source, label, w1_bin, work_dir, expected=None, sanitize=False, strict=False, expect_rejection=False, run_timeout=30):
     original = ROOT / label
     if original.is_file():
         def qualify_import(match):
@@ -212,7 +212,7 @@ def verify_case(source, label, w1_bin, work_dir, expected=None, sanitize=False, 
         if reason:
             unsupported[engine] = reason
         else:
-            results.append(run_engine(engine, source, label, w1_bin, directory, sanitize))
+            results.append(run_engine(engine, source, label, w1_bin, directory, sanitize, run_timeout))
     ok, detail = compare(results, expected)
     if expect_rejection and panic_expectation(expected) is None:
         for result in results:

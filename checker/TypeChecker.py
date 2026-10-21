@@ -788,7 +788,7 @@ class TypeChecker:
                     body_ret = self._check_block(m.body, is_statement_context=is_unit_ret)
                     if m.name == "init":
                         self._check_constructor_rules(stmt, cls_type, m)
-                    self._mark_result_lift(m.body.tail_expr, fn_type.ret)
+                    self._mark_tail_result_lift(m.body.tail_expr, fn_type.ret)
                     if not is_unit_ret and not self._block_has_return(m.body):
                         if body_ret is not None and is_assignable(body_ret, fn_type.ret):
                             pass
@@ -841,7 +841,7 @@ class TypeChecker:
 
             is_unit_ret = (fn_type.ret == UnitType) or (isinstance(fn_type.ret, ResultType) and fn_type.ret.ok == UnitType)
             body_ret = self._check_block(stmt.body, is_statement_context=is_unit_ret)
-            self._mark_result_lift(stmt.body.tail_expr, fn_type.ret)
+            self._mark_tail_result_lift(stmt.body.tail_expr, fn_type.ret)
 
             # If function expects a return value other than unit, verify return presence
             if not is_unit_ret and not self._block_has_return(stmt.body):
@@ -1091,6 +1091,27 @@ class TypeChecker:
     # ==========================================
     # Expression Type Checking
     # ==========================================
+
+    def _mark_tail_result_lift(self, expr: Optional[Expr], target: WType) -> None:
+        if expr is None:
+            return
+        if isinstance(target, ResultType) and target.ok == UnitType:
+            if isinstance(expr, IfExpr):
+                branches = [expr.then_branch] + [branch.body for branch in expr.elif_branches]
+                if expr.else_branch is not None:
+                    branches.append(expr.else_branch)
+                for branch in branches:
+                    self._mark_tail_result_lift(branch.tail_expr, target)
+            elif isinstance(expr, MatchExpr):
+                for arm in expr.arms:
+                    self._mark_tail_result_lift(arm.body.tail_expr, target)
+            source = self.interner.get_entry(expr.inferred_type_id)
+            if source.tag == 'result' and not self.interner.is_error_channel_assignable(
+                    source.data[1], self.interner.intern(target.err)):
+                raise TypeError("Incompatible error channel in unit result tail", file=self.file,
+                                line=expr.line, col=expr.col, code="W2004")
+            return
+        self._mark_result_lift(expr, target)
 
     def _mark_result_lift(self, expr: Optional[Expr], target: WType, force: bool = False) -> None:
         if expr is None:
