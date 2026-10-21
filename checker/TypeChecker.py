@@ -2790,6 +2790,17 @@ class TypeChecker:
                 previous_wildcard = has_wildcard
                 if isinstance(subject_t, ErrorUnionType) and isinstance(arm.pattern, (EnumPattern, ErrorTypePattern)):
                     arm.pattern = self._resolve_error_type_pattern(arm.pattern, subject_t)
+                elif expected_variants is not None and isinstance(arm.pattern, IdentifierPattern) and arm.pattern.name in expected_variants:
+                    owner_name = getattr(subject_t, "name", None)
+                    if getattr(subject_t, "template_name", None) in ("Option", "Result"):
+                        owner_name = subject_t.template_name
+                    arm.pattern = EnumPattern(
+                        enum_name=owner_name,
+                        variant=arm.pattern.name,
+                        args=[],
+                        line=arm.pattern.line,
+                        col=arm.pattern.col
+                    )
                 arm.pattern.inferred_type_id = self.interner.intern(subject_t)
                 arm_bindings: Dict[str, WType] = {}
 
