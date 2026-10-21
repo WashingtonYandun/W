@@ -441,7 +441,7 @@ def repl(show_tokens: bool = False, show_ast: bool = False) -> None:
 
 def print_help(prog: Optional[str] = None) -> None:
     if prog is None:
-        prog = "wysna" if "wysna" in os.path.basename(sys.argv[0]) else "w"
+        prog = "wysna"
     print(f"Wysna Language Compiler & Toolchain v{W_VERSION}")
     print("Usage:")
     print(f"  {prog} lsp                                       # LSP over stdio")
@@ -460,6 +460,7 @@ def print_help(prog: Optional[str] = None) -> None:
 
 
 def main() -> None:
+    prog = "wysna"
     args = sys.argv[1:]
     if args == ["lsp"]:
         from tooling.LanguageServer import serve
@@ -488,7 +489,7 @@ def main() -> None:
         args = args[1:]
         if subcmd == "bench":
             if not os.path.isfile(os.path.join(get_repo_root(), "bench", "run_bench.py")):
-                print("w bench requires a source checkout", file=sys.stderr)
+                print(f"{prog} bench requires a source checkout", file=sys.stderr)
                 sys.exit(1)
             update_baseline = "--update-baseline" in args
             repo_root = get_repo_root()
@@ -501,7 +502,7 @@ def main() -> None:
                 print_help()
                 return
             if not os.path.isdir(os.path.join(get_repo_root(), "tests", "unit")):
-                print("w test requires a source checkout", file=sys.stderr)
+                print(f"{prog} test requires a source checkout", file=sys.stderr)
                 sys.exit(1)
             if args and args[0] == "--differential":
                 gen_count = 25

@@ -88,7 +88,7 @@ def validate(wheel, forbidden, report):
         site_packages = Path(installed.stdout.strip()).resolve()
         assert directory in site_packages.parents, site_packages
         assert cli.is_file()
-                work = directory / 'project with spaces and á'
+        work = directory / 'project with spaces and á'
         work.mkdir()
         (work / 'hello.wysna').write_text('print("hello installed")\n', encoding='utf-8')
         (work / 'library.wysna').write_text('import "std/text" as text\nprint(text.join(["hello", "stdlib"], " "))\n', encoding='utf-8')

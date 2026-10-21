@@ -62,7 +62,7 @@ def test_benchmark_checkout_requirement_precedes_bootstrap():
         def forbidden_bootstrap(*args):
             raise AssertionError('Benchmark capability must be checked before bootstrap')
         output = io.StringIO()
-        with patch.object(sys, 'argv', ['w', 'bench']), patch.object(main, 'get_repo_root', return_value=temporary):
+        with patch.object(sys, 'argv', ['wysna', 'bench']), patch.object(main, 'get_repo_root', return_value=temporary):
             with patch.object(main, 'ensure_selfhost_w1_binary', forbidden_bootstrap), redirect_stderr(output):
                 try:
                     main.main()
@@ -70,7 +70,7 @@ def test_benchmark_checkout_requirement_precedes_bootstrap():
                     assert error.code == 1
                 else:
                     raise AssertionError('Source-only benchmark accepted without checkout')
-        assert output.getvalue() == 'w bench requires a source checkout\n'
+        assert output.getvalue() == 'wysna bench requires a source checkout\n'
 
 
 if __name__ == '__main__':
