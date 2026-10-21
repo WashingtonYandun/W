@@ -285,6 +285,12 @@ static inline void* w_realloc_safe(void* old_ptr, size_t new_size) {
     return ptr;
 }
 
+static int w_g_argc = 0;
+static char** w_g_argv = NULL;
+#ifdef _WIN32
+static bool w_g_argv_allocated = false;
+#endif
+
 static inline void w_runtime_cleanup(void) {
 #ifdef _WIN32
     if (w_g_argv_allocated && w_g_argv) {
@@ -2729,12 +2735,6 @@ static inline WVal w_builtin_write_file(WVal path, WVal content) {
     return failed ? w_io_error("Failed to write file") : w_ok(w_unit());
 }
 
-static int w_g_argc = 0;
-static char** w_g_argv = NULL;
-#ifdef _WIN32
-static bool w_g_argv_allocated = false;
-#endif
-
 /*
  * Propagates an unhandled `Err` out of the program entrypoint.
  *
@@ -2771,7 +2771,7 @@ static inline void w_init_args(int argc, char** argv) {
     (void)argc; (void)argv;
     typedef LPWSTR* (WINAPI *pfnCommandLineToArgvW)(LPCWSTR, int*);
     HMODULE hShell = LoadLibraryA("shell32.dll");
-    pfnCommandLineToArgvW pCmdLineToArgvW = hShell ? (pfnCommandLineToArgvW)(void*)GetProcAddress(hShell, "CommandLineToArgvW") : NULL;
+    pfnCommandLineToArgvW pCmdLineToArgvW = hShell ? (pfnCommandLineToArgvW)GetProcAddress(hShell, "CommandLineToArgvW") : NULL;
     int w_argc = 0;
     LPWSTR* w_argv = pCmdLineToArgvW ? pCmdLineToArgvW(GetCommandLineW(), &w_argc) : NULL;
     if (w_argv && w_argc > 0) {
