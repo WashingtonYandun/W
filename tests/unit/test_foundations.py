@@ -29,16 +29,18 @@ extern "C" fn w_host_active_handles() -> int
 extern "C" fn w_host_active_bytes() -> int
 extern "C" fn w_host_buffer_size(handle: opaque) -> int
 fn request() -> unit ! files.FileError {
-    let data = buffer.from_text("request")
+    let data = new buffer.Bytes()
+    data.append(255) else error { exit(21) return }
     let alias = data
     let copied = buffer.clone(alias) else error { exit(21) return }
     let file = files.open("README.md", 0)?
     let chunk = file.read(32)?
     if chunk.size() != 32 { exit(22) }
-    let missing = files.open("w-missing-resource-contract/file", 0) else error {
+    file.read(0) else error {
         if error.code <= 0 or error.domain <= 0 { exit(23) }
         return
     }
+    exit(30)
 }
 fn closed_alias() {
     let first = buffer.from_text("alias")
@@ -58,7 +60,15 @@ fn containers_and_closures() {
     let callback = || -> int { values[0].size() }
     if callback() != 8 { exit(28) }
 }
+fn missing_file() {
+    let missing = files.open("w-missing-resource-contract/file", 0) else error {
+        if error.code <= 0 or error.domain <= 0 { exit(23) }
+        return
+    }
+    exit(31)
+}
 let baseline = w_host_active_handles()
+missing_file()
 containers_and_closures()
 if w_host_buffer_size(borrowed()) != -1 { exit(29) }
 for count in [10000, 100000] {

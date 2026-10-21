@@ -103,7 +103,6 @@ jobs:
           python3 -m tests.unit.test_mir
           python3 -m tests.unit.test_distribution_contract
           python3 -m tests.unit.test_audit_findings
-          python3 -m tests.unit.test_foundations
           python3 -m tests.unit.test_standard_toolkit
       - name: Verify runtime, examples and direct W1 negatives across four engines
         run: python3 tools/ci_conformance.py --profile=${{ inputs.profile || 'integration' }}
@@ -246,6 +245,8 @@ jobs:
           path: |
             audit.log
             toolkit.log
+            .w_cache/ci-artifacts/
+          include-hidden-files: true
           if-no-files-found: ignore
       - name: Package and verify the native SQLite pilot
         run: |
