@@ -91,7 +91,11 @@ def file_write(file_handle, buffer_handle):
     if file is None or buffer is None:
         return -1
     try:
-        return 0 if file.write(buffer) == len(buffer) else -1
+        written = file.write(buffer)
+        if written != len(buffer):
+            return -1
+        file.flush()
+        return 0
     except (OSError, ValueError):
         return -1
 

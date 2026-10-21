@@ -41,7 +41,10 @@ fn main() -> unit ! files.FileError | fs.FsError | buffer.BufferError {
     let output = files.open(name, 1)?
     output.write(data)?
     data.close()
-    print(output.close(), output.close(), fs.size(name)?)
+    let c1 = output.close()
+    let c2 = output.close()
+    let sz = fs.size(name)?
+    print(c1, c2, sz)
     let input = files.open(name, 0)?
     let mut total = 0
     while true {
@@ -65,7 +68,9 @@ print(path.join("root", "child"), path.basename("C:/é/file.w"), path.dirname("C
         for engine in ('interpreter', 'ast', 'hir', 'w1'):
             result = run_engine(engine, text, 'streaming', w1, directory / engine,
                                 sanitize=os.environ.get('W_SANITIZE') == '1')
-            assert (result.exit_code, result.stdout, result.stderr) == (0, expected, ''), vars(result)
+            assert (result.exit_code, result.stdout, result.stderr) == (0, expected, ''), (
+                f"Engine {engine} failed: exit={result.exit_code}, stdout={repr(result.stdout)}, stderr={repr(result.stderr)}"
+            )
             assert not path.exists() and not moved.exists()
 
 

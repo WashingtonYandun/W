@@ -222,12 +222,14 @@ jobs:
         run: |
           python -m tests.unit.test_audit_findings 2>&1 | Tee-Object -FilePath audit.log
           if ($LASTEXITCODE -ne 0) {
-              Get-Content audit.log | Select-Object -Last 25 | ForEach-Object { Write-Host "::error::$_" }
+              $line = Get-Content audit.log | Select-String "AssertionError" | Select-Object -First 1
+              if ($line) { Write-Host "::error::$line" } else { Get-Content audit.log -Tail 10 | ForEach-Object { Write-Host "::error::$_" } }
               exit $LASTEXITCODE
           }
           python -m tests.unit.test_standard_toolkit 2>&1 | Tee-Object -FilePath toolkit.log
           if ($LASTEXITCODE -ne 0) {
-              Get-Content toolkit.log | Select-Object -Last 25 | ForEach-Object { Write-Host "::error::$_" }
+              $line = Get-Content toolkit.log | Select-String "AssertionError" | Select-Object -First 1
+              if ($line) { Write-Host "::error::$line" } else { Get-Content toolkit.log -Tail 10 | ForEach-Object { Write-Host "::error::$_" } }
               exit $LASTEXITCODE
           }
       - name: Upload smoke failure logs

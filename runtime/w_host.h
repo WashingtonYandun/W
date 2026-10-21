@@ -153,7 +153,9 @@ static int64_t w_host_file_write(void* file_handle, void* buffer_handle) {
     WHostEntry* buffer = w_host_find(buffer_handle, 1);
     if (!file || !buffer) return -1;
     if (!buffer->length) return 0;
-    return fwrite(buffer->data, 1, buffer->length, (FILE*)file->data) == buffer->length ? 0 : -1;
+    if (fwrite(buffer->data, 1, buffer->length, (FILE*)file->data) != buffer->length) return -1;
+    fflush((FILE*)file->data);
+    return 0;
 }
 static int64_t w_host_is_open(void* handle) { return w_host_find(handle, 2) != NULL; }
 /* Operations: exists, size, mkdir, remove, rename. Failures return -1. */
