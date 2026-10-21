@@ -3,7 +3,10 @@
     "core": {},
     "generics": {},
     "checked_modules": {},
-    "error_unions": {}
+    "error_unions": {},
+    "functions": {},
+    "stdlib": {},
+    "regressions": {}
   },
   "fixtures": {
     "tests/runtime/generic_domain_err.w": "generics",
@@ -29,7 +32,27 @@
     "tests/types/invalid/generic_recursive_infinite_layout.w": "generics",
     "tests/types/invalid/generic_struct_recursive_cycle.w": "generics",
     "tests/types/invalid/generic_structural_growth_cycle.w": "generics",
-    "tests/modules/checked_session/main.w": "checked_modules"
+    "tests/modules/checked_session/main.w": "checked_modules",
+    "tests/functions/closures.w": "functions",
+    "tests/functions/nested_closures.w": "functions",
+    "tests/functions/option_result_payload_match.w": "functions",
+    "tests/functions/indexed_functions.w": "functions",
+    "tests/functions/captured_function.w": "functions",
+    "tests/stdlib/basic.w": "stdlib",
+    "tests/stdlib/toolkit.w": "stdlib",
+    "tests/regressions/ctor_branch.w": "regressions",
+    "tests/regressions/negative_slice.w": "regressions",
+    "tests/regressions/nul_string.w": "regressions",
+    "tests/regressions/dictionary_growth.w": "regressions",
+    "tests/regressions/dict_enum_keys.w": "regressions",
+    "tests/regressions/dict_bool_keys.w": "regressions",
+    "tests/regressions/assignment_receiver.w": "regressions",
+    "tests/regressions/assignment_order.w": "regressions",
+    "tests/regressions/invalid/ctor_early_return.w": "regressions",
+    "tests/regressions/invalid/super_after_let.w": "regressions",
+    "tests/regressions/invalid/ctor_read_before_init.w": "regressions",
+    "tests/regressions/invalid/override_visibility.w": "regressions",
+    "tests/regressions/invalid/inherited_field_type.w": "regressions"
   },
   "support_files": {
     "tests/runtime/math_lib.w": "Imported library exercised by tests/runtime/import_module.w",

@@ -1475,6 +1475,7 @@ fn sem_block(statement: bool) -> SemFlow {
             tail = sem_unit
         } elif sem_match("BREAK") or sem_match("CONTINUE") {
             if sem_loop == 0 { sem_error("W1004", "loop transfer outside loop") }
+            terminates = true
             tail = sem_unit
         } else {
             sem_statement_context = statement or not sem_tail_expression()

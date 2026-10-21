@@ -67,7 +67,7 @@ fn compile_source(src: str) -> str {
             let expr_r = parse_expr(0, true)
             if is_entry_call {
                 has_main_call = true
-                emit_line("WVal _t_main = " + expr_r.val + ";")
+                emit_line("WVal _t_main = " + own_expr(expr_r.val) + ";")
                 emit_line("if (_t_main.tag == W_ERR) { w_report_entrypoint_error(_t_main.as.box->val); w_release(_t_main); w_runtime_cleanup(); return 1; }")
                 emit_line("w_release(_t_main);")
             } else {

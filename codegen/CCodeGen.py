@@ -396,7 +396,8 @@ class CCodeGen:
                 elif ns == "" and self._is_entrypoint_call(stmt):
                     # The module calls main() explicitly at top level. Its Result must
                     # not be discarded, or a failed program would exit 0 silently.
-                    out_main_stmts.append("WVal _t_main = " + self.emit_expr(stmt.expr, out_main_stmts) + ";")
+                    value = self.emit_expr(stmt.expr, out_main_stmts)
+                    out_main_stmts.append("WVal _t_main = " + self._own_expr(value) + ";")
                     self._emit_entrypoint_guard(out_main_stmts)
                 else:
                     self.emit_stmt(stmt, out_main_stmts)
@@ -802,7 +803,11 @@ class CCodeGen:
             return f"w_float({s})"
 
         if isinstance(expr, StringLiteral):
-            return f"w_str_n({self.escape_c_str(expr.value)}, {len(expr.value.encode('utf-8'))})"
+            if len(expr.value) <= 1:
+                return f"w_str_n({self.escape_c_str(expr.value)}, {len(expr.value.encode('utf-8'))})"
+            literal = self.new_aux("_literal")
+            out.append(f"static WStringLiteral {literal} = {{0}};")
+            return f"w_literal_str_n(&{literal}, {self.escape_c_str(expr.value)}, {len(expr.value.encode('utf-8'))})"
 
         if isinstance(expr, BoolLiteral):
             return "w_bool(true)" if expr.value else "w_bool(false)"

@@ -12,6 +12,7 @@ class CCodeGen:
 
     def generate(self, module):
         Verifier(self.interner).verify(module)
+        self.literal_counter = 0
         self.module = module
         self.functions = {function.name: function for function in module.functions}
         self.layouts = module.layouts
@@ -195,6 +196,11 @@ class CCodeGen:
                 literal = repr(value) if math.isfinite(value) else 'NAN' if math.isnan(value) else 'INFINITY' if value > 0 else '-INFINITY'
                 expression = 'w_float(' + literal + ')'
             else:
+                if len(value) > 1:
+                    literal = f'_literal_{self.literal_counter}'
+                    self.literal_counter += 1
+                    expression = f'w_literal_str_n(&{literal}, {quote(value)}, {len(value.encode("utf-8"))})'
+                    return [f'static WStringLiteral {literal} = {{0}};', self.write(result, expression)]
                 expression = f'w_str_n({quote(value)}, {len(value.encode("utf-8"))})'
             return [self.write(result, expression, boxed=self.slots[result].storage != 'predicate')]
         if kind in ('clone', 'narrow'):

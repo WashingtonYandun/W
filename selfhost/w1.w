@@ -1827,7 +1827,12 @@ fn parse_prefix_expr(allow_struct: bool) -> ExprRes {
         return ExprRes { val: "w_float(" + tok.val + ")", lref: "" }
     }
     if match_kind("STR") {
-        return ExprRes { val: "w_str_n(" + escape_c_str(tok.val) + ", " + str(len(bytes(tok.val))) + ")", lref: "" }
+        if len(tok.val) <= 1 {
+            return ExprRes { val: "w_str_n(" + escape_c_str(tok.val) + ", " + str(len(bytes(tok.val))) + ")", lref: "" }
+        }
+        let literal = new_aux("_literal")
+        emit_line("static WStringLiteral " + literal + " = {0};")
+        return ExprRes { val: "w_literal_str_n(&" + literal + ", " + escape_c_str(tok.val) + ", " + str(len(bytes(tok.val))) + ")", lref: "" }
     }
     if match_kind("TRUE") {
         return ExprRes { val: "w_bool(true)", lref: "" }
@@ -3176,7 +3181,7 @@ fn compile_source(src: str) -> str {
             let expr_r = parse_expr(0, true)
             if is_entry_call {
                 has_main_call = true
-                emit_line("WVal _t_main = " + expr_r.val + ";")
+                emit_line("WVal _t_main = " + own_expr(expr_r.val) + ";")
                 emit_line("if (_t_main.tag == W_ERR) { w_report_entrypoint_error(_t_main.as.box->val); w_release(_t_main); w_runtime_cleanup(); return 1; }")
                 emit_line("w_release(_t_main);")
             } else {
@@ -4778,6 +4783,7 @@ fn sem_block(statement: bool) -> SemFlow {
             tail = sem_unit
         } elif sem_match("BREAK") or sem_match("CONTINUE") {
             if sem_loop == 0 { sem_error("W1004", "loop transfer outside loop") }
+            terminates = true
             tail = sem_unit
         } else {
             sem_statement_context = statement or not sem_tail_expression()
