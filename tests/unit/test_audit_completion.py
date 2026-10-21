@@ -181,12 +181,55 @@ def test_typed_composition_across_engines():
                 assert ok, f'seed {seed}, {variant}: {detail}\n{code}'
 
 
+def test_unqualified_enum_variant_pattern_exhaustiveness_and_dispatch():
+    from parser.Parser import Parser
+    from checker.TypeChecker import TypeChecker
+    from error.Error import TypeError
+    from runtime.Interpreter import Interpreter
+
+    # 1. Incomplete unqualified arms must fail exhaustiveness (W2003)
+    incomplete_source = '''
+    enum Dir { North, South, East }
+    fn f(d: Dir) -> int {
+        return match d {
+            North => 1,
+            South => 2
+        }
+    }
+    '''
+    ast_incomplete = Parser().parse(incomplete_source)
+    try:
+        TypeChecker().check(ast_incomplete)
+        assert False, "Incomplete unqualified enum match should have raised W2003"
+    except TypeError as e:
+        assert e.code == "W2003", f"Expected W2003, got {e.code}"
+
+    # 2. Complete unqualified arms must pass check and evaluate correctly in interpreter
+    complete_source = '''
+    enum Dir { North, South, East }
+    fn f(d: Dir) -> int {
+        return match d {
+            North => 1,
+            South => 2,
+            East => 3
+        }
+    }
+    let res = f(Dir.East)
+    '''
+    ast_complete = Parser().parse(complete_source)
+    TypeChecker().check(ast_complete)
+    interp = Interpreter()
+    interp.interpret(ast_complete)
+    assert interp.global_env.lookup("res").value == 3, "f(Dir.East) must return 3, not 1"
+
+
 def run_completion_tests():
     test_ascii_allocation_and_lifetime_contract()
     test_formatter_preserves_guards_and_production_sources()
     test_typed_generator_shape_and_independent_model()
     test_typed_composition_across_engines()
-    print('Audit completion: ASCII lifetime/allocation, formatter AST preservation and typed composition passed')
+    test_unqualified_enum_variant_pattern_exhaustiveness_and_dispatch()
+    print('Audit completion: ASCII lifetime/allocation, formatter AST preservation, typed composition and enum pattern exhaustiveness passed')
     return True
 
 
