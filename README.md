@@ -12,44 +12,18 @@ The current release is `0.4.0a1` (alpha). W0 serves as the reference implementat
 
 ---
 
-## Architecture Overview
+## Compiler Architecture
 
-W follows a multi-stage compiler pipeline designed for verifiable transformations, explicit ownership modeling, and portable native code generation:
+W implements a multi-stage compiler pipeline designed for verifiable transformations, deterministic memory safety, and portable native code generation:
 
-```mermaid
-flowchart TD
-    subgraph Frontend ["Frontend"]
-        Source["Source Code (.w)"] --> Lexer["Lexer & Scanner"]
-        Lexer --> Parser["Pratt / Recursive Descent Parser"]
-        Parser --> AST["Abstract Syntax Tree (AST)"]
-    end
-
-    subgraph SemanticAnalysis ["Semantic Analysis"]
-        AST --> Checker["TypeChecker (Nominal Equality, Scopes)"]
-        Checker --> Monomorph["Monomorphization Engine"]
-        Monomorph --> HIR["High-Level IR (Typed & Desugared)"]
-    end
-
-    subgraph IntermediateRepresentation ["Mid-Level IR & Optimization"]
-        HIR --> MIR["Mid-Level IR (MIR)"]
-        MIR --> CFG["Explicit Basic Blocks & CFG"]
-        CFG --> Borrow["Ownership, Drop Elaboration & CoW Detach"]
-    end
-
-    subgraph NativeBackend ["Backend & Native Execution"]
-        Borrow --> CCodeGen["C99 Code Generator"]
-        CCodeGen --> Emit["Emitted C99 Source"]
-        Emit --> CC["Native Toolchain (clang / gcc)"]
-        Runtime["Runtime Core (w_runtime.h + w_host.h)"] --> CC
-        CC --> Binary["Native Executable (Mach-O / ELF / PE)"]
-    end
-
-    subgraph BootstrapPipeline ["Self-Hosting Verification"]
-        W1Source["W1 Compiler Source (selfhost/w1.w)"] --> W0["W0 Reference Compiler"]
-        W0 --> W1Bin["W1 Native Binary"]
-        W1Bin -.->|Compiles self| FixedPoint["3-Stage Fixed-Point Verification"]
-    end
-```
+| Stage | Component | Responsibility | Output Representation |
+| :--- | :--- | :--- | :--- |
+| **Frontend** | Lexer & Pratt Parser | UTF-8 scanning, operator-precedence parsing, and syntax diagnostics | Abstract Syntax Tree (`AST`) |
+| **Semantic Analysis** | Type Checker & Scopes | Scope-based symbol resolution, nominal type checking, and monomorphization | Typed High-Level IR (`HIR`) |
+| **Mid-Level IR** | Control-Flow Graph & MIR | Basic blocks, place projections, borrow checking, and CoW detach injection | Verified Mid-Level IR (`MIR`) |
+| **Backend** | C99 Code Generator | Translation of MIR to clean C99 code, ARC reference counting, and literal pooling | C99 Translation Unit (`.c`) |
+| **Native Compilation** | C Toolchain (`clang` / `gcc`) | Native compilation and linking against `w_runtime.h` and `w_host.h` | Standalone Executable (`.exe` / ELF / Mach-O) |
+| **Self-Hosting (W1)** | Self-Hosted Compiler | Bootstrap pipeline verifying fixed-point identity (`compiler0.c == compiler1.c`) | Self-Hosted Native Binary (`w1`) |
 
 ---
 
@@ -70,25 +44,25 @@ See [docs/ENGINE_PARITY_MATRIX.md](docs/ENGINE_PARITY_MATRIX.md) for full breakd
 
 ## Quick Start
 
-### Windows: Instalador Autónomo
+### Windows: Standalone Installer
 
-En las [descargas de W](https://github.com/WashingtonYandun/W/releases), descarga `w-<version>-windows-x64-setup.exe`:
+Download `w-<version>-windows-x64-setup.exe` from [W Releases](https://github.com/WashingtonYandun/W/releases):
 
-1. Ejecuta el archivo `-setup.exe`.
-2. Conserva la opción predeterminada de agregar W al `PATH`.
-3. Abre una terminal nueva (PowerShell o CMD) y comprueba:
+1. Run the `-setup.exe` installer.
+2. Keep the default option to add W to your system `PATH`.
+3. Open a new terminal (PowerShell or CMD) and verify the installation:
 
 ```powershell
 w version
 ```
 
-Crea un archivo `hello.w`:
+Create a simple `hello.w` file:
 
 ```w
-print("Hola desde W!")
+print("Hello from W!")
 ```
 
-Ejecuta o compila nativamente:
+Run directly via the interpreter or compile to a native standalone executable:
 
 ```powershell
 w run hello.w
@@ -96,11 +70,11 @@ w build hello.w -o hello.exe
 .\hello.exe
 ```
 
-El instalador incluye Python privado y toolchain C portátil: funciona sin conexión, sin permisos de administrador y sin requerir Visual Studio.
+The standalone installer bundles a private Python runtime and a portable C toolchain: it works fully offline, requires no administrator privileges, and has no dependency on Visual Studio or MSVC build tools.
 
 ### macOS & Linux: Source Checkout
 
-Requisitos: Python 3.10 o superior y un compilador C99 (`clang` o `gcc`).
+Requirements: Python 3.10 or higher and a C99 compiler (`clang` or `gcc`).
 
 ```sh
 git clone https://github.com/WashingtonYandun/W.git
@@ -110,7 +84,7 @@ cd W
 ./w test
 ```
 
-Compilación a binario nativo:
+Compiling to a native executable:
 
 ```sh
 ./w build examples/01_hello_world.w -o build/hello
