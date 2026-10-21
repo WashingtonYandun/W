@@ -110,7 +110,7 @@ def run_scaling_tests():
     assert reference['retention/after'] == reference['retention/before']
     hir = HirBuilder(checker.interner).lower(ast)
     with tempfile.TemporaryDirectory(prefix='w-cow-scaling-') as directory:
-        w_path = Path(directory) / 'scaling.w'
+        w_path = Path(directory) / 'scaling.wysna'
         w_path.write_text(source)
         native_reference = None
         for backend in ['ast', 'hir', 'w1']:

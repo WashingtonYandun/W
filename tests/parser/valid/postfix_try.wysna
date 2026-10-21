@@ -1,0 +1,2 @@
+let x = read_file("test.wysna")?
+let y = obj.method()?

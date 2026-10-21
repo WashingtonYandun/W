@@ -11,7 +11,7 @@ def test_runtime_suite():
     if not os.path.exists(runtime_dir):
         raise AssertionError(f"Directory {runtime_dir} not found.")
 
-    w_files = sorted([f for f in os.listdir(runtime_dir) if f.endswith(".w")])
+    w_files = sorted([f for f in os.listdir(runtime_dir) if f.endswith(".wysna")])
     passed = 0
     failures = []
 
@@ -22,7 +22,7 @@ def test_runtime_suite():
 
     for f in w_files:
         path = os.path.join(runtime_dir, f)
-        expected_path = os.path.join(runtime_dir, f[:-2] + ".expected")
+        expected_path = os.path.join(runtime_dir, f[:-6] + ".expected")
 
         with open(path, "r", encoding="utf-8") as stream:
             code = stream.read()

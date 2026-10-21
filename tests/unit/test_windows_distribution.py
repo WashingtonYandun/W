@@ -27,10 +27,10 @@ def test_windows_client_isolation_preserves_case_insensitive_system_root():
 def test_modules_on_other_windows_volumes_keep_distinct_stable_identities():
     with tempfile.TemporaryDirectory() as temporary:
         root = Path(temporary).resolve()
-        first = root / 'first/library.w'
-        second = root / 'second/library.w'
+        first = root / 'first/library.wysna'
+        second = root / 'second/library.wysna'
         session = CompilationSession(project_root=str(root))
-        assert session.module_id(str(first)) == 'first/library.w'
+        assert session.module_id(str(first)) == 'first/library.wysna'
         assert session.module_id('<stdin>') == '<stdin>'
         with patch('compiler.CompilationSession.os.path.relpath', side_effect=ValueError('different mounts')):
             assert session.module_id(str(first)) == first.as_uri()
@@ -94,7 +94,7 @@ def test_component_checksum_failure_precedes_network_and_extraction():
 def test_bundle_never_replaces_existing_installation():
     with tempfile.TemporaryDirectory() as temporary:
         existing = Path(temporary)
-        marker = existing / 'project.w'
+        marker = existing / 'project.wysna'
         marker.write_text('print(7)')
         try:
             assemble(existing / 'missing.whl', existing, existing / 'cache')

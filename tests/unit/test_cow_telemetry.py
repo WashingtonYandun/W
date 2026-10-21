@@ -49,7 +49,7 @@ def parse_checkpoints(stderr_text: str) -> Dict[str, Dict[str, int]]:
 
 def run_cow_telemetry_suite() -> bool:
     repo_root = get_repo_root()
-    test_file = os.path.join(repo_root, "tests", "runtime", "cow_telemetry.w")
+    test_file = os.path.join(repo_root, "tests", "runtime", "cow_telemetry.wysna")
     exp_file = os.path.join(repo_root, "tests", "runtime", "cow_telemetry.expected")
 
     print("==================================================")

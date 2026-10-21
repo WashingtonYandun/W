@@ -22,11 +22,11 @@ ROOT = Path(__file__).resolve().parents[2]
 
 
 def lower(source, optimize=True):
-    ast = Parser(file='mir-contract.w').parse(source)
-    checker = TypeChecker(file='mir-contract.w')
+    ast = Parser(file='mir-contract.wysna').parse(source)
+    checker = TypeChecker(file='mir-contract.wysna')
     checker.check(ast)
-    hir = HirBuilder(checker.interner, file_path='mir-contract.w').lower(ast)
-    return Lowering(checker.interner, 'mir-contract.w').lower(hir, optimize=optimize), checker.interner
+    hir = HirBuilder(checker.interner, file_path='mir-contract.wysna').lower(ast)
+    return Lowering(checker.interner, 'mir-contract.wysna').lower(hir, optimize=optimize), checker.interner
 
 
 def operations(module):
@@ -125,7 +125,7 @@ def test_range_iteration_and_limits_across_engines():
     w1 = ensure_selfhost_w1_binary(str(ROOT))
     with tempfile.TemporaryDirectory(prefix='w-mir-contracts-') as directory:
         for name in ('mir_range_iteration', 'mir_range_limit', 'mir_range_overflow'):
-            path = ROOT / 'tests/runtime' / (name + '.w')
+            path = ROOT / 'tests/runtime' / (name + '.wysna')
             ok, detail = verify(path.read_text(), str(path.relative_to(ROOT)), w1, directory,
                                 expected=path.with_suffix('.expected').read_text(), strict=True,
                                 sanitize=os.environ.get('W_SANITIZE') == '1')
@@ -134,7 +134,7 @@ def test_range_iteration_and_limits_across_engines():
 
 def test_mir_inspection_and_default_backend():
     with tempfile.TemporaryDirectory(prefix='w-mir-cli-') as directory:
-        path = Path(directory) / 'source.w'
+        path = Path(directory) / 'source.wysna'
         path.write_text('for index in 0..3 { print(index) }')
         result = subprocess.run([sys.executable, str(ROOT / 'main.py'), 'mir', str(path)],
                                 capture_output=True, text=True, timeout=30)
@@ -155,7 +155,7 @@ def test_mir_inspection_and_default_backend():
 def test_bootstrap_cache_serializes_processes():
     with tempfile.TemporaryDirectory(prefix='w-bootstrap-lock-') as directory:
         (Path(directory) / 'selfhost').mkdir()
-        (Path(directory) / 'selfhost' / 'w1.w').write_text('print(0)\n')
+        (Path(directory) / 'selfhost' / 'w1.wysna').write_text('print(0)\n')
         script = """import sys, time
 from pathlib import Path
 import main

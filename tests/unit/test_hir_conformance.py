@@ -36,7 +36,7 @@ def test_hir_suite() -> None:
     for d in test_dirs:
         if not os.path.exists(d):
             continue
-        files = sorted([f for f in os.listdir(d) if f.endswith(".w")])
+        files = sorted([f for f in os.listdir(d) if f.endswith(".wysna")])
         for f in files:
             total += 1
             path = os.path.join(d, f)

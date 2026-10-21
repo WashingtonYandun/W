@@ -43,7 +43,7 @@ def test_default_backend_is_hir():
     """
     with tempfile.TemporaryDirectory() as td:
         c_path = os.path.join(td, "default.c")
-        code = run_pipeline(source, file_name="test_default.w", emit_c_path=c_path)
+        code = run_pipeline(source, file_name="test_default.wysna", emit_c_path=c_path)
         assert code == 0, "run_pipeline failed on default emission"
         with open(c_path, "r", encoding="utf-8") as f:
             c_content = f.read()
@@ -63,10 +63,10 @@ def test_explicit_backend_flags():
     print(p.x + p.y)
     """
     repo_root = get_repo_root()
-    w_bin = os.path.join(repo_root, "w")
+    w_bin = os.path.join(repo_root, "wysna")
 
     with tempfile.TemporaryDirectory() as td:
-        src_path = os.path.join(td, "point.w")
+        src_path = os.path.join(td, "point.wysna")
         with open(src_path, "w", encoding="utf-8") as f:
             f.write(source)
 
@@ -111,11 +111,11 @@ def test_unit_function_tail_normalization():
     }
     procedure()
     """
-    ast = Parser(file="unit_tail.w").parse(source)
-    tc = TypeChecker(file="unit_tail.w")
+    ast = Parser(file="unit_tail.wysna").parse(source)
+    tc = TypeChecker(file="unit_tail.wysna")
     tc.check(ast)
 
-    builder = HirBuilder(tc.interner, file_path="unit_tail.w")
+    builder = HirBuilder(tc.interner, file_path="unit_tail.wysna")
     hir_mod = builder.lower(ast)
     assert hir_mod is not None, "HIR module must lower successfully"
 
@@ -155,10 +155,10 @@ def test_native_c99_execution_under_sanitizers():
     print("LEAVES:", run_test())
     """
     repo_root = get_repo_root()
-    w_bin = os.path.join(repo_root, "w")
+    w_bin = os.path.join(repo_root, "wysna")
 
     with tempfile.TemporaryDirectory() as td:
-        src_path = os.path.join(td, "tree.w")
+        src_path = os.path.join(td, "tree.wysna")
         bin_path = os.path.join(td, "tree_bin")
         with open(src_path, "w", encoding="utf-8") as f:
             f.write(source)

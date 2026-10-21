@@ -208,7 +208,7 @@ def test_deterministic_topological_sorting_and_hashseed():
     repo_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.realpath(__file__))))
 
     with tempfile.TemporaryDirectory() as tmpdir:
-        src_path = os.path.join(tmpdir, "test_seed.w")
+        src_path = os.path.join(tmpdir, "test_seed.wysna")
         with open(src_path, "w", encoding="utf-8") as f:
             f.write(code)
 

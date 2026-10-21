@@ -19,7 +19,7 @@ def run_session_tests():
     with tempfile.TemporaryDirectory(prefix='w-session-') as temporary:
         root = Path(temporary).resolve()
         sources = {
-            'shared.w': """
+            'shared.wysna': """
                 print("init")
                 struct Item { value: bool }
                 enum Mode { On, Off }
@@ -31,20 +31,20 @@ def run_session_tests():
                 let values = [3]
                 fn value() -> int { return id(values[0]) }
             """.strip(),
-            'left.w': """
-                import "shared.w"
+            'left.wysna': """
+                import "shared.wysna"
                 struct Item { value: int }
                 fn make() -> Item { return Item { value: shared.value() } }
             """.strip(),
-            'right.w': """
-                import "shared.w"
+            'right.wysna': """
+                import "shared.wysna"
                 struct Item { value: str }
                 fn make() -> Item { return Item { value: "right" } }
             """.strip(),
-            'main.w': """
-                import "left.w"
-                import "right.w"
-                import "shared.w"
+            'main.wysna': """
+                import "left.wysna"
+                import "right.wysna"
+                import "shared.wysna"
                 fn main() { let a = left.make()
                 let b = right.make()
                 print(a.value, b.value, shared.id(7), shared.id[str]("yes"), shared.id(Some(4)) ?? 0, left.shared.value())
@@ -54,20 +54,20 @@ def run_session_tests():
         }
         import re
         for name in sources:
-            if name != "main.w":
+            if name != "main.wysna":
                 sources[name] = re.sub(r"(?m)^(\s*)(fn|struct|enum|class|interface|let|import) ",
                                        r"\1pub \2 ", sources[name])
         for name, source in sources.items():
             (root / name).write_text(source)
         session = CompilationSession(root)
-        entry = root / 'main.w'
-        unit = session.check_source(sources['main.w'], str(entry))
+        entry = root / 'main.wysna'
+        unit = session.check_source(sources['main.wysna'], str(entry))
         assert len(session.modules) == 4
         assert all(count == 1 for count in session.check_counts.values())
         assert all(count == 1 for count in session.parse_counts.values())
         assert all(count == 1 for count in session.sources.read_counts.values())
-        left = session.modules[str(root / 'left.w')]
-        right = session.modules[str(root / 'right.w')]
+        left = session.modules[str(root / 'left.wysna')]
+        right = session.modules[str(root / 'right.wysna')]
         left_type = left.exports.lookup_type('Item')
         right_type = right.exports.lookup_type('Item')
         assert left_type != right_type
@@ -88,7 +88,7 @@ def run_session_tests():
                 if backend == 'hir':
                     module = HirBuilder(session.interner, str(entry)).lower(unit.program)
                     imported = next(function for function in module.functions if function.name == left.names['make'])
-                    assert imported.span.file_path == str(root / 'left.w')
+                    assert imported.span.file_path == str(root / 'left.wysna')
                     assert imported.span.file_id == left.module_id
                     from checker.TypeInterner import TypeInterner
                     try:
@@ -102,7 +102,7 @@ def run_session_tests():
                     try:
                         HirCCodeGen(session.interner, str(entry)).generate(module)
                     except WError as error:
-                        assert error.file == str(root / 'left.w'), str(error)
+                        assert error.file == str(root / 'left.wysna'), str(error)
                     else:
                         raise AssertionError('Malformed dependency HIR was accepted')
                     imported.return_type_id = old_type
@@ -119,7 +119,7 @@ def run_session_tests():
                 assert result.stdout == expected, (backend, result.stdout)
         finally:
             session.sources.read, TypeChecker._check_program = original_read, original_check
-        assert session.check_source(sources['main.w'], str(entry)) is unit
+        assert session.check_source(sources['main.wysna'], str(entry)) is unit
         from checker.TypeInterner import TypeInterner
         try:
             HirBuilder(TypeInterner(), str(entry)).lower(unit.program)
@@ -128,18 +128,18 @@ def run_session_tests():
         else:
             raise AssertionError('Foreign arena was accepted by HIR builder')
         # Same canonical file through two namespaces executes initialization once.
-        (root / 'alias.w').symlink_to(root / 'shared.w')
-        alias_source = 'import "shared.w"\nimport "alias.w"\nprint(shared.value(), alias.value())'
+        (root / 'alias.wysna').symlink_to(root / 'shared.wysna')
+        alias_source = 'import "shared.wysna"\nimport "alias.wysna"\nprint(shared.value(), alias.value())'
         alias_unit = session.check_source(alias_source, str(entry))
         assert alias_unit.dependencies[0] is alias_unit.dependencies[1]
         alias_output = io.StringIO()
         Interpreter(stdout=alias_output).interpret(alias_unit.program)
         assert alias_output.getvalue() == 'init\n3 3\n'
-        unit = session.check_source(sources['main.w'], str(entry))
-        previous_stat = (root / 'shared.w').stat()
-        (root / 'shared.w').write_text(sources['shared.w'].replace('[3]', '[9]'))
-        os.utime(root / 'shared.w', ns=(previous_stat.st_atime_ns, previous_stat.st_mtime_ns))
-        refreshed = session.check_source(sources['main.w'], str(entry))
+        unit = session.check_source(sources['main.wysna'], str(entry))
+        previous_stat = (root / 'shared.wysna').stat()
+        (root / 'shared.wysna').write_text(sources['shared.wysna'].replace('[3]', '[9]'))
+        os.utime(root / 'shared.wysna', ns=(previous_stat.st_atime_ns, previous_stat.st_mtime_ns))
+        refreshed = session.check_source(sources['main.wysna'], str(entry))
         assert refreshed is not unit and refreshed.generation == unit.generation + 1
         refreshed_output = io.StringIO()
         Interpreter(stdout=refreshed_output).interpret(refreshed.program)
@@ -151,16 +151,16 @@ def run_session_tests():
         else:
             raise AssertionError('Stale arena was accepted')
         # Nominal mismatches identify the source modules without exposing mangling.
-        mismatch = 'import "left.w"\nimport "right.w"\nfn take(x: int) {}\ntake(left.make())'
+        mismatch = 'import "left.wysna"\nimport "right.wysna"\nfn take(x: int) {}\ntake(left.make())'
         try:
             session.check_source(mismatch, str(entry))
         except WError as error:
-            assert '__wm_' not in str(error) and 'left.w::Item' in str(error), str(error)
+            assert '__wm_' not in str(error) and 'left.wysna::Item' in str(error), str(error)
         else:
             raise AssertionError('Nominal argument mismatch was accepted')
         for suffix in ('let alias = shared', 'print(shared)', 'print(left.shared)'):
             try:
-                session.check_source('import "shared.w"\nimport "left.w"\n' + suffix, str(entry))
+                session.check_source('import "shared.wysna"\nimport "left.wysna"\n' + suffix, str(entry))
             except WError as error:
                 assert error.code == 'W2003' and 'runtime values' in error.message, str(error)
             else:
@@ -173,29 +173,29 @@ def run_session_tests():
                 assert error.code == 'W1002', str(error)
             else:
                 raise AssertionError('Reserved identity was accepted')
-        refreshed = session.check_source(sources['main.w'], str(entry))
+        refreshed = session.check_source(sources['main.wysna'], str(entry))
         session.options['profile'] = 'strict'
-        changed_options = session.check_source(sources['main.w'], str(entry))
+        changed_options = session.check_source(sources['main.wysna'], str(entry))
         assert changed_options is not refreshed
-        (root / 'cycle.w').write_text('import "main.w"')
-        cycle_source = 'import "cycle.w"'
+        (root / 'cycle.wysna').write_text('import "main.wysna"')
+        cycle_source = 'import "cycle.wysna"'
         try:
             session.check_source(cycle_source, str(entry))
         except WError as error:
-            assert error.code == 'W1003' and 'main.w -> cycle.w -> main.w' in str(error), str(error)
-            assert error.file == str(root / 'cycle.w')
+            assert error.code == 'W1003' and 'main.wysna -> cycle.wysna -> main.wysna' in str(error), str(error)
+            assert error.file == str(root / 'cycle.wysna')
         else:
             raise AssertionError('Import cycle was accepted')
-        (root / 'bad.w').write_text('let value: int = "wrong"')
+        (root / 'bad.wysna').write_text('let value: int = "wrong"')
         try:
-            session.check_source('import "bad.w"', str(entry))
+            session.check_source('import "bad.wysna"', str(entry))
         except WError as error:
-            assert error.file == str(root / 'bad.w'), str(error)
+            assert error.file == str(root / 'bad.wysna'), str(error)
         else:
             raise AssertionError('Invalid dependency was accepted')
         # The legacy checker API also reparses its original source on invalidation.
         legacy_session = CompilationSession(root)
-        legacy_ast = Parser(file=str(entry)).parse(sources['main.w'])
+        legacy_ast = Parser(file=str(entry)).parse(sources['main.wysna'])
         legacy_checker = TypeChecker(file=str(entry), session=legacy_session)
         legacy_checker.check(legacy_ast)
         checked_scope = legacy_checker.global_scope
@@ -209,6 +209,10 @@ def run_session_tests():
         assert legacy_ast.interner is legacy_checker.interner
     print('C01 shared arenas, checked reuse, diamond imports, generic exports, identity, invalidation and diagnostics passed')
     return True
+
+
+def test_session():
+    assert run_session_tests()
 
 
 if __name__ == '__main__':

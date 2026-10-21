@@ -1,7 +1,7 @@
 {
-  "name": "w-lang",
-  "displayName": "W Programming Language",
-  "description": "Syntax highlighting and language configuration for the W Programming Language (v0.1)",
+  "name": "wysna-lang",
+  "displayName": "Wysna Programming Language",
+  "description": "Syntax highlighting and language configuration for the Wysna Programming Language (v0.1)",
   "version": "0.1.0",
   "publisher": "washingtonyandun",
   "engines": {
@@ -13,16 +13,16 @@
   "contributes": {
     "languages": [
       {
-        "id": "w",
-        "aliases": ["W", "w"],
-        "extensions": [".w"],
+        "id": "wysna",
+        "aliases": ["Wysna", "wysna", "W", "w"],
+        "extensions": [".wysna", ".w"],
         "configuration": "./language-configuration.json"
       }
     ],
     "grammars": [
       {
-        "language": "w",
-        "scopeName": "source.w",
+        "language": "wysna",
+        "scopeName": "source.wysna",
         "path": "./syntaxes/w.tmLanguage.json"
       }
     ]

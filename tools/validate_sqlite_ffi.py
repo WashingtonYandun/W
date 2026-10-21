@@ -47,7 +47,7 @@ def validate(rows=1000, samples=3, sanitize=False):
             else:
                 source = directory / (backend + '.c')
                 execute([sys.executable, str(ROOT / 'main.py'), 'emit-c', '--backend=' + backend,
-                         str(PILOT / 'measurements.w'), '-o', str(source)])
+                         str(PILOT / 'measurements.wysna'), '-o', str(source)])
             command = compiler + flags + [str(source), str(adapter), '-lsqlite3', '-o', str(binary)]
             execute(command)
             build_seconds = time.perf_counter() - started

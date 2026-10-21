@@ -21,12 +21,12 @@ ROOT = Path(__file__).resolve().parents[2]
 def test_principal_regressions_across_engines():
     w1 = ensure_selfhost_w1_binary(str(ROOT))
     with tempfile.TemporaryDirectory(prefix='w-readiness-') as directory:
-        for path in sorted((ROOT / 'tests/runtime').glob('readiness_*.w')):
+        for path in sorted((ROOT / 'tests/runtime').glob('readiness_*.wysna')):
             ok, detail = verify(path.read_text(), str(path.relative_to(ROOT)), w1, directory,
                                 expected=path.with_suffix('.expected').read_text(), strict=True,
                                 sanitize=os.environ.get('W_SANITIZE') == '1')
             assert ok, detail
-        for path in sorted((ROOT / 'tests/types/invalid').glob('readiness_*.w')):
+        for path in sorted((ROOT / 'tests/types/invalid').glob('readiness_*.wysna')):
             ok, detail = verify(path.read_text(), str(path.relative_to(ROOT)), w1, directory,
                                 strict=True, expect_rejection=True)
             assert ok, detail
@@ -104,7 +104,7 @@ def test_recovery_reports_multiple_errors_without_returning_a_partial_program():
     assert len(diagnostics) >= 3
     assert [error['line'] for error in diagnostics] == sorted(error['line'] for error in diagnostics)
     with tempfile.TemporaryDirectory(prefix='w-diagnostics-') as directory:
-        path = Path(directory) / 'broken.w'
+        path = Path(directory) / 'broken.wysna'
         path.write_text(source)
         result = subprocess.run([sys.executable, str(ROOT / 'main.py'), 'check', '--json', str(path)],
                                 capture_output=True, text=True, timeout=30)
@@ -123,7 +123,7 @@ def test_compositional_patterns_and_closures():
             source, expected = generate_readiness_case(seed)
             formatted = verify_formatting(source)
             for variant, text in (('original', source), ('formatted', formatted)):
-                ok, detail = verify(text, f'readiness_{seed}_{variant}.w', w1, directory,
+                ok, detail = verify(text, f'readiness_{seed}_{variant}.wysna', w1, directory,
                                     expected=expected, strict=True,
                                     sanitize=os.environ.get('W_SANITIZE') == '1')
                 assert ok, detail
@@ -181,13 +181,13 @@ def test_scoped_foreign_resources():
         subprocess.run(compiler_command() + ['-std=c99', '-dynamiclib' if sys.platform == 'darwin' else '-shared',
             str(ROOT / 'tests/ffi/resource_adapter.c'), '-o', str(shared)], check=True, capture_output=True, timeout=60)
         interpreted = subprocess.run([sys.executable, str(ROOT / 'main.py'), 'run',
-            str(ROOT / 'tests/ffi/resources.w'), '--link-lib', str(shared)], capture_output=True, text=True, timeout=30)
+            str(ROOT / 'tests/ffi/resources.wysna'), '--link-lib', str(shared)], capture_output=True, text=True, timeout=30)
         assert (interpreted.returncode, interpreted.stdout, interpreted.stderr) == (0, expected, ''), interpreted
         for backend in ('ast', 'hir', 'selfhost'):
             binary = Path(directory) / executable_name(backend)
             flags = ['--sanitize'] if os.environ.get('W_SANITIZE') == '1' else []
             built = subprocess.run([sys.executable, str(ROOT / 'main.py'), 'build',
-                str(ROOT / 'tests/ffi/resources.w'), '--backend=' + backend,
+                str(ROOT / 'tests/ffi/resources.wysna'), '--backend=' + backend,
                 '--link-lib', str(ROOT / 'tests/ffi/resource_adapter.c'), '-o', str(binary)] + flags,
                 capture_output=True, text=True, timeout=120)
             assert built.returncode == 0, built.stderr
@@ -212,7 +212,7 @@ def test_lsp_publishes_recovered_syntax_diagnostics():
     from tooling.LanguageServer import LanguageServer
     messages = []
     server = LanguageServer(messages.append)
-    uri = (ROOT / 'readiness-diagnostics.w').as_uri()
+    uri = (ROOT / 'readiness-diagnostics.wysna').as_uri()
     server.update(uri, 'let first =\nlet second =\nlet valid = 1', 1)
     diagnostics = messages[-1]['params']['diagnostics']
     assert len(diagnostics) == 2 and all(item['source'] == 'w' for item in diagnostics)
@@ -223,7 +223,7 @@ def test_native_build_reports_independent_compile_and_link_phases():
     with tempfile.TemporaryDirectory(prefix='w-build-phases-') as directory:
         binary = Path(directory) / 'program'
         result = subprocess.run([sys.executable, str(ROOT / 'main.py'), 'build', '--stats',
-            str(ROOT / 'examples/01_hello_world.w'), '-o', str(binary)], capture_output=True, text=True, timeout=60)
+            str(ROOT / 'examples/01_hello_world.wysna'), '-o', str(binary)], capture_output=True, text=True, timeout=60)
         assert result.returncode == 0, result.stderr
         timings = json.loads(result.stderr)['telemetry']['timing_ms']
         assert timings['c_compile'] > 0 and timings['link'] > 0 and timings['mir'] >= 0 and timings['c_emit'] >= 0

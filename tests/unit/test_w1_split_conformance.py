@@ -19,7 +19,7 @@ def test_split_conformance() -> None:
 
     repo_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     src_dir = os.path.join(repo_root, "selfhost", "src")
-    w1_path = os.path.join(repo_root, "selfhost", "w1.w")
+    w1_path = os.path.join(repo_root, "selfhost", "w1.wysna")
 
     if not os.path.exists(src_dir):
         raise AssertionError(f"Directory not found: {src_dir}")
@@ -42,7 +42,7 @@ def test_split_conformance() -> None:
         w1_content = f.read()
 
     if bundled != w1_content:
-        raise AssertionError("Bundled code does not match selfhost/w1.w")
+        raise AssertionError("Bundled code does not match selfhost/w1.wysna")
 
     print(f"  [PASS] All {len(MODULE_ORDER)} modules combine to exactly {total_lines} lines matching selfhost/w1.w (100% loss-less).")
 

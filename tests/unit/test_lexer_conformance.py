@@ -16,8 +16,8 @@ def test_lexer_suite():
     valid_dir = "tests/lexer/valid"
     invalid_dir = "tests/lexer/invalid"
 
-    valid_files = sorted([f for f in os.listdir(valid_dir) if f.endswith(".w")])
-    invalid_files = sorted([f for f in os.listdir(invalid_dir) if f.endswith(".w")])
+    valid_files = sorted([f for f in os.listdir(valid_dir) if f.endswith(".wysna")])
+    invalid_files = sorted([f for f in os.listdir(invalid_dir) if f.endswith(".wysna")])
 
     valid_passed = 0
     invalid_passed = 0

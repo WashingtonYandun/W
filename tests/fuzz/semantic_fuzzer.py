@@ -343,7 +343,7 @@ def check_c_determinism(source: str, repo_root: Path, work_dir: Path) -> Tuple[b
     under different PYTHONHASHSEED environments and paths.
     """
     hashes = []
-    source_file = work_dir / "det_source.w"
+    source_file = work_dir / "det_source.wysna"
     source_file.write_text(source)
 
     for run_idx in range(3):
@@ -405,7 +405,7 @@ def run_semantic_fuzz_suite(
         for i in range(count):
             seed = base_seed + i
             source = generate_typed_program(seed)
-            label = f"fuzz_pos_{seed}.w"
+            label = f"fuzz_pos_{seed}.wysna"
             total_checks += 1
 
             # Check C determinism first
@@ -471,7 +471,7 @@ def run_semantic_fuzz_suite(
         for i in range(count):
             seed = base_seed + 1000 + i
             source, expected_code = generate_mutated_negative(seed)
-            label = f"fuzz_neg_{seed}.w"
+            label = f"fuzz_neg_{seed}.wysna"
             total_checks += 1
 
             # All engines must reject with expected_code

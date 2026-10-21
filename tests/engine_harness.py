@@ -33,14 +33,16 @@ def panic_expectation(expected_text):
 
 def corpus_paths():
     """Phase D public corpus. Expansion fixtures live under dedicated directories."""
-    positives = sorted((ROOT / 'tests/runtime').glob('*.w')) + sorted((ROOT / 'examples').glob('*.w'))
-    positives += sorted((ROOT / 'tests/modules').glob('*/main.w'))
+    positives = sorted((ROOT / 'tests/runtime').glob('*.wysna'))
+    positives += sorted((ROOT / 'examples').glob('*.wysna'))
+    positives += sorted((ROOT / 'tests/modules').glob('*/main.wysna'))
     for directory in ('functions', 'stdlib', 'regressions'):
-        positives += sorted(path for path in (ROOT / 'tests' / directory).rglob('*.w')
+        positives += sorted(path for path in (ROOT / 'tests' / directory).rglob('*.wysna')
                             if path.with_suffix('.expected').is_file())
     support_files = PROFILES.get('support_files', {})
     positives = [path for path in positives if path.relative_to(ROOT).as_posix() not in support_files]
-    negatives = sorted((ROOT / 'tests').glob('*/invalid/*.w')) + sorted((ROOT / 'tests/errors').glob('invalid_*.w'))
+    negatives = sorted((ROOT / 'tests').glob('*/invalid/*.wysna'))
+    negatives += sorted((ROOT / 'tests/errors').glob('invalid_*.wysna'))
     negatives = [path for path in negatives if 'ffi' not in path.parts]
     return positives, negatives
 
@@ -109,7 +111,7 @@ def execute(command, directory, phase, timeout, env=None):
 def run_engine(engine, source, label, w1_bin, directory, sanitize=False, run_timeout=30):
     directory = Path(directory) / engine
     directory.mkdir(parents=True, exist_ok=True)
-    source_path = directory / 'source.w'
+    source_path = directory / 'source.wysna'
     source_path.write_text(source, encoding='utf-8')
     c_path, binary = directory / 'program.c', directory / executable_name('program')
     driver = [sys.executable, str(ROOT / 'main.py')]

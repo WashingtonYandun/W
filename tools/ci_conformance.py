@@ -20,15 +20,16 @@ def source_fingerprint(root=ROOT):
     roots = ('checker', 'codegen', 'common', 'compiler', 'error', 'formatter', 'hir',
              'lexer', 'mir', 'node', 'parser', 'runtime', 'selfhost/src', 'stdlib',
              'tooling', 'tools', 'tests', 'examples', 'wtokens')
-    suffixes = {'.py', '.w', '.c', '.h', '.expected', '.json', '.txt'}
+    suffixes = {'.py', '.wysna', '.c', '.h', '.expected', '.json', '.txt'}
     paths = {path for name in roots for path in (root / name).rglob('*')
              if path.is_file() and path.suffix in suffixes
              and (path.suffix != '.txt' or 'data' in path.parts)
              and not {'__pycache__', 'failures'}.intersection(path.parts)}
-    paths.update(root / name for name in ('main.py', 'run_conformance.py', 'selfhost/w1.w',
+    paths.update(root / name for name in ('main.py', 'wysna', 'run_conformance.py', 'selfhost/w1.wysna',
                                          'SPEC.md', 'README.md', 'docs/STDLIB.md', 'docs/OWNERSHIP_LIFETIME.md',
                                          'docs/KNOWN_LIMITS.md', 'docs/SERVICE_FOUNDATIONS.md',
-                                         'pyproject.toml', '.github/workflows/ci.yml')
+                                         'pyproject.toml', '.github/workflows/ci.yml',
+                                         'runtime/wysna_host.h', 'runtime/wysna_runtime.h')
                  if (root / name).is_file())
     inputs = {path.relative_to(root).as_posix(): hashlib.sha256(path.read_bytes()).hexdigest()
               for path in sorted(paths)}

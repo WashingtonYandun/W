@@ -19,7 +19,7 @@ def sha256_file(path: str) -> str:
 
 def run_bootstrap_test() -> bool:
     repo_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-    w1_src_path = os.path.join(repo_root, "selfhost", "w1.w")
+    w1_src_path = os.path.join(repo_root, "selfhost", "w1.wysna")
 
     print("==================================================")
     print("W Language Self-Hosting Bootstrap Suite (SPEC 11)")
@@ -91,11 +91,11 @@ def run_bootstrap_test() -> bool:
         print("  [PASS] Fixed-Point verified: SHA256(compiler0.c) == SHA256(compiler1.c) == SHA256(compiler2.c)")
 
         # 5. Stage 2 Native Binary Compiles & Runs Full Runtime Suite
-        w_files = sorted(glob.glob(os.path.join(repo_root, "tests", "runtime", "*.w")))
+        w_files = sorted(glob.glob(os.path.join(repo_root, "tests", "runtime", "*.wysna")))
         w1_passed = 0
         w1_total = 0
         for w_file in w_files:
-            exp_file = w_file[:-2] + ".expected"
+            exp_file = w_file[:-6] + ".expected"
             if not os.path.exists(exp_file):
                 continue
             reason = unsupported_reason(os.path.relpath(w_file, repo_root), 'w1')
@@ -105,7 +105,7 @@ def run_bootstrap_test() -> bool:
             w1_total += 1
             with open(exp_file, "r", encoding="utf-8") as ef:
                 expected = ef.read()
-            base = os.path.basename(w_file)[:-2]
+            base = os.path.basename(w_file)[:-6]
             out_c = os.path.join(tmpdir, f"w1_{base}.c")
             out_bin = os.path.join(tmpdir, f"w1_{base}")
 
@@ -124,7 +124,7 @@ def run_bootstrap_test() -> bool:
             )
             ok, detail = compare([result], expected)
             if not ok:
-                print(f"  [FAIL W1 RUN] {base}.w mismatch: {detail}")
+                print(f"  [FAIL W1 RUN] {base}.wysna mismatch: {detail}")
                 return False
             w1_passed += 1
 
@@ -135,6 +135,10 @@ def run_bootstrap_test() -> bool:
         print(f"  [PASS] Stage 2 w1_stage2 compiled & verified {w1_passed}/{w1_total} runtime conformance programs")
         print("==================================================")
         return True
+
+
+def test_bootstrap():
+    assert run_bootstrap_test()
 
 
 if __name__ == "__main__":

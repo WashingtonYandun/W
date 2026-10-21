@@ -1,4 +1,4 @@
 fn fetch() -> str ! NetError {
-    let s = read_file("test.w")?
+    let s = read_file("test.wysna")?
     return s
 }

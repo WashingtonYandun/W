@@ -1,6 +1,6 @@
 # W MIR: Verified Intermediate Representation
 
-W0's default native pipeline is checked AST → typed and verified HIR → verified MIR → C99 → system compiler. `w emit-c` and `w build` use this pipeline; `--backend=ast` selects the secondary AST emitter, and W1 is an independent self-hosted compiler. `w mir path.w` prints verified MIR as JSON.
+W0's default native pipeline is checked AST → typed and verified HIR → verified MIR → C99 → system compiler. `wysna emit-c` and `wysna build` use this pipeline; `--backend=ast` selects the secondary AST emitter, and W1 is an independent self-hosted compiler. `wysna mir path.wysna` prints verified MIR as JSON.
 
 ## Representation
 

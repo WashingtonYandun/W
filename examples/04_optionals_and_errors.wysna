@@ -31,6 +31,6 @@ fn main() -> unit {
     print("env2:", resolve_host_and_port(env2) ?? "missing HOST")
     print("env3:", resolve_host_and_port(env3) ?? "missing HOST")
 
-    let cfg = load_or_default("non_existent_config_file.w")
+    let cfg = load_or_default("non_existent_config_file.wysna")
     print("config:", cfg)
 }

@@ -79,8 +79,8 @@ def _run_suite_in_repo(repo_root: str) -> None:
     valid_lexer = "tests/lexer/valid"
     invalid_lexer = "tests/lexer/invalid"
 
-    v_lex_files = sorted([f for f in os.listdir(valid_lexer) if f.endswith(".w")]) if os.path.exists(valid_lexer) else []
-    i_lex_files = sorted([f for f in os.listdir(invalid_lexer) if f.endswith(".w")]) if os.path.exists(invalid_lexer) else []
+    v_lex_files = sorted([f for f in os.listdir(valid_lexer) if f.endswith(".wysna")]) if os.path.exists(valid_lexer) else []
+    i_lex_files = sorted([f for f in os.listdir(invalid_lexer) if f.endswith(".wysna")]) if os.path.exists(invalid_lexer) else []
 
     v_lex_passed = 0
     for f in v_lex_files:
@@ -139,8 +139,8 @@ def _run_suite_in_repo(repo_root: str) -> None:
     valid_parser = "tests/parser/valid"
     invalid_parser = "tests/parser/invalid"
 
-    v_parse_files = sorted([f for f in os.listdir(valid_parser) if f.endswith(".w")]) if os.path.exists(valid_parser) else []
-    i_parse_files = sorted([f for f in os.listdir(invalid_parser) if f.endswith(".w")]) if os.path.exists(invalid_parser) else []
+    v_parse_files = sorted([f for f in os.listdir(valid_parser) if f.endswith(".wysna")]) if os.path.exists(valid_parser) else []
+    i_parse_files = sorted([f for f in os.listdir(invalid_parser) if f.endswith(".wysna")]) if os.path.exists(invalid_parser) else []
 
     v_parse_passed = 0
     for f in v_parse_files:
@@ -188,8 +188,8 @@ def _run_suite_in_repo(repo_root: str) -> None:
     valid_types = "tests/types/valid"
     invalid_types = "tests/types/invalid"
 
-    v_type_files = sorted([f for f in os.listdir(valid_types) if f.endswith(".w")]) if os.path.exists(valid_types) else []
-    i_type_files = sorted([f for f in os.listdir(invalid_types) if f.endswith(".w")]) if os.path.exists(invalid_types) else []
+    v_type_files = sorted([f for f in os.listdir(valid_types) if f.endswith(".wysna")]) if os.path.exists(valid_types) else []
+    i_type_files = sorted([f for f in os.listdir(invalid_types) if f.endswith(".wysna")]) if os.path.exists(invalid_types) else []
 
     v_type_passed = 0
     for f in v_type_files:
@@ -239,7 +239,7 @@ def _run_suite_in_repo(repo_root: str) -> None:
 
     # 4. Error Handling Tests (tests/errors/)
     err_dir = "tests/errors"
-    err_files = sorted([f for f in os.listdir(err_dir) if f.endswith(".w")]) if os.path.exists(err_dir) else []
+    err_files = sorted([f for f in os.listdir(err_dir) if f.endswith(".wysna")]) if os.path.exists(err_dir) else []
     err_passed = 0
     for f in err_files:
         path = os.path.join(err_dir, f)
@@ -279,7 +279,7 @@ def _run_suite_in_repo(repo_root: str) -> None:
     print(f"Formatter idempotent:{fmt_passed}/{len(fmt_files)}")
 
     # 6. Typed HIR Lowering Tests
-    hir_files = sorted(glob.glob("tests/runtime/*.w") + glob.glob("examples/*.w"))
+    hir_files = sorted(glob.glob("tests/runtime/*.wysna") + glob.glob("examples/*.wysna"))
     hir_passed = 0
     for path in hir_files:
         with open(path, "r", encoding="utf-8") as stream:
@@ -310,12 +310,13 @@ def _run_suite_in_repo(repo_root: str) -> None:
 
     # 7. Runtime Interpreter (W0) Tests
     runtime_dir = "tests/runtime"
-    runtime_files = sorted([f for f in os.listdir(runtime_dir) if f.endswith(".w")]) if os.path.exists(runtime_dir) else []
+    runtime_files = sorted([f for f in os.listdir(runtime_dir) if f.endswith(".wysna")]) if os.path.exists(runtime_dir) else []
     runtime_passed = 0
 
     for f in runtime_files:
         path = os.path.join(runtime_dir, f)
-        expected_path = os.path.join(runtime_dir, f[:-2] + ".expected")
+        stem = f[:-6]
+        expected_path = os.path.join(runtime_dir, stem + ".expected")
         with open(path, "r", encoding="utf-8") as stream:
             code = stream.read()
 
@@ -356,7 +357,7 @@ def _run_suite_in_repo(repo_root: str) -> None:
 
     # 7. Native C99 Backend Tests (W0) & 8. Self-Hosting W1 Stage-2 Suite
     repo_root = os.path.dirname(os.path.abspath(__file__))
-    c99_targets = [f for f in runtime_files if os.path.exists(os.path.join(runtime_dir, f[:-2] + ".expected"))]
+    c99_targets = [f for f in runtime_files if os.path.exists(os.path.join(runtime_dir, f[:-6] + ".expected"))]
     c99_passed = 0
     w1_runtime_passed = 0
     bootstrap_ok = False
@@ -369,7 +370,7 @@ def _run_suite_in_repo(repo_root: str) -> None:
     with tempfile.TemporaryDirectory() as tmpdir:
         for f in c99_targets:
             path = os.path.join(runtime_dir, f)
-            expected_path = os.path.join(runtime_dir, f[:-2] + ".expected")
+            expected_path = os.path.join(runtime_dir, f[:-6] + ".expected")
             with open(path, "r", encoding="utf-8") as stream:
                 code = stream.read()
             with open(expected_path, "r", encoding="utf-8") as exp_stream:
@@ -379,8 +380,8 @@ def _run_suite_in_repo(repo_root: str) -> None:
                 ast = Parser(file=path).parse(code)
                 TypeChecker(file=path).check(ast)
                 c_code = CCodeGen(file=path).generate(ast)
-                c_path = os.path.join(tmpdir, f[:-2] + ".c")
-                bin_path = os.path.join(tmpdir, f[:-2])
+                c_path = os.path.join(tmpdir, f[:-6] + ".c")
+                bin_path = os.path.join(tmpdir, f[:-6])
                 with open(c_path, "w", encoding="utf-8") as cf:
                     cf.write(c_code)
                 comp = subprocess.run([os.environ.get("CC", "cc"), "-std=c99", f"-I{repo_root}"] + extra_cc_flags + [c_path, "-o", bin_path], timeout=120, capture_output=True, text=True)
@@ -396,7 +397,7 @@ def _run_suite_in_repo(repo_root: str) -> None:
         w1_runtime_passed = 0
 
         # 8. Self-Hosting Bootstrap Fixed-Point (W0 -> W1 Stage 1 -> W1 Stage 2)
-        w1_src_path = os.path.join(repo_root, "selfhost", "w1.w")
+        w1_src_path = os.path.join(repo_root, "selfhost", "w1.wysna")
         try:
             with open(w1_src_path, "r", encoding="utf-8") as wf:
                 w1_src = wf.read()
@@ -428,24 +429,25 @@ def _run_suite_in_repo(repo_root: str) -> None:
             w1_targets = [f for f in c99_targets if not unsupported_reason("tests/runtime/" + f, "w1")]
             for f in w1_targets:
                 path = os.path.join(runtime_dir, f)
-                expected_path = os.path.join(runtime_dir, f[:-2] + ".expected")
+                expected_path = os.path.join(runtime_dir, f[:-6] + ".expected")
                 with open(expected_path, "r", encoding="utf-8") as exp_stream:
                     expected = exp_stream.read()
-                w1_c_path = os.path.join(tmpdir, "w1_" + f[:-2] + ".c")
-                w1_bin_path = os.path.join(tmpdir, "w1_" + f[:-2])
+                w1_c_path = os.path.join(tmpdir, "w1_" + f[:-6] + ".c")
+                w1_bin_path = os.path.join(tmpdir, "w1_" + f[:-6])
                 subprocess.run([s2_bin, path, w1_c_path], check=True, timeout=120, capture_output=True, cwd=repo_root)
                 subprocess.run([os.environ.get("CC", "cc"), "-std=c99", f"-I{repo_root}"] + extra_cc_flags + [w1_c_path, "-o", w1_bin_path], check=True, timeout=120, capture_output=True)
                 run_res = subprocess.run([w1_bin_path], timeout=30, capture_output=True, text=True, cwd=repo_root)
                 _assert_native_outcome(f, run_res, expected, panic_expectation(expected))
                 w1_runtime_passed += 1
 
-            # 10. Verify Showcase Examples (examples/*.w) on W0 Interpreter, W0 C99, and W1 Stage-2 Native
+            # 10. Verify Showcase Examples (examples/*.w, examples/*.wysna) on W0 Interpreter, W0 C99, and W1 Stage-2 Native
             examples_dir = "examples"
-            example_files = sorted([f for f in os.listdir(examples_dir) if f.endswith(".w")]) if os.path.exists(examples_dir) else []
+            example_files = sorted([f for f in os.listdir(examples_dir) if f.endswith(".wysna")]) if os.path.exists(examples_dir) else []
             examples_passed = 0
             for f in example_files:
                 ex_path = os.path.join(examples_dir, f)
-                exp_path = os.path.join(examples_dir, f[:-2] + ".expected")
+                ex_stem = f[:-6]
+                exp_path = os.path.join(examples_dir, ex_stem + ".expected")
                 with open(ex_path, "r", encoding="utf-8") as sf:
                     ex_code = sf.read()
                 with open(exp_path, "r", encoding="utf-8") as ef:
@@ -457,8 +459,8 @@ def _run_suite_in_repo(repo_root: str) -> None:
                 Interpreter(stdout=ex_buf, file=ex_path).interpret(ex_ast)
                 assert ex_buf.getvalue() == ex_expected, f"Interpreter mismatch on {f}"
 
-                ex_c_path = os.path.join(tmpdir, "ex_" + f[:-2] + ".c")
-                ex_bin_path = os.path.join(tmpdir, "ex_" + f[:-2])
+                ex_c_path = os.path.join(tmpdir, "ex_" + f[:-6] + ".c")
+                ex_bin_path = os.path.join(tmpdir, "ex_" + f[:-6])
                 subprocess.run([s2_bin, ex_path, ex_c_path], check=True, timeout=120, capture_output=True, cwd=repo_root)
                 subprocess.run([os.environ.get("CC", "cc"), "-std=c99", f"-I{repo_root}", ex_c_path, "-o", ex_bin_path], check=True, timeout=120, capture_output=True)
                 ex_res = subprocess.run([ex_bin_path], timeout=30, capture_output=True, text=True, cwd=repo_root)
@@ -475,7 +477,7 @@ def _run_suite_in_repo(repo_root: str) -> None:
     with tempfile.TemporaryDirectory() as tmpdir:
         for f in c99_targets:
             path = os.path.join(runtime_dir, f)
-            expected_path = os.path.join(runtime_dir, f[:-2] + ".expected")
+            expected_path = os.path.join(runtime_dir, f[:-6] + ".expected")
             with open(path, "r", encoding="utf-8") as stream:
                 code = stream.read()
             with open(expected_path, "r", encoding="utf-8") as exp_stream:
@@ -490,8 +492,8 @@ def _run_suite_in_repo(repo_root: str) -> None:
                 gen = HirCCodeGen(checker.interner, file_path=path)
                 c_code = gen.generate(hir_mod)
 
-                c_path = os.path.join(tmpdir, "hir_" + f[:-2] + ".c")
-                bin_path = os.path.join(tmpdir, "hir_" + f[:-2])
+                c_path = os.path.join(tmpdir, "hir_" + f[:-6] + ".c")
+                bin_path = os.path.join(tmpdir, "hir_" + f[:-6])
                 with open(c_path, "w", encoding="utf-8") as cf:
                     cf.write(c_code)
                 comp = subprocess.run([os.environ.get("CC", "cc"), "-std=c99", f"-I{repo_root}"] + extra_cc_flags + [c_path, "-o", bin_path], timeout=120, capture_output=True, text=True)

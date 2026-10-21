@@ -21,15 +21,15 @@ def isolated_environment():
 
 def validate(installation, report):
     installation = Path(installation).resolve()
-    cli = installation / 'w.exe'
+    cli = installation / 'wysna.exe'
     manifest = json.loads((installation / 'windows-bundle.json').read_text(encoding='utf-8'))
     environment = isolated_environment()
     checks = report['checks']
     with tempfile.TemporaryDirectory(prefix='w installed project á ') as temporary:
         work = Path(temporary)
-        source = work / 'hello á & spaces.w'
+        source = work / 'hello á & spaces.wysna'
         source.write_text('import "std/text" as text\nprint(text.join(["hola", "W"], " "))\n', encoding='utf-8')
-        invalid = work / 'invalid.w'
+        invalid = work / 'invalid.wysna'
         invalid.write_text('let value: int = "wrong"\n', encoding='utf-8')
 
         def run(name, arguments, expected=None, code=0, custom_environment=None, executable=cli):
@@ -65,8 +65,8 @@ def validate(installation, report):
             run(command + '-source-only', [command], code=1)
         run('selfhost-source-only', ['build', '--backend=selfhost', str(source), '-o', str(work / 'w1')], code=1)
         formatted = run('format', ['fmt', str(source)])
-        (work / 'formatted.w').write_text(formatted.stdout, encoding='utf-8')
-        run('format-idempotence', ['fmt', str(work / 'formatted.w')], formatted.stdout)
+        (work / 'formatted.wysna').write_text(formatted.stdout, encoding='utf-8')
+        run('format-idempotence', ['fmt', str(work / 'formatted.wysna')], formatted.stdout)
         packets = [
             {'jsonrpc': '2.0', 'id': 1, 'method': 'initialize', 'params': {}},
             {'jsonrpc': '2.0', 'id': 2, 'method': 'shutdown'},

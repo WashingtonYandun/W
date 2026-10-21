@@ -14,7 +14,7 @@ $reportRoot = (Resolve-Path $ReportDirectory).Path
 $workspace = Join-Path ([System.IO.Path]::GetTempPath()) ('w lifecycle á ' + [guid]::NewGuid())
 $installRoot = Join-Path $workspace 'installed W with spaces'
 $unrelatedDirectory = Join-Path $workspace 'unrelated tools'
-$project = Join-Path $workspace 'user project.w'
+$project = Join-Path $workspace 'user project.wysna'
 New-Item -ItemType Directory -Force $unrelatedDirectory | Out-Null
 Set-Content -LiteralPath $project -Value 'print(42)' -Encoding utf8
 $environmentKey = [Microsoft.Win32.Registry]::CurrentUser.CreateSubKey('Environment')
@@ -52,17 +52,17 @@ try {
     if ($installedPath -cne ($baseline + ';' + $installRoot)) { throw 'Installation changed unrelated PATH content.' }
 
     # Reinstall repairs missing files without duplicating PATH or damaging projects.
-    Remove-Item -LiteralPath (Join-Path $installRoot 'stdlib/text.w')
+    Remove-Item -LiteralPath (Join-Path $installRoot 'stdlib/text.wysna')
     Run-Installer 'repair' @('/TASKS=addtopath')
     if ((Get-UserPath) -cne $installedPath) { throw 'Repair duplicated or changed PATH.' }
-    & (Join-Path $installRoot 'w.exe') check $project
+    & (Join-Path $installRoot 'wysna.exe') check $project
     if ($LASTEXITCODE -ne 0) { throw 'Repair did not preserve a working compiler.' }
-    if (!(Test-Path (Join-Path $installRoot 'stdlib/text.w'))) { throw 'Repair did not restore the standard library.' }
+    if (!(Test-Path (Join-Path $installRoot 'stdlib/text.wysna'))) { throw 'Repair did not restore the standard library.' }
     Uninstall-W 'uninstall'
     $installed = $false
     if ((Get-UserPath) -cne $baseline) { throw 'Uninstall removed unrelated PATH entries.' }
     if (!(Test-Path $project)) { throw 'Uninstall removed a user project.' }
-    if (Test-Path (Join-Path $installRoot 'w.exe')) { throw 'Uninstall left the installed command behind.' }
+    if (Test-Path (Join-Path $installRoot 'wysna.exe')) { throw 'Uninstall left the installed command behind.' }
 
     # An entry added by the user must survive installation and uninstallation.
     $preexisting = $baseline + ';' + $installRoot
@@ -79,7 +79,7 @@ try {
     Run-Installer 'no-path-install' @('/TASKS=')
     $installed = $true
     if ((Get-UserPath) -cne $baseline) { throw 'The PATH opt-out was ignored.' }
-    & (Join-Path $installRoot 'w.exe') version
+    & (Join-Path $installRoot 'wysna.exe') version
     if ($LASTEXITCODE -ne 0) { throw 'Direct execution failed without PATH registration.' }
     Uninstall-W 'no-path-uninstall'
     $installed = $false

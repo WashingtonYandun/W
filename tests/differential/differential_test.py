@@ -157,27 +157,27 @@ def run_differential_suite(repo_root: str, w1_bin: str, generated_count: int = 2
     case_files: List[str] = []
     if os.path.exists(cases_dir):
         for fname in sorted(os.listdir(cases_dir)):
-            if fname.endswith(".w"):
+            if fname.endswith(".wysna"):
                 case_files.append(os.path.join(cases_dir, fname))
 
-    case_files += sorted(glob.glob(os.path.join(repo_root, 'tests', 'modules', '*', 'main.w')))
+    case_files += sorted(glob.glob(os.path.join(repo_root, 'tests', 'modules', '*', 'main.wysna')))
 
     invalid_files: List[str] = sorted(
-        glob.glob(os.path.join(repo_root, "tests", "*", "invalid", "*.w"))
-        + glob.glob(os.path.join(repo_root, "tests", "errors", "invalid_*.w"))
+        glob.glob(os.path.join(repo_root, "tests", "*", "invalid", "*.wysna"))
+        + glob.glob(os.path.join(repo_root, "tests", "errors", "invalid_*.wysna"))
     )
 
     runtime_panic_cases: List[Tuple[str, str]] = [
         (
-            "panic_div_zero.w",
+            "panic_div_zero.wysna",
             "fn main() -> unit {\n    let z = 0\n    print(10 / z)\n}\n",
         ),
         (
-            "panic_float_div_zero.w",
+            "panic_float_div_zero.wysna",
             "fn main() -> unit {\n    let z = 0.0\n    print(10.0 / z)\n}\n",
         ),
         (
-            "panic_index_oob.w",
+            "panic_index_oob.wysna",
             "fn main() -> unit {\n    let xs = [1, 2, 3]\n    print(xs[9])\n}\n",
         ),
     ]
@@ -185,7 +185,7 @@ def run_differential_suite(repo_root: str, w1_bin: str, generated_count: int = 2
     labels = [os.path.relpath(path, repo_root) for path in case_files]
     labels += [label for label, _ in runtime_panic_cases]
     labels += [os.path.relpath(path, repo_root) for path in invalid_files]
-    labels += [f'seed_{base_seed + offset}.w' for offset in range(generated_count)]
+    labels += [f'seed_{base_seed + offset}.wysna' for offset in range(generated_count)]
     unsupported_rows = sum(bool(unsupported_reason(label, engine)) for label in labels for engine in ENGINES)
     engine_rows = len(labels) * len(ENGINES) - unsupported_rows
     passed_cases = 0
@@ -222,7 +222,7 @@ def run_differential_suite(repo_root: str, w1_bin: str, generated_count: int = 2
         for offset in range(generated_count):
             seed = base_seed + offset
             code = generate_valid_program(seed)
-            label = f"seed_{seed}.w"
+            label = f"seed_{seed}.wysna"
             ok, detail = verify_four_way_equivalence(code, label, w1_bin, repo_root, work_dir)
             if ok:
                 passed_cases += 1
@@ -343,7 +343,7 @@ def run_fuzz_suite(
             pass
         except Exception as exc:
             crashes += 1
-            fail_path = os.path.join(failures_dir, f"{seed}.w")
+            fail_path = os.path.join(failures_dir, f"{seed}.wysna")
             with open(fail_path, "w", encoding="utf-8") as ff:
                 ff.write(fuzz_code)
             print(

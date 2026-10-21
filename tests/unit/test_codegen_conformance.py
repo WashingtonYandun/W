@@ -9,7 +9,7 @@ from codegen.CCodeGen import CCodeGen
 
 
 def run_codegen_tests() -> bool:
-    w_files = sorted(glob.glob("tests/runtime/*.w"))
+    w_files = sorted(glob.glob("tests/runtime/*.wysna"))
     passed = 0
     failed = 0
     repo_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -20,7 +20,7 @@ def run_codegen_tests() -> bool:
 
     with tempfile.TemporaryDirectory() as tmpdir:
         for w_file in w_files:
-            exp_file = w_file[:-2] + ".expected"
+            exp_file = w_file[:-6] + ".expected"
             if not os.path.exists(exp_file):
                 continue
 
@@ -34,7 +34,7 @@ def run_codegen_tests() -> bool:
                 TypeChecker(file=w_file).check(ast)
                 c_code = CCodeGen(file=w_file).generate(ast)
 
-                base = os.path.basename(w_file)[:-2]
+                base = os.path.basename(w_file)[:-6]
                 c_path = os.path.join(tmpdir, f"{base}.c")
                 bin_path = os.path.join(tmpdir, base)
 

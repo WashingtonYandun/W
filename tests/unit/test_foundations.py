@@ -12,12 +12,12 @@ ROOT = Path(__file__).resolve().parents[2]
 
 def test_readme_examples_execute_in_all_engines():
     text = (ROOT / 'README.md').read_text(encoding='utf-8')
-    blocks = re.findall(r'```w\n(.*?)```', text, re.S)
+    blocks = re.findall(r'```wysna\n(.*?)```', text, re.S)
     assert len(blocks) == 5
     w1 = ensure_selfhost_w1_binary(str(ROOT))
     with tempfile.TemporaryDirectory(prefix='w-doc-contract-') as temporary:
         for index, source in enumerate(blocks):
-            ok, detail = verify(source, f'readme_{index}.w', w1, temporary, strict=True,
+            ok, detail = verify(source, f'readme_{index}.wysna', w1, temporary, strict=True,
                                 sanitize=os.environ.get('W_SANITIZE') == '1')
             assert ok, detail
 
@@ -83,14 +83,14 @@ print(w_host_active_handles() - baseline)
 '''
     w1 = ensure_selfhost_w1_binary(str(ROOT))
     with tempfile.TemporaryDirectory(prefix='w-persistent-resource-') as temporary:
-        ok, detail = verify(source, 'persistent_resources.w', w1, temporary, strict=True,
+        ok, detail = verify(source, 'persistent_resources.wysna', w1, temporary, strict=True,
                             expected='10000 0 0\n100000 0 0\n0\n', run_timeout=300,
                             sanitize=os.environ.get('W_SANITIZE') == '1')
         assert ok, detail
 
 
 def test_fallible_unit_tail_parity():
-    source = ROOT / 'tests/runtime/fallible_unit_tails.w'
+    source = ROOT / 'tests/runtime/fallible_unit_tails.wysna'
     w1 = ensure_selfhost_w1_binary(str(ROOT))
     with tempfile.TemporaryDirectory(prefix='w-unit-result-') as temporary:
         ok, detail = verify(source.read_text(), str(source), w1, temporary, strict=True,
@@ -108,7 +108,7 @@ def test_unit_tail_rejects_incompatible_error_channels():
     with tempfile.TemporaryDirectory(prefix='w-unit-error-channel-') as temporary:
         for index, source in enumerate(sources):
             for engine in ('interpreter', 'ast', 'hir', 'w1'):
-                result = run_engine(engine, source, 'unit_error_channel.w', w1, Path(temporary) / str(index) / engine)
+                result = run_engine(engine, source, 'unit_error_channel.wysna', w1, Path(temporary) / str(index) / engine)
                 assert result.exit_code == 1 and result.diag_code == 'W2004', vars(result)
                 assert not result.infrastructure_error, vars(result)
 
@@ -127,7 +127,7 @@ write_failure() else error { print(error.operation == "write", error.code > 0, e
 '''
     w1 = ensure_selfhost_w1_binary(str(ROOT))
     with tempfile.TemporaryDirectory(prefix='w-flush-failure-') as temporary:
-        ok, detail = verify(source, 'flush_failure.w', w1, temporary, strict=True,
+        ok, detail = verify(source, 'flush_failure.wysna', w1, temporary, strict=True,
                             expected='true true true\n', sanitize=os.environ.get('W_SANITIZE') == '1')
         assert ok, detail
 

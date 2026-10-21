@@ -67,7 +67,7 @@ def test_seeded_semantic_properties():
     with tempfile.TemporaryDirectory(prefix='w-semantic-properties-') as temporary:
         for seed in (17, 29, 37, 51, 63, 101, 202, 303):
             source, expected = generate_properties(seed)
-            ok, detail = verify(source, f'audit_properties_{seed}.w', w1, temporary,
+            ok, detail = verify(source, f'audit_properties_{seed}.wysna', w1, temporary,
                                 expected=expected, strict=True, sanitize=os.environ.get('W_SANITIZE') == '1')
             assert ok, f'seed {seed}: {detail}\n{source}'
 
