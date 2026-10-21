@@ -16,8 +16,8 @@ ROOT = Path(__file__).resolve().parents[2]
 
 def test_toolkit_semantics_across_four_engines():
     w1 = ensure_selfhost_w1_binary(str(ROOT))
-    source = (ROOT / 'tests/stdlib/toolkit.w').read_text()
-    expected = (ROOT / 'tests/stdlib/toolkit.expected').read_text()
+    source = (ROOT / 'tests/stdlib/toolkit.w').read_text(encoding='utf-8')
+    expected = (ROOT / 'tests/stdlib/toolkit.expected').read_text(encoding='utf-8')
     with tempfile.TemporaryDirectory() as directory:
         results = [run_engine(engine, source, 'toolkit', w1, directory,
                    sanitize=os.environ.get('W_SANITIZE') == '1') for engine in ('interpreter', 'ast', 'hir', 'w1')]
@@ -99,7 +99,7 @@ int main(void) {
     with tempfile.TemporaryDirectory() as temporary:
         source = Path(temporary) / 'handles.c'
         binary = Path(temporary) / executable_name('handles')
-        source.write_text(code)
+        source.write_text(code, encoding='utf-8')
         subprocess.run(compiler_command() + ['-std=c99'] + ([] if os.name == 'nt' else ['-fsanitize=address,undefined']) + ['-I' + str(ROOT),
                        str(source), '-o', str(binary)], check=True, capture_output=True, timeout=120)
         result = subprocess.run([str(binary)], capture_output=True, text=True, timeout=30)
@@ -148,7 +148,7 @@ int main(int argc, char** argv) {
     assert(w_host_entries == NULL);
     return 0;
 }
-''')
+''', encoding='utf-8')
         subprocess.run(compiler_command() + ['-std=c99', '-O2', '-I' + str(ROOT), str(source), '-o', str(binary)],
                        check=True, capture_output=True, timeout=120)
         subprocess.run([str(binary), str(data_path)], check=True, capture_output=True, timeout=30)
@@ -175,7 +175,7 @@ def test_standard_file_cleanup_runs_on_runtime_panic():
             source.write_text('import "std/buffer"\nimport "std/files"\nfn main() {\n'
                 f'let file = files.open({json.dumps(str(output))}, 1) else error {{ exit(2) return }}\n'
                 'let data = buffer.from_text("flushed")\n'
-                'file.write(data) else error { exit(2) }\nprint(1 / 0)\n}\n')
+                'file.write(data) else error { exit(2) }\nprint(1 / 0)\n}\n', encoding='utf-8')
             if backend == 'interpreter':
                 command = [sys.executable, str(ROOT / 'main.py'), 'run', str(source)]
             else:
@@ -205,7 +205,7 @@ second.borrow() else error { print(error.message) }
 print(second.close(), audit_live(), first.close(), audit_live(), first.close())
 }
 '''.replace('second.borrow() else error { print(error.message) }',
-            'let rejected = resources.acquire(handle, |value: opaque| -> int { audit_dispose(value) }) else error { print(error.message)\nfirst }'))
+            'let rejected = resources.acquire(handle, |value: opaque| -> int { audit_dispose(value) }) else error { print(error.message)\nfirst }'), encoding='utf-8')
         adapter = ROOT / 'tests/ffi/resource_adapter.c'
         shared = directory / ('adapter.dll' if os.name == 'nt' else 'adapter.dylib' if sys.platform == 'darwin' else 'adapter.so')
         subprocess.run(compiler_command() + ['-std=c99', '-dynamiclib' if sys.platform == 'darwin' else '-shared',

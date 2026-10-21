@@ -102,7 +102,7 @@ def execute(command, directory, phase, timeout, env=None):
     except OSError as error:
         record = {'command': command, 'returncode': 127, 'stdout': '', 'stderr': str(error),
                   'launch_error': True}
-    (directory / (phase + '.json')).write_text(json.dumps(record, indent=2))
+    (directory / (phase + '.json')).write_text(json.dumps(record, indent=2), encoding='utf-8')
     return record
 
 
@@ -110,7 +110,7 @@ def run_engine(engine, source, label, w1_bin, directory, sanitize=False):
     directory = Path(directory) / engine
     directory.mkdir(parents=True, exist_ok=True)
     source_path = directory / 'source.w'
-    source_path.write_text(source)
+    source_path.write_text(source, encoding='utf-8')
     c_path, binary = directory / 'program.c', directory / executable_name('program')
     driver = [sys.executable, str(ROOT / 'main.py')]
     if engine == 'interpreter':
@@ -230,7 +230,7 @@ def verify_case(source, label, w1_bin, work_dir, expected=None, sanitize=False, 
     report = {'label': label, 'feature': feature_for(label), 'sanitize': sanitize, 'status': 'passed' if ok else 'failed',
               'unsupported': unsupported, 'results': rows}
     artifacts.mkdir(parents=True, exist_ok=True)
-    (artifacts / (case_id + '.json')).write_text(json.dumps(report, indent=2))
+    (artifacts / (case_id + '.json')).write_text(json.dumps(report, indent=2), encoding='utf-8')
     if unsupported:
         print(f'  [UNSUPPORTED] {label}: {unsupported}')
     if not ok:
