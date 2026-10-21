@@ -62,6 +62,18 @@ fn parsed_unit_return(start: int) -> bool {
     return found
 }
 
+fn parsed_unit_result_return(start: int) -> bool {
+    let mut found = false
+    for index in start..g_pos {
+        let token = g_tokens[index]
+        if token.kind == "BANG" { return found }
+        if token.kind == "LPAREN" or token.kind == "RPAREN" { continue }
+        if not found and token.kind == "IDENT" and token.val == "unit" { found = true }
+        else { return false }
+    }
+    return false
+}
+
 fn parse_type_ann() -> bool {
     let mut is_fallible = false
     if match_kind("FN") {

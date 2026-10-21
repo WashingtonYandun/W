@@ -1,7 +1,7 @@
 """Convert lexical lambdas into explicit snapshot environments and free functions."""
 from node import NodeType as A
 from node.NodeType import clone_ast
-from checker.WType import FunctionType, StructType
+from checker.WType import FunctionType, StructType, ResultType, UnitType
 from checker.SymbolTable import Scope, Symbol
 from error.Error import TypeError
 
@@ -35,7 +35,8 @@ def convert_lambda(checker, expression):
     checker.current_scope, checker.current_fn_ret_type, checker.loop_depth = scope, returned, 0
     checker.expected_type = returned
     try:
-        inferred = checker._check_block(expression.body)
+        discard = returned == UnitType or isinstance(returned, ResultType) and returned.ok == UnitType
+        inferred = checker._check_block(expression.body, is_statement_context=discard)
         returned = returned or inferred
         if returned is None:
             raise TypeError('Block lambda needs an explicit return type', file=checker.file,

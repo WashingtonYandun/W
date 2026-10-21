@@ -1,14 +1,18 @@
 import "std/buffer"
 extern "C" fn w_host_fs(first: opaque, second: opaque, operation: int) -> int
-pub struct FsError { operation: str, path: str, code: int }
+extern "C" fn w_host_last_error() -> int
+extern "C" fn w_host_last_error_domain() -> int
+pub struct FsError { operation: str, path: str, code: int, domain: int }
 
 fn apply(path: str, target: str, operation: int, name: str) -> int ! FsError {
     let first = buffer.from_text(path)
     let second = buffer.from_text(target)
     let status = w_host_fs(first.borrow(), second.borrow(), operation)
+    let code = w_host_last_error()
+    let domain = w_host_last_error_domain()
     first.close()
     second.close()
-    if status < 0 { return Err(FsError { operation: name, path: path, code: status }) }
+    if status < 0 { return Err(FsError { operation: name, path: path, code: code, domain: domain }) }
     return status
 }
 pub fn exists(path: str) -> bool ! FsError { return apply(path, "", 0, "exists")? == 1 }

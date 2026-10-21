@@ -1142,7 +1142,10 @@ fn parse_lambda() -> ExprRes {
     if match_kind("FAT_ARROW") { result = parse_expr(0, true).val }
     else { result = parse_block_expr() }
     let signature_types = sem_types[lambda.type_id].args
-    if signature_types[len(signature_types) - 1] == sem_unit { result = "w_unit()" }
+    let return_type = signature_types[len(signature_types) - 1]
+    if return_type == sem_unit { result = "w_unit()" }
+    elif sem_unit_return(return_type) { result = bind_call("w_discard_result_value(" + own_expr(result) + ")").val }
+    elif sem_kind(return_type) == "result" { result = bind_call("w_wrap_result(" + own_expr(result) + ", \"\")").val }
     let returned = new_aux("_ret")
     emit_line("WVal " + returned + " = " + own_expr(result) + ";")
     pop_scope()

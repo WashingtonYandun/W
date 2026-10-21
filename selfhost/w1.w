@@ -1067,6 +1067,18 @@ fn parsed_unit_return(start: int) -> bool {
     return found
 }
 
+fn parsed_unit_result_return(start: int) -> bool {
+    let mut found = false
+    for index in start..g_pos {
+        let token = g_tokens[index]
+        if token.kind == "BANG" { return found }
+        if token.kind == "LPAREN" or token.kind == "RPAREN" { continue }
+        if not found and token.kind == "IDENT" and token.val == "unit" { found = true }
+        else { return false }
+    }
+    return false
+}
+
 fn parse_type_ann() -> bool {
     let mut is_fallible = false
     if match_kind("FN") {
@@ -2404,7 +2416,10 @@ fn parse_lambda() -> ExprRes {
     if match_kind("FAT_ARROW") { result = parse_expr(0, true).val }
     else { result = parse_block_expr() }
     let signature_types = sem_types[lambda.type_id].args
-    if signature_types[len(signature_types) - 1] == sem_unit { result = "w_unit()" }
+    let return_type = signature_types[len(signature_types) - 1]
+    if return_type == sem_unit { result = "w_unit()" }
+    elif sem_unit_return(return_type) { result = bind_call("w_discard_result_value(" + own_expr(result) + ")").val }
+    elif sem_kind(return_type) == "result" { result = bind_call("w_wrap_result(" + own_expr(result) + ", \"\")").val }
     let returned = new_aux("_ret")
     emit_line("WVal " + returned + " = " + own_expr(result) + ";")
     pop_scope()
@@ -2756,10 +2771,13 @@ fn parse_class_decl() -> unit {
             expect_kind("RPAREN")
             let mut fallible = false
             let mut unit_return = true
+            let mut unit_result_return = false
+            let mut type_start = 0
             if match_kind("ARROW") {
-                let type_start = g_pos
+                type_start = g_pos
                 fallible = parse_type_ann()
                 unit_return = parsed_unit_return(type_start)
+                unit_result_return = parsed_unit_result_return(type_start)
             }
             m_names.append(mname)
             m_arities.append(len(p_names))
@@ -2784,7 +2802,9 @@ fn parse_class_decl() -> unit {
             let mut ret_v = parse_block_expr()
             if unit_return { ret_v = "w_unit()" }
             let ret_hold = new_aux("_ret")
-            emit_line("WVal " + ret_hold + " = " + own_expr(ret_v) + ";")
+            let mut owned_return = own_expr(ret_v)
+            if unit_result_return { owned_return = "w_discard_result_value(" + owned_return + ")" }
+            emit_line("WVal " + ret_hold + " = " + owned_return + ";")
             pop_scope()
             if g_fn_fallible {
                 emit_line("return w_wrap_result(" + ret_hold + ", \"" + g_cur_err_type + "\");")
@@ -3004,10 +3024,13 @@ fn parse_fn_decl() -> unit {
     expect_kind("RPAREN")
     let mut fallible = false
     let mut unit_return = true
+    let mut unit_result_return = false
+    let mut type_start = 0
     if match_kind("ARROW") {
-        let type_start = g_pos
+        type_start = g_pos
         fallible = parse_type_ann()
         unit_return = parsed_unit_return(type_start)
+        unit_result_return = parsed_unit_result_return(type_start)
     }
     let mut sig = "void"
     if len(param_names) > 0 {
@@ -3035,7 +3058,9 @@ fn parse_fn_decl() -> unit {
     let mut ret_v = parse_block_expr()
     if unit_return { ret_v = "w_unit()" }
     let ret_hold = new_aux("_ret")
-    emit_line("WVal " + ret_hold + " = " + own_expr(ret_v) + ";")
+    let mut owned_return = own_expr(ret_v)
+    if unit_result_return { owned_return = "w_discard_result_value(" + owned_return + ")" }
+    emit_line("WVal " + ret_hold + " = " + owned_return + ";")
     pop_scope()
     if g_fn_fallible {
         emit_line("return w_wrap_result(" + ret_hold + ", \"" + g_cur_err_type + "\");")
@@ -3109,6 +3134,7 @@ fn parse_extern_decl() {
     elif returned == "int" or returned == "int32" or returned == "int64" { result = "return w_int(" + call + ");" }
     elif returned == "float" or returned == "double" { result = "return w_float(" + call + ");" }
     elif returned == "bool" { result = "return w_bool(" + call + ");" }
+    elif native_name == "w_host_buffer_new" or native_name == "w_host_file_open" { result = "return w_host_owned_pointer(" + call + ");" }
     else { result = "return w_pointer(" + call + ");" }
     g_fn_defs.append("static WVal " + c_name + "(" + wrapped_params + ") { " + result + " }")
 }
@@ -3682,7 +3708,7 @@ let mut sem_expected = -1
 fn sem_builtin(name: str) -> bool {
     return name == "join_strings" or name == "print" or name == "eprint" or name == "len" or name == "int" or name == "float" or name == "str" or name == "ord" or name == "chr" or name == "bytes" or name == "slice" or name == "args" or name == "exit" or name == "enumerate" or name == "dict_items" or name == "read_file" or name == "write_file" or name == "Some" or name == "Ok" or name == "Err" or name == "weak" or name == "upgrade"
 }
-fn sem_call_builtin(name: str, args: list[int]) -> int {
+fn sem_call_builtin(name: str, args: list[int], discard: bool) -> int {
     let count = len(args)
     if name == "print" or name == "eprint" { return sem_unit }
     if name == "args" {
@@ -3705,7 +3731,8 @@ fn sem_call_builtin(name: str, args: list[int]) -> int {
     if name == "Ok" or name == "Err" {
         if sem_expected >= 0 and sem_kind(sem_expected) == "result" {
             let channel = sem_types[sem_expected].args
-            if name == "Ok" { sem_require(first, channel[0], "W2001") }
+            if name == "Ok" { if not discard or channel[0] != sem_unit { sem_require(first, channel[0], "W2001") } }
+            elif discard and channel[0] == sem_unit { sem_require(first, channel[1], "W2004") }
             else { sem_require(first, channel[1], "W2001") }
             return sem_expected
         }
@@ -3766,9 +3793,9 @@ fn sem_call_builtin(name: str, args: list[int]) -> int {
     sem_error("W1001", "unknown builtin")
     return sem_unit
 }
-fn sem_check_call(signature: int, args: list[int]) -> int {
+fn sem_check_call(signature: int, args: list[int], discard: bool) -> int {
     let type_ = sem_types[signature]
-    if type_.kind == "builtin" { return sem_call_builtin(type_.name, args) }
+    if type_.kind == "builtin" { return sem_call_builtin(type_.name, args, discard) }
     if type_.kind == "enum_ctor" {
         let mut separator = -1
         for i in 0..len(type_.name) - 1 { if slice(type_.name, i, i + 1) == "." { separator = i } }
@@ -3783,7 +3810,8 @@ fn sem_check_call(signature: int, args: list[int]) -> int {
             if len(args) != 1 { sem_error("W2005", "Result constructor arity") }
             if sem_expected >= 0 and sem_kind(sem_expected) == "result" {
                 let expected = sem_types[sem_expected]
-                if variant == "Ok" { sem_require(args[0], expected.args[0], "W2001") }
+                if variant == "Ok" { if not discard or expected.args[0] != sem_unit { sem_require(args[0], expected.args[0], "W2001") } }
+                elif discard and expected.args[0] == sem_unit { sem_require(args[0], expected.args[1], "W2004") }
                 else { sem_require(args[0], expected.args[1], "W2001") }
             }
             if variant == "Ok" { return sem_wrap("ok", args[0]) }
@@ -3855,7 +3883,7 @@ fn sem_check_call(signature: int, args: list[int]) -> int {
     if type_.kind == "constructor" {
         let target = type_.args[0]
         let method = sem_method(sem_types[target].name, "init")
-        if method >= 0 { sem_check_call(sem_functions[method].type_id, args) }
+        if method >= 0 { sem_check_call(sem_functions[method].type_id, args, false) }
         elif len(args) != 0 { sem_error("W2005", "constructor arity") }
         return target
     }
@@ -4288,7 +4316,7 @@ fn sem_expression(minimum: int, allow_struct: bool) -> SemValue {
                     sem_check_generic_constraints(function_index, args, call_line, call_col)
                 }
             }
-            let actual = sem_check_call(left.type_id, args)
+            let actual = sem_check_call(left.type_id, args, statement)
             let result_kind = sem_kind(actual)
             if sem_expected >= 0 and sem_kind(sem_expected) == "result" and (result_kind == "ok" or result_kind == "err") and sem_assignable(actual, sem_expected) {
                 left = sem_value(sem_expected)
@@ -4412,11 +4440,17 @@ fn sem_intersect(left: list[str], right: list[str]) -> list[str] {
     for value in left { for other in right { if value == other { result.append(value) } } }
     return result
 }
+fn sem_check_discarded_branch(type_id: int, statement: bool) {
+    if statement and sem_expected >= 0 and sem_kind(sem_expected) == "result" and sem_unit_return(sem_expected) {
+        sem_require_tail(type_id, sem_expected)
+    }
+}
 fn sem_if(statement: bool) -> SemValue {
     sem_expect("IF")
     sem_require(sem_expression(0, false).type_id, sem_bool, "W2001")
     let initial = sem_initialized
     let first = sem_block(statement)
+    sem_check_discarded_branch(first.type_id, statement)
     let mut initialized = sem_initialized
     let mut all_return = first.terminates
     let mut common = first.type_id
@@ -4424,6 +4458,7 @@ fn sem_if(statement: bool) -> SemValue {
         sem_initialized = initial
         sem_require(sem_expression(0, false).type_id, sem_bool, "W2001")
         let branch = sem_block(statement)
+        sem_check_discarded_branch(branch.type_id, statement)
         if not branch.terminates and not all_return and branch.type_id != common { if not statement { sem_error("W2001", "incompatible if branches") } common = sem_unit }
         if not branch.terminates {
             if all_return { initialized = sem_initialized } else { initialized = sem_intersect(initialized, sem_initialized) }
@@ -4434,6 +4469,7 @@ fn sem_if(statement: bool) -> SemValue {
     sem_initialized = initial
     if sem_match("ELSE") {
         let branch = sem_block(statement)
+        sem_check_discarded_branch(branch.type_id, statement)
         if not branch.terminates {
             if not all_return and branch.type_id != common { if not statement { sem_error("W2001", "incompatible if branches") } common = sem_unit }
             if all_return { initialized = sem_initialized } else { initialized = sem_intersect(initialized, sem_initialized) }
@@ -4797,6 +4833,20 @@ fn sem_block(statement: bool) -> SemFlow {
     sem_variables = saved_variables
     return SemFlow { type_id: tail, terminates: terminates }
 }
+fn sem_unit_return(type_id: int) -> bool {
+    if type_id == sem_unit { return true }
+    return type_id >= 0 and sem_kind(type_id) == "result" and sem_types[type_id].args[0] == sem_unit
+}
+fn sem_require_tail(source: int, target: int) {
+    if sem_unit_return(target) {
+        if sem_kind(target) == "result" {
+            let mut error_type = -1
+            if sem_kind(source) == "result" { error_type = sem_types[source].args[1] }
+            elif sem_kind(source) == "err" { error_type = sem_types[source].args[0] }
+            if error_type >= 0 and not sem_error_channel_assignable(error_type, sem_types[target].args[1]) { sem_error("W2004", "incompatible error channel") }
+        }
+    } else { sem_require(source, target, "W2004") }
+}
 fn sem_check_function(function: SemFunction) {
     if function.body < 0 { return }
     let previous_position = sem_pos
@@ -4833,8 +4883,8 @@ fn sem_check_function(function: SemFunction) {
             if sem_tokens[sem_pos + 1].kind != "SUPER" or sem_tokens[sem_pos + 2].kind != "DOT" or sem_tokens[sem_pos + 3].val != "init" { sem_error("W3004", "super.init must be first") }
         }
     }
-    let flow = sem_block(sem_return == sem_unit)
-    if sem_return != sem_unit and not flow.terminates { sem_require(flow.type_id, sem_return, "W2004") }
+    let flow = sem_block(sem_unit_return(sem_return))
+    if not flow.terminates { sem_require_tail(flow.type_id, sem_return) }
     sem_complete_constructor()
     sem_pos = previous_position
     sem_variables = variables
@@ -5110,12 +5160,13 @@ fn sem_lambda() -> SemValue {
     sem_loop = 0
     if sem_match("FAT_ARROW") {
         sem_expected = returned
+        sem_statement_context = sem_unit_return(returned)
         let actual = sem_expression(0, true).type_id
-        if returned < 0 { returned = actual } else { sem_require(actual, returned, "W2004") }
+        if returned < 0 { returned = actual } else { sem_require_tail(actual, returned) }
     } else {
         if returned < 0 { sem_error("W2001", "block lambda needs return type context") }
-        let flow = sem_block(sem_return == sem_unit)
-        if returned != sem_unit and not flow.terminates { sem_require(flow.type_id, returned, "W2004") }
+        let flow = sem_block(sem_unit_return(sem_return))
+        if not flow.terminates { sem_require_tail(flow.type_id, returned) }
     }
     types.append(returned)
     let signature = sem_intern("function", "", types)

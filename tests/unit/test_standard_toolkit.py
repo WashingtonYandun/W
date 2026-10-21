@@ -55,7 +55,7 @@ fn main() -> unit ! files.FileError | fs.FsError | buffer.BufferError {
         if count == 0 { break }
     }
     print(total, input.close())
-    input.read(2) else error { print(error.operation, error.code) return }
+    input.read(2) else error { print(error.operation, error.code > 0, error.domain > 0) return }
     return
 }
 main()
@@ -64,7 +64,7 @@ print(fs.exists(PATH) else error { false }, fs.exists(MOVED) else error { false 
 fs.remove(MOVED) else error { exit(1) }
 print(path.join("root", "child"), path.basename("C:/é/file.w"), path.dirname("C:/file.w"))
 '''.replace('PATH', json.dumps(str(path), ensure_ascii=False)).replace('MOVED', json.dumps(str(moved), ensure_ascii=False))
-        expected = '0 0 6\n6 0\nread -1\nfalse true\nroot/child file.w C:/\n'
+        expected = '0 0 6\n6 0\nread true true\nfalse true\nroot/child file.w C:/\n'
         for engine in ('interpreter', 'ast', 'hir', 'w1'):
             result = run_engine(engine, text, 'streaming', w1, directory / engine,
                                 sanitize=os.environ.get('W_SANITIZE') == '1')

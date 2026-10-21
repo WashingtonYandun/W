@@ -277,3 +277,17 @@ external C ABI keeps its declared signatures.
 `std/resources` provides checked borrowing, idempotent close and explicit scopes.
 Raw aliases remain unsafe after close. Panic, exit and process termination do not unwind
 resource scopes. See [Standard library](STDLIB.md).
+
+## Trusted standard host owners
+
+File and Bytes store an owned opaque value: address plus a shared runtime owner
+with a trusted close function. Native clone/release retains/releases that owner;
+last release closes the checked host ID. The reference engine retains the same
+owner with WPointer references. No user finalizer is invoked. Raw external opaque
+values keep their original non-owning scalar ABI. Bytes.borrow explicitly strips
+ownership, so retaining a borrowed ID does not extend the allocation lifetime.
+
+Explicit close is idempotent and affects every alias. Automatic close is a fallback;
+observe explicit close status when a write/flush error matters. Strong cycles and
+raw FFI disposal callbacks remain subject to their documented explicit discipline.
+Host handle/storage accounting is separate from WVal allocation accounting.
