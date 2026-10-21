@@ -286,6 +286,16 @@ static inline void* w_realloc_safe(void* old_ptr, size_t new_size) {
 }
 
 static inline void w_runtime_cleanup(void) {
+#ifdef _WIN32
+    if (w_g_argv_allocated && w_g_argv) {
+        for (int i = 0; i < w_g_argc; i++) {
+            if (w_g_argv[i]) free(w_g_argv[i]);
+        }
+        free(w_g_argv);
+        w_g_argv = NULL;
+        w_g_argv_allocated = false;
+    }
+#endif
     while (w_g_string_literals) {
         WStringLiteral* literal = w_g_string_literals;
         w_g_string_literals = literal->next;
@@ -2504,8 +2514,7 @@ static inline WVal w_builtin_ord(WVal v) {
     size_t slen = 0;
     int64_t cp = 0;
     if (!w_utf8_valid_codepoint_at_n(v.as.string.data, v.as.string.length, 0, &slen, &cp)) {
-        fprintf(stderr, "[W4003] RuntimeError: ord() invalid UTF-8 sequence\n");
-        exit(1);
+        return w_int((unsigned char)v.as.string.data[0]);
     }
     return w_int(cp);
 }
@@ -2722,6 +2731,9 @@ static inline WVal w_builtin_write_file(WVal path, WVal content) {
 
 static int w_g_argc = 0;
 static char** w_g_argv = NULL;
+#ifdef _WIN32
+static bool w_g_argv_allocated = false;
+#endif
 
 /*
  * Propagates an unhandled `Err` out of the program entrypoint.
@@ -2754,10 +2766,64 @@ static inline void w_report_entrypoint_error(WVal error) {
     free(rendered);
 }
 
+#ifdef _WIN32
+static inline void w_init_args(int argc, char** argv) {
+    (void)argc; (void)argv;
+    typedef LPWSTR* (WINAPI *pfnCommandLineToArgvW)(LPCWSTR, int*);
+    HMODULE hShell = LoadLibraryA("shell32.dll");
+    pfnCommandLineToArgvW pCmdLineToArgvW = hShell ? (pfnCommandLineToArgvW)(void*)GetProcAddress(hShell, "CommandLineToArgvW") : NULL;
+    int w_argc = 0;
+    LPWSTR* w_argv = pCmdLineToArgvW ? pCmdLineToArgvW(GetCommandLineW(), &w_argc) : NULL;
+    if (w_argv && w_argc > 0) {
+        w_g_argc = w_argc;
+        w_g_argv = (char**)w_alloc_safe(sizeof(char*) * (size_t)(w_argc + 1));
+        w_g_argv_allocated = true;
+        for (int i = 0; i < w_argc; i++) {
+            int len = WideCharToMultiByte(CP_UTF8, 0, w_argv[i], -1, NULL, 0, NULL, NULL);
+            char* utf8 = (char*)w_alloc_safe(len > 0 ? (size_t)len : 1);
+            if (len > 0) {
+                WideCharToMultiByte(CP_UTF8, 0, w_argv[i], -1, utf8, len, NULL, NULL);
+            } else {
+                utf8[0] = '\0';
+            }
+            w_g_argv[i] = utf8;
+        }
+        w_g_argv[w_argc] = NULL;
+        LocalFree(w_argv);
+    } else {
+        w_g_argc = argc;
+        w_g_argv = (char**)w_alloc_safe(sizeof(char*) * (size_t)(argc + 1));
+        w_g_argv_allocated = true;
+        for (int i = 0; i < argc; i++) {
+            int wlen = MultiByteToWideChar(CP_ACP, 0, argv[i], -1, NULL, 0);
+            if (wlen > 0) {
+                wchar_t* wide = (wchar_t*)w_alloc_safe((size_t)wlen * sizeof(wchar_t));
+                MultiByteToWideChar(CP_ACP, 0, argv[i], -1, wide, wlen);
+                int u8len = WideCharToMultiByte(CP_UTF8, 0, wide, -1, NULL, 0, NULL, NULL);
+                char* utf8 = (char*)w_alloc_safe(u8len > 0 ? (size_t)u8len : 1);
+                if (u8len > 0) {
+                    WideCharToMultiByte(CP_UTF8, 0, wide, -1, utf8, u8len, NULL, NULL);
+                } else {
+                    utf8[0] = '\0';
+                }
+                w_g_argv[i] = utf8;
+                free(wide);
+            } else {
+                size_t blen = strlen(argv[i]);
+                char* copy = (char*)w_alloc_safe(blen + 1);
+                memcpy(copy, argv[i], blen + 1);
+                w_g_argv[i] = copy;
+            }
+        }
+        w_g_argv[argc] = NULL;
+    }
+}
+#else
 static inline void w_init_args(int argc, char** argv) {
     w_g_argc = argc;
     w_g_argv = argv;
 }
+#endif
 
 static inline WVal w_builtin_args(void) {
     WListBuf* b = (WListBuf*)w_alloc_safe(sizeof(WListBuf));
