@@ -565,7 +565,12 @@ fn parse_prefix_expr(allow_struct: bool) -> ExprRes {
         return ExprRes { val: "w_float(" + tok.val + ")", lref: "" }
     }
     if match_kind("STR") {
-        return ExprRes { val: "w_str_n(" + escape_c_str(tok.val) + ", " + str(len(bytes(tok.val))) + ")", lref: "" }
+        if len(tok.val) <= 1 {
+            return ExprRes { val: "w_str_n(" + escape_c_str(tok.val) + ", " + str(len(bytes(tok.val))) + ")", lref: "" }
+        }
+        let literal = new_aux("_literal")
+        emit_line("static WStringLiteral " + literal + " = {0};")
+        return ExprRes { val: "w_literal_str_n(&" + literal + ", " + escape_c_str(tok.val) + ", " + str(len(bytes(tok.val))) + ")", lref: "" }
     }
     if match_kind("TRUE") {
         return ExprRes { val: "w_bool(true)", lref: "" }

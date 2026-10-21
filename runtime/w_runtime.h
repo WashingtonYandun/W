@@ -95,6 +95,19 @@ typedef struct {
     char* data;
 } WStringBuf;
 
+/* Literal descriptors have static lifetime; only their lazy index is allocated. */
+typedef struct WStringLiteral {
+    WStringBuf buffer;
+    struct WStringLiteral* next;
+} WStringLiteral;
+static WStringLiteral* w_g_string_literals = NULL;
+#ifdef W_STRING_METRICS
+static uint64_t w_g_string_scan_steps = 0;
+#define W_STRING_SCAN_STEP() (++w_g_string_scan_steps)
+#else
+#define W_STRING_SCAN_STEP() ((void)0)
+#endif
+
 /* ABI v2 keeps string metadata in its variant rather than in every value. */
 #define W_RUNTIME_ABI_VERSION 2
 struct WVal {
@@ -264,6 +277,13 @@ static inline void* w_realloc_safe(void* old_ptr, size_t new_size) {
 }
 
 static inline void w_runtime_cleanup(void) {
+    while (w_g_string_literals) {
+        WStringLiteral* literal = w_g_string_literals;
+        w_g_string_literals = literal->next;
+        free(literal->buffer.codepoint_offsets);
+        memset(&literal->buffer, 0, sizeof(literal->buffer));
+        literal->next = NULL;
+    }
     const char* stats_env = getenv("W_MEM_STATS");
     if (stats_env && strcmp(stats_env, "1") == 0) {
         fprintf(stderr, "[W_MEM_STATS] alloc=%" PRId64 " free=%" PRId64 " retain=%" PRId64 " release=%" PRId64 " live=%" PRId64 "\n",
@@ -319,6 +339,20 @@ static inline WVal w_bool(bool x) {
 static inline WVal w_str_n(const char* s, size_t length) {
     WVal v; v.tag = W_STR; v.as.string.owner = NULL;
     v.as.string.data = s ? s : ""; v.as.string.length = s ? length : 0; return v;
+}
+
+static inline WVal w_literal_str_n(WStringLiteral* literal, const char* data, size_t length) {
+    if (literal->buffer.refcount == 0) {
+        literal->buffer.refcount = -1; /* Immortal data and descriptor. */
+        literal->buffer.byte_length = length;
+        literal->buffer.codepoint_count = SIZE_MAX;
+        literal->buffer.data = (char*)data;
+        literal->next = w_g_string_literals;
+        w_g_string_literals = literal;
+    }
+    WVal value = w_str_n(data, length);
+    value.as.string.owner = &literal->buffer;
+    return value;
 }
 
 static inline WVal w_str(const char* s) {
@@ -444,6 +478,7 @@ static inline WVal w_clone(WVal v) {
         v.as.function->refcount++;
         w_g_retain_count++;
     } else if (v.tag == W_STR && v.as.string.owner) {
+        if (v.as.string.owner->refcount == -1) return v;
         w_check_refcount(v.as.string.owner->refcount, "retain/string");
         v.as.string.owner->refcount++;
         w_g_retain_count++;
@@ -505,7 +540,7 @@ static W_RUNTIME_NOINLINE void w_release_graph(WVal v);
 
 /* Leaf values never need the graph work list, including strings owned by a container. */
 static inline void w_release_string(WStringBuf* buffer) {
-    if (!buffer) return;
+    if (!buffer || buffer->refcount == -1) return;
     w_check_refcount(buffer->refcount, "release/string");
     w_g_release_count++;
     if (--buffer->refcount == 0) {
@@ -1400,6 +1435,7 @@ static inline size_t w_utf8_seq_len(unsigned char c) {
 }
 
 static inline bool w_utf8_valid_codepoint_at_n(const char* s, size_t length, size_t pos, size_t* out_len, int64_t* out_cp) {
+    W_STRING_SCAN_STEP();
     const unsigned char* u = (const unsigned char*)s + pos;
     if (pos >= length) {
         if (out_len) *out_len = 0;
@@ -1491,6 +1527,7 @@ static W_RUNTIME_NOINLINE bool w_string_offset_slow(WVal value, int64_t index, s
         size_t ascii_pos = 0;
         const unsigned char* bytes = (const unsigned char*)value.as.string.data;
         while (ascii_pos < value.as.string.length && bytes[ascii_pos] < 0x80) {
+            W_STRING_SCAN_STEP();
             ascii_pos++;
         }
         if (ascii_pos == value.as.string.length) {
@@ -1503,7 +1540,9 @@ static W_RUNTIME_NOINLINE bool w_string_offset_slow(WVal value, int64_t index, s
         if (value.as.string.length > SIZE_MAX / sizeof(size_t) - 1) {
             fprintf(stderr, "[W4003] RuntimeError: String index too large\n"); exit(1);
         }
-        owner->codepoint_offsets = (size_t*)w_alloc_safe((value.as.string.length + 1) * sizeof(size_t));
+        size_t count_hint = owner->codepoint_count;
+        if (count_hint == SIZE_MAX) count_hint = (size_t)w_utf8_cp_len_n(value.as.string.data, value.as.string.length);
+        owner->codepoint_offsets = (size_t*)w_alloc_safe((count_hint + 1) * sizeof(size_t));
         size_t position = 0, count = 0;
         while (position < value.as.string.length) {
             size_t step = 1;
@@ -2702,5 +2741,7 @@ static inline WVal w_builtin_args(void) {
     }
     WVal v; v.tag = W_LIST; v.as.list = b; return v;
 }
+
+#include "w_host.h"
 
 #endif /* W_RUNTIME_H */

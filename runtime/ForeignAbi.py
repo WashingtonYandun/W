@@ -14,16 +14,19 @@ def bind_foreign(declaration, libraries=()):
     signature = [p.type_ann.name for p in declaration.params]
     returned = declaration.return_type.name
     name = getattr(declaration, 'source_name', declaration.name)
-    handles = [ctypes.CDLL(None)]
-    for library in list(libraries) + ['m']:
+    from runtime.HostAbi import FUNCTIONS
+    internal = FUNCTIONS.get(name)
+    handles = [] if internal else [ctypes.CDLL(None)]
+    for library in ([] if internal else list(libraries) + ['m']):
         path = library if os.path.isfile(library) else ctypes.util.find_library(library)
         if path:
             handles.append(ctypes.CDLL(path))
-    function = next((getattr(handle, name) for handle in handles if hasattr(handle, name)), None)
+    function = internal or next((getattr(handle, name) for handle in handles if hasattr(handle, name)), None)
     if function is None:
         raise WRuntimeError("Unresolved C symbol: " + name, code='W4003')
-    function.argtypes = [C_TYPES[t] for t in signature]
-    function.restype = C_TYPES[returned]
+    if not internal:
+        function.argtypes = [C_TYPES[t] for t in signature]
+        function.restype = C_TYPES[returned]
 
     def invoke(arguments):
         raw = []
