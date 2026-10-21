@@ -39,7 +39,7 @@ def corpus_paths():
         positives += sorted(path for path in (ROOT / 'tests' / directory).rglob('*.w')
                             if path.with_suffix('.expected').is_file())
     support_files = PROFILES.get('support_files', {})
-    positives = [path for path in positives if str(path.relative_to(ROOT)) not in support_files]
+    positives = [path for path in positives if path.relative_to(ROOT).as_posix() not in support_files]
     negatives = sorted((ROOT / 'tests').glob('*/invalid/*.w')) + sorted((ROOT / 'tests/errors').glob('invalid_*.w'))
     negatives = [path for path in negatives if 'ffi' not in path.parts]
     return positives, negatives

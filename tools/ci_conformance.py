@@ -75,7 +75,7 @@ def generate_markdown_matrix(measured=None) -> str:
 
     by_feature = {}
     for path in fixtures:
-        label = str(path.relative_to(ROOT))
+        label = path.relative_to(ROOT).as_posix()
         feat = PROFILES.get('fixtures', {}).get(label, 'core')
         by_feature.setdefault(feat, []).append(label)
 
@@ -137,7 +137,7 @@ def generate_markdown_matrix(measured=None) -> str:
             totals.append(f"**{passed}/{tot_fixtures} ({passed / tot_fixtures * 100:.1f}%)**")
     stale_warning = False
     measured_labels = set((measured or {}).get('corpus') or [])
-    current_labels = {str(path.relative_to(ROOT)) for path in fixtures}
+    current_labels = {path.relative_to(ROOT).as_posix() for path in fixtures}
     if invalidation:
         verdict = 'no verified run for current source tree; STALE: ' + invalidation
         stale_warning = True
@@ -202,7 +202,7 @@ def main():
     support_files = PROFILES['support_files']
     positives, negatives = corpus_paths()
     fixtures = positives + negatives
-    labels = {str(path.relative_to(ROOT)) for path in fixtures}
+    labels = {path.relative_to(ROOT).as_posix() for path in fixtures}
     stale = set(PROFILES['fixtures']) - labels
     if stale or not positives or not negatives:
         raise RuntimeError(f'Empty corpus or stale profile entries: {stale}')
@@ -211,7 +211,7 @@ def main():
     coverage = {engine: {'passed': 0, 'failed': 0, 'unsupported': 0} for engine in ENGINES}
     with tempfile.TemporaryDirectory(prefix='w-ci-') as directory:
         for path in fixtures:
-            label = str(path.relative_to(ROOT))
+            label = path.relative_to(ROOT).as_posix()
             expected = path.with_suffix('.expected').read_text() if path in positives else None
             if path in positives and expected is None:
                 raise RuntimeError(f'Missing expected output: {label}')
