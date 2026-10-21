@@ -16,11 +16,15 @@ def bind_foreign(declaration, libraries=()):
     name = getattr(declaration, 'source_name', declaration.name)
     from runtime.HostAbi import FUNCTIONS
     internal = FUNCTIONS.get(name)
-    handles = [] if internal else [ctypes.CDLL(None)]
-    for library in ([] if internal else list(libraries) + ['m']):
+    handles = [] if internal else ([ctypes.CDLL(None)] if os.name != 'nt' else [])
+    for library in ([] if internal else list(libraries) + ([] if os.name == 'nt' else ['m'])):
         path = library if os.path.isfile(library) else ctypes.util.find_library(library)
         if path:
-            handles.append(ctypes.CDLL(path))
+            try:
+                kwargs = {'winmode': 0} if (os.name == 'nt' and sys.version_info >= (3, 8)) else {}
+                handles.append(ctypes.CDLL(path, **kwargs))
+            except Exception:
+                pass
     function = internal or next((getattr(handle, name) for handle in handles if hasattr(handle, name)), None)
     if function is None:
         raise WRuntimeError("Unresolved C symbol: " + name, code='W4003')

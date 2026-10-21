@@ -107,8 +107,15 @@ static char* w_host_path(void* handle) {
 }
 #ifdef _WIN32
 static wchar_t* w_host_wide(const char* text) {
+    if (!text) return NULL;
     int count = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, text, -1, NULL, 0);
-    if (!count) return NULL;
+    if (!count) {
+        count = MultiByteToWideChar(CP_ACP, 0, text, -1, NULL, 0);
+        if (!count) return NULL;
+        wchar_t* wide = (wchar_t*)w_alloc_safe((size_t)count * sizeof(wchar_t));
+        if (!MultiByteToWideChar(CP_ACP, 0, text, -1, wide, count)) { free(wide); return NULL; }
+        return wide;
+    }
     wchar_t* wide = (wchar_t*)w_alloc_safe((size_t)count * sizeof(wchar_t));
     if (!MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, text, -1, wide, count)) { free(wide); return NULL; }
     return wide;
