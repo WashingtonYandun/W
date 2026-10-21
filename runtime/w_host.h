@@ -2,10 +2,30 @@
 #define W_HOST_H
 /* Internal scalar/opaque ABI for bounded binary I/O. Handles are checked IDs,
  * never exposed allocation addresses; stale handles cannot access freed storage. */
+#include <stdio.h>
+#include <stdlib.h>
+#include <stdint.h>
+#include <stdbool.h>
+#include <string.h>
+#include <errno.h>
 #include <sys/stat.h>
+
 #ifdef _WIN32
-#include <direct.h>
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
 #include <windows.h>
+#include <io.h>
+#include <direct.h>
+#include <wchar.h>
+#endif
+
+/* Guard against POSIX unistd.h access() macros colliding with WTag W_OK */
+#ifdef W_OK
+#undef W_OK
 #endif
 
 typedef struct WHostEntry {
@@ -138,12 +158,24 @@ static int64_t w_host_fs(void* first, void* second, int64_t operation) {
 #ifdef _WIN32
     wchar_t* wide = w_host_wide(path);
     wchar_t* wide_other = other ? w_host_wide(other) : NULL;
-    struct _stat64 status;
     if (wide) {
-        if (operation <= 1) result = _wstat64(wide, &status) == 0 ? (operation == 0 ? 1 : status.st_size) : (operation == 0 && errno == ENOENT ? 0 : -1);
-        else if (operation == 2) result = _wmkdir(wide) == 0 ? 0 : -1;
-        else if (operation == 3) result = _wremove(wide) == 0 ? 0 : -1;
-        else if (operation == 4 && wide_other) result = _wrename(wide, wide_other) == 0 ? 0 : -1;
+        if (operation == 0) {
+            DWORD attr = GetFileAttributesW(wide);
+            result = (attr != INVALID_FILE_ATTRIBUTES) ? 1 : 0;
+        } else if (operation == 1) {
+            WIN32_FILE_ATTRIBUTE_DATA data;
+            if (GetFileAttributesExW(wide, GetFileExInfoStandard, &data)) {
+                result = (int64_t)(((uint64_t)data.nFileSizeHigh << 32) | data.nFileSizeLow);
+            } else {
+                result = -1;
+            }
+        } else if (operation == 2) {
+            result = CreateDirectoryW(wide, NULL) ? 0 : -1;
+        } else if (operation == 3) {
+            result = (DeleteFileW(wide) || RemoveDirectoryW(wide)) ? 0 : -1;
+        } else if (operation == 4 && wide_other) {
+            result = MoveFileExW(wide, wide_other, MOVEFILE_REPLACE_EXISTING | MOVEFILE_COPY_ALLOWED) ? 0 : -1;
+        }
     }
     free(wide); free(wide_other);
 #else

@@ -2742,6 +2742,14 @@ static inline WVal w_builtin_args(void) {
     WVal v; v.tag = W_LIST; v.as.list = b; return v;
 }
 
+#if defined(__has_include)
+#if __has_include("runtime/w_host.h")
+#include "runtime/w_host.h"
+#else
 #include "w_host.h"
+#endif
+#else
+#include "w_host.h"
+#endif
 
 #endif /* W_RUNTIME_H */
