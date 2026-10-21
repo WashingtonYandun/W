@@ -138,8 +138,8 @@ int main(void) {
 
 def test_formatter_preserves_guards_and_production_sources():
     paths = formatter_paths()
-    required = ['selfhost/w1.w', 'selfhost/src/07_parser_decl.w',
-                'examples/ffi/sqlite/import_csv.w', 'stdlib/text.w']
+    required = ['selfhost/w1.wysna', 'selfhost/src/07_parser_decl.wysna',
+                'examples/ffi/sqlite/import_csv.wysna', 'stdlib/text.wysna']
     assert all(ROOT / name in paths for name in required)
     for path in paths:
         verify_formatting(path.read_text(), str(path))
@@ -173,9 +173,9 @@ def test_typed_composition_across_engines():
     with tempfile.TemporaryDirectory(prefix='w-typed-composition-') as temporary:
         for seed in SEEDS:
             source, expected, _ = generate_typed_properties(seed)
-            formatted = verify_formatting(source, 'typed_properties_' + str(seed) + '.w')
+            formatted = verify_formatting(source, 'typed_properties_' + str(seed) + '.wysna')
             for variant, code in [('source', source), ('formatted', formatted)]:
-                ok, detail = verify(code, f'typed_properties_{seed}_{variant}.w', w1, temporary,
+                ok, detail = verify(code, f'typed_properties_{seed}_{variant}.wysna', w1, temporary,
                                     expected=expected, strict=True,
                                     sanitize=os.environ.get('W_SANITIZE') == '1')
                 assert ok, f'seed {seed}, {variant}: {detail}\n{code}'

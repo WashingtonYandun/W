@@ -31,7 +31,7 @@ fn class_text() -> str {
 }
 print(class_text())
 fn file_text() -> str ! IoError {
-    let text = read_file("tests/runtime/strings.w")?
+    let text = read_file("tests/runtime/strings.wysna")?
     return slice(text, 0, 3)
 }
 print(file_text() else err { "failed" })

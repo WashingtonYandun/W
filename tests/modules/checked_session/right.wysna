@@ -1,4 +1,4 @@
-import "shared.w"
+import "shared.wysna"
 
 pub struct Item {
     value: str,

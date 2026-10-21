@@ -4,7 +4,7 @@
 
 ## Pilot workflow
 
-`examples/ffi/sqlite/import_csv.w` imports measurements into a persistent local database. It validates columns, 64-bit ASCII integers, and bounds; uses a transaction; returns data or SQLite errors; and closes its resources. `import_reference.c` independently implements the same contract with the same C adapter and library. There is not yet a real user workload or a measured time saving; product validation remains open.
+`examples/ffi/sqlite/import_csv.wysna` imports measurements into a persistent local database. It validates columns, 64-bit ASCII integers, and bounds; uses a transaction; returns data or SQLite errors; and closes its resources. `import_reference.c` independently implements the same contract with the same C adapter and library. There is not yet a real user workload or a measured time saving; product validation remains open.
 
 The input format requires the exact header `id,value` and accepts up to 100,000 rows and an input of at most 8 MiB. Both columns are non-negative decimal integers in `[0, INT64_MAX]`. The parser accepts LF, CRLF, and a final line without a newline. It rejects quotes, empty fields, signs, Unicode digits, NUL, and extra columns; this is not a general CSV parser. The identifier is a primary key, so duplicates in the batch or database abort the whole batch. The aggregate sum must also fit in int64; it is checked before commit, and SQLite overflow rolls back the import.
 
@@ -32,11 +32,11 @@ To run the importer from the repository root:
 ```sh
 mkdir -p .w_cache/sqlite-import
 cc -std=c99 -O2 -c examples/ffi/sqlite/adapter.c -o .w_cache/sqlite-import/adapter.o
-./w build examples/ffi/sqlite/import_csv.w --link-lib .w_cache/sqlite-import/adapter.o --link-lib sqlite3 -o .w_cache/sqlite-import/import_csv
+./wysna build examples/ffi/sqlite/import_csv.wysna --link-lib .w_cache/sqlite-import/adapter.o --link-lib sqlite3 -o .w_cache/sqlite-import/import_csv
 W_SQLITE_DB=.w_cache/sqlite-import/measurements.sqlite .w_cache/sqlite-import/import_csv measurements.csv
 ```
 
-The runner tests C, AST, and HIR, then invokes W1 directly without running the W0 checker over the input. An independent Python connection compares persisted rows rather than checking output alone. The test appends data in a second run and exercises 14 failures, including an error after an earlier valid row has been inserted. It requires rollback, the expected exit status, no live external resources, and no sanitizer output. Linux enables LSan; macOS does not support it. The system SQLite library is not rebuilt with sanitizers. The earlier `measurements.w` pilot retains C/AST/HIR checks for repeated close and use after close.
+The runner tests C, AST, and HIR, then invokes W1 directly without running the W0 checker over the input. An independent Python connection compares persisted rows rather than checking output alone. The test appends data in a second run and exercises 14 failures, including an error after an earlier valid row has been inserted. It requires rollback, the expected exit status, no live external resources, and no sanitizer output. Linux enables LSan; macOS does not support it. The system SQLite library is not rebuilt with sanitizers. The earlier `measurements.wysna` pilot retains C/AST/HIR checks for repeated close and use after close.
 
 ## Measurement and interpretation
 

@@ -27,7 +27,7 @@ def get_repo_root() -> str:
 # runtime header and the W1 sources are the obvious ones; the W0 frontend, checker
 # and C emitter are just as load-bearing because stage 1 is produced by them, and a
 # stale binary silently invalidates every `--backend=selfhost` comparison.
-SELFHOST_BOOTSTRAP_INPUTS = ("selfhost/w1.w", "runtime/w_runtime.h", "runtime/w_host.h", "main.py") + tuple(
+SELFHOST_BOOTSTRAP_INPUTS = ("selfhost/w1.wysna", "runtime/wysna_runtime.h", "runtime/wysna_host.h", "main.py") + tuple(
     os.path.relpath(os.path.join(directory, name), get_repo_root())
     for package in ("lexer", "parser", "node", "checker", "compiler", "codegen", "common", "error", "hir", "mir", "wtokens")
     for directory, _, names in os.walk(os.path.join(get_repo_root(), package))
@@ -48,7 +48,7 @@ def _bootstrap_source_mtime(repo_root: str) -> float:
 
 def ensure_selfhost_w1_binary(repo_root: str) -> str:
     """Serialize cache rebuilds across independent compiler/test processes."""
-    w1_src_path = os.path.join(repo_root, "selfhost", "w1.w")
+    w1_src_path = os.path.join(repo_root, "selfhost", "w1.wysna")
     if not os.path.isfile(w1_src_path):
         from error.Error import TypeError
         raise TypeError("W1 bootstrap requires a source checkout", file=w1_src_path, code="W2013")
@@ -62,7 +62,7 @@ def _ensure_selfhost_w1_binary_locked(repo_root: str) -> str:
     cache_dir = os.path.join(repo_root, ".w_cache")
     os.makedirs(cache_dir, exist_ok=True)
     w1_bin = os.path.join(cache_dir, executable_name("w1_stage2"))
-    w1_src_path = os.path.join(repo_root, "selfhost", "w1.w")
+    w1_src_path = os.path.join(repo_root, "selfhost", "w1.wysna")
 
     needs_rebuild = not os.path.exists(w1_bin)
     if not needs_rebuild and _bootstrap_source_mtime(repo_root) > os.path.getmtime(w1_bin):
@@ -439,25 +439,28 @@ def repl(show_tokens: bool = False, show_ast: bool = False) -> None:
             print(f"Error: {exc}")
 
 
-def print_help() -> None:
-    print(f"W Language Compiler & Toolchain v{W_VERSION}")
+def print_help(prog: Optional[str] = None) -> None:
+    if prog is None:
+        prog = "wysna"
+    print(f"Wysna Language Compiler & Toolchain v{W_VERSION}")
     print("Usage:")
-    print("  w lsp                                       # LSP over stdio")
-    print("  w repl                                    # Start interactive REPL")
-    print("  w [run] [--stats] <file.w>                  # Execute W source file (W0 interpreter)")
-    print("  w check [--json] [--stats] <file.w>         # Static typecheck without execution")
-    print("  w fmt [--write] <file.w>                    # Canonical deterministic formatter")
-    print("  w ast [--json] <file.w>                     # Emit canonical JSON AST (v0.1)")
-    print("  w mir <file.w>                              # Emit verified MIR as JSON")
-    print("  w tokens <file.w>                           # Emit lexical token stream")
-    print("  w emit-c [--backend=hir|ast|selfhost] [--stats] <file.w> [-o <out.c>] # Transpile W source to C99 (default: hir)")
-    print("  w build [--backend=hir|ast|selfhost] [--stats] <file.w> [-o <bin>]    # Compile W source to native binary (default: hir)")
-    print("  w test [--differential [N]] [--fuzz [N]]            # Run conformance, differential, or fuzz suite")
-    print("  w bench [--update-baseline]                         # Run W0/W1 performance benchmark harness")
-    print("  w version                                           # Show compiler version")
+    print(f"  {prog} lsp                                       # LSP over stdio")
+    print(f"  {prog} repl                                    # Start interactive REPL")
+    print(f"  {prog} [run] [--stats] <file.wysna>            # Execute Wysna source file (W0 interpreter)")
+    print(f"  {prog} check [--json] [--stats] <file.wysna>   # Static typecheck without execution")
+    print(f"  {prog} fmt [--write] <file.wysna>              # Canonical deterministic formatter")
+    print(f"  {prog} ast [--json] <file.wysna>               # Emit canonical JSON AST (v0.1)")
+    print(f"  {prog} mir <file.wysna>                        # Emit verified MIR as JSON")
+    print(f"  {prog} tokens <file.wysna>                     # Emit lexical token stream")
+    print(f"  {prog} emit-c [--backend=hir|ast|selfhost] [--stats] <file.wysna> [-o <out.c>] # Transpile Wysna source to C99 (default: hir)")
+    print(f"  {prog} build [--backend=hir|ast|selfhost] [--stats] <file.wysna> [-o <bin>]    # Compile Wysna source to native binary (default: hir)")
+    print(f"  {prog} test [--differential [N]] [--fuzz [N]]            # Run conformance, differential, or fuzz suite")
+    print(f"  {prog} bench [--update-baseline]                         # Run W0/W1 performance benchmark harness")
+    print(f"  {prog} version                                           # Show compiler version")
 
 
 def main() -> None:
+    prog = "wysna"
     args = sys.argv[1:]
     if args == ["lsp"]:
         from tooling.LanguageServer import serve
@@ -486,7 +489,7 @@ def main() -> None:
         args = args[1:]
         if subcmd == "bench":
             if not os.path.isfile(os.path.join(get_repo_root(), "bench", "run_bench.py")):
-                print("w bench requires a source checkout", file=sys.stderr)
+                print(f"{prog} bench requires a source checkout", file=sys.stderr)
                 sys.exit(1)
             update_baseline = "--update-baseline" in args
             repo_root = get_repo_root()
@@ -499,7 +502,7 @@ def main() -> None:
                 print_help()
                 return
             if not os.path.isdir(os.path.join(get_repo_root(), "tests", "unit")):
-                print("w test requires a source checkout", file=sys.stderr)
+                print(f"{prog} test requires a source checkout", file=sys.stderr)
                 sys.exit(1)
             if args and args[0] == "--differential":
                 gen_count = 25
@@ -543,7 +546,7 @@ def main() -> None:
                 run_suite()
                 return
         elif subcmd == "version":
-            print(f"W Language Compiler v{W_VERSION} (W0 + W1 Self-Hosted C99)")
+            print(f"Wysna Language Compiler v{W_VERSION} (W0 + W1 Self-Hosted C99)")
             return
         elif subcmd == "check":
             check_only = True
@@ -594,7 +597,7 @@ def main() -> None:
                 print(f"Error: Unknown backend '{b_val}'. Valid backends: hir, ast, selfhost", file=sys.stderr)
                 sys.exit(1)
         elif arg in ("--version", "-v"):
-            print(f"W Language Compiler v{W_VERSION} (W0 + W1 Self-Hosted C99)")
+            print(f"Wysna Language Compiler v{W_VERSION} (W0 + W1 Self-Hosted C99)")
             sys.exit(0)
         elif arg == "--emit-c":
             i += 1
@@ -628,11 +631,26 @@ def main() -> None:
             file_to_run = arg
         i += 1
 
+    prog_cmd = "wysna"
+
     if file_to_run:
+        if file_to_run.endswith(".w"):
+            print(f"error: '.w' files are no longer supported. Rename '{file_to_run}' to '{file_to_run[:-2]}.wysna'", file=sys.stderr)
+            sys.exit(1)
+
+        # Resolve file with extension fallback if omitted
+        if not os.path.isfile(file_to_run) and os.path.isfile(file_to_run + ".wysna"):
+            file_to_run = file_to_run + ".wysna"
+
+        def _strip_src_ext(p: str) -> str:
+            if p.endswith(".wysna"):
+                return p[:-6]
+            return p
+
         if subcmd == "emit-c" and emit_c_path is None:
-            emit_c_path = file_to_run[:-2] + ".c" if file_to_run.endswith(".w") else file_to_run + ".c"
+            emit_c_path = _strip_src_ext(file_to_run) + ".c"
         elif subcmd == "build" and build_bin_path is None:
-            build_bin_path = file_to_run[:-2] if file_to_run.endswith(".w") else file_to_run + ".bin"
+            build_bin_path = _strip_src_ext(file_to_run) if file_to_run.endswith(".wysna") else file_to_run + ".bin"
 
         try:
             with open(file_to_run, "r", encoding="utf-8") as f:
@@ -668,9 +686,9 @@ def main() -> None:
     if subcmd is None or subcmd == "repl":
         repl(show_tokens=show_tokens, show_ast=show_ast)
         return
-    print(f"w {subcmd}: no input file given", file=sys.stderr)
-    print("usage: w " + subcmd + " <file.w> [options]", file=sys.stderr)
-    print("       w repl        # start the interactive REPL", file=sys.stderr)
+    print(f"{prog_cmd} {subcmd}: no input file given", file=sys.stderr)
+    print(f"usage: {prog_cmd} {subcmd} <file.wysna> [options]", file=sys.stderr)
+    print(f"       {prog_cmd} repl        # start the interactive REPL", file=sys.stderr)
     sys.exit(2)
 
 

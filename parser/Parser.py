@@ -682,7 +682,7 @@ class Parser:
         start_tok = self.expect(TokenType.IMPORT, code="W0006", msg="Expected 'import'")
         path_tok = self.expect(TokenType.STR, code="W0006", msg="Expected string path for import")
 
-        # Derive namespace from filename (e.g. "lexer.w" -> "lexer")
+        # Derive namespace from filename (e.g. "lexer.wysna" -> "lexer")
         raw_path = str(path_tok.value)
         base = os.path.basename(raw_path)
         namespace = base.split(".")[0] if "." in base else base

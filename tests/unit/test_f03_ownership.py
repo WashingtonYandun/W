@@ -9,7 +9,7 @@ def run_f03_ownership_tests():
     from main import ensure_selfhost_w1_binary
 
     root = Path(__file__).resolve().parents[2]
-    fixture = root / 'tests/runtime/error_union_ownership.w'
+    fixture = root / 'tests/runtime/error_union_ownership.wysna'
     w1 = ensure_selfhost_w1_binary(str(root))
     with tempfile.TemporaryDirectory(prefix='w-f03-ownership-') as directory:
         results = [run_engine(engine, fixture.read_text(), str(fixture), w1, directory,

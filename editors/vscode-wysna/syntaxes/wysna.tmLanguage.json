@@ -1,7 +1,7 @@
 {
   "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
-  "name": "W",
-  "scopeName": "source.w",
+  "name": "Wysna",
+  "scopeName": "source.wysna",
   "patterns": [
     { "include": "#comments" },
     { "include": "#strings" },
@@ -16,26 +16,26 @@
     "comments": {
       "patterns": [
         {
-          "name": "comment.line.documentation.w",
+          "name": "comment.line.documentation.wysna",
           "match": "##.*$"
         },
         {
-          "name": "comment.line.number-sign.w",
+          "name": "comment.line.number-sign.wysna",
           "match": "#.*$"
         }
       ]
     },
     "strings": {
-      "name": "string.quoted.double.w",
+      "name": "string.quoted.double.wysna",
       "begin": "\"",
       "end": "\"",
       "patterns": [
         {
-          "name": "constant.character.escape.unicode.w",
+          "name": "constant.character.escape.unicode.wysna",
           "match": "\\\\u\\{[0-9a-fA-F]{1,6}\\}"
         },
         {
-          "name": "constant.character.escape.w",
+          "name": "constant.character.escape.wysna",
           "match": "\\\\[nrt\\\\\"0]"
         }
       ]
@@ -45,15 +45,15 @@
         {
           "match": "\\b(fn)\\s+([A-Za-z_][A-Za-z0-9_]*)\\b",
           "captures": {
-            "1": { "name": "keyword.declaration.function.w" },
-            "2": { "name": "entity.name.function.w" }
+            "1": { "name": "keyword.declaration.function.wysna" },
+            "2": { "name": "entity.name.function.wysna" }
           }
         },
         {
           "match": "\\b(struct|enum|class|interface)\\s+([A-Za-z_][A-Za-z0-9_]*)\\b",
           "captures": {
-            "1": { "name": "keyword.declaration.type.w" },
-            "2": { "name": "entity.name.type.w" }
+            "1": { "name": "keyword.declaration.type.wysna" },
+            "2": { "name": "entity.name.type.wysna" }
           }
         }
       ]
@@ -61,23 +61,23 @@
     "keywords": {
       "patterns": [
         {
-          "name": "keyword.control.w",
+          "name": "keyword.control.wysna",
           "match": "\\b(if|elif|else|for|while|in|match|return|break|continue)\\b"
         },
         {
-          "name": "keyword.declaration.w",
+          "name": "keyword.declaration.wysna",
           "match": "\\b(fn|let|mut|struct|enum|import|class|interface|extends|implements|public|private|new|pub|extern)\\b"
         },
         {
-          "name": "variable.language.w",
+          "name": "variable.language.wysna",
           "match": "\\b(this|super)\\b"
         },
         {
-          "name": "keyword.operator.logical.w",
+          "name": "keyword.operator.logical.wysna",
           "match": "\\b(and|or|not)\\b"
         },
         {
-          "name": "constant.language.w",
+          "name": "constant.language.wysna",
           "match": "\\b(true|false|none)\\b"
         }
       ]
@@ -85,7 +85,7 @@
     "types": {
       "patterns": [
         {
-          "name": "storage.type.primitive.w",
+          "name": "storage.type.primitive.wysna",
           "match": "\\b(int|float|bool|str|unit|list|dict|tuple|IoError)\\b"
         }
       ]
@@ -93,7 +93,7 @@
     "builtins": {
       "patterns": [
         {
-          "name": "support.function.builtin.w",
+          "name": "support.function.builtin.wysna",
           "match": "\\b(print|len|enumerate|dict_items|ord|chr|slice|bytes|args|read_file|write_file|weak|upgrade)\\b(?=\\s*\\()"
         }
       ]
@@ -101,11 +101,11 @@
     "numbers": {
       "patterns": [
         {
-          "name": "constant.numeric.float.w",
+          "name": "constant.numeric.float.wysna",
           "match": "\\b[0-9][0-9_]*\\.[0-9][0-9_]*\\b"
         },
         {
-          "name": "constant.numeric.integer.w",
+          "name": "constant.numeric.integer.wysna",
           "match": "\\b[0-9][0-9_]*\\b"
         }
       ]
@@ -113,7 +113,7 @@
     "operators": {
       "patterns": [
         {
-          "name": "keyword.operator.w",
+          "name": "keyword.operator.wysna",
           "match": "(->|=>|\\?\\?|\\.\\.=|\\.\\.|==|!=|<=|>=|[+\\-*/%=<>?!])"
         }
       ]

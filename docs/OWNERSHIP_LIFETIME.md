@@ -1,7 +1,7 @@
 # Ownership and Lifetime Model
 
 **Status:** Current runtime and compiler ownership contract  
-**Scope:** `W0 Typed HIR` (default), `W0 AST C99` (oracle), `W1 C99` (`selfhost/w1.w`), and C99 Runtime (`runtime/w_runtime.h`)
+**Scope:** `Wysna0 Typed HIR` (default), `Wysna0 AST C99` (oracle), `Wysna1 C99` (`selfhost/w1.wysna`), and C99 Runtime (`runtime/wysna_runtime.h`)
 
 ---
 
@@ -40,7 +40,7 @@ When a value is stored into a new variable (`let x = ...`), assigned (`x = ...`)
 
 ## 3. `CleanupScope` Stack & LIFO Destruction Invariant
 
-Both `W0` (`CCodeGen.py`) and `W1` (`selfhost/w1.w`) maintain an explicit lexical scope stack:
+Both `Wysna0` (`CCodeGen.py`) and `Wysna1` (`selfhost/w1.wysna`) maintain an explicit lexical scope stack:
 
 ```text
 struct CleanupScope {

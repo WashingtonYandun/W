@@ -25,10 +25,10 @@ If you discover a security vulnerability in the W compiler, runtime, or tooling,
 
 To help us triage and resolve the issue quickly, please provide:
 - A description of the vulnerability, including severity assessment (CVSS if available).
-- A minimal reproducing W code snippet (`.w`) or script.
+- A minimal reproducing Wysna code snippet (`.wysna`) or script.
 - The affected component (e.g., C99 runtime `w_runtime.h`, Typed HIR lowerer, C codegen, parser, or self-hosting compiler).
-- Exact environment details: OS, CPU architecture, compiler version (`./w version`), and C toolchain (`clang --version` or `gcc --version`).
-- Sanitizer trace if applicable (e.g., ASan/UBSan report via `./w run <file>.w --sanitize`).
+- Exact environment details: OS, CPU architecture, compiler version (`./wysna version`), and C toolchain (`clang --version` or `gcc --version`).
+- Sanitizer trace if applicable (e.g., ASan/UBSan report via `./wysna run <file>.wysna --sanitize`).
 
 ## Security Response Process
 

@@ -126,7 +126,7 @@ def package(output, archive=None):
                 (workspace / name).write_bytes(zipped.read(SQLITE_ARCHIVE + '/' + name))
         generated = workspace / 'application.c'
         execute([sys.executable, str(ROOT / 'main.py'), 'emit-c', '--backend=hir',
-                 str(ROOT / 'examples/ffi/sqlite/import_csv.w'), '-o', str(generated)])
+                 str(ROOT / 'examples/ffi/sqlite/import_csv.wysna'), '-o', str(generated)])
         objects = []
         for index, source in enumerate((generated, ROOT / 'examples/ffi/sqlite/adapter.c', workspace / 'sqlite3.c')):
             object_path = workspace / (str(index) + ('.obj' if windows else '.o'))
@@ -154,7 +154,7 @@ def package(output, archive=None):
     smoke = verify_package(output)
     (output / 'smoke.json').write_text(json.dumps(smoke, indent=2))
     digest = hashlib.sha256()
-    for relative in sorted(set(SELFHOST_BOOTSTRAP_INPUTS + ('examples/ffi/sqlite/import_csv.w',
+    for relative in sorted(set(SELFHOST_BOOTSTRAP_INPUTS + ('examples/ffi/sqlite/import_csv.wysna',
                                'examples/ffi/sqlite/adapter.c', 'examples/ffi/sqlite/adapter.h',
                                'tools/package_measurement_pilot.py'))):
         digest.update(relative.encode())

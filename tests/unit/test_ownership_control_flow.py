@@ -8,7 +8,7 @@ import tempfile
 
 def run_ownership_tests():
     root = Path(__file__).resolve().parents[2]
-    source = root / 'tests/runtime/ownership_control_flow.w'
+    source = root / 'tests/runtime/ownership_control_flow.wysna'
     expected = source.with_suffix('.expected').read_text()
     env = dict(os.environ, W_MEM_CHECK='1')
     env['ASAN_OPTIONS'] = 'detect_leaks=1' if sys.platform.startswith('linux') else 'detect_leaks=0'

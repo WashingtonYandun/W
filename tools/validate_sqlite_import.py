@@ -88,10 +88,10 @@ def validate(rows=10000, samples=3, sanitize=False):
             else:
                 source = directory / (backend + '.c')
                 if backend == 'w1':
-                    execute([w1, str(PILOT / 'import_csv.w'), str(source)])
+                    execute([w1, str(PILOT / 'import_csv.wysna'), str(source)])
                 else:
                     execute([sys.executable, str(ROOT / 'main.py'), 'emit-c', '--backend=' + backend,
-                             str(PILOT / 'import_csv.w'), '-o', str(source)])
+                             str(PILOT / 'import_csv.wysna'), '-o', str(source)])
             command = compiler + flags + [str(source), str(adapter), '-lsqlite3', '-o', str(binary)]
             execute(command)
             build_seconds = time.perf_counter() - started

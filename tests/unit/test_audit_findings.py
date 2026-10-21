@@ -27,7 +27,7 @@ def test_nominal_equality_and_undeclared_super_constructor_are_rejected():
     ]
     with tempfile.TemporaryDirectory(prefix='w-nominal-contracts-') as temporary:
         directory = Path(temporary)
-        module = directory / 'nominals.w'
+        module = directory / 'nominals.wysna'
         module.write_text('pub struct A { x: int }\npub enum E { X }\npub fn make() -> A { A { x: 1 } }\npub fn event() -> E { E.X }\n', encoding='utf-8')
         programs += [f'import {json.dumps(module.as_posix())}\nstruct B {{ x: int }}\nprint(nominals.make() == B {{ x: 1 }})',
                      f'import {json.dumps(module.as_posix())}\nenum E {{ X }}\nprint(nominals.event() == E.X)']
@@ -53,7 +53,7 @@ def test_literal_indexing_scales_linearly_by_work_not_wall_clock():
                       'print(sum(literal), sum(owned), len(literal), len(owned))\n')
             expected_sum = sum(ord(character) for character in text)
             expected = f'{expected_sum} {expected_sum} {len(text)} {len(text)}\n'
-            source_path = directory / 'source.w'
+            source_path = directory / 'source.wysna'
             source_path.write_text(source, encoding='utf-8')
             interpreted = run_engine('interpreter', source, 'literal', w1, directory / 'reference')
             assert interpreted.stdout == expected and interpreted.exit_code == 0, vars(interpreted)
@@ -100,7 +100,7 @@ def test_matrix_invalidates_changes_without_renaming_inputs():
     with tempfile.TemporaryDirectory() as temporary:
         root = Path(temporary)
         (root / 'stdlib').mkdir()
-        path = root / 'stdlib/library.w'
+        path = root / 'stdlib/library.wysna'
         path.write_text('pub fn value() -> int { 1 }', encoding='utf-8')
         before = source_fingerprint(root)
         path.write_text('pub fn value() -> int { 2 }', encoding='utf-8')
@@ -117,7 +117,7 @@ def test_matrix_invalidates_changes_without_renaming_inputs():
 def test_lsp_uri_and_definition_on_native_platform():
     from tooling.LanguageServer import LanguageServer, source_path
     with tempfile.TemporaryDirectory(prefix='w lsp é ') as temporary:
-        path = Path(temporary).resolve() / 'module.w'
+        path = Path(temporary).resolve() / 'module.wysna'
         uri = path.as_uri()
         assert os.path.normcase(source_path(uri)) == os.path.normcase(str(path))
         messages = []

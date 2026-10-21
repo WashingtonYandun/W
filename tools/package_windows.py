@@ -87,7 +87,7 @@ def assemble(wheel, output, cache, launcher_compiler=None, source_commit=None):
         stage = Path(temporary) / 'bundle'
         stage.mkdir()
         extract(wheel, stage)
-        for required in ('main.py', 'common/Version.py', 'runtime/w_runtime.h', 'stdlib/text.w'):
+        for required in ('main.py', 'common/Version.py', 'runtime/w_runtime.h', 'stdlib/text.wysna'):
             if not (stage / required).is_file():
                 raise ValueError('Wheel is missing ' + required)
         metadata = list(stage.glob('*.dist-info/METADATA'))
@@ -102,8 +102,7 @@ def assemble(wheel, output, cache, launcher_compiler=None, source_commit=None):
         compiler = Path(launcher_compiler).resolve() if launcher_compiler else stage / 'toolchain/zig/zig.exe'
         subprocess.run([str(compiler), 'cc', '-target', 'x86_64-windows-gnu', '-mcpu=baseline',
                         '-O2', '-municode', str(ROOT / 'packaging/windows/launcher.c'),
-                        '-o', str(stage / 'w.exe')], check=True, timeout=300)
-        shutil.copy2(stage / 'w.exe', stage / 'wlang.exe')
+                        '-o', str(stage / 'wysna.exe')], check=True, timeout=300)
         shutil.copy2(ROOT / 'LICENSE', stage / 'LICENSE')
         shutil.copy2(ROOT / 'packaging/windows/open-terminal.cmd', stage / 'open-terminal.cmd')
         (stage / 'THIRD_PARTY.txt').write_text(

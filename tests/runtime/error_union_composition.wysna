@@ -1,4 +1,4 @@
-import "tests/modules/error_union/errors.w"
+import "tests/modules/error_union/errors.wysna"
 
 fn parse_value() -> int ! errors.ParseError {
     return Err(errors.parse_error())

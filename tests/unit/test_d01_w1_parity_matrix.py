@@ -80,14 +80,14 @@ def test_standalone_w1_execution_contracts():
     with tempfile.TemporaryDirectory() as td:
         # 1. Core fixture: must compile cleanly standalone
         core_c = os.path.join(td, "core_out.c")
-        core_src = str(ROOT / "tests/runtime/arithmetic.w")
+        core_src = str(ROOT / "tests/runtime/arithmetic.wysna")
         rc, out, err = _run_cmd([w1_bin, core_src, core_c], cwd=str(ROOT))
         assert rc == 0, f"Standalone W1 failed on core fixture '{core_src}': {err}"
         assert os.path.exists(core_c), "W1 must emit C file for core fixture"
 
         # 2. Generic fixture: must compile directly without passing through W0.
         gen_c = os.path.join(td, "gen_out.c")
-        gen_src = str(ROOT / "tests/runtime/generic_function.w")
+        gen_src = str(ROOT / "tests/runtime/generic_function.wysna")
         rc_gen, out_gen, err_gen = _run_cmd([w1_bin, gen_src, gen_c], cwd=str(ROOT))
         assert rc_gen == 0, f"Standalone W1 failed on generic fixture '{gen_src}': {err_gen or out_gen}"
         assert os.path.exists(gen_c), "W1 must emit C for a valid generic fixture"
@@ -159,8 +159,8 @@ def test_documentation_consistency():
     assert error_union_row and int(error_union_row.group(1)) == len(error_union_fixtures), (
         "Parity matrix error-union count must match fixture classifications"
     )
-    expected_error_union_paths = list((ROOT / 'tests/runtime').glob('error_union_*.w'))
-    expected_error_union_paths += list((ROOT / 'tests/types/invalid').glob('error_union_*.w'))
+    expected_error_union_paths = list((ROOT / 'tests/runtime').glob('error_union_*.wysna'))
+    expected_error_union_paths += list((ROOT / 'tests/types/invalid').glob('error_union_*.wysna'))
     expected_error_union_fixtures = {path.relative_to(ROOT).as_posix() for path in expected_error_union_paths}
     assert set(error_union_fixtures) == expected_error_union_fixtures, "F03 fixtures must be classified together"
     assert "Bootstrap Fixed-Point vs. Core Corpus Parity" in content, (

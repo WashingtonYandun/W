@@ -15,13 +15,13 @@ ROOT = Path(__file__).resolve().parents[1]
 
 def measure(samples=5):
     prefix = 'struct Token { kind: str, val: str, line: int, col: int }\nlet mut g_in_path = ""\n'
-    source = prefix + (ROOT / 'selfhost/src/02_lexer.w').read_text()
+    source = prefix + (ROOT / 'selfhost/src/02_lexer.wysna').read_text()
     source += '\nfn measure() -> unit ! IoError { let text = read_file(args()[1])?\nprint(len(tokenize(text))) }\nmeasure() else err { print(err.message) }\n'
     report = {'samples': samples, 'platform': sys.platform, 'compiler': os.environ.get('CC', 'cc'),
               'workload': 'unmodified W1 tokenizer; alpha + beta newline; owned source read_file', 'rows': []}
     with tempfile.TemporaryDirectory(prefix='w-tokenizer-scaling-') as temporary:
         directory = Path(temporary)
-        path, binary = directory / 'lexer.w', directory / 'lexer'
+        path, binary = directory / 'lexer.wysna', directory / 'lexer'
         path.write_text(source)
         subprocess.run([sys.executable, str(ROOT / 'main.py'), 'build', str(path), '-o', str(binary)],
                        cwd=ROOT, check=True, capture_output=True, timeout=120)

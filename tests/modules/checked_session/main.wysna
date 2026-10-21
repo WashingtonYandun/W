@@ -1,6 +1,6 @@
-import "tests/modules/checked_session/left.w"
-import "tests/modules/checked_session/right.w"
-import "tests/modules/checked_session/shared.w"
+import "tests/modules/checked_session/left.wysna"
+import "tests/modules/checked_session/right.wysna"
+import "tests/modules/checked_session/shared.wysna"
 
 fn main() -> unit {
     let a = left.make()

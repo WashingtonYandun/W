@@ -15,7 +15,7 @@ def test_generic_function_inference_and_explicit_arguments():
     with tempfile.TemporaryDirectory(prefix="w1-generic-function-") as directory:
         output_c = Path(directory) / "generic_function.c"
         built = subprocess.run(
-            [compiler, str(ROOT / "tests/runtime/generic_function.w"), str(output_c)],
+            [compiler, str(ROOT / "tests/runtime/generic_function.wysna"), str(output_c)],
             cwd=ROOT,
             capture_output=True,
             text=True,
@@ -43,8 +43,8 @@ def test_generic_interface_constraints_reject_non_implementations():
 
     compiler = ensure_selfhost_w1_binary(str(ROOT))
     fixtures = (
-        ROOT / "tests/types/invalid/generic_constraint_failure.w",
-        ROOT / "tests/types/invalid/generic_nominal_constraint_violation.w",
+        ROOT / "tests/types/invalid/generic_constraint_failure.wysna",
+        ROOT / "tests/types/invalid/generic_nominal_constraint_violation.wysna",
     )
     with tempfile.TemporaryDirectory(prefix="w1-generic-constraint-") as directory:
         for index, fixture in enumerate(fixtures):
@@ -66,9 +66,9 @@ def test_generic_runtime_and_checked_module_fixtures():
 
     compiler = ensure_selfhost_w1_binary(str(ROOT))
     fixtures = [
-        *sorted((ROOT / "tests/runtime").glob("generic_*.w")),
-        ROOT / "tests/runtime/recursive_tree_adt.w",
-        ROOT / "tests/modules/checked_session/main.w",
+        *sorted((ROOT / "tests/runtime").glob("generic_*.wysna")),
+        ROOT / "tests/runtime/recursive_tree_adt.wysna",
+        ROOT / "tests/modules/checked_session/main.wysna",
     ]
     environment = dict(os.environ, W_MEM_CHECK="1")
     with tempfile.TemporaryDirectory(prefix="w1-generic-runtime-") as directory:
@@ -111,9 +111,9 @@ def test_generic_cycle_diagnostics():
 
     compiler = ensure_selfhost_w1_binary(str(ROOT))
     fixtures = (
-        ROOT / "tests/types/invalid/generic_recursive_infinite_layout.w",
-        ROOT / "tests/types/invalid/generic_struct_recursive_cycle.w",
-        ROOT / "tests/types/invalid/generic_structural_growth_cycle.w",
+        ROOT / "tests/types/invalid/generic_recursive_infinite_layout.wysna",
+        ROOT / "tests/types/invalid/generic_struct_recursive_cycle.wysna",
+        ROOT / "tests/types/invalid/generic_structural_growth_cycle.wysna",
     )
     with tempfile.TemporaryDirectory(prefix="w1-generic-cycle-") as directory:
         for index, fixture in enumerate(fixtures):

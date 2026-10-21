@@ -21,28 +21,28 @@ def run_expansion_tests():
     from main import ensure_selfhost_w1_binary
     w1 = ensure_selfhost_w1_binary(str(ROOT))
     positive = {
-        'tests/functions/closures.w': '10\n2 3\n',
-        'tests/functions/nested_closures.w': '60\n7\n',
-        'tests/functions/captured_function.w': '10\n11\n',
-        'tests/functions/indexed_functions.w': '42\n11\n',
-        'tests/functions/option_result_payload_match.w': 'some 42\nerror failed\nnone\nok 7\n',
-        'tests/regressions/assignment_order.w': 'index\nvalue\n[7]\n',
-        'tests/regressions/assignment_receiver.w': '9 2\n',
-        'tests/regressions/dictionary_growth.w': '2001 2000 7 2000\n0 2000\n',
-        'tests/regressions/dict_bool_keys.w': '[true, false]\n[(true, 1), (false, 2)]\n',
-        'tests/regressions/dict_enum_keys.w': '[E.A, E.B]\n[(E.A, 1), (E.B, 2)]\n',
-        'tests/regressions/nul_string.w': '3 [97, 0, 98] false\n1\n',
-        'tests/generic_oop/repository.w': '42 hello\n',
-        'tests/generic_oop/modules/main.w': '42 hello\n',
-        'tests/stdlib/basic.w': '[3, 1, 2, 1] [1, 1, 2, 3] [2, 2, 4, 6]\nuno, dos ["a", "b"]\n3 7\n',
-        'examples/algorithms/two_sum.w': '[1, 2]\n',
+        'tests/functions/closures.wysna': '10\n2 3\n',
+        'tests/functions/nested_closures.wysna': '60\n7\n',
+        'tests/functions/captured_function.wysna': '10\n11\n',
+        'tests/functions/indexed_functions.wysna': '42\n11\n',
+        'tests/functions/option_result_payload_match.wysna': 'some 42\nerror failed\nnone\nok 7\n',
+        'tests/regressions/assignment_order.wysna': 'index\nvalue\n[7]\n',
+        'tests/regressions/assignment_receiver.wysna': '9 2\n',
+        'tests/regressions/dictionary_growth.wysna': '2001 2000 7 2000\n0 2000\n',
+        'tests/regressions/dict_bool_keys.wysna': '[true, false]\n[(true, 1), (false, 2)]\n',
+        'tests/regressions/dict_enum_keys.wysna': '[E.A, E.B]\n[(E.A, 1), (E.B, 2)]\n',
+        'tests/regressions/nul_string.wysna': '3 [97, 0, 98] false\n1\n',
+        'tests/generic_oop/repository.wysna': '42 hello\n',
+        'tests/generic_oop/modules/main.wysna': '42 hello\n',
+        'tests/stdlib/basic.wysna': '[3, 1, 2, 1] [1, 1, 2, 3] [2, 2, 4, 6]\nuno, dos ["a", "b"]\n3 7\n',
+        'examples/algorithms/two_sum.wysna': '[1, 2]\n',
     }
     with tempfile.TemporaryDirectory(prefix='w-expansion-') as temporary:
         directory = Path(temporary)
         for label, expected in positive.items():
             source = (ROOT / label).read_text()
-            if label.endswith('generic_oop/modules/main.w'):
-                source = source.replace('"library.w"', json.dumps(str(ROOT / 'tests/generic_oop/modules/library.w')))
+            if label.endswith('generic_oop/modules/main.wysna'):
+                source = source.replace('"library.wysna"', json.dumps(str(ROOT / 'tests/generic_oop/modules/library.wysna')))
             engines = ('interpreter', 'ast', 'hir') if '/generic_oop/' in label or '/stdlib/' in label else ('interpreter', 'ast', 'hir', 'w1')
             results = [run_engine(engine, source, label, w1, directory / label.replace('/', '_'),
                                   sanitize=bool(os.environ.get('W_SANITIZE'))) for engine in engines]
@@ -52,7 +52,7 @@ def run_expansion_tests():
                            ('ctor_early_return', 'W3004'), ('ctor_read_before_init', 'W3004'),
                            ('super_after_let', 'W3004')]:
             # These permanent cases must not depend on private audit files.
-            source = (ROOT / 'tests/regressions/invalid' / (name + '.w')).read_text()
+            source = (ROOT / 'tests/regressions/invalid' / (name + '.wysna')).read_text()
             for engine in ('interpreter', 'ast', 'hir', 'w1'):
                 result = run_engine(engine, source, name, w1, directory / ('invalid_' + name))
                 assert not result.compile_ok and result.diag_code == code, (name, vars(result))
@@ -63,12 +63,12 @@ def run_expansion_tests():
                 assert result.diag_code == 'W4003' and result.exit_code != 0, vars(result)
         for backend in ('ast', 'hir'):
             binary = directory / ('ffi_' + backend)
-            built = subprocess.run([sys.executable, str(ROOT / 'main.py'), 'build', str(ROOT / 'tests/ffi/scalars.w'),
+            built = subprocess.run([sys.executable, str(ROOT / 'main.py'), 'build', str(ROOT / 'tests/ffi/scalars.wysna'),
                                     '--backend=' + backend, '--link-lib', 'm', '-o', str(binary)], capture_output=True, text=True)
             assert built.returncode == 0, built.stderr
             result = subprocess.run([str(binary)], capture_output=True, text=True, env=dict(os.environ, W_MEM_CHECK='1'))
             assert (result.returncode, result.stdout) == (0, '9.0\n7\n'), result.stderr
-        cfg = directory / 'read_cfg.w'
+        cfg = directory / 'read_cfg.wysna'
         cfg.write_text('fn read_cfg() -> int { return 7 }\nprint(read_cfg())\n')
         built = subprocess.run([sys.executable, str(ROOT / 'main.py'), 'build', '--backend=selfhost',
                                 str(cfg), '-o', str(directory / 'read_cfg')], capture_output=True, text=True)
@@ -94,10 +94,10 @@ def test_lsp():
     server = LanguageServer(outgoing.append)
     with tempfile.TemporaryDirectory(prefix='w-lsp-') as temporary:
         directory = Path(temporary).resolve()
-        library = directory / 'library.w'
+        library = directory / 'library.wysna'
         library.write_text('pub fn plus(x: int) -> int { return x + 1 }\n')
-        uri = (directory / 'main.w').as_uri()
-        source = 'import "library.w" as library\nfn use(value: int) -> int { return library.plus(value) }\nprint(use(2))\n'
+        uri = (directory / 'main.wysna').as_uri()
+        source = 'import "library.wysna" as library\nfn use(value: int) -> int { return library.plus(value) }\nprint(use(2))\n'
         server.update(uri, source, 1)
         assert not outgoing[-1]['params']['diagnostics'], outgoing
         definition = server.definition(uri, {'line': 1, 'character': 46})

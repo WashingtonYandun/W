@@ -1,4 +1,4 @@
-pub import "shared.w"
+pub import "shared.wysna"
 
 pub struct Item {
     value: int,

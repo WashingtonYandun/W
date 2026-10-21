@@ -95,7 +95,7 @@ def test_native_runtime_panics_report_exact_w_source_location():
         temp = Path(directory)
         for backend in ("ast", "hir", "w1"):
             for name, source_text, line, marker, message in CASES:
-                source = temp / f"{name}.w"
+                source = temp / f"{name}.wysna"
                 c_file = temp / f"{name}-{backend}.c"
                 binary = temp / f"{name}-{backend}"
                 source.write_text(source_text, encoding="utf-8")

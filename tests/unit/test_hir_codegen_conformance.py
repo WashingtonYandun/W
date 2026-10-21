@@ -23,7 +23,7 @@ def run_hir_codegen_suite() -> bool:
 
     repo_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     runtime_dir = os.path.join(repo_root, "tests", "runtime")
-    files = sorted([f for f in os.listdir(runtime_dir) if f.endswith(".w")])
+    files = sorted([f for f in os.listdir(runtime_dir) if f.endswith(".wysna")])
 
     passed = 0
     total = 0
@@ -31,7 +31,7 @@ def run_hir_codegen_suite() -> bool:
 
     for f in files:
         w_path = os.path.join(runtime_dir, f)
-        expected_path = os.path.join(runtime_dir, f.replace(".w", ".expected"))
+        expected_path = os.path.join(runtime_dir, f.replace(".wysna", ".expected"))
         if not os.path.exists(expected_path):
             continue
 

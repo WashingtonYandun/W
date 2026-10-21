@@ -20,15 +20,16 @@ def source_fingerprint(root=ROOT):
     roots = ('checker', 'codegen', 'common', 'compiler', 'error', 'formatter', 'hir',
              'lexer', 'mir', 'node', 'parser', 'runtime', 'selfhost/src', 'stdlib',
              'tooling', 'tools', 'tests', 'examples', 'wtokens')
-    suffixes = {'.py', '.w', '.c', '.h', '.expected', '.json', '.txt'}
+    suffixes = {'.py', '.wysna', '.c', '.h', '.expected', '.json', '.txt'}
     paths = {path for name in roots for path in (root / name).rglob('*')
              if path.is_file() and path.suffix in suffixes
              and (path.suffix != '.txt' or 'data' in path.parts)
              and not {'__pycache__', 'failures'}.intersection(path.parts)}
-    paths.update(root / name for name in ('main.py', 'run_conformance.py', 'selfhost/w1.w',
+    paths.update(root / name for name in ('main.py', 'wysna', 'run_conformance.py', 'selfhost/w1.wysna',
                                          'SPEC.md', 'README.md', 'docs/STDLIB.md', 'docs/OWNERSHIP_LIFETIME.md',
                                          'docs/KNOWN_LIMITS.md', 'docs/SERVICE_FOUNDATIONS.md',
-                                         'pyproject.toml', '.github/workflows/ci.yml')
+                                         'pyproject.toml', '.github/workflows/ci.yml',
+                                         'runtime/wysna_host.h', 'runtime/wysna_runtime.h')
                  if (root / name).is_file())
     inputs = {path.relative_to(root).as_posix(): hashlib.sha256(path.read_bytes()).hexdigest()
               for path in sorted(paths)}
@@ -167,7 +168,7 @@ def generate_markdown_matrix(measured=None) -> str:
     rows.append("- **W0 Interpreter (`runtime/Interpreter.py`):** Canonical reference AST tree-walking interpreter.")
     rows.append("- **W0 AST C99 (`codegen/CCodeGen.py`):** Secondary C99 oracle for differential validation.")
     rows.append("- **W0 Typed HIR (`hir/HirCCodeGen.py`):** Primary compiler entry; verified MIR drives C99 emission (ADR-018).")
-    rows.append("- **W1 Self-Hosted (`selfhost/w1.w`):** Native Stage-2 compiler binary compiled via 3-stage bootstrap fixed-point.")
+    rows.append("- **W1 Self-Hosted (`selfhost/w1.wysna`):** Native Stage-2 compiler binary compiled via 3-stage bootstrap fixed-point.")
     return "\n".join(rows)
 
 

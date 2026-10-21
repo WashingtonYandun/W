@@ -1,4 +1,4 @@
-name: W Compiler Integration Gates
+name: Wysna Compiler Integration Gates
 
 on:
   push:
@@ -107,11 +107,11 @@ jobs:
       - name: Verify runtime, examples and direct W1 negatives across four engines
         run: python3 tools/ci_conformance.py --profile=${{ inputs.profile || 'integration' }}
       - name: Verify full conformance and SHA256 bootstrap
-        run: ./w test 2>&1 | tee .w_cache/ci-artifacts/conformance.log
+        run: ./wysna test 2>&1 | tee .w_cache/ci-artifacts/conformance.log
       - name: Verify four-engine differential and deterministic fuzz corpus
         run: |
-          ./w test --differential 20 2>&1 | tee .w_cache/ci-artifacts/differential.log
-          ./w test --fuzz 100 2>&1 | tee .w_cache/ci-artifacts/fuzz.log
+          ./wysna test --differential 20 2>&1 | tee .w_cache/ci-artifacts/differential.log
+          ./wysna test --fuzz 100 2>&1 | tee .w_cache/ci-artifacts/fuzz.log
       - name: Install SQLite development headers on Linux
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y libsqlite3-dev
@@ -207,15 +207,15 @@ jobs:
         run: |
           python -m tests.unit.test_distribution_contract
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          python main.py check --stats examples/01_hello_world.w
+          python main.py check --stats examples/01_hello_world.wysna
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          python main.py build --stats examples/01_hello_world.w -o hello.exe
+          python main.py build --stats examples/01_hello_world.wysna -o hello.exe
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           ./hello.exe
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Bootstrap W1 through the Windows cache lock
         run: |
-          python main.py build --backend=selfhost tests/runtime/readiness_patterns.w -o patterns.exe
+          python main.py build --backend=selfhost tests/runtime/readiness_patterns.wysna -o patterns.exe
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           ./patterns.exe
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
@@ -294,19 +294,19 @@ jobs:
           $version = (Get-Content dist/windows-bundle/windows-bundle.json | ConvertFrom-Json).version
           $compiler = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
           if (!(Test-Path $compiler)) { throw "Inno Setup 6 is required on the Windows packaging runner" }
-          & $compiler /Q "/DBundleDir=$((Resolve-Path dist/windows-bundle).Path)" "/DWVersion=$version" "/DOutputDir=$env:GITHUB_WORKSPACE\dist\windows-installer" packaging/windows/w.iss
+          & $compiler /Q "/DBundleDir=$((Resolve-Path dist/windows-bundle).Path)" "/DWVersion=$version" "/DOutputDir=$env:GITHUB_WORKSPACE\dist\windows-installer" packaging/windows/wysna.iss
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Test install, native build, repair and uninstall without host dependencies
         run: |
           ./tools/validate_windows_lifecycle.ps1 -Installer (Get-ChildItem dist/windows-installer/*-setup.exe).FullName -ReportDirectory "$env:GITHUB_WORKSPACE\dist\windows-reports"
       - name: Archive the portable distribution and calculate checksums
         run: |
-          python -c "import shutil; shutil.make_archive('dist/windows-installer/w-windows-x64-portable', 'zip', 'dist/windows-bundle')"
+          python -c "import shutil; shutil.make_archive('dist/windows-installer/wysna-windows-x64-portable', 'zip', 'dist/windows-bundle')"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           Get-ChildItem dist/windows-installer -File | ForEach-Object { "$((Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLower())  $($_.Name)" } | Set-Content dist/windows-installer/CHECKSUMS.sha256 -Encoding ascii
       - uses: actions/upload-artifact@v4
         with:
-          name: w-windows-x64-installer
+          name: wysna-windows-x64-installer
           path: dist/windows-installer/
           if-no-files-found: error
       - uses: actions/upload-artifact@v4

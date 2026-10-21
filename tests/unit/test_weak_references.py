@@ -58,7 +58,7 @@ def run_weak_tests():
         for name, expected_leak in [('weak_references', False), ('class_cycle_limitation', False),
                                     ('strong_cycle', True)]:
             folder = 'memory' if expected_leak else 'runtime'
-            source = root / 'tests' / folder / (name + '.w')
+            source = root / 'tests' / folder / (name + '.wysna')
             expected = '' if expected_leak else source.with_suffix('.expected').read_text()
             if not expected_leak:
                 interpreted = subprocess.run([sys.executable, 'main.py', 'run', str(source)],

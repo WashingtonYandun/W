@@ -42,7 +42,7 @@ fn module_contains(names: list[str], name: str) -> bool {
     return false
 }
 fn module_stdlib_path(requested: str) -> str {
-    let relative = "stdlib/" + slice(requested, 4, len(requested)) + ".w"
+    let relative = "stdlib/" + slice(requested, 4, len(requested)) + ".wysna"
     let local = read_file(relative) else error { "" }
     if local != "" { return relative }
     let arguments = args()

@@ -141,7 +141,7 @@ int main(void) {
 def test_parameter_lifetimes_across_engines():
     from main import ensure_selfhost_w1_binary
     from tests.engine_harness import verify
-    path = ROOT / 'tests/runtime/mir_parameter_lifetime.w'
+    path = ROOT / 'tests/runtime/mir_parameter_lifetime.wysna'
     with tempfile.TemporaryDirectory(prefix='w-parameter-lifetime-') as temporary:
         ok, detail = verify(path.read_text(), str(path.relative_to(ROOT)),
                             ensure_selfhost_w1_binary(str(ROOT)), temporary,

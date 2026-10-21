@@ -36,16 +36,16 @@ from hir.HirCCodeGen import HirCCodeGen
 SAMPLES = 15
 
 BENCHMARK_ORDER: List[str] = [
-    "arithmetic.w",
-    "function_calls.w",
-    "list_iteration.w",
-    "list_copy.w",
-    "list_mutation.w",
-    "nested_cow.w",
-    "string_unicode.w",
-    "structs.w",
-    "objects.w",
-    "dynamic_dispatch.w",
+    "arithmetic.wysna",
+    "function_calls.wysna",
+    "list_iteration.wysna",
+    "list_copy.wysna",
+    "list_mutation.wysna",
+    "nested_cow.wysna",
+    "string_unicode.wysna",
+    "structs.wysna",
+    "objects.wysna",
+    "dynamic_dispatch.wysna",
 ]
 
 

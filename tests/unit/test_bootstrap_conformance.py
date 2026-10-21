@@ -19,7 +19,7 @@ def sha256_file(path: str) -> str:
 
 def run_bootstrap_test() -> bool:
     repo_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-    w1_src_path = os.path.join(repo_root, "selfhost", "w1.w")
+    w1_src_path = os.path.join(repo_root, "selfhost", "w1.wysna")
 
     print("==================================================")
     print("W Language Self-Hosting Bootstrap Suite (SPEC 11)")
@@ -47,7 +47,7 @@ def run_bootstrap_test() -> bool:
         if res1.returncode != 0:
             print(f"[FAIL] Stage 0 -> Stage 1 C compilation failed:\n{res1.stderr}")
             return False
-        print("  [PASS] Stage 0: W0 compiled selfhost/w1.w -> compiler0.c -> w1_stage1")
+        print("  [PASS] Stage 0: W0 compiled selfhost/w1.wysna -> compiler0.c -> w1_stage1")
 
         # 2. Stage 1 (w1_stage1 native binary -> compiler1.c -> w1_stage2 binary)
         compiler1_c = os.path.join(tmpdir, "compiler1.c")
@@ -65,7 +65,7 @@ def run_bootstrap_test() -> bool:
         if res2.returncode != 0:
             print(f"[FAIL] Stage 1 -> Stage 2 C compilation failed:\n{res2.stderr}")
             return False
-        print("  [PASS] Stage 1: w1_stage1 compiled selfhost/w1.w -> compiler1.c -> w1_stage2")
+        print("  [PASS] Stage 1: w1_stage1 compiled selfhost/w1.wysna -> compiler1.c -> w1_stage2")
 
         # 3. Stage 2 (w1_stage2 native binary -> compiler2.c)
         compiler2_c = os.path.join(tmpdir, "compiler2.c")
@@ -73,7 +73,7 @@ def run_bootstrap_test() -> bool:
         if run2.returncode != 0 or not os.path.exists(compiler2_c):
             print(f"[FAIL] Stage 2 execution failed:\n{run2.stderr}\n{run2.stdout}")
             return False
-        print("  [PASS] Stage 2: w1_stage2 compiled selfhost/w1.w -> compiler2.c")
+        print("  [PASS] Stage 2: w1_stage2 compiled selfhost/w1.wysna -> compiler2.c")
 
         # 4. Fixed-Point Hash Verification
         h0 = sha256_file(compiler0_c)
@@ -91,11 +91,11 @@ def run_bootstrap_test() -> bool:
         print("  [PASS] Fixed-Point verified: SHA256(compiler0.c) == SHA256(compiler1.c) == SHA256(compiler2.c)")
 
         # 5. Stage 2 Native Binary Compiles & Runs Full Runtime Suite
-        w_files = sorted(glob.glob(os.path.join(repo_root, "tests", "runtime", "*.w")))
+        w_files = sorted(glob.glob(os.path.join(repo_root, "tests", "runtime", "*.wysna")))
         w1_passed = 0
         w1_total = 0
         for w_file in w_files:
-            exp_file = w_file[:-2] + ".expected"
+            exp_file = w_file[:-6] + ".expected"
             if not os.path.exists(exp_file):
                 continue
             reason = unsupported_reason(os.path.relpath(w_file, repo_root), 'w1')
@@ -105,13 +105,13 @@ def run_bootstrap_test() -> bool:
             w1_total += 1
             with open(exp_file, "r", encoding="utf-8") as ef:
                 expected = ef.read()
-            base = os.path.basename(w_file)[:-2]
+            base = os.path.basename(w_file)[:-6]
             out_c = os.path.join(tmpdir, f"w1_{base}.c")
             out_bin = os.path.join(tmpdir, f"w1_{base}")
 
             r_w1 = subprocess.run([w1_stage2, w_file, out_c], timeout=120, capture_output=True, text=True, cwd=repo_root)
             if r_w1.returncode != 0:
-                print(f"  [FAIL W1] {base}.w compile failed: {r_w1.stderr}")
+                print(f"  [FAIL W1] {base}.wysna compile failed: {r_w1.stderr}")
                 return False
             r_cc = subprocess.run([os.environ.get("CC", "cc"), "-std=c99", f"-I{repo_root}", out_c, "-o", out_bin], timeout=120, capture_output=True, text=True)
             if r_cc.returncode != 0:
@@ -124,7 +124,7 @@ def run_bootstrap_test() -> bool:
             )
             ok, detail = compare([result], expected)
             if not ok:
-                print(f"  [FAIL W1 RUN] {base}.w mismatch: {detail}")
+                print(f"  [FAIL W1 RUN] {base}.wysna mismatch: {detail}")
                 return False
             w1_passed += 1
 
@@ -135,6 +135,10 @@ def run_bootstrap_test() -> bool:
         print(f"  [PASS] Stage 2 w1_stage2 compiled & verified {w1_passed}/{w1_total} runtime conformance programs")
         print("==================================================")
         return True
+
+
+def test_bootstrap():
+    assert run_bootstrap_test()
 
 
 if __name__ == "__main__":

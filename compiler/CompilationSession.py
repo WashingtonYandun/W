@@ -232,11 +232,19 @@ class CompilationSession:
     def import_module(self, statement, importer):
         directory = os.path.dirname(importer) if not importer.startswith('<') else os.getcwd()
         if statement.path.startswith('std/'):
-            candidate = self.path(str(Path(__file__).resolve().parent.parent / 'stdlib' / (statement.path[4:] + '.w')))
+            subpath = statement.path[4:]
+            base = Path(__file__).resolve().parent.parent / 'stdlib' / subpath
+            candidate = self.path(str(base.with_suffix('.wysna')))
         else:
             candidate = self.path(os.path.join(directory, statement.path))
+            if not os.path.isfile(candidate) and candidate not in self.sources.overlays:
+                if os.path.isfile(candidate + '.wysna') or (candidate + '.wysna') in self.sources.overlays:
+                    candidate = self.path(candidate + '.wysna')
         if not os.path.isfile(candidate) and candidate not in self.sources.overlays:
             candidate = self.path(statement.path)
+            if not os.path.isfile(candidate) and candidate not in self.sources.overlays:
+                if os.path.isfile(candidate + '.wysna') or (candidate + '.wysna') in self.sources.overlays:
+                    candidate = self.path(candidate + '.wysna')
         if not os.path.isfile(candidate) and candidate not in self.sources.overlays:
             raise TypeError(f"Module not found: '{statement.path}'", file=importer,
                             line=statement.line, col=statement.col, code='W1003')

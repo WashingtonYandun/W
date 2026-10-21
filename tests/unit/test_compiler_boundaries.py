@@ -24,7 +24,7 @@ def test_compiler_boundaries():
     valid = 'fn unused[T: Printable](x: T) -> T { return x }\ninterface Printable { fn show() -> str }'
     TypeChecker().check(Parser().parse(valid))
 
-    path = 'tests/runtime/generic_pair.w'
+    path = 'tests/runtime/generic_pair.wysna'
     with open(path, encoding='utf-8') as stream:
         ast = Parser(file=path).parse(stream.read())
     checker = TypeChecker(file=path)
@@ -42,8 +42,8 @@ def test_compiler_boundaries():
                 visit(child)
     visit(module)
 
-    builder = HirBuilder(checker.interner, file_path='boundary.w')
-    generator = HirCCodeGen(checker.interner, file_path='boundary.w')
+    builder = HirBuilder(checker.interner, file_path='boundary.wysna')
+    generator = HirCCodeGen(checker.interner, file_path='boundary.wysna')
     for action in [lambda: builder._lower_expr(Expr()),
                    lambda: builder._lower_stmt(Stmt()),
                    lambda: generator.emit_expr(HirExpr(1, Span(3, 4)), [])]:
@@ -51,7 +51,7 @@ def test_compiler_boundaries():
             action()
         except WError as error:
             assert error.code == 'W9999', str(error)
-            assert error.file == 'boundary.w'
+            assert error.file == 'boundary.wysna'
             assert error.to_dict()['stage'] in ('hir', 'codegen')
         else:
             raise AssertionError('Unsupported nodes must not silently become unit')

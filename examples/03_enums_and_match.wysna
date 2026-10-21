@@ -1,4 +1,4 @@
-## 03_enums_and_match.w
+## 03_enums_and_match.wysna
 ## Sum types (enum), Product types (struct), and exhaustive pattern matching.
 
 enum TaskStatus {

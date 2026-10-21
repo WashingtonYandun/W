@@ -1,4 +1,4 @@
-## 02_value_semantics_cow.w
+## 02_value_semantics_cow.wysna
 ## Pure Value Semantics powered by ARC + Copy-on-Write (CoW).
 
 struct Config {

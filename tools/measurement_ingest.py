@@ -20,7 +20,7 @@ def build(output=None, backend='hir'):
     compiler = subprocess.run(compiler_command() + ['--version'], capture_output=True,
                               text=True, check=True, timeout=30).stdout
     inputs = list(SELFHOST_BOOTSTRAP_INPUTS) + [str(path.relative_to(ROOT)) for path in
-        (PILOT / 'import_csv.w', PILOT / 'adapter.c', PILOT / 'adapter.h')]
+        (PILOT / 'import_csv.wysna', PILOT / 'adapter.c', PILOT / 'adapter.h')]
     digest = hashlib.sha256(json.dumps([compiler, backend, compiler_command(), os.name]).encode())
     for relative in sorted(set(inputs)):
         digest.update(relative.encode())
@@ -31,7 +31,7 @@ def build(output=None, backend='hir'):
     binary.parent.mkdir(parents=True, exist_ok=True)
     with cache_lock(binary.parent / 'build.lock'):
         if output or not binary.exists():
-            command = [sys.executable, str(ROOT / 'main.py'), 'build', str(PILOT / 'import_csv.w'),
+            command = [sys.executable, str(ROOT / 'main.py'), 'build', str(PILOT / 'import_csv.wysna'),
                        '--backend=' + backend, '--link-lib', str(PILOT / 'adapter.c'),
                        '--link-lib', 'sqlite3', '-o', str(binary)]
             result = subprocess.run(command, capture_output=True, text=True, timeout=180)

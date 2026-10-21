@@ -58,7 +58,7 @@ def run_phase_a_tests():
     root = Path(__file__).resolve().parents[2]
     with tempfile.TemporaryDirectory(prefix='w-phase-a-') as directory:
         for name in ['strings_ownership', 'generic_error_composition', 'generic_domain_err', 'generic_match_guards']:
-            source = root / 'tests/runtime' / (name + '.w')
+            source = root / 'tests/runtime' / (name + '.wysna')
             expected = source.with_suffix('.expected').read_text()
             interpreted = subprocess.run([sys.executable, str(root / 'main.py'), 'run', str(source)],
                                          capture_output=True, text=True, timeout=30)

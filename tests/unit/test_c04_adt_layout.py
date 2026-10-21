@@ -85,8 +85,8 @@ def test_reject_infinite_layout_cycles():
     }
     """
     try:
-        ast = Parser(file="test_self.w").parse(code_self)
-        TypeChecker(file="test_self.w").check(ast)
+        ast = Parser(file="test_self.wysna").parse(code_self)
+        TypeChecker(file="test_self.wysna").check(ast)
         assert False, "Expected TypeError for direct self-cycle"
     except TypeError as e:
         assert e.code == "W2011", f"Expected W2011, got {e.code}"
@@ -104,8 +104,8 @@ def test_reject_infinite_layout_cycles():
     }
     """
     try:
-        ast = Parser(file="test_mutual.w").parse(code_mutual)
-        TypeChecker(file="test_mutual.w").check(ast)
+        ast = Parser(file="test_mutual.wysna").parse(code_mutual)
+        TypeChecker(file="test_mutual.wysna").check(ast)
         assert False, "Expected TypeError for mutual struct cycle"
     except TypeError as e:
         assert e.code == "W2011", f"Expected W2011, got {e.code}"
@@ -119,8 +119,8 @@ def test_reject_infinite_layout_cycles():
     }
     """
     try:
-        ast = Parser(file="test_tuple.w").parse(code_tuple)
-        TypeChecker(file="test_tuple.w").check(ast)
+        ast = Parser(file="test_tuple.wysna").parse(code_tuple)
+        TypeChecker(file="test_tuple.wysna").check(ast)
         assert False, "Expected TypeError for tuple struct cycle"
     except TypeError as e:
         assert e.code == "W2011", f"Expected W2011, got {e.code}"
@@ -177,8 +177,8 @@ def test_match_guards_and_exhaustiveness():
     }
     """
     try:
-        ast = Parser(file="test_guard.w").parse(code_missing_unconditional)
-        TypeChecker(file="test_guard.w").check(ast)
+        ast = Parser(file="test_guard.wysna").parse(code_missing_unconditional)
+        TypeChecker(file="test_guard.wysna").check(ast)
         assert False, "Expected W2003 for non-exhaustive match with guarded arm"
     except TypeError as e:
         assert e.code == "W2003", f"Expected W2003, got {e.code}"
@@ -202,8 +202,8 @@ def test_match_guards_and_exhaustiveness():
     let s2 = Status.Active(5)
     let s3 = Status.Inactive
     """
-    ast = Parser(file="test_guard_ok.w").parse(code_exhaustive)
-    checker = TypeChecker(file="test_guard_ok.w")
+    ast = Parser(file="test_guard_ok.wysna").parse(code_exhaustive)
+    checker = TypeChecker(file="test_guard_ok.wysna")
     checker.check(ast)
 
     print("  [PASS] Match guards do not bypass exhaustiveness checking (W2003 enforced)")
@@ -267,15 +267,15 @@ def test_native_c99_recursive_adts():
     main()
     """
 
-    ast = Parser(file="recursive_adts.w").parse(code)
-    checker = TypeChecker(file="recursive_adts.w")
+    ast = Parser(file="recursive_adts.wysna").parse(code)
+    checker = TypeChecker(file="recursive_adts.wysna")
     checker.check(ast)
 
     repo_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
     with tempfile.TemporaryDirectory() as tmpdir:
         # 1. AST Backend
-        c_ast = CCodeGen(file="recursive_adts.w").generate(ast)
+        c_ast = CCodeGen(file="recursive_adts.wysna").generate(ast)
         c_path_ast = os.path.join(tmpdir, "adt_ast.c")
         bin_path_ast = os.path.join(tmpdir, "adt_ast")
         with open(c_path_ast, "w", encoding="utf-8") as f:

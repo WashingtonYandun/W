@@ -1,8 +1,8 @@
 @echo off
 set "PATH=%~dp0;%PATH%"
-echo W Language
-"%~dp0w.exe" version
+echo Wysna Language
+"%~dp0wysna.exe" version
 echo.
-echo Run: w run hello.w
-echo Build: w build hello.w -o hello.exe
+echo Run: wysna run hello.wysna
+echo Build: wysna build hello.wysna -o hello.exe
 echo.

@@ -16,7 +16,7 @@ ROOT = Path(__file__).resolve().parents[2]
 
 def test_toolkit_semantics_across_four_engines():
     w1 = ensure_selfhost_w1_binary(str(ROOT))
-    source = (ROOT / 'tests/stdlib/toolkit.w').read_text(encoding='utf-8')
+    source = (ROOT / 'tests/stdlib/toolkit.wysna').read_text(encoding='utf-8')
     expected = (ROOT / 'tests/stdlib/toolkit.expected').read_text(encoding='utf-8')
     with tempfile.TemporaryDirectory() as directory:
         results = [run_engine(engine, source, 'toolkit', w1, directory,
@@ -62,9 +62,9 @@ main()
 fs.rename(PATH, MOVED) else error { exit(1) }
 print(fs.exists(PATH) else error { false }, fs.exists(MOVED) else error { false })
 fs.remove(MOVED) else error { exit(1) }
-print(path.join("root", "child"), path.basename("C:/é/file.w"), path.dirname("C:/file.w"))
+print(path.join("root", "child"), path.basename("C:/é/file.wysna"), path.dirname("C:/file.wysna"))
 '''.replace('PATH', json.dumps(str(path), ensure_ascii=False)).replace('MOVED', json.dumps(str(moved), ensure_ascii=False))
-        expected = '0 0 6\n6 0\nread true true\nfalse true\nroot/child file.w C:/\n'
+        expected = '0 0 6\n6 0\nread true true\nfalse true\nroot/child file.wysna C:/\n'
         for engine in ('interpreter', 'ast', 'hir', 'w1'):
             result = run_engine(engine, text, 'streaming', w1, directory / engine,
                                 sanitize=os.environ.get('W_SANITIZE') == '1')
@@ -176,7 +176,7 @@ def test_standard_file_cleanup_runs_on_runtime_panic():
         directory = Path(temporary)
         for backend in ('interpreter', 'ast', 'hir', 'selfhost'):
             output = directory / (backend + '.bin')
-            source = directory / (backend + '.w')
+            source = directory / (backend + '.wysna')
             source.write_text('import "std/buffer"\nimport "std/files"\nfn main() {\n'
                 f'let file = files.open({json.dumps(str(output))}, 1) else error {{ exit(2) return }}\n'
                 'let data = buffer.from_text("flushed")\n'
@@ -197,7 +197,7 @@ def test_standard_file_cleanup_runs_on_runtime_panic():
 def test_resource_duplicate_owner_is_rejected_without_disposal():
     with tempfile.TemporaryDirectory() as temporary:
         directory = Path(temporary)
-        source = directory / 'owners.w'
+        source = directory / 'owners.wysna'
         source.write_text('''import "std/resources"
 extern "C" fn audit_open() -> opaque
 extern "C" fn audit_dispose(handle: opaque) -> int32
