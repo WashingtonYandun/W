@@ -17,6 +17,10 @@ defaults:
   run:
     shell: bash
 
+env:
+  PYTHONUTF8: "1"
+  PYTHONIOENCODING: "utf-8"
+
 jobs:
   wheel-build:
     name: Build W0 wheel
@@ -191,6 +195,8 @@ jobs:
         shell: pwsh
     env:
       CC: clang
+      PYTHONUTF8: "1"
+      PYTHONIOENCODING: "utf-8"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
