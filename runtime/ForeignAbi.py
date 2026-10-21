@@ -2,6 +2,7 @@
 import ctypes
 import ctypes.util
 import os
+import sys
 from error.Error import WRuntimeError
 from runtime.Values import WInt, WFloat, WBool, WUnit, WPointer
 
@@ -21,10 +22,15 @@ def bind_foreign(declaration, libraries=()):
         path = library if os.path.isfile(library) else ctypes.util.find_library(library)
         if path:
             try:
+                abs_path = os.path.abspath(path)
                 kwargs = {'winmode': 0} if (os.name == 'nt' and sys.version_info >= (3, 8)) else {}
-                handles.append(ctypes.CDLL(path, **kwargs))
+                handles.append(ctypes.CDLL(abs_path, **kwargs))
             except Exception:
-                pass
+                try:
+                    kwargs = {'winmode': 0} if (os.name == 'nt' and sys.version_info >= (3, 8)) else {}
+                    handles.append(ctypes.CDLL(path, **kwargs))
+                except Exception:
+                    pass
     function = internal or next((getattr(handle, name) for handle in handles if hasattr(handle, name)), None)
     if function is None:
         raise WRuntimeError("Unresolved C symbol: " + name, code='W4003')
