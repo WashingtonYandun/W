@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Run declared compiler coverage; the release profile rejects unsupported rows."""
 import json
+import hashlib
 import os
 from pathlib import Path
 import shlex
@@ -12,6 +13,39 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 from common.Platform import executable_name
 from tests.engine_harness import ENGINES, PROFILES, corpus_paths, execute, verify_case
+
+
+def source_fingerprint(root=ROOT):
+    """Bind evidence to the commit and exact source, fixture and harness bytes."""
+    roots = ('checker', 'codegen', 'common', 'compiler', 'error', 'formatter', 'hir',
+             'lexer', 'mir', 'node', 'parser', 'runtime', 'selfhost/src', 'stdlib',
+             'tooling', 'tools', 'tests', 'examples', 'wtokens')
+    suffixes = {'.py', '.w', '.c', '.h', '.expected', '.json', '.txt'}
+    paths = {path for name in roots for path in (root / name).rglob('*')
+             if path.is_file() and path.suffix in suffixes
+             and (path.suffix != '.txt' or 'data' in path.parts)
+             and not {'__pycache__', 'failures'}.intersection(path.parts)}
+    paths.update(root / name for name in ('main.py', 'run_conformance.py', 'selfhost/w1.w',
+                                         'SPEC.md', 'pyproject.toml', '.github/workflows/ci.yml')
+                 if (root / name).is_file())
+    inputs = {path.relative_to(root).as_posix(): hashlib.sha256(path.read_bytes()).hexdigest()
+              for path in sorted(paths)}
+    git = subprocess.run(['git', '-C', str(root), 'rev-parse', 'HEAD'],
+                         capture_output=True, text=True, timeout=30)
+    return {'version': 1, 'sha': git.stdout.strip() if git.returncode == 0 else None,
+            'inputs': inputs,
+            'digest': hashlib.sha256(json.dumps(inputs, sort_keys=True).encode()).hexdigest()}
+
+
+def stale_reason(measured, current):
+    recorded = measured.get('provenance')
+    if not recorded:
+        return 'measurement has no source fingerprints'
+    if recorded != current:
+        changed = sorted(name for name in set(recorded.get('inputs', {})) | set(current['inputs'])
+                         if recorded.get('inputs', {}).get(name) != current['inputs'].get(name))
+        return 'source/fixture hashes or commit changed: ' + ', '.join(changed[:3])
+    return ''
 
 
 def _measured_summary():
@@ -36,7 +70,8 @@ def generate_markdown_matrix(measured=None) -> str:
     fixtures = positives + negatives
     if measured is None:
         measured = _measured_summary()
-    coverage = (measured or {}).get('coverage') or {}
+    invalidation = stale_reason(measured, source_fingerprint()) if measured else ''
+    coverage = {} if invalidation else (measured or {}).get('coverage') or {}
 
     by_feature = {}
     for path in fixtures:
@@ -61,6 +96,8 @@ def generate_markdown_matrix(measured=None) -> str:
               'hir': 'W0 Typed HIR (Default)', 'w1': 'W1 Self-Hosted C99'}
 
     def cell(engine, feature, count):
+        if invalidation:
+            return '—'
         stats = (coverage.get(engine) or {})
         if feature is not None:
             stats = ((measured or {}).get('features') or {}).get(feature, {}).get(engine) or {}
@@ -74,7 +111,7 @@ def generate_markdown_matrix(measured=None) -> str:
             return f"⏳ {passed}/{count} ({unsupported} declared unsupported)"
         return f"{mark} {passed}/{count}"
 
-    feature_order = ['core', 'generics', 'checked_modules', 'error_unions']
+    feature_order = list(PROFILES['features'])
     for feat in feature_order:
         items = by_feature.get(feat, [])
         count = len(items)
@@ -101,7 +138,10 @@ def generate_markdown_matrix(measured=None) -> str:
     stale_warning = False
     measured_labels = set((measured or {}).get('corpus') or [])
     current_labels = {str(path.relative_to(ROOT)) for path in fixtures}
-    if measured and measured_labels != current_labels:
+    if invalidation:
+        verdict = 'no verified run for current source tree; STALE: ' + invalidation
+        stale_warning = True
+    elif measured and measured_labels != current_labels:
         missing = sorted(current_labels - measured_labels)[:3]
         stale = sorted(measured_labels - current_labels)[:3]
         verdict = (f'STALE: summary.json covers a different corpus '
@@ -144,8 +184,8 @@ def main():
     artifacts.mkdir(parents=True, exist_ok=True)
     compiler = subprocess.run(shlex.split(os.environ.get('CC', 'cc')) + ['--version'],
                               capture_output=True, text=True, timeout=30, check=True)
-    sha = subprocess.run(['git', 'rev-parse', 'HEAD'], cwd=ROOT, capture_output=True,
-                         text=True, timeout=30, check=True).stdout.strip()
+    provenance = source_fingerprint()
+    sha = provenance['sha']
     (artifacts / 'environment.json').write_text(json.dumps({
         'sha': sha, 'python': sys.version, 'platform': sys.platform,
         'compiler': compiler.stdout, 'profile': profile, 'sanitize': sanitize,
@@ -188,12 +228,13 @@ def main():
                 coverage[engine][state] += 1
                 feature_rows[engine][state] += 1
             print(f"  [{'PASS' if ok else 'FAIL'}] {label}" + ('' if ok else ': ' + detail), flush=True)
-    summary = {'profile': profile, 'passed_cases': passed, 'total_cases': len(fixtures),
+    unchanged = provenance == source_fingerprint()
+    summary = {'provenance': provenance, 'source_unchanged': unchanged, 'profile': profile, 'passed_cases': passed, 'total_cases': len(fixtures),
                'coverage': coverage, 'features': feature_coverage, 'support_files': support_files,
                'corpus': sorted(labels)}
     (artifacts / 'summary.json').write_text(json.dumps(summary, indent=2))
     print(json.dumps(summary, indent=2))
-    return 0 if passed == len(fixtures) else 1
+    return 0 if passed == len(fixtures) and unchanged else 1
 
 
 if __name__ == '__main__':

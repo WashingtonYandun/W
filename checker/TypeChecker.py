@@ -35,55 +35,6 @@ from error.Error import TypeError
 from checker.LayoutGraph import LayoutGraph, build_layout_graph_from_declarations
 
 
-def _equality_compatible(left: WType, right: WType, seen: Optional[set] = None) -> bool:
-    """True when `left == right` can be decided at runtime.
-
-    Two specializations of the same generic template count as compatible when their
-    type arguments line up, treating an unbound type parameter as compatible with
-    anything. Without this, `Ok(42) == Err("bad")` is rejected because checking the
-    operands separately infers `Result[int, E]` and `Result[T, str]`: two different
-    specialized names for what is really a single `Result[int, str]` comparison.
-    """
-    if left == right:
-        return True
-    if isinstance(left, TypeParamType) or isinstance(right, TypeParamType):
-        return True
-    if isinstance(left, AnyType) or isinstance(right, AnyType):
-        return True
-    if isinstance(left, EnumType) and isinstance(right, EnumType):
-        if getattr(left, "template_name", None) != getattr(right, "template_name", None):
-            return False
-        if len(left.type_args) != len(right.type_args):
-            return False
-        return all(_equality_compatible(a, b, seen) for a, b in zip(left.type_args, right.type_args))
-    if seen is None:
-        seen = set()
-    if (id(left), id(right)) in seen:
-        return False
-    seen.add((id(left), id(right)))
-    if isinstance(left, StructType) and isinstance(right, StructType):
-        if getattr(left, "template_name", None) != getattr(right, "template_name", None):
-            return False
-        if len(left.type_args) != len(right.type_args):
-            return False
-        return all(_equality_compatible(a, b, seen) for a, b in zip(left.type_args, right.type_args))
-    if isinstance(left, ListType) and isinstance(right, ListType):
-        return _equality_compatible(left.element, right.element, seen)
-    if isinstance(left, OptionalType) and isinstance(right, OptionalType):
-        return _equality_compatible(left.inner, right.inner, seen)
-    if isinstance(left, TupleType) and isinstance(right, TupleType):
-        return len(left.elements) == len(right.elements) and all(
-            _equality_compatible(a, b, seen) for a, b in zip(left.elements, right.elements))
-    if isinstance(left, ResultType) and isinstance(right, ResultType):
-        return (_equality_compatible(left.ok, right.ok, seen)
-                and _equality_compatible(left.err, right.err, seen))
-    if isinstance(left, ErrorUnionType) and isinstance(right, ErrorUnionType):
-        return (len(left.alternatives) == len(right.alternatives)
-                and all(_equality_compatible(a, b, seen)
-                        for a, b in zip(left.alternatives, right.alternatives)))
-    return False
-
-
 class GenericInstanceKey(NamedTuple):
     """Session-local specialization identity; not a persistent hash or ABI name."""
     template_name: str
@@ -1331,25 +1282,9 @@ class TypeChecker:
                 )
 
             if op in ("==", "!="):
-                def contains_function(type_, seen):
-                    if id(type_) in seen:
-                        return False
-                    seen.add(id(type_))
-                    if isinstance(type_, FunctionType):
-                        return True
-                    children = []
-                    if isinstance(type_, ListType): children = [type_.element]
-                    elif isinstance(type_, DictType): children = [type_.key, type_.value]
-                    elif isinstance(type_, TupleType): children = type_.elements
-                    elif isinstance(type_, OptionalType): children = [type_.inner]
-                    elif isinstance(type_, ResultType): children = [type_.ok, type_.err]
-                    elif isinstance(type_, StructType): children = list(type_.fields.values())
-                    elif isinstance(type_, EnumType): children = [p for payload in type_.variant_payloads.values() for p in payload]
-                    return any(contains_function(child, seen) for child in children)
-                if contains_function(lhs_t, set()) or contains_function(rhs_t, set()):
-                    raise TypeError("Function values do not support equality", file=self.file, line=expr.line, col=expr.col, code="W2001")
-                if not is_assignable(lhs_t, rhs_t) and not is_assignable(rhs_t, lhs_t) \
-                        and not _equality_compatible(lhs_t, rhs_t):
+                left_id = self.interner.from_wtype(lhs_t)
+                right_id = self.interner.from_wtype(rhs_t)
+                if not self.interner.equality_compatible(left_id, right_id):
                     raise TypeError(
                         message=f"Cannot compare equality of different types '{lhs_t}' and '{rhs_t}'",
                         line=expr.line,
@@ -1811,7 +1746,8 @@ class TypeChecker:
                         if curr_s.init_type is not None:
                             return curr_s.init_type
                         curr_s = curr_s.superclass
-                    return FunctionType(params=[], ret=UnitType)
+                    raise TypeError("Superclass has no declared constructor", file=self.file,
+                                    line=expr.line, col=expr.col, code="W3002")
 
                 f_info = obj_t.fields.get(expr.property)
                 if f_info is not None:

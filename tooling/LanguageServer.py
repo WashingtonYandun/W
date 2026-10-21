@@ -1,8 +1,10 @@
 """LSP over stdio using checked modules, lexical scopes and source snapshots."""
 import json
+import os
 from pathlib import Path
 import sys
 from urllib.parse import unquote, urlparse
+from urllib.request import url2pathname
 from compiler.CompilationSession import CompilationSession
 from error.Error import WError
 from lexer.Lexer import Lexer
@@ -13,7 +15,7 @@ def source_path(uri):
     parsed = urlparse(uri)
     if parsed.scheme != 'file' or parsed.netloc not in ('', 'localhost'):
         raise ValueError('Only local file URIs are supported')
-    return str(Path(unquote(parsed.path)).resolve())
+    return str(Path(url2pathname(parsed.path)).resolve())
 
 
 def offset_at(source, position):
@@ -125,7 +127,7 @@ class LanguageServer:
                         if candidate:
                             symbol = candidate
                             break
-        if symbol is None or not getattr(symbol, 'file', '').startswith('/'):
+        if symbol is None or not Path(getattr(symbol, 'file', '')).is_absolute():
             return None
         path = symbol.file
         source = self.session.sources.snapshots.get(path, '')

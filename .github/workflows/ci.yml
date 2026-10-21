@@ -98,6 +98,8 @@ jobs:
           python3 -m tests.unit.test_audit_remediation
           python3 -m tests.unit.test_mir
           python3 -m tests.unit.test_distribution_contract
+          python3 -m tests.unit.test_audit_findings
+          python3 -m tests.unit.test_standard_toolkit
       - name: Verify runtime, examples and direct W1 negatives across four engines
         run: python3 tools/ci_conformance.py --profile=${{ inputs.profile || 'integration' }}
       - name: Verify full conformance and SHA256 bootstrap
@@ -157,6 +159,8 @@ jobs:
           W_SANITIZE=1 python3 -m tests.unit.test_audit_completion
           W_SANITIZE=1 python3 -m tests.unit.test_audit_readiness
           W_SANITIZE=1 python3 -m tests.unit.test_compilation_session
+          W_SANITIZE=1 python3 -m tests.unit.test_audit_findings
+          W_SANITIZE=1 python3 -m tests.unit.test_standard_toolkit
           python3 -m tests.unit.test_phase_a
           python3 -m tests.unit.test_ownership_control_flow
           python3 -m tests.unit.test_f03_ownership
@@ -207,6 +211,12 @@ jobs:
           python main.py build --backend=selfhost tests/runtime/readiness_patterns.w -o patterns.exe
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           ./patterns.exe
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Verify standard toolkit and native LSP paths
+        run: |
+          python -m tests.unit.test_audit_findings
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python -m tests.unit.test_standard_toolkit
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Package and verify the native SQLite pilot
         run: |

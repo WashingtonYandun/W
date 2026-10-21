@@ -34,10 +34,13 @@ def corpus_paths():
     """Phase D public corpus. Expansion fixtures live under dedicated directories."""
     positives = sorted((ROOT / 'tests/runtime').glob('*.w')) + sorted((ROOT / 'examples').glob('*.w'))
     positives += sorted((ROOT / 'tests/modules').glob('*/main.w'))
+    for directory in ('functions', 'stdlib', 'regressions'):
+        positives += sorted(path for path in (ROOT / 'tests' / directory).rglob('*.w')
+                            if path.with_suffix('.expected').is_file())
     support_files = PROFILES.get('support_files', {})
     positives = [path for path in positives if str(path.relative_to(ROOT)) not in support_files]
     negatives = sorted((ROOT / 'tests').glob('*/invalid/*.w')) + sorted((ROOT / 'tests/errors').glob('invalid_*.w'))
-    negatives = [path for path in negatives if not EXPANSION_DIRS.intersection(path.parts)]
+    negatives = [path for path in negatives if 'ffi' not in path.parts]
     return positives, negatives
 
 
@@ -187,6 +190,17 @@ def compare(results, expected=None):
 
 
 def verify_case(source, label, w1_bin, work_dir, expected=None, sanitize=False, strict=False, expect_rejection=False):
+    original = ROOT / label
+    if original.is_file():
+        def qualify_import(match):
+            requested = match.group(1)
+            if requested.startswith('std/'):
+                return match.group(0)
+            candidate = original.parent / requested
+            if not candidate.is_file():
+                candidate = ROOT / requested
+            return 'import ' + json.dumps(str(candidate.resolve()), ensure_ascii=False)
+        source = re.sub(r'import\s+"([^"\n]+)"', qualify_import, source)
     artifacts = Path(os.environ.get('W_CI_ARTIFACTS', ROOT / '.w_cache/ci-artifacts'))
     case_id = hashlib.sha256(label.encode()).hexdigest()[:12]
     directory = Path(work_dir) / case_id

@@ -1,0 +1,22 @@
+-9223372036854775808 9223372036854775807
+invalid integer 0
+invalid integer 1
+invalid integer 18
+invalid integer 19
+invalid integer 2
+invalid integer 0
+125.0 -0.5
+invalid float 0
+invalid float 2
+invalid float 1
+invalid float 0
+invalid float 0
+invalid float 1
+["a", "b", ""] ["é", "x"]
+x é-é
+true true 2
+5 4 0 255
+0 0
+closed buffer or invalid index
+closed buffer or byte outside 0..255
+0

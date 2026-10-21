@@ -1,0 +1,30 @@
+import "std/text"
+# W paths use '/' for composition; the Windows file adapter accepts UTF-8 paths.
+pub fn is_absolute(path: str) -> bool {
+    if len(path) == 0 { return false }
+    if path[0] == "/" or path[0] == "\\" { return true }
+    return len(path) >= 3 and path[1] == ":" and (path[2] == "/" or path[2] == "\\")
+}
+pub fn join(base: str, child: str) -> str {
+    if len(base) == 0 or is_absolute(child) { return child }
+    if len(child) == 0 { return base }
+    if text.ends_with(base, "/") or text.ends_with(base, "\\") { return base + child }
+    return base + "/" + child
+}
+pub fn basename(path: str) -> str {
+    let mut start = 0
+    for index in 0..len(path) {
+        if path[index] == "/" or path[index] == "\\" { start = index + 1 }
+    }
+    return slice(path, start, len(path))
+}
+pub fn dirname(path: str) -> str {
+    let mut boundary = -1
+    for index in 0..len(path) {
+        if path[index] == "/" or path[index] == "\\" { boundary = index }
+    }
+    if boundary < 0 { return "." }
+    if boundary == 0 { return slice(path, 0, 1) }
+    if boundary == 2 and path[1] == ":" { return slice(path, 0, 3) }
+    return slice(path, 0, boundary)
+}
