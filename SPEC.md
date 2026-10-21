@@ -1,10 +1,10 @@
-# W Language Specification
+# Wysna Language Specification
 
 > **Status:** The current alpha toolchain is `0.4.0a1`. Sections 1–11 describe the frozen core grammar and are normative; sections 12–14 describe implementation contracts.
 >
 > **Targets:** `W0` is the reference implementation and the authority on whether a program is valid. `W1` is an experimental self-hosted compiler whose supported subset is measured by the public release corpus. The measured support boundary is documented in [docs/ENGINE_PARITY_MATRIX.md](docs/ENGINE_PARITY_MATRIX.md).
 >
-> **Thesis:** W is a compact, statically typed language for small native tools, with deterministic diagnostics and inspectable C99 output. This document defines the language syntax and semantics.
+> **Thesis:** Wysna is a compact, statically typed language for small native tools, with deterministic diagnostics and inspectable C99 output. This document defines the language syntax and semantics.
 
 ---
 
@@ -62,7 +62,7 @@ Identifiers must start with an ASCII letter (`a-z`, `A-Z`) or underscore `_`, fo
 ### 3.3 Strings (`str`) & Unicode Scalar Semantics
 * **UTF-8 Storage:** Strings are immutable and stored as UTF-8 in memory.
 * **Unicode Scalar Value Indexing:** `len(s)`, `s[i]`, `slice(s, start, end)`, `ord(s)`, and `chr(c)` operate strictly on **Unicode Scalar Values (Code Points)** (`U+0000..=U+D7FF` and `U+E000..=U+10FFFF`), returning a single code-point string (`str`) or code-point count:
-  ```w
+  ```wysna
   let s = "José"
   s[3]    # returns "é" (4th Unicode scalar value)
   len(s)  # returns 4
@@ -95,12 +95,12 @@ Identifiers must start with an ASCII letter (`a-z`, `A-Z`) or underscore `_`, fo
 
 ### 4.2 Explicit Nullability (`T?`)
 * Types are **non-nullable by default**. Assigning `none` to a non-optional type is a compile-time error:
-  ```w
+  ```wysna
   let name: str = none     # COMPILE ERROR
   let name: str? = none    # VALID: explicit optional
   ```
 * Functions returning no value return `unit`:
-  ```w
+  ```wysna
   fn greet(name: str) -> unit {
       print("Hello, ", name)
       return               # Bare return allowed only in unit functions
@@ -122,15 +122,15 @@ line returns that expression, and the value may span lines.
 * `list[T]`: Dynamically sized contiguous homogeneous array (`[1, 2, 3]`).
 * `dict[K, V]`: Associative key-value table (`{"key": 42}`).
   - **Reads:** `d[k]` yields `V` and panics with `W4002` when the key is absent. The
-    optional form is `d.get(k)`, which returns `V?` and never panics. W has no
+    optional form is `d.get(k)`, which returns `V?` and never panics. Wysna has no
     auto-narrowing, so a single optional-deducing operator for the common case would
     force every dictionary read through unwrapping ceremony.
-  - **Key Domain & `float` Restriction (`W2010`):** Dictionary keys `K` must belong to W's predictable key domain (`int`, `str`, `bool`, or `enum`). While some languages permit floating-point dictionary keys by defining custom canonicalization rules for `NaN` bit patterns and signed zeros (`+0.0` vs `-0.0`), W deliberately restricts the dictionary key model for predictability and rejects `float` (and any composite type containing `float`) as a key type `K` at compile time with diagnostic `W2010` (`INVALID_DICT_KEY_TYPE`).
+  - **Key Domain & `float` Restriction (`W2010`):** Dictionary keys `K` must belong to Wysna's predictable key domain (`int`, `str`, `bool`, or `enum`). While some languages permit floating-point dictionary keys by defining custom canonicalization rules for `NaN` bit patterns and signed zeros (`+0.0` vs `-0.0`), Wysna deliberately restricts the dictionary key model for predictability and rejects `float` (and any composite type containing `float`) as a key type `K` at compile time with diagnostic `W2010` (`INVALID_DICT_KEY_TYPE`).
 * `tuple[T1, T2, ...]`: Fixed-size heterogeneous immutable product type (`(1, "ok", true)`).
 
 ### 4.4 Sum Types (`enum`)
 Closed enumerations for modeling variant states:
-```w
+```wysna
 enum TokenKind {
     Ident
     Number
@@ -143,7 +143,7 @@ enum TokenKind {
 
 ### 4.5 Value-Type Records (`struct`) with Mandatory Named Initialization
 `struct` defines pure Copy-on-Write value records:
-```w
+```wysna
 struct Token {
     kind: TokenKind
     value: str
@@ -161,9 +161,9 @@ let tok = Token {
 ```
 
 ### 4.6 Object-Oriented Programming (`class` & `interface`)
-Alongside value-type `struct` and `enum`, W supports Java-style reference-type classes, single inheritance (`extends`), multiple interface contracts (`implements`), visibility modifiers (`public` / `private`), constructors (`fn init`), and runtime polymorphism:
+Alongside value-type `struct` and `enum`, Wysna supports Java-style reference-type classes, single inheritance (`extends`), multiple interface contracts (`implements`), visibility modifiers (`public` / `private`), constructors (`fn init`), and runtime polymorphism:
 
-```w
+```wysna
 interface Describable {
     fn describe() -> str
 }
@@ -257,16 +257,16 @@ Equality is partitioned cleanly along the value vs reference boundary:
 * **Reference Types (`class`):** Reference identity equality (`obj1 == obj2` is `true` if and only if both bindings point to the exact same allocated instance in memory).
 
 ### 5.3 Formal Desugaring of `?` (`T?` and `T ! E`)
-1. **Type Level (`T?`):** Defines an optional type (official W optional representation).
+1. **Type Level (`T?`):** Defines an optional type (official Wysna optional representation).
 2. **Expression Level (`expr?`):** Postfix unwrapping and early-return propagation operator defined by explicit semantic desugaring:
    - **For Optional (`expr: T?`) inside a function returning `U?`:**
-     ```w
+     ```wysna
      let x = expr?
      # Semantically equivalent to:
      # if expr is none -> return none; else -> unwrap value
      ```
    - **For Fallible Result (`expr: T ! E`) inside a function returning `U ! E`:**
-     ```w
+     ```wysna
      let x = expr?
      # Semantically equivalent to:
      # if expr is err(e) -> return err(e); else -> unwrap ok value
@@ -285,19 +285,19 @@ Equality is partitioned cleanly along the value vs reference boundary:
 
 ### 6.2 Loops
 * **Element iteration:**
-  ```w
+  ```wysna
   for item in items {
       print(item)
   }
   ```
 * **Indexed iteration via tuple destructuring with `enumerate`:**
-  ```w
+  ```wysna
   for i, item in enumerate(items) {
       print(i, item)
   }
   ```
 * **Range iteration:**
-  ```w
+  ```wysna
   for i in 0..10 {    # 0 to 9 (exclusive)
       print(i)
   }
@@ -310,7 +310,7 @@ Equality is partitioned cleanly along the value vs reference boundary:
   limit and the overflow error for an inclusive `INT64_MAX` endpoint remain in effect,
   even if the body exits immediately.
 * **While loops:**
-  ```w
+  ```wysna
   while condition {
       # ...
   }
@@ -318,7 +318,7 @@ Equality is partitioned cleanly along the value vs reference boundary:
 
 ### 6.3 Exhaustive `match`
 `match` must be exhaustive when switching on `enum` variants:
-```w
+```wysna
 match tok.kind {
     TokenKind.Number => {
         return parse_number()
@@ -348,26 +348,26 @@ match tok.kind {
 
 W does not use non-local stack-unwinding exceptions. Fallible functions declare their error type explicitly:
 
-```w
+```wysna
 fn read_file(path: str) -> str ! IoError {
     # ...
 }
 ```
 
 If `main` returns a `Result` and that result is an `Err`, the runtime reports it on
-`stderr` as `W4003` and terminates with a non-zero status. W has no stack unwinding, so
+`stderr` as `W4003` and terminates with a non-zero status. Wysna has no stack unwinding, so
 this is the only point where an error becomes visible to the process that started the
 program; discarding it would make a failing program indistinguishable from a success
 for `make`, CI or a shell script.
 
 Handling strategies:
 1. **Propagation via `?`:**
-   ```w
-   let content = read_file("src/main.w")?
+   ```wysna
+   let content = read_file("src/main.wysna")?
    ```
 2. **In-place Handling via `else err`:**
-   ```w
-   let content = read_file("src/main.w") else err {
+   ```wysna
+   let content = read_file("src/main.wysna") else err {
        print("Failed to read file: ", err.message)
        return
    }
@@ -377,7 +377,7 @@ Handling strategies:
 
 A function signature can declare a closed set of error types after `!`:
 
-```w
+```wysna
 fn parse() -> Config ! ParseError | IoError
 ```
 
@@ -410,10 +410,10 @@ Optional/Option and fallible/Result spellings share canonical type identity. Opt
 
 ## 8. Memory Model: Deterministic Reference Counting + Copy-on-Write
 
-> **Core Value Semantics Guarantee:** *"Copying a W value produces a semantically independent value. Internal storage may be shared through copy-on-write as an implementation optimization, but mutations must never be observable through another value alias."*
+> **Core Value Semantics Guarantee:** *"Copying a Wysna value produces a semantically independent value. Internal storage may be shared through copy-on-write as an implementation optimization, but mutations must never be observable through another value alias."*
 
 1. **Pure & Recursive Value Semantics:** To the programmer, collections (`list`, `dict`, `str`, `tuple`) and `struct` records behave as independent values, including when nested (`list[list[T]]`, `struct` containing `list[T]`, etc.). Mutating `b` or any nested component inside `b` never affects `a`:
-   ```w
+   ```wysna
    let a = [[1], [2]]
    let mut b = a
    b[0].append(99)
@@ -428,8 +428,8 @@ Optional/Option and fallible/Result spellings share canonical type identity. Opt
    - Unlike `struct`, instances of `class` (`W_OBJECT`) have reference identity semantics: assigning `let b = a` shares the same underlying instance without CoW detachment on field mutation.
 4. **Acyclic Value-Storage Subgraph:**
    - **The subgraph formed exclusively by value storage (`struct`, `enum`, `list`, `dict`, `tuple`) cannot contain cycles.**
-   - Copy-on-Write by itself is an internal storage-sharing optimization and does not inherently guarantee acyclicity in arbitrary languages. Rather, pure W value storage is guaranteed to form a directed acyclic graph (DAG) because:
-     1. W provides no raw pointers, addresses, or shared mutable references to value containers;
+   - Copy-on-Write by itself is an internal storage-sharing optimization and does not inherently guarantee acyclicity in arbitrary languages. Rather, pure Wysna value storage is guaranteed to form a directed acyclic graph (DAG) because:
+     1. Wysna provides no raw pointers, addresses, or shared mutable references to value containers;
      2. Every composite literal construction and every mutating value operation (`xs[i] = v`, `xs.append(v)`, `s.field = v`) captures an independent semantic snapshot of `v` (detaching any shared value container along the target lvalue path before writing); and
      3. Consequently, no value container can ever be mutated to hold a direct or indirect value-storage path back to itself.
    - Note that a value (such as a `struct` or `list`) may contain a reference to a `class` instance without losing its own value semantics. If a `class` instance holds a field containing a `struct` that references that `class` instance (`Node(class) -> Wrapper(struct) -> Node(class)`), the cycle crosses a reference-type (`class`) identity boundary; the subgraph formed solely by value storage remains strictly acyclic.
@@ -458,9 +458,9 @@ cleanup. This runtime is single-threaded.
 
 Modules are imported using file path strings. The imported module automatically binds to a namespace derived from the file's base name:
 
-```w
-import "lexer.w"
-import "parser.w"
+```wysna
+import "lexer.wysna"
+import "parser.wysna"
 
 fn compile(source: str) {
     let tokens = lexer.tokenize(source)
@@ -474,9 +474,9 @@ fn compile(source: str) {
 ## 10. AI & Tooling Contract
 
 1. **Canonical Formatter (`w fmt`):**
-   - Every valid W program has exactly one canonical formatted representation.
+   - Every valid Wysna program has exactly one canonical formatted representation.
    - The formatter is idempotent: `fmt(fmt(source)) == fmt(source)`.
-2. **Stable Diagnostic Codes & Structured JSON Diagnostics (`w check --json`):**
+2. **Stable Diagnostic Codes & Structured JSON Diagnostics (`wysna check --json`):**
    - Every compiler and runtime error carries a stable `Wxxxx` diagnostic code categorized by phase:
      - **`W0xxx` — Lexical & Syntactic Diagnostics:**
        - `W0001`: Unexpected token or invalid character
@@ -510,24 +510,24 @@ fn compile(source: str) {
        - `W4003`: Runtime execution error
      - **`W5xxx` — Host Toolchain Diagnostics:**
        - `W5001`: C compiler command unavailable or invalid. This is an environment error, not a source type error or compiler invariant failure.
-   - `w check --json <file.w>` outputs deterministic machine-readable JSON:
+   - `wysna check --json <file.wysnaysna>` outputs deterministic machine-readable JSON:
    ```json
    {
      "code": "W2001",
      "severity": "error",
      "stage": "type",
      "message": "Type mismatch: cannot assign value of type 'none' to variable 'name' of type 'str'",
-     "file": "example.w",
+     "file": "example.wysna",
      "line": 12,
      "column": 9,
      "span": {
-       "file": "example.w",
+       "file": "example.wysna",
        "line": 12,
        "column": 9
      }
    }
    ```
-3. **Stable AST Representation (`w ast file.w --json`):**
+3. **Stable AST Representation (`wysna ast file.wysna --json`):**
    - Emits a standardized JSON AST containing `"w_ast_version": "0.1"` for reliable agentic code analysis.
 
 ---
@@ -580,6 +580,6 @@ compatibility. Formatting preserves tuple-pattern grouping.
 `str` and printing render an active ancestor class as `<cycle>`. An alias encountered
 in independent branches renders fully. This finite display rule does not collect cycles.
 
-`w check --json` may report multiple syntax errors in `diagnostics`, preserving the
+`wysna check --json` may report multiple syntax errors in `diagnostics`, preserving the
 existing fields of the first error. Recovery is diagnostic only: no recovered tree is
 checked or executed. The diagnostic budget is 100 errors per parse.

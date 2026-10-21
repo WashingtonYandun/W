@@ -63,6 +63,6 @@ exit status and rejection diagnostics across four engines.
 every engine to pass every fixture. `--sanitize` instruments native programs with
 ASan/UBSan; Linux additionally enables LSan.
 
-`w build --backend=selfhost` invokes native W1 directly, with no W0 semantic pre-check.
+`wysna build --backend=selfhost` invokes native W1 directly, with no W0 semantic pre-check.
 Unsupported syntax or semantics must be diagnosed by W1. See [known limits](KNOWN_LIMITS.md)
 for runtime and platform boundaries.

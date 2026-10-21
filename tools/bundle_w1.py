@@ -3,7 +3,7 @@
 tools/bundle_w1.py - Deterministic Bundler for Self-Hosted W1 Compiler.
 
 Concatenates the modular compiler source files from selfhost/src/ into
-the unified compilation unit selfhost/w1.w for 3-stage bootstrap fixed-point verification.
+the unified compilation unit selfhost/w1.wysna for 3-stage bootstrap fixed-point verification.
 """
 
 import os

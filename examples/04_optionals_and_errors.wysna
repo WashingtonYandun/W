@@ -1,4 +1,4 @@
-## 04_optionals_and_errors.w
+## 04_optionals_and_errors.wysna
 ## Explicit nullability (T?), coalescing (??), fallible channels (T ! E),
 ## postfix propagation (?), and inline recovery (else err).
 

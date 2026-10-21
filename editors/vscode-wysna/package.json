@@ -14,8 +14,8 @@
     "languages": [
       {
         "id": "wysna",
-        "aliases": ["Wysna", "wysna", "W", "w"],
-        "extensions": [".wysna", ".w"],
+        "aliases": ["Wysna", "wysna"],
+        "extensions": [".wysna"],
         "configuration": "./language-configuration.json"
       }
     ],
@@ -23,7 +23,7 @@
       {
         "language": "wysna",
         "scopeName": "source.wysna",
-        "path": "./syntaxes/w.tmLanguage.json"
+        "path": "./syntaxes/wysna.tmLanguage.json"
       }
     ]
   }

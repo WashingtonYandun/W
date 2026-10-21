@@ -18,9 +18,9 @@ body:
   - type: textarea
     id: reproduction
     attributes:
-      label: Minimal Reproducing Code (.w)
-      description: Provide a minimal, self-contained W source snippet demonstrating the issue.
-      render: w
+      label: Minimal Reproducing Code (.wysna)
+      description: Provide a minimal, self-contained Wysna source snippet demonstrating the issue.
+      render: wysna
       placeholder: |
         fn main() {
             // Minimal code triggering the bug
@@ -45,9 +45,9 @@ body:
   - type: input
     id: version
     attributes:
-      label: W Version
-      description: Output of `./w version` or `./w --version`.
-      placeholder: "w version 0.2.0"
+      label: Wysna Version
+      description: Output of `./wysna version` or `./wysna --version`.
+      placeholder: "wysna version 0.2.0"
     validations:
       required: true
   - type: dropdown

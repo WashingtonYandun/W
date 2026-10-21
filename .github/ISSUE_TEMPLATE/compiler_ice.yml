@@ -17,9 +17,9 @@ body:
   - type: textarea
     id: code
     attributes:
-      label: Code Snippet (.w)
+      label: Code Snippet (.wysna)
       description: Minimal code snippet triggering the crash.
-      render: w
+      render: wysna
       placeholder: |
         fn main() {
             // Code triggering crash
@@ -38,7 +38,7 @@ body:
     id: command
     attributes:
       label: Command Executed
-      placeholder: "./w run main.w --sanitize"
+      placeholder: "./wysna run main.wysna --sanitize"
       description: The exact command line invoked.
     validations:
       required: true
@@ -47,7 +47,7 @@ body:
     attributes:
       label: System Information
       placeholder: |
-        - Compiler: ./w version
+        - Compiler: ./wysna version
         - Python: python3 --version
         - C Toolchain: clang --version
         - OS: uname -a

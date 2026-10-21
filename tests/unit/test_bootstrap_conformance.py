@@ -47,7 +47,7 @@ def run_bootstrap_test() -> bool:
         if res1.returncode != 0:
             print(f"[FAIL] Stage 0 -> Stage 1 C compilation failed:\n{res1.stderr}")
             return False
-        print("  [PASS] Stage 0: W0 compiled selfhost/w1.w -> compiler0.c -> w1_stage1")
+        print("  [PASS] Stage 0: W0 compiled selfhost/w1.wysna -> compiler0.c -> w1_stage1")
 
         # 2. Stage 1 (w1_stage1 native binary -> compiler1.c -> w1_stage2 binary)
         compiler1_c = os.path.join(tmpdir, "compiler1.c")
@@ -65,7 +65,7 @@ def run_bootstrap_test() -> bool:
         if res2.returncode != 0:
             print(f"[FAIL] Stage 1 -> Stage 2 C compilation failed:\n{res2.stderr}")
             return False
-        print("  [PASS] Stage 1: w1_stage1 compiled selfhost/w1.w -> compiler1.c -> w1_stage2")
+        print("  [PASS] Stage 1: w1_stage1 compiled selfhost/w1.wysna -> compiler1.c -> w1_stage2")
 
         # 3. Stage 2 (w1_stage2 native binary -> compiler2.c)
         compiler2_c = os.path.join(tmpdir, "compiler2.c")
@@ -73,7 +73,7 @@ def run_bootstrap_test() -> bool:
         if run2.returncode != 0 or not os.path.exists(compiler2_c):
             print(f"[FAIL] Stage 2 execution failed:\n{run2.stderr}\n{run2.stdout}")
             return False
-        print("  [PASS] Stage 2: w1_stage2 compiled selfhost/w1.w -> compiler2.c")
+        print("  [PASS] Stage 2: w1_stage2 compiled selfhost/w1.wysna -> compiler2.c")
 
         # 4. Fixed-Point Hash Verification
         h0 = sha256_file(compiler0_c)
@@ -111,7 +111,7 @@ def run_bootstrap_test() -> bool:
 
             r_w1 = subprocess.run([w1_stage2, w_file, out_c], timeout=120, capture_output=True, text=True, cwd=repo_root)
             if r_w1.returncode != 0:
-                print(f"  [FAIL W1] {base}.w compile failed: {r_w1.stderr}")
+                print(f"  [FAIL W1] {base}.wysna compile failed: {r_w1.stderr}")
                 return False
             r_cc = subprocess.run([os.environ.get("CC", "cc"), "-std=c99", f"-I{repo_root}", out_c, "-o", out_bin], timeout=120, capture_output=True, text=True)
             if r_cc.returncode != 0:

@@ -1,4 +1,4 @@
-## 01_hello_world.w
+## 01_hello_world.wysna
 ## Basic functions, type annotations, ranges, and loops in W v0.1.
 
 fn greet(name: str) -> str {

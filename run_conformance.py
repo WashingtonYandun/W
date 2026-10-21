@@ -440,7 +440,7 @@ def _run_suite_in_repo(repo_root: str) -> None:
                 _assert_native_outcome(f, run_res, expected, panic_expectation(expected))
                 w1_runtime_passed += 1
 
-            # 10. Verify Showcase Examples (examples/*.w, examples/*.wysna) on W0 Interpreter, W0 C99, and W1 Stage-2 Native
+            # 10. Verify Showcase Examples (examples/*.wysna) on W0 Interpreter, W0 C99, and W1 Stage-2 Native
             examples_dir = "examples"
             example_files = sorted([f for f in os.listdir(examples_dir) if f.endswith(".wysna")]) if os.path.exists(examples_dir) else []
             examples_passed = 0

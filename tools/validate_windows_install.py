@@ -46,7 +46,6 @@ def validate(installation, report):
             return result
 
         run('version', ['version'])
-        run('alias', ['version'], executable=installation / 'wlang.exe')
         run('help', ['--help'])
         run('check', ['check', str(source)])
         run('run-stdlib-and-unicode-path', ['run', str(source)], 'hola W\n')
@@ -93,14 +92,14 @@ def validate(installation, report):
         with winreg.OpenKey(winreg.HKEY_CURRENT_USER, 'Environment') as key:
             user_path = winreg.QueryValueEx(key, 'Path')[0]
         resolved_environment = dict(environment, PATH=os.path.expandvars(user_path) + ';' + environment['PATH'])
-        resolved = shutil.which('w.exe', path=resolved_environment['PATH'])
+        resolved = shutil.which('wysna.exe', path=resolved_environment['PATH'])
         assert resolved and Path(resolved).resolve() == cli, resolved
         run('fresh-terminal-PATH', ['version'], custom_environment=resolved_environment, executable=Path(resolved))
         # A portable copy must not retain absolute installation paths.
         relocated = work / 'relocated W á'
         shutil.copytree(installation, relocated)
-        run('relocated-runtime', ['run', str(source)], 'hola W\n', executable=relocated / 'w.exe')
-        run('relocated-build', ['build', str(source), '-o', str(work / 'relocated')], executable=relocated / 'w.exe')
+        run('relocated-runtime', ['run', str(source)], 'hola W\n', executable=relocated / 'wysna.exe')
+        run('relocated-build', ['build', str(source), '-o', str(work / 'relocated')], executable=relocated / 'wysna.exe')
         run('relocated-native', [], 'hola W\n', executable=work / 'relocated.exe')
     report.update(passed=True, manifest=manifest, host_dependencies_removed=True)
 

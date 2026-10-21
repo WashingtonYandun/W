@@ -5,7 +5,7 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TARGET_DIR="${1:-$HOME/.local/bin}"
 
 echo "=================================================="
-echo "W Language toolchain installer"
+echo "Wysna Language toolchain installer"
 echo "=================================================="
 
 if ! command -v python3 >/dev/null 2>&1; then
@@ -18,24 +18,24 @@ if ! command -v cc >/dev/null 2>&1; then
     exit 1
 fi
 
-chmod +x "$REPO_ROOT/w"
+chmod +x "$REPO_ROOT/wysna"
 
 echo "[1/2] Pre-building Stage-2 native self-hosted W1 compiler..."
 mkdir -p "$REPO_ROOT/.w_cache"
-"$REPO_ROOT/w" build --selfhost "$REPO_ROOT/selfhost/w1.w" -o "$REPO_ROOT/.w_cache/w1"
+"$REPO_ROOT/wysna" build --selfhost "$REPO_ROOT/selfhost/w1.wysna" -o "$REPO_ROOT/.w_cache/w1"
 
-echo "[2/2] Installing 'w' CLI into $TARGET_DIR..."
+echo "[2/2] Installing 'wysna' CLI into $TARGET_DIR..."
 mkdir -p "$TARGET_DIR"
-ln -sf "$REPO_ROOT/w" "$TARGET_DIR/w"
+ln -sf "$REPO_ROOT/wysna" "$TARGET_DIR/wysna"
 
 echo "=================================================="
-echo "[OK] Installed: $TARGET_DIR/w -> $REPO_ROOT/w"
-"$TARGET_DIR/w" version
+echo "[OK] Installed: $TARGET_DIR/wysna -> $REPO_ROOT/wysna"
+"$TARGET_DIR/wysna" version
 echo "=================================================="
 
 case ":$PATH:" in
     *":$TARGET_DIR:"*)
-        echo "You can now run 'w' from any directory."
+        echo "You can now run 'wysna' from any directory."
         ;;
     *)
         echo "NOTE: Add $TARGET_DIR to your PATH if not already present:"

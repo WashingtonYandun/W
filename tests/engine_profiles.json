@@ -55,10 +55,10 @@
     "tests/regressions/invalid/inherited_field_type.wysna": "regressions"
   },
   "support_files": {
-    "tests/runtime/math_lib.wysna": "Imported library exercised by tests/runtime/import_module.w",
-    "tests/modules/checked_session/left.wysna": "Checked-module fixture dependency exercised by tests/modules/checked_session/main.w",
-    "tests/modules/checked_session/right.wysna": "Checked-module fixture dependency exercised by tests/modules/checked_session/main.w",
-    "tests/modules/checked_session/shared.wysna": "Checked-module fixture dependency exercised by tests/modules/checked_session/main.w",
-    "tests/modules/error_union/errors.wysna": "Exported error types and constructors imported by tests/runtime/error_union_composition.w"
+    "tests/runtime/math_lib.wysna": "Imported library exercised by tests/runtime/import_module.wysna",
+    "tests/modules/checked_session/left.wysna": "Checked-module fixture dependency exercised by tests/modules/checked_session/main.wysna",
+    "tests/modules/checked_session/right.wysna": "Checked-module fixture dependency exercised by tests/modules/checked_session/main.wysna",
+    "tests/modules/checked_session/shared.wysna": "Checked-module fixture dependency exercised by tests/modules/checked_session/main.wysna",
+    "tests/modules/error_union/errors.wysna": "Exported error types and constructors imported by tests/runtime/error_union_composition.wysna"
   }
 }

@@ -10,12 +10,12 @@
 
 [Setup]
 AppId={{E7DFAD44-C0AF-447A-BD57-39A0498CA07A}
-AppName=W Language
+AppName=Wysna Language
 AppVersion={#WVersion}
 AppPublisher=Washington Yandun
-AppPublisherURL=https://github.com/WashingtonYandun/W
-DefaultDirName={localappdata}\Programs\W Language
-DefaultGroupName=W Language
+AppPublisherURL=https://github.com/WashingtonYandun/wysna
+DefaultDirName={localappdata}\Programs\Wysna
+DefaultGroupName=Wysna Language
 PrivilegesRequired=lowest
 ArchitecturesAllowed=x64compatible and not arm64
 ArchitecturesInstallIn64BitMode=x64compatible
@@ -26,8 +26,8 @@ ChangesEnvironment=yes
 Compression=lzma2/fast
 SolidCompression=yes
 OutputDir={#OutputDir}
-OutputBaseFilename=w-{#WVersion}-windows-x64-setup
-UninstallDisplayIcon={app}\w.exe
+OutputBaseFilename=wysna-{#WVersion}-windows-x64-setup
+UninstallDisplayIcon={app}\wysna.exe
 LicenseFile={#BundleDir}\LICENSE
 WizardStyle=modern
 CloseApplications=yes
@@ -38,10 +38,10 @@ Name: english; MessagesFile: compiler:Default.isl
 Name: spanish; MessagesFile: compiler:Languages\Spanish.isl
 
 [CustomMessages]
-english.AddToPath=Add W to my terminal PATH (recommended)
-spanish.AddToPath=Agregar W al PATH de mi terminal (recomendado)
-english.OpenTerminal=Open a terminal ready to use W
-spanish.OpenTerminal=Abrir una terminal lista para usar W
+english.AddToPath=Add Wysna to my terminal PATH (recommended)
+spanish.AddToPath=Agregar Wysna al PATH de mi terminal (recomendado)
+english.OpenTerminal=Open a terminal ready to use Wysna
+spanish.OpenTerminal=Abrir una terminal lista para usar Wysna
 
 [Tasks]
 Name: addtopath; Description: {cm:AddToPath}
@@ -50,19 +50,19 @@ Name: addtopath; Description: {cm:AddToPath}
 Source: "{#BundleDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
-Name: "{group}\W Language"; Filename: "{cmd}"; Parameters: "/K """"{app}\open-terminal.cmd"""""; WorkingDir: "{userdocs}"
-Name: "{group}\Uninstall W Language"; Filename: "{uninstallexe}"
+Name: "{group}\Wysna Language"; Filename: "{cmd}"; Parameters: "/K """"{app}\open-terminal.cmd"""""; WorkingDir: "{userdocs}"
+Name: "{group}\Uninstall Wysna Language"; Filename: "{uninstallexe}"
 
 [Run]
 Filename: "{cmd}"; Parameters: "/K """"{app}\open-terminal.cmd"""""; WorkingDir: "{userdocs}"; Description: "{cm:OpenTerminal}"; Flags: postinstall nowait skipifsilent
 
 [Messages]
-english.FinishedLabel=W is installed with its own runtime and C compiler.%n%nUse the W Language shortcut or open a new terminal and run: w version%n%nNo Python, pip, virtual environment or Visual Studio setup is needed.
-spanish.FinishedLabel=W incluye su propio runtime y compilador C.%n%nUsa el acceso directo W Language o abre una terminal nueva y ejecuta: w version%n%nNo necesitas instalar Python, pip, un entorno virtual ni Visual Studio.
+english.FinishedLabel=Wysna is installed with its own runtime and C compiler.%n%nUse the Wysna Language shortcut or open a new terminal and run: wysna version%n%nNo Python, pip, virtual environment or Visual Studio setup is needed.
+spanish.FinishedLabel=Wysna incluye su propio runtime y compilador C.%n%nUsa el acceso directo Wysna Language o abre una terminal nueva y ejecuta: wysna version%n%nNo necesitas instalar Python, pip, un entorno virtual ni Visual Studio.
 
 [Code]
 const
-  InstallerKey = 'Software\WLanguage\Installer';
+  InstallerKey = 'Software\Wysna\Installer';
 
 function NormalizeEntry(Value: String): String;
 begin
@@ -113,7 +113,7 @@ begin
     if RegQueryStringValue(HKCU, 'Environment', 'Path', Current) then begin
       Updated := FilterPath(Current, Owned, True, Found);
       if Found and not RegWriteExpandStringValue(HKCU, 'Environment', 'Path', Updated) then
-        Log('Could not remove the owned W PATH entry.');
+        Log('Could not remove the owned Wysna PATH entry.');
     end;
     RegDeleteValue(HKCU, InstallerKey, 'PathEntry');
   end;
@@ -135,7 +135,7 @@ begin
         if not RegWriteExpandStringValue(HKCU, 'Environment', 'Path', Current + Entry) then
           RaiseException('Cannot update the user PATH.');
         if not RegWriteStringValue(HKCU, InstallerKey, 'PathEntry', Entry) then
-          RaiseException('Cannot record the W PATH entry.');
+          RaiseException('Cannot record the Wysna PATH entry.');
       end;
     end;
   end;
