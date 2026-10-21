@@ -38,7 +38,7 @@ def test_fixture_accounting_and_staleness():
     positives, negatives = corpus_paths()
     fixtures = positives + negatives
 
-    labels = {str(p.relative_to(ROOT)) for p in fixtures}
+    labels = {p.relative_to(ROOT).as_posix() for p in fixtures}
     stale = set(profiles.get("fixtures", {}).keys()) - labels
     assert not stale, f"Found stale fixture entries in engine_profiles.json: {stale}"
 
@@ -143,7 +143,7 @@ def test_documentation_consistency():
         f"rerun: python3 tools/ci_conformance.py --matrix")
     from collections import Counter
     from tests.engine_harness import feature_for
-    expected_counts = Counter(feature_for(str(path.relative_to(ROOT)))
+    expected_counts = Counter(feature_for(path.relative_to(ROOT).as_posix())
                               for group in corpus_paths() for path in group)
     documented_counts = {name: int(count) for name, count in _re.findall(
         r'\| \*\*`([^`]+)`\*\* \| (\d+) \|', content)}
@@ -161,7 +161,7 @@ def test_documentation_consistency():
     )
     expected_error_union_paths = list((ROOT / 'tests/runtime').glob('error_union_*.w'))
     expected_error_union_paths += list((ROOT / 'tests/types/invalid').glob('error_union_*.w'))
-    expected_error_union_fixtures = {str(path.relative_to(ROOT)) for path in expected_error_union_paths}
+    expected_error_union_fixtures = {path.relative_to(ROOT).as_posix() for path in expected_error_union_paths}
     assert set(error_union_fixtures) == expected_error_union_fixtures, "F03 fixtures must be classified together"
     assert "Bootstrap Fixed-Point vs. Core Corpus Parity" in content, (
         "Doc must distinguish bootstrap fixed-point from core-corpus parity"
