@@ -223,13 +223,50 @@ def test_unqualified_enum_variant_pattern_exhaustiveness_and_dispatch():
     assert interp.global_env.lookup("res").value == 3, "f(Dir.East) must return 3, not 1"
 
 
+def test_specification_operator_semantics():
+    from parser.Parser import Parser
+    from checker.TypeChecker import TypeChecker
+    from runtime.Interpreter import Interpreter
+
+    # SPEC §3.2: Integer division and modulo truncate toward zero
+    arithmetic_source = '''
+    let a = -7 / 3
+    let b = 7 / -2
+    let c = -7 % 3
+    let d = 7 % -2
+    '''
+    ast = Parser().parse(arithmetic_source)
+    TypeChecker().check(ast)
+    interp = Interpreter()
+    interp.interpret(ast)
+    assert interp.global_env.lookup("a").value == -2, "-7 / 3 must truncate toward zero to -2"
+    assert interp.global_env.lookup("b").value == -3, "7 / -2 must truncate toward zero to -3"
+    assert interp.global_env.lookup("c").value == -1, "-7 % 3 must be -1"
+    assert interp.global_env.lookup("d").value == 1, "7 % -2 must be 1"
+
+    # SPEC §5: Unary precedence Level 3 tighter than comparison Level 8
+    prec_source = '''
+    let r1 = not false == false
+    let r2 = (not false) == false
+    let r3 = not true == false
+    '''
+    ast_prec = Parser().parse(prec_source)
+    TypeChecker().check(ast_prec)
+    interp_prec = Interpreter()
+    interp_prec.interpret(ast_prec)
+    assert interp_prec.global_env.lookup("r1").value is False, "'not false == false' is '(!false) == false' -> False"
+    assert interp_prec.global_env.lookup("r2").value is False
+    assert interp_prec.global_env.lookup("r3").value is True, "'not true == false' is '(!true) == false' -> True"
+
+
 def run_completion_tests():
     test_ascii_allocation_and_lifetime_contract()
     test_formatter_preserves_guards_and_production_sources()
     test_typed_generator_shape_and_independent_model()
     test_typed_composition_across_engines()
     test_unqualified_enum_variant_pattern_exhaustiveness_and_dispatch()
-    print('Audit completion: ASCII lifetime/allocation, formatter AST preservation, typed composition and enum pattern exhaustiveness passed')
+    test_specification_operator_semantics()
+    print('Audit completion: ASCII lifetime/allocation, formatter AST preservation, typed composition, enum pattern exhaustiveness and SPEC operator semantics passed')
     return True
 
 
