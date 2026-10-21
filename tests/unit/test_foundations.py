@@ -92,6 +92,7 @@ def test_fallible_unit_tail_parity():
 def test_unit_tail_rejects_incompatible_error_channels():
     sources = ['fn failure() -> int ! int { Err(7) }\nfn action() -> unit ! str { failure() }',
                'fn action() -> unit ! str { Err(42) }',
+               'fn action() -> unit ! str { let problem = Err(42)\nproblem }',
                'fn failure() -> int ! int { Err(7) }\nfn action() -> unit ! str { if true { failure() } else { 42 } }']
     w1 = ensure_selfhost_w1_binary(str(ROOT))
     with tempfile.TemporaryDirectory(prefix='w-unit-error-channel-') as temporary:

@@ -1505,8 +1505,11 @@ fn sem_unit_return(type_id: int) -> bool {
 }
 fn sem_require_tail(source: int, target: int) {
     if sem_unit_return(target) {
-        if sem_kind(target) == "result" and sem_kind(source) == "result" {
-            if not sem_error_channel_assignable(sem_types[source].args[1], sem_types[target].args[1]) { sem_error("W2004", "incompatible error channel") }
+        if sem_kind(target) == "result" {
+            let mut error_type = -1
+            if sem_kind(source) == "result" { error_type = sem_types[source].args[1] }
+            elif sem_kind(source) == "err" { error_type = sem_types[source].args[0] }
+            if error_type >= 0 and not sem_error_channel_assignable(error_type, sem_types[target].args[1]) { sem_error("W2004", "incompatible error channel") }
         }
     } else { sem_require(source, target, "W2004") }
 }
