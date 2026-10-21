@@ -8,6 +8,7 @@ import shlex
 import signal
 import subprocess
 import sys
+from common.Platform import compiler_command, executable_name
 from error.Error import DIAGNOSTIC_CODES
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -110,7 +111,7 @@ def run_engine(engine, source, label, w1_bin, directory, sanitize=False):
     directory.mkdir(parents=True, exist_ok=True)
     source_path = directory / 'source.w'
     source_path.write_text(source)
-    c_path, binary = directory / 'program.c', directory / 'program'
+    c_path, binary = directory / 'program.c', directory / executable_name('program')
     driver = [sys.executable, str(ROOT / 'main.py')]
     if engine == 'interpreter':
         command = driver + ['run', str(source_path)]
@@ -133,9 +134,9 @@ def run_engine(engine, source, label, w1_bin, directory, sanitize=False):
             result.infrastructure_error = 'frontend failed without a structured diagnostic'
         return result
     flags = ['-std=c99', '-O1', '-g', '-I' + str(ROOT)]
-    if sanitize:
+    if sanitize and os.name != 'nt':
         flags += ['-fsanitize=address,undefined', '-fno-omit-frame-pointer']
-    compiled = execute(shlex.split(os.environ.get('CC', 'cc')) + flags +
+    compiled = execute(compiler_command() + flags +
                        [str(c_path), '-o', str(binary)], directory, 'compile', 120)
     if compiled['returncode'] != 0:
         return EngineResult(engine, stderr=compiled['stderr'], exit_code=compiled['returncode'],

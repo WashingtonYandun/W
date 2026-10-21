@@ -29,8 +29,8 @@ def test_nominal_equality_and_undeclared_super_constructor_are_rejected():
         directory = Path(temporary)
         module = directory / 'nominals.w'
         module.write_text('pub struct A { x: int }\npub enum E { X }\npub fn make() -> A { A { x: 1 } }\npub fn event() -> E { E.X }\n')
-        programs += [f'import {json.dumps(str(module))}\nstruct B {{ x: int }}\nprint(nominals.make() == B {{ x: 1 }})',
-                     f'import {json.dumps(str(module))}\nenum E {{ X }}\nprint(nominals.event() == E.X)']
+        programs += [f'import {json.dumps(module.as_posix())}\nstruct B {{ x: int }}\nprint(nominals.make() == B {{ x: 1 }})',
+                     f'import {json.dumps(module.as_posix())}\nenum E {{ X }}\nprint(nominals.event() == E.X)']
         for index, source in enumerate(programs):
             expected = 'W3002' if index == 4 else 'W2001'
             for engine in ('interpreter', 'ast', 'hir', 'w1'):
@@ -70,13 +70,13 @@ def test_literal_indexing_scales_linearly_by_work_not_wall_clock():
                     '    fprintf(stderr, "scan=%" PRIu64 "\\n", w_g_string_scan_steps);\n    w_runtime_cleanup();')
                 emitted.write_text(code)
                 binary = directory / executable_name(engine)
-                flags = ['-fsanitize=address,undefined', '-fno-omit-frame-pointer'] if os.environ.get('W_SANITIZE') == '1' else []
+                flags = ['-fsanitize=address,undefined', '-fno-omit-frame-pointer'] if (os.environ.get('W_SANITIZE') == '1' and os.name != 'nt') else []
                 subprocess.run(compiler_command() + ['-std=c99', '-O2', '-DW_STRING_METRICS', '-I' + str(ROOT),
                                str(emitted), '-o', str(binary)] + flags, check=True, capture_output=True, timeout=120)
                 ran = subprocess.run([str(binary)], capture_output=True, text=True, timeout=30,
                     env=dict(os.environ, W_MEM_CHECK='1', ASAN_OPTIONS='detect_leaks=' + ('1' if sys.platform.startswith('linux') else '0'), UBSAN_OPTIONS='halt_on_error=1'))
                 assert ran.returncode == 0 and ran.stdout == expected, (engine, ran)
-                match = re.fullmatch(r'scan=(\d+)\n', ran.stderr)
+                match = re.search(r'scan=(\d+)', ran.stderr)
                 assert match, ran.stderr
                 steps = int(match.group(1))
                 assert steps <= 12 * len(text) + 100, (engine, count, steps)
