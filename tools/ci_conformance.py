@@ -26,7 +26,9 @@ def source_fingerprint(root=ROOT):
              and (path.suffix != '.txt' or 'data' in path.parts)
              and not {'__pycache__', 'failures'}.intersection(path.parts)}
     paths.update(root / name for name in ('main.py', 'run_conformance.py', 'selfhost/w1.w',
-                                         'SPEC.md', 'pyproject.toml', '.github/workflows/ci.yml')
+                                         'SPEC.md', 'README.md', 'docs/STDLIB.md', 'docs/OWNERSHIP_LIFETIME.md',
+                                         'docs/KNOWN_LIMITS.md', 'docs/SERVICE_FOUNDATIONS.md',
+                                         'pyproject.toml', '.github/workflows/ci.yml')
                  if (root / name).is_file())
     inputs = {path.relative_to(root).as_posix(): hashlib.sha256(path.read_bytes()).hexdigest()
               for path in sorted(paths)}

@@ -320,7 +320,10 @@ class CCodeGen:
                 if m.return_type is None or isinstance(m.return_type, NamedType) and m.return_type.name == 'unit':
                     ret_expr = 'w_unit()'
                 ret_hold = self.new_aux("_ret")
-                body_stmts.append(f"WVal {ret_hold} = {self._own_expr(ret_expr)};")
+                owned_return = self._own_expr(ret_expr)
+                if isinstance(m.return_type, ResultType) and isinstance(m.return_type.ok_type, NamedType) and m.return_type.ok_type.name == 'unit':
+                    owned_return = f"w_discard_result_value({owned_return})"
+                body_stmts.append(f"WVal {ret_hold} = {owned_return};")
                 self._pop_scope(body_stmts)
                 if self.current_fn_fallible:
                     body_stmts.append(f'return w_wrap_result({ret_hold}, "{self.current_fn_err_type}");')
@@ -430,7 +433,10 @@ class CCodeGen:
         if stmt.return_type is None or isinstance(stmt.return_type, NamedType) and stmt.return_type.name == 'unit':
             ret_expr = 'w_unit()'
         ret_hold = self.new_aux("_ret")
-        body_stmts.append(f"WVal {ret_hold} = {self._own_expr(ret_expr)};")
+        owned_return = self._own_expr(ret_expr)
+        if isinstance(stmt.return_type, ResultType) and isinstance(stmt.return_type.ok_type, NamedType) and stmt.return_type.ok_type.name == 'unit':
+            owned_return = f"w_discard_result_value({owned_return})"
+        body_stmts.append(f"WVal {ret_hold} = {owned_return};")
         self._pop_scope(body_stmts)
         if self.current_fn_fallible:
             body_stmts.append(f'return w_wrap_result({ret_hold}, "{self.current_fn_err_type}");')

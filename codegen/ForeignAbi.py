@@ -18,5 +18,7 @@ def foreign_wrapper(c_name, native_name, signature):
     else:
         constructor = {'int': 'w_int', 'int64': 'w_int', 'int32': 'w_int', 'float': 'w_float',
                        'double': 'w_float', 'bool': 'w_bool', 'opaque': 'w_pointer'}[returned]
+        if native_name in ('w_host_buffer_new', 'w_host_file_open'):
+            constructor = 'w_host_owned_pointer'
         body = 'return ' + constructor + '(' + call + ');'
     return prototype, 'static WVal ' + c_name + '(' + wrapped_params + ') { ' + body + ' }'

@@ -15,14 +15,14 @@ exclusions. It does not establish universal language parity or measure code cove
 
 | Feature Category | Fixtures | W0 Interpreter | W0 AST C99 | W0 Typed HIR (Default) | W1 Self-Hosted C99 | Status / Milestone |
 | :--- | :---: | :---: | :---: | :---: | :---: | :--- |
-| **`core`** | 156 | ✅ 156/156 | ✅ 156/156 | ✅ 156/156 | ✅ 156/156 | Declared supported |
+| **`core`** | 157 | ✅ 157/157 | ✅ 157/157 | ✅ 157/157 | ✅ 157/157 | Declared supported |
 | **`generics`** | 15 | ✅ 15/15 | ✅ 15/15 | ✅ 15/15 | ✅ 15/15 | Declared supported |
 | **`checked_modules`** | 1 | ✅ 1/1 | ✅ 1/1 | ✅ 1/1 | ✅ 1/1 | Declared supported |
 | **`error_unions`** | 8 | ✅ 8/8 | ✅ 8/8 | ✅ 8/8 | ✅ 8/8 | Declared supported |
 | **`functions`** | 5 | ✅ 5/5 | ✅ 5/5 | ✅ 5/5 | ✅ 5/5 | Declared supported |
 | **`stdlib`** | 2 | ✅ 2/2 | ✅ 2/2 | ✅ 2/2 | ✅ 2/2 | Declared supported |
 | **`regressions`** | 13 | ✅ 13/13 | ✅ 13/13 | ✅ 13/13 | ✅ 13/13 | Declared supported |
-| **Total Verified** | **200** | **200/200 (100.0%)** | **200/200 (100.0%)** | **200/200 (100.0%)** | **200/200 (100.0%)** | _measured_ |
+| **Total Verified** | **201** | **201/201 (100.0%)** | **201/201 (100.0%)** | **201/201 (100.0%)** | **201/201 (100.0%)** | _measured_ |
 
 <!-- GENERATED TABLE END -->
 

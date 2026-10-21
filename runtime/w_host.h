@@ -39,6 +39,14 @@ typedef struct WHostEntry {
 static WHostEntry* w_host_entries = NULL;
 static uintptr_t w_host_next_id = 1;
 static bool w_host_initialized = false;
+/* Error codes are captured immediately, before cleanup can overwrite errno. */
+static int64_t w_host_error_code = 0;
+static int64_t w_host_error_domain = 0; /* 0 none, 1 errno, 2 Win32 */
+static int64_t w_host_last_error(void) { return w_host_error_code; }
+static int64_t w_host_last_error_domain(void) { return w_host_error_domain; }
+static int64_t w_host_errno(int code) {
+    w_host_error_code = code ? code : EIO; w_host_error_domain = 1; return -1;
+}
 
 static WHostEntry* w_host_find(void* handle, int kind) {
     for (WHostEntry* entry = w_host_entries; entry; entry = entry->next)
@@ -51,11 +59,28 @@ static int64_t w_host_close(void* handle) {
     if (!*slot) return 0;
     WHostEntry* entry = *slot;
     /* fclose consumes the stream even when flushing fails. */
+    errno = 0;
     int status = entry->kind == 2 ? fclose((FILE*)entry->data) : 0;
+    int close_error = errno;
     if (entry->kind == 1) free(entry->data);
     *slot = entry->next;
     free(entry);
-    return status == 0 ? 0 : -1;
+    return status == 0 ? 0 : w_host_errno(close_error);
+}
+static WVal w_host_owned_pointer(void* address) {
+    return w_managed_pointer(address, w_host_close);
+}
+static void* w_host_borrow(void* address) { return address; }
+static int64_t w_host_active_handles(void) {
+    int64_t count = 0;
+    for (WHostEntry* entry = w_host_entries; entry; entry = entry->next) count++;
+    return count;
+}
+static int64_t w_host_active_bytes(void) {
+    int64_t count = 0;
+    for (WHostEntry* entry = w_host_entries; entry; entry = entry->next)
+        if (entry->kind == 1) count += (int64_t)entry->capacity;
+    return count;
 }
 static void w_host_cleanup(void) {
     while (w_host_entries) w_host_close((void*)w_host_entries->id);
@@ -123,7 +148,7 @@ static wchar_t* w_host_wide(const char* text) {
 #endif
 static void* w_host_file_open(void* path_handle, int64_t mode) {
     char* path = w_host_path(path_handle);
-    if (!path || mode < 0 || mode > 2) { free(path); return NULL; }
+    if (!path || mode < 0 || mode > 2) { free(path); w_host_errno(EINVAL); return NULL; }
     const char* modes[] = { "rb", "wb", "ab" };
 #ifdef _WIN32
     wchar_t* wide = w_host_wide(path);
@@ -133,6 +158,7 @@ static void* w_host_file_open(void* path_handle, int64_t mode) {
 #else
     FILE* file = fopen(path, modes[mode]);
 #endif
+    if (!file) w_host_errno(errno);
     free(path);
     return file ? w_host_new(2, file) : NULL;
 }
@@ -140,21 +166,24 @@ static int64_t w_host_file_read(void* file_handle, void* buffer_handle, int64_t 
     WHostEntry* file = w_host_find(file_handle, 2);
     WHostEntry* buffer = w_host_find(buffer_handle, 1);
     /* An explicit bound prevents an untrusted request from allocating a whole file. */
-    if (!file || !buffer || count <= 0 || count > 16777216) return -1;
+    if (!file || !buffer) return w_host_errno(EBADF);
+    if (count <= 0 || count > 16777216) return w_host_errno(EINVAL);
     if ((uint64_t)count > buffer->capacity) {
         buffer->capacity = (size_t)count;
         buffer->data = w_realloc_safe(buffer->data, buffer->capacity);
     }
+    errno = 0;
     buffer->length = fread(buffer->data, 1, (size_t)count, (FILE*)file->data);
-    return ferror((FILE*)file->data) ? -1 : (int64_t)buffer->length;
+    return ferror((FILE*)file->data) ? w_host_errno(errno) : (int64_t)buffer->length;
 }
 static int64_t w_host_file_write(void* file_handle, void* buffer_handle) {
     WHostEntry* file = w_host_find(file_handle, 2);
     WHostEntry* buffer = w_host_find(buffer_handle, 1);
-    if (!file || !buffer) return -1;
+    if (!file || !buffer) return w_host_errno(EBADF);
     if (!buffer->length) return 0;
-    if (fwrite(buffer->data, 1, buffer->length, (FILE*)file->data) != buffer->length) return -1;
-    fflush((FILE*)file->data);
+    errno = 0;
+    if (fwrite(buffer->data, 1, buffer->length, (FILE*)file->data) != buffer->length) return w_host_errno(errno);
+    if (fflush((FILE*)file->data) != 0) return w_host_errno(errno);
     return 0;
 }
 static int64_t w_host_is_open(void* handle) { return w_host_find(handle, 2) != NULL; }
@@ -162,7 +191,7 @@ static int64_t w_host_is_open(void* handle) { return w_host_find(handle, 2) != N
 static int64_t w_host_fs(void* first, void* second, int64_t operation) {
     char* path = w_host_path(first);
     char* other = operation == 4 ? w_host_path(second) : NULL;
-    if (!path || (operation == 4 && !other)) { free(path); free(other); return -1; }
+    if (!path || (operation == 4 && !other)) { free(path); free(other); return w_host_errno(EINVAL); }
     int64_t result = -1;
 #ifdef _WIN32
     wchar_t* wide = w_host_wide(path);
@@ -170,7 +199,12 @@ static int64_t w_host_fs(void* first, void* second, int64_t operation) {
     if (wide) {
         if (operation == 0) {
             DWORD attr = GetFileAttributesW(wide);
-            result = (attr != INVALID_FILE_ATTRIBUTES) ? 1 : 0;
+            if (attr != INVALID_FILE_ATTRIBUTES) result = 1;
+            else {
+                DWORD code = GetLastError();
+                result = code == ERROR_FILE_NOT_FOUND || code == ERROR_PATH_NOT_FOUND ? 0 : -1;
+                if (result < 0) { w_host_error_code = code; w_host_error_domain = 2; }
+            }
         } else if (operation == 1) {
             WIN32_FILE_ATTRIBUTE_DATA data;
             if (GetFileAttributesExW(wide, GetFileExInfoStandard, &data)) {
@@ -183,9 +217,10 @@ static int64_t w_host_fs(void* first, void* second, int64_t operation) {
         } else if (operation == 3) {
             result = (DeleteFileW(wide) || RemoveDirectoryW(wide)) ? 0 : -1;
         } else if (operation == 4 && wide_other) {
-            result = MoveFileExW(wide, wide_other, MOVEFILE_REPLACE_EXISTING | MOVEFILE_COPY_ALLOWED) ? 0 : -1;
+            result = MoveFileExW(wide, wide_other, MOVEFILE_REPLACE_EXISTING) ? 0 : -1;
         }
     }
+    if (result < 0 && operation != 0) { w_host_error_code = GetLastError(); w_host_error_domain = 2; }
     free(wide); free(wide_other);
 #else
     struct stat status;
@@ -193,6 +228,9 @@ static int64_t w_host_fs(void* first, void* second, int64_t operation) {
     else if (operation == 2) result = mkdir(path, 0777) == 0 ? 0 : -1;
     else if (operation == 3) result = remove(path) == 0 ? 0 : -1;
     else if (operation == 4) result = rename(path, other) == 0 ? 0 : -1;
+#endif
+#ifndef _WIN32
+    if (result < 0) w_host_errno(errno);
 #endif
     free(path); free(other); return result;
 }

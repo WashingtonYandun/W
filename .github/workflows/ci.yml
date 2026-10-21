@@ -103,6 +103,7 @@ jobs:
           python3 -m tests.unit.test_mir
           python3 -m tests.unit.test_distribution_contract
           python3 -m tests.unit.test_audit_findings
+          python3 -m tests.unit.test_foundations
           python3 -m tests.unit.test_standard_toolkit
       - name: Verify runtime, examples and direct W1 negatives across four engines
         run: python3 tools/ci_conformance.py --profile=${{ inputs.profile || 'integration' }}
@@ -164,6 +165,7 @@ jobs:
           W_SANITIZE=1 python3 -m tests.unit.test_audit_readiness
           W_SANITIZE=1 python3 -m tests.unit.test_compilation_session
           W_SANITIZE=1 python3 -m tests.unit.test_audit_findings
+          W_SANITIZE=1 python3 -m tests.unit.test_foundations
           W_SANITIZE=1 python3 -m tests.unit.test_standard_toolkit
           python3 -m tests.unit.test_phase_a
           python3 -m tests.unit.test_ownership_control_flow
@@ -217,6 +219,10 @@ jobs:
           python main.py build --backend=selfhost tests/runtime/readiness_patterns.w -o patterns.exe
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           ./patterns.exe
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Verify persistent resources and executable documentation
+        run: |
+          python -m tests.unit.test_foundations
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Verify standard toolkit and native LSP paths
         run: |

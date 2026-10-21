@@ -536,8 +536,10 @@ def _run_suite_in_repo(repo_root: str) -> None:
     readiness_ok = run_readiness_tests()
     from tests.unit.test_audit_findings import run_findings_tests
     from tests.unit.test_standard_toolkit import run_toolkit_tests
+    from tests.unit.test_foundations import run_foundations_tests
+    foundations_ok = run_foundations_tests()
     findings_ok = run_findings_tests()
-    toolkit_ok = run_toolkit_tests()
+    toolkit_ok = run_toolkit_tests() and foundations_ok
 
     if os.path.exists(temp_file):
         try:

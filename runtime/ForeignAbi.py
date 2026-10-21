@@ -50,5 +50,8 @@ def bind_foreign(declaration, libraries=()):
             return WUnit()
         constructor = {'int': WInt, 'int32': WInt, 'int64': WInt, 'float': WFloat,
                        'double': WFloat, 'bool': WBool, 'opaque': WPointer}[returned]
+        if name in ('w_host_buffer_new', 'w_host_file_open'):
+            from runtime.HostAbi import close
+            return WPointer(result, close=close)
         return constructor(result)
     return invoke

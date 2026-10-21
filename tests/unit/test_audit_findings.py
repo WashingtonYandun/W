@@ -107,6 +107,11 @@ def test_matrix_invalidates_changes_without_renaming_inputs():
         after = source_fingerprint(root)
         assert before['inputs'].keys() == after['inputs'].keys()
         assert before['digest'] != after['digest']
+        (root / 'README.md').write_text('Public contract', encoding='utf-8')
+        documented = source_fingerprint(root)
+        assert 'README.md' in documented['inputs']
+        (root / 'README.md').write_text('Changed contract', encoding='utf-8')
+        assert documented['digest'] != source_fingerprint(root)['digest']
 
 
 def test_lsp_uri_and_definition_on_native_platform():

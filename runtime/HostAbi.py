@@ -1,9 +1,19 @@
 """Reference implementation of the internal, checked scalar/opaque resource ABI."""
 import atexit
+import errno
 from pathlib import Path
 
 _entries = {}
 _next_id = 1
+_error_code = 0
+_error_domain = 0
+
+
+def failure(error):
+    global _error_code, _error_domain
+    _error_code = getattr(error, 'winerror', None) or getattr(error, 'errno', None) or errno.EIO
+    _error_domain = 2 if getattr(error, 'winerror', None) else 1
+    return -1
 
 
 def allocate(kind, value):
@@ -24,8 +34,8 @@ def close(handle):
     if entry and entry[0] == 'file':
         try:
             entry[1].close()
-        except OSError:
-            return -1
+        except OSError as error:
+            return failure(error)
     return 0
 
 
@@ -50,10 +60,12 @@ def path_text(handle):
 def file_open(handle, mode):
     path = path_text(handle)
     if path is None or mode not in (0, 1, 2):
+        failure(OSError(errno.EINVAL, 'invalid path or mode'))
         return 0
     try:
         return allocate('file', open(path, ('rb', 'wb', 'ab')[mode]))
-    except OSError:
+    except OSError as error:
+        failure(error)
         return 0
 
 
@@ -77,34 +89,36 @@ def buffer_append(handle, value):
 
 def file_read(file_handle, buffer_handle, count):
     file, buffer = find(file_handle, 'file'), find(buffer_handle, 'buffer')
-    if file is None or buffer is None or not 0 < count <= 16777216:
-        return -1
+    if file is None or buffer is None:
+        return failure(OSError(errno.EBADF, 'closed handle'))
+    if not 0 < count <= 16777216:
+        return failure(OSError(errno.EINVAL, 'invalid read bound'))
     try:
         buffer[:] = file.read(count)
         return len(buffer)
-    except (OSError, ValueError):
-        return -1
+    except (OSError, ValueError) as error:
+        return failure(error)
 
 
 def file_write(file_handle, buffer_handle):
     file, buffer = find(file_handle, 'file'), find(buffer_handle, 'buffer')
     if file is None or buffer is None:
-        return -1
+        return failure(OSError(errno.EBADF, 'closed handle'))
     try:
         written = file.write(buffer)
         if written != len(buffer):
-            return -1
+            return failure(OSError(errno.EIO, 'short write'))
         file.flush()
         return 0
-    except (OSError, ValueError):
-        return -1
+    except (OSError, ValueError) as error:
+        return failure(error)
 
 
 def filesystem(first, second, operation):
     text = path_text(first)
     other = path_text(second) if operation == 4 else None
     if text is None or (operation == 4 and other is None):
-        return -1
+        return failure(OSError(errno.EINVAL, 'invalid path'))
     path = Path(text)
     try:
         if operation in (0, 1):
@@ -122,8 +136,8 @@ def filesystem(first, second, operation):
         else:
             return -1
         return 0
-    except (OSError, ValueError):
-        return -1
+    except (OSError, ValueError) as error:
+        return failure(error)
 
 
 def claim(raw):
@@ -133,6 +147,11 @@ def claim(raw):
 
 
 FUNCTIONS = {
+    'w_host_last_error': lambda: _error_code,
+    'w_host_last_error_domain': lambda: _error_domain,
+    'w_host_borrow': lambda handle: handle,
+    'w_host_active_handles': lambda: len(_entries),
+    'w_host_active_bytes': lambda: sum(len(value) for kind, value in _entries.values() if kind == 'buffer'),
     'w_host_claim': claim,
     'w_host_claim_valid': lambda handle: int(find(handle, 'claim') is not None),
     'w_host_buffer_new': lambda: allocate('buffer', bytearray()),

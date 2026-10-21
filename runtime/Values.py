@@ -638,8 +638,13 @@ class WModule(WValue):
 
 
 class WPointer(WValue):
-    def __init__(self, address):
+    def __init__(self, address, close=None):
         self.address = address
+        self._close = close
+
+    def __del__(self):
+        if self._close is not None and self.address:
+            self._close(self.address)
 
     def __eq__(self, other):
         return isinstance(other, WPointer) and self.address == other.address

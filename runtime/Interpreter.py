@@ -799,6 +799,8 @@ class Interpreter:
         from node.NodeType import ResultType as AstResultType
         if ret_type is None or isinstance(ret_type, NamedType) and ret_type.name == 'unit':
             return WUnit()
+        if isinstance(ret_type, AstResultType) and isinstance(ret_type.ok_type, NamedType) and ret_type.ok_type.name == 'unit':
+            return ret_val if isinstance(ret_val, WErr) else WOk(WUnit())
         if not isinstance(ret_type, AstResultType) or isinstance(ret_val, WResult):
             return ret_val
         return WOk(ret_val)

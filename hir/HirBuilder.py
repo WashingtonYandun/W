@@ -333,6 +333,9 @@ class HirBuilder:
         ret_tid = self._get_type_id_from_node(decl.return_type) if decl.return_type else TYPE_UNIT
         body_hir = self._lower_block(decl.body)
         self._pop_scope()
+        return_entry = self.interner.get_entry(ret_tid)
+        if return_entry.tag == "result" and return_entry.data[0] == TYPE_UNIT:
+            self._discard_unit_result_tail(body_hir)
         if ret_tid == TYPE_UNIT:
             if body_hir.tail_expr is not None and body_hir.tail_expr.type_id != TYPE_UNIT:
                 body_hir.statements.append(HirExprStmt(body_hir.tail_expr, body_hir.tail_expr.span))
@@ -358,6 +361,26 @@ class HirBuilder:
             span=self._span(decl)
         )
 
+    def _discard_unit_result_tail(self, body):
+        tail = body.tail_expr
+        if isinstance(tail, HirIf):
+            branches = [tail.then_block] + [branch for _, branch in tail.elifs]
+            if tail.else_block is not None:
+                branches.append(tail.else_block)
+            for branch in branches:
+                self._discard_unit_result_tail(branch)
+            tail.type_id = TYPE_UNIT
+        elif isinstance(tail, HirMatch):
+            for arm in tail.arms:
+                self._discard_unit_result_tail(arm.body)
+            tail.type_id = TYPE_UNIT
+        if tail is not None:
+            entry = self.interner.get_entry(tail.type_id)
+            if entry.tag == "result":
+                tail = HirTryPropagate(tail, "result", entry.data[0], tail.span)
+            body.statements.append(HirExprStmt(tail, tail.span))
+        body.tail_expr = HirConstUnit(TYPE_UNIT, body.span)
+
     def _lower_method_decl(self, decl: MethodDecl) -> HirFnDecl:
         self._push_scope()
         params = [
@@ -372,6 +395,9 @@ class HirBuilder:
         ret_tid = self._get_type_id_from_node(decl.return_type) if decl.return_type else TYPE_UNIT
         body_hir = self._lower_block(decl.body)
         self._pop_scope()
+        return_entry = self.interner.get_entry(ret_tid)
+        if return_entry.tag == "result" and return_entry.data[0] == TYPE_UNIT:
+            self._discard_unit_result_tail(body_hir)
         if ret_tid == TYPE_UNIT:
             if body_hir.tail_expr is not None and body_hir.tail_expr.type_id != TYPE_UNIT:
                 body_hir.statements.append(HirExprStmt(body_hir.tail_expr, body_hir.tail_expr.span))

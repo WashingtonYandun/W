@@ -319,10 +319,13 @@ fn parse_class_decl() -> unit {
             expect_kind("RPAREN")
             let mut fallible = false
             let mut unit_return = true
+            let mut unit_result_return = false
+            let mut type_start = 0
             if match_kind("ARROW") {
-                let type_start = g_pos
+                type_start = g_pos
                 fallible = parse_type_ann()
                 unit_return = parsed_unit_return(type_start)
+                unit_result_return = parsed_unit_result_return(type_start)
             }
             m_names.append(mname)
             m_arities.append(len(p_names))
@@ -347,7 +350,9 @@ fn parse_class_decl() -> unit {
             let mut ret_v = parse_block_expr()
             if unit_return { ret_v = "w_unit()" }
             let ret_hold = new_aux("_ret")
-            emit_line("WVal " + ret_hold + " = " + own_expr(ret_v) + ";")
+            let mut owned_return = own_expr(ret_v)
+            if unit_result_return { owned_return = "w_discard_result_value(" + owned_return + ")" }
+            emit_line("WVal " + ret_hold + " = " + owned_return + ";")
             pop_scope()
             if g_fn_fallible {
                 emit_line("return w_wrap_result(" + ret_hold + ", \"" + g_cur_err_type + "\");")
@@ -567,10 +572,13 @@ fn parse_fn_decl() -> unit {
     expect_kind("RPAREN")
     let mut fallible = false
     let mut unit_return = true
+    let mut unit_result_return = false
+    let mut type_start = 0
     if match_kind("ARROW") {
-        let type_start = g_pos
+        type_start = g_pos
         fallible = parse_type_ann()
         unit_return = parsed_unit_return(type_start)
+        unit_result_return = parsed_unit_result_return(type_start)
     }
     let mut sig = "void"
     if len(param_names) > 0 {
@@ -598,7 +606,9 @@ fn parse_fn_decl() -> unit {
     let mut ret_v = parse_block_expr()
     if unit_return { ret_v = "w_unit()" }
     let ret_hold = new_aux("_ret")
-    emit_line("WVal " + ret_hold + " = " + own_expr(ret_v) + ";")
+    let mut owned_return = own_expr(ret_v)
+    if unit_result_return { owned_return = "w_discard_result_value(" + owned_return + ")" }
+    emit_line("WVal " + ret_hold + " = " + owned_return + ";")
     pop_scope()
     if g_fn_fallible {
         emit_line("return w_wrap_result(" + ret_hold + ", \"" + g_cur_err_type + "\");")
@@ -672,6 +682,7 @@ fn parse_extern_decl() {
     elif returned == "int" or returned == "int32" or returned == "int64" { result = "return w_int(" + call + ");" }
     elif returned == "float" or returned == "double" { result = "return w_float(" + call + ");" }
     elif returned == "bool" { result = "return w_bool(" + call + ");" }
+    elif native_name == "w_host_buffer_new" or native_name == "w_host_file_open" { result = "return w_host_owned_pointer(" + call + ");" }
     else { result = "return w_pointer(" + call + ");" }
     g_fn_defs.append("static WVal " + c_name + "(" + wrapped_params + ") { " + result + " }")
 }
