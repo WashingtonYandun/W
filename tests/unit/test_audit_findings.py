@@ -28,7 +28,7 @@ def test_nominal_equality_and_undeclared_super_constructor_are_rejected():
     with tempfile.TemporaryDirectory(prefix='w-nominal-contracts-') as temporary:
         directory = Path(temporary)
         module = directory / 'nominals.w'
-        module.write_text('pub struct A { x: int }\npub enum E { X }\npub fn make() -> A { A { x: 1 } }\npub fn event() -> E { E.X }\n')
+        module.write_text('pub struct A { x: int }\npub enum E { X }\npub fn make() -> A { A { x: 1 } }\npub fn event() -> E { E.X }\n', encoding='utf-8')
         programs += [f'import {json.dumps(module.as_posix())}\nstruct B {{ x: int }}\nprint(nominals.make() == B {{ x: 1 }})',
                      f'import {json.dumps(module.as_posix())}\nenum E {{ X }}\nprint(nominals.event() == E.X)']
         for index, source in enumerate(programs):
@@ -54,7 +54,7 @@ def test_literal_indexing_scales_linearly_by_work_not_wall_clock():
             expected_sum = sum(ord(character) for character in text)
             expected = f'{expected_sum} {expected_sum} {len(text)} {len(text)}\n'
             source_path = directory / 'source.w'
-            source_path.write_text(source)
+            source_path.write_text(source, encoding='utf-8')
             interpreted = run_engine('interpreter', source, 'literal', w1, directory / 'reference')
             assert interpreted.stdout == expected and interpreted.exit_code == 0, vars(interpreted)
             for engine in metrics:
@@ -66,9 +66,9 @@ def test_literal_indexing_scales_linearly_by_work_not_wall_clock():
                                str(source_path), '-o', str(emitted)]
                 built = subprocess.run(command, capture_output=True, text=True, timeout=120)
                 assert built.returncode == 0, built.stderr
-                code = emitted.read_text().replace('    w_runtime_cleanup();',
+                code = emitted.read_text(encoding='utf-8').replace('    w_runtime_cleanup();',
                     '    fprintf(stderr, "scan=%" PRIu64 "\\n", w_g_string_scan_steps);\n    w_runtime_cleanup();')
-                emitted.write_text(code)
+                emitted.write_text(code, encoding='utf-8')
                 binary = directory / executable_name(engine)
                 flags = ['-fsanitize=address,undefined', '-fno-omit-frame-pointer'] if (os.environ.get('W_SANITIZE') == '1' and os.name != 'nt') else []
                 subprocess.run(compiler_command() + ['-std=c99', '-O2', '-DW_STRING_METRICS', '-I' + str(ROOT),
@@ -101,9 +101,9 @@ def test_matrix_invalidates_changes_without_renaming_inputs():
         root = Path(temporary)
         (root / 'stdlib').mkdir()
         path = root / 'stdlib/library.w'
-        path.write_text('pub fn value() -> int { 1 }')
+        path.write_text('pub fn value() -> int { 1 }', encoding='utf-8')
         before = source_fingerprint(root)
-        path.write_text('pub fn value() -> int { 2 }')
+        path.write_text('pub fn value() -> int { 2 }', encoding='utf-8')
         after = source_fingerprint(root)
         assert before['inputs'].keys() == after['inputs'].keys()
         assert before['digest'] != after['digest']

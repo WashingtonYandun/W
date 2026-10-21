@@ -12,6 +12,15 @@
 #include <errno.h>
 #include <ctype.h>
 #include <stdarg.h>
+#ifdef _WIN32
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#include <windows.h>
+#endif
+#ifdef W_OK
+#undef W_OK
+#endif
 
 typedef enum {
     W_UNIT = 0,
@@ -2649,9 +2658,30 @@ static inline WVal w_io_error(const char* message) {
     return w_err(w_make_struct("IoError", 1, keys, values));
 }
 
+static inline FILE* w_builtin_fopen(const char* path, const char* mode) {
+#ifdef _WIN32
+    int count = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, path, -1, NULL, 0);
+    if (!count) count = MultiByteToWideChar(CP_ACP, 0, path, -1, NULL, 0);
+    if (!count) return NULL;
+    wchar_t* wide = (wchar_t*)w_alloc_safe((size_t)count * sizeof(wchar_t));
+    if (!MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, path, -1, wide, count) &&
+        !MultiByteToWideChar(CP_ACP, 0, path, -1, wide, count)) {
+        free(wide);
+        return NULL;
+    }
+    wchar_t wide_mode[8];
+    MultiByteToWideChar(CP_UTF8, 0, mode, -1, wide_mode, 8);
+    FILE* file = _wfopen(wide, wide_mode);
+    free(wide);
+    return file;
+#else
+    return fopen(path, mode);
+#endif
+}
+
 static inline WVal w_builtin_read_file(WVal path) {
     if (path.tag != W_STR || memchr(path.as.string.data, 0, path.as.string.length)) return w_io_error("Invalid path");
-    FILE* file = fopen(path.as.string.data, "rb");
+    FILE* file = w_builtin_fopen(path.as.string.data, "rb");
     if (!file) return w_io_error("Failed to open file");
     size_t length = 0, capacity = 4096;
     char* data = (char*)w_alloc_safe(capacity + 1);
@@ -2682,7 +2712,7 @@ static inline WVal w_builtin_read_file(WVal path) {
 static inline WVal w_builtin_write_file(WVal path, WVal content) {
     if (path.tag != W_STR || content.tag != W_STR || memchr(path.as.string.data, 0, path.as.string.length))
         return w_io_error("Invalid arguments");
-    FILE* file = fopen(path.as.string.data, "wb");
+    FILE* file = w_builtin_fopen(path.as.string.data, "wb");
     if (!file) return w_io_error("Failed to write file");
     size_t written = fwrite(content.as.string.data, 1, content.as.string.length, file);
     bool failed = written != content.as.string.length || ferror(file);
