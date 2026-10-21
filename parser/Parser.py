@@ -1042,10 +1042,11 @@ class Parser:
             return IdentExpr(name=ident_name, line=token.line, col=token.col)
 
         # Unary operations: '-' and 'not'.
-        # SPEC 5 puts unary at level 3, tighter than multiplicative (level 4), so the
-        # operand stops below `* / %`. Passing 8 here let `*` bind inside the unary
-        # operator, which made `not a == b` mean `(not a) == b` and broke the int64
-        # minimum literal in `-9223372036854775808 * 1`.
+        # SPEC §5 puts unary at Level 3, tighter than multiplicative (Level 4, prec=9).
+        # Passing min_prec=9 ensures that operators with precedence <= 9 (*, /, %, +, -, ==, etc.)
+        # bind outside the unary operand, ensuring '-a * b' parses as '(-a) * b',
+        # 'not a == b' parses as '(not a) == b', and preserving exact int64 minimum literals
+        # like '-9223372036854775808 * 1'.
         if self.match(TokenType.MINUS, TokenType.NOT):
             operand = self.parse_expr(min_prec=9, allow_struct_init=allow_struct_init)
             if token.value == "-" and isinstance(operand, IntLiteral):
