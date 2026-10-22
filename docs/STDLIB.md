@@ -1,6 +1,6 @@
 # Standard Library
 
-W distributes modules under `std/` imported via canonical paths such as `import "std/text"`.
+Wysna distributes modules under `std/` imported via canonical paths such as `import "std/text"`.
 
 ## Modules Overview
 
@@ -25,6 +25,13 @@ W distributes modules under `std/` imported via canonical paths such as `import 
 - `std/parse`: recoverable numeric parsing returning `Result` with `ParseError`.
   - `parse.parse_int(text) -> int ! ParseError`: parse 64-bit signed integer with whitespace trimming, optional sign, and overflow checks.
   - `parse.parse_float(text) -> float ! ParseError`: parse IEEE-754 64-bit float with fractional and exponent support.
+- `std/json`: bounded JSON parsing and deterministic compact serialization.
+  - `json.parse(text) -> Value ! JsonError`: parse one JSON value; error offsets count Unicode scalar values.
+  - `json.stringify(value) -> str ! JsonError`: serialize compact JSON with object keys sorted by Unicode scalar value.
+  - `Value` supports null, boolean, number, string, array and object values. Numbers preserve their JSON source spelling as `str`, avoiding silent binary64 precision loss.
+  - `json.null()`, `boolean()`, `number()`, `string()`, `array()` and `object()` construct values. `number()` validates its input.
+  - `json.is_null()`, `as_bool()`, `as_number()`, `as_string()`, `as_array()`, `as_object()`, `get()` and `at()` inspect values; optional accessors return `none` for a type mismatch or missing index/key.
+  - Objects use string keys. Repeated keys during parsing keep the last value. Parsing rejects unpaired UTF-16 surrogates, malformed number syntax, trailing content and nesting deeper than 32 containers.
 - `std/text`: string manipulation and query operations.
   - `text.join(parts, separator) -> str`: join string list with separator.
   - `text.pad_left(text, width, fill) -> str`: pad text on the left with fill character.

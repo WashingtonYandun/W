@@ -1,0 +1,495 @@
+import "std/algorithms"
+
+pub enum Value { Null, Bool(bool), Number(str), String(str), Array(list[Value]), Object(dict[str, Value]) }
+
+pub struct JsonError {
+    offset: int,
+    message: str,
+}
+
+fn is_digit(value: str) -> bool {
+    if len(value) != 1 {
+        return false
+    }
+    let codepoint = ord(value)
+    return codepoint >= 48 and codepoint <= 57
+}
+
+fn is_nonzero_digit(value: str) -> bool {
+    if len(value) != 1 {
+        return false
+    }
+    let codepoint = ord(value)
+    return codepoint >= 49 and codepoint <= 57
+}
+
+fn hex_digit(value: str) -> int {
+    if len(value) != 1 {
+        return -1
+    }
+    let codepoint = ord(value)
+    if codepoint >= 48 and codepoint <= 57 {
+        return codepoint - 48
+    }
+    if codepoint >= 65 and codepoint <= 70 {
+        return codepoint - 55
+    }
+    if codepoint >= 97 and codepoint <= 102 {
+        return codepoint - 87
+    }
+    return -1
+}
+
+class Decoder {
+    private source: str
+    private index: int
+    private depth: int
+    public fn init(source: str) -> unit {
+        this.source = source
+        this.index = 0
+        this.depth = 0
+    }
+    public fn peek() -> str {
+        if this.index >= len(this.source) {
+            return ""
+        }
+        return this.source[this.index]
+    }
+    public fn take() -> str {
+        if this.index >= len(this.source) {
+            return ""
+        }
+        let value = this.source[this.index]
+        this.index = this.index + 1
+        return value
+    }
+    public fn skip_space() -> unit {
+        while this.index < len(this.source) {
+            let value = this.peek()
+            if value == " " or value == "\t" or value == "\r" or value == "\n" {
+                this.index = this.index + 1
+            } else {
+                break
+            }
+        }
+    }
+    public fn fail(message: str) -> JsonError {
+        return JsonError { offset: this.index, message: message }
+    }
+    public fn expect(value: str) -> unit ! JsonError {
+        if this.take() != value {
+            return Err(this.fail("expected '" + value + "'"))
+        }
+    }
+    public fn read_hex4() -> int ! JsonError {
+        let mut value = 0
+        for digit_index in 0..4 {
+            let character = this.take()
+            let digit = hex_digit(character)
+            if digit < 0 {
+                return Err(this.fail("expected four hexadecimal digits"))
+            }
+            value = value * 16 + digit
+        }
+        return value
+    }
+    public fn read_string() -> str ! JsonError {
+        if this.take() != "\"" {
+            return Err(this.fail("expected string"))
+        }
+        let mut parts: list[str] = []
+        while this.index < len(this.source) and this.peek() != "\"" {
+            let value = this.take()
+            if value == "\\" {
+                let escape = this.take()
+                if escape == "\"" {
+                    parts.append("\"")
+                } elif escape == "\\" {
+                    parts.append("\\")
+                } elif escape == "/" {
+                    parts.append("/")
+                } elif escape == "b" {
+                    parts.append(chr(8))
+                } elif escape == "f" {
+                    parts.append(chr(12))
+                } elif escape == "n" {
+                    parts.append("\n")
+                } elif escape == "r" {
+                    parts.append("\r")
+                } elif escape == "t" {
+                    parts.append("\t")
+                } elif escape == "u" {
+                    let first = this.read_hex4()?
+                    let mut codepoint = first
+                    if first >= 55296 and first <= 56319 {
+                        if this.take() != "\\" or this.take() != "u" {
+                            return Err(this.fail("high surrogate must be followed by a low surrogate"))
+                        }
+                        let second = this.read_hex4()?
+                        if second < 56320 or second > 57343 {
+                            return Err(this.fail("high surrogate must be followed by a low surrogate"))
+                        }
+                        codepoint = 65536 + (first - 55296) * 1024 + (second - 56320)
+                    } elif first >= 56320 and first <= 57343 {
+                        return Err(this.fail("unexpected low surrogate"))
+                    }
+                    parts.append(chr(codepoint))
+                } else {
+                    return Err(this.fail("invalid string escape"))
+                }
+            } else {
+                if ord(value) < 32 {
+                    return Err(this.fail("unescaped control character in string"))
+                }
+                parts.append(value)
+            }
+        }
+        if this.index >= len(this.source) {
+            return Err(this.fail("unterminated string"))
+        }
+        this.index = this.index + 1
+        return join_strings(parts, "")
+    }
+    public fn read_literal(expected: str) -> unit ! JsonError {
+        if this.index + len(expected) > len(this.source) or slice(this.source, this.index, this.index + len(expected)) != expected {
+            return Err(this.fail("invalid literal"))
+        }
+        this.index = this.index + len(expected)
+    }
+    public fn read_number() -> str ! JsonError {
+        let start = this.index
+        if this.peek() == "-" {
+            this.index = this.index + 1
+        }
+        if this.peek() == "0" {
+            this.index = this.index + 1
+            if is_digit(this.peek()) {
+                return Err(this.fail("leading zero in number"))
+            }
+        } elif is_nonzero_digit(this.peek()) {
+            while is_digit(this.peek()) {
+                this.index = this.index + 1
+            }
+        } else {
+            return Err(this.fail("expected integer part"))
+        }
+        if this.peek() == "." {
+            this.index = this.index + 1
+            if not is_digit(this.peek()) {
+                return Err(this.fail("expected digit after decimal point"))
+            }
+            while is_digit(this.peek()) {
+                this.index = this.index + 1
+            }
+        }
+        if this.peek() == "e" or this.peek() == "E" {
+            this.index = this.index + 1
+            if this.peek() == "+" or this.peek() == "-" {
+                this.index = this.index + 1
+            }
+            if not is_digit(this.peek()) {
+                return Err(this.fail("expected exponent digits"))
+            }
+            while is_digit(this.peek()) {
+                this.index = this.index + 1
+            }
+        }
+        return slice(this.source, start, this.index)
+    }
+    public fn read_array() -> Value ! JsonError {
+        this.index = this.index + 1
+        this.depth = this.depth + 1
+        if this.depth > 32 {
+            return Err(this.fail("maximum JSON nesting depth is 32"))
+        }
+        this.skip_space()
+        let mut values: list[Value] = []
+        if this.peek() == "]" {
+            this.index = this.index + 1
+            this.depth = this.depth - 1
+            return Value.Array(values)
+        }
+        while true {
+            values.append(this.read_value()?)
+            this.skip_space()
+            if this.peek() == "]" {
+                this.index = this.index + 1
+                this.depth = this.depth - 1
+                return Value.Array(values)
+            }
+            if this.peek() != "," {
+                return Err(this.fail("expected ',' or ']'"))
+            }
+            this.index = this.index + 1
+            this.skip_space()
+        }
+        return Value.Array(values)
+    }
+    public fn read_object() -> Value ! JsonError {
+        this.index = this.index + 1
+        this.depth = this.depth + 1
+        if this.depth > 32 {
+            return Err(this.fail("maximum JSON nesting depth is 32"))
+        }
+        this.skip_space()
+        let mut fields: dict[str, Value] = {}
+        if this.peek() == "}" {
+            this.index = this.index + 1
+            this.depth = this.depth - 1
+            return Value.Object(fields)
+        }
+        while true {
+            if this.peek() != "\"" {
+                return Err(this.fail("object key must be a string"))
+            }
+            let key = this.read_string()?
+            this.skip_space()
+            if this.take() != ":" {
+                return Err(this.fail("expected ':' after object key"))
+            }
+            this.skip_space()
+            fields[key] = this.read_value()?
+            this.skip_space()
+            if this.peek() == "}" {
+                this.index = this.index + 1
+                this.depth = this.depth - 1
+                return Value.Object(fields)
+            }
+            if this.peek() != "," {
+                return Err(this.fail("expected ',' or '}'"))
+            }
+            this.index = this.index + 1
+            this.skip_space()
+        }
+        return Value.Object(fields)
+    }
+    public fn read_value() -> Value ! JsonError {
+        this.skip_space()
+        let current = this.peek()
+        if current == "\"" {
+            return Value.String(this.read_string()?)
+        }
+        if current == "{" {
+            return this.read_object()
+        }
+        if current == "[" {
+            return this.read_array()
+        }
+        if current == "t" {
+            this.read_literal("true")?
+            return Value.Bool(true)
+        }
+        if current == "f" {
+            this.read_literal("false")?
+            return Value.Bool(false)
+        }
+        if current == "n" {
+            this.read_literal("null")?
+            return Value.Null
+        }
+        if current == "-" or is_digit(current) {
+            return Value.Number(this.read_number()?)
+        }
+        return Err(this.fail("expected JSON value"))
+    }
+    public fn document() -> Value ! JsonError {
+        this.skip_space()
+        let value = this.read_value()?
+        this.skip_space()
+        if this.index != len(this.source) {
+            return Err(this.fail("trailing characters after JSON value"))
+        }
+        return value
+    }
+}
+
+pub fn parse(source: str) -> Value ! JsonError {
+    return Decoder(source).document()
+}
+
+pub fn null() -> Value {
+    return Value.Null
+}
+
+pub fn boolean(value: bool) -> Value {
+    return Value.Bool(value)
+}
+
+pub fn string(value: str) -> Value {
+    return Value.String(value)
+}
+
+pub fn array(values: list[Value]) -> Value {
+    return Value.Array(values)
+}
+
+pub fn object(fields: dict[str, Value]) -> Value {
+    return Value.Object(fields)
+}
+
+pub fn number(value: str) -> Value ! JsonError {
+    return Value.Number(validate_number(value)?)
+}
+
+pub fn is_null(value: Value) -> bool {
+    return match value {
+        Value.Null => true,
+        else => false,
+    }
+}
+
+pub fn as_bool(value: Value) -> bool? {
+    return match value {
+        Value.Bool(result) => Some(result),
+        else => none,
+    }
+}
+
+pub fn as_number(value: Value) -> str? {
+    return match value {
+        Value.Number(result) => Some(result),
+        else => none,
+    }
+}
+
+pub fn as_string(value: Value) -> str? {
+    return match value {
+        Value.String(result) => Some(result),
+        else => none,
+    }
+}
+
+pub fn as_array(value: Value) -> list[Value]? {
+    return match value {
+        Value.Array(result) => Some(result),
+        else => none,
+    }
+}
+
+pub fn as_object(value: Value) -> dict[str, Value]? {
+    return match value {
+        Value.Object(result) => Some(result),
+        else => none,
+    }
+}
+
+pub fn get(value: Value, key: str) -> Value? {
+    return match value {
+        Value.Object(fields) => fields.get(key),
+        else => none,
+    }
+}
+
+fn array_at(values: list[Value], index: int) -> Value? {
+    if index < 0 or index >= len(values) {
+        return none
+    }
+    return Some(values[index])
+}
+
+pub fn at(value: Value, index: int) -> Value? {
+    return match value {
+        Value.Array(values) => array_at(values, index),
+        else => none,
+    }
+}
+
+fn quote_string(value: str) -> str {
+    let hex = "0123456789abcdef"
+    let mut parts: list[str] = ["\""]
+    for index in 0..len(value) {
+        let character = value[index]
+        let codepoint = ord(character)
+        if character == "\"" {
+            parts.append("\\\"")
+        } elif character == "\\" {
+            parts.append("\\\\")
+        } elif codepoint == 8 {
+            parts.append("\\b")
+        } elif codepoint == 12 {
+            parts.append("\\f")
+        } elif character == "\n" {
+            parts.append("\\n")
+        } elif character == "\r" {
+            parts.append("\\r")
+        } elif character == "\t" {
+            parts.append("\\t")
+        } elif codepoint < 32 {
+            parts.append("\\u00" + hex[codepoint / 16] + hex[codepoint % 16])
+        } else {
+            parts.append(character)
+        }
+    }
+    parts.append("\"")
+    return join_strings(parts, "")
+}
+
+fn validate_number(raw: str) -> str ! JsonError {
+    let parsed = parse(raw)?
+    if len(raw) == 0 {
+        return Err(JsonError { offset: 0, message: "number value must contain one JSON number" })
+    }
+    match parsed {
+        Value.Number(value) => {
+            return value
+        },
+        else => {
+            return Err(JsonError { offset: 0, message: "number value must contain one JSON number" })
+        },
+    }
+}
+
+fn string_less(left: str, right: str) -> bool {
+    let limit = if len(left) < len(right) {
+        len(left)
+    } else {
+        len(right)
+    }
+    for index in 0..limit {
+        let left_codepoint = ord(left[index])
+        let right_codepoint = ord(right[index])
+        if left_codepoint != right_codepoint {
+            return left_codepoint < right_codepoint
+        }
+    }
+    return len(left) < len(right)
+}
+
+fn stringify_value(value: Value) -> str ! JsonError {
+    return match value {
+        Value.Null => "null",
+        Value.Bool(flag) => if flag {
+            "true"
+        } else {
+            "false"
+        },
+        Value.Number(raw) => validate_number(raw)?,
+        Value.String(text) => quote_string(text),
+        Value.Array(values) => {
+            let mut parts: list[str] = []
+            for index in 0..len(values) {
+                parts.append(stringify_value(values[index])?)
+            }
+            "[" + join_strings(parts, ",") + "]"
+        },
+        Value.Object(fields) => {
+            let mut keys: list[str] = []
+            for (key, child) in dict_items(fields) {
+                keys.append(key)
+            }
+            let ordered = algorithms.sort[str](keys, |left: str, right: str| {
+                string_less(left, right)
+            })
+            let mut parts: list[str] = []
+            for index in 0..len(ordered) {
+                let key = ordered[index]
+                parts.append(quote_string(key) + ":" + stringify_value(fields[key])?)
+            }
+            "{" + join_strings(parts, ",") + "}"
+        },
+    }
+}
+
+pub fn stringify(value: Value) -> str ! JsonError {
+    return stringify_value(value)
+}

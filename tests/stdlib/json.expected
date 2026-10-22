@@ -1,0 +1,9 @@
+{"items":[true,false,null],"name":"Wysna","number":-12.5e+2,"text":"line\nnext\t\"","unicode":"😀"}
+name Wysna
+items true true
+{"a":"line\nnext\t\"","control":"\u0001","z":1e3}
+invalid 3 expected JSON value
+surrogate 8 high surrogate must be followed by a low surrogate
+leading zero 1 leading zero in number
+exponent 2 expected exponent digits
+deep 33 maximum JSON nesting depth is 32
