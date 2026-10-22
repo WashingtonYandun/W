@@ -98,7 +98,10 @@ def validate(wheel, forbidden, report):
             '    let value = json.parse("{\\"ready\\":true}") else error { return }\n'
             '    let encoded = json.stringify(value) else error { return }\n'
             '    print(encoded)\n'
-            '    json.parse_with_limits("[1,2]", 5, 32, 2) else error { print("json node budget", error.offset) }\n'
+            '    json.parse_with_limits("[1,2]", 5, 32, 2) else error {\n'
+            '        print("json node budget", error.offset)\n'
+            '        json.null()\n'
+            '    }\n'
             '}\n'
             'exercise()\n', encoding='utf-8')
         (work / 'invalid.wysna').write_text('let value: int = "wrong"\n', encoding='utf-8')
