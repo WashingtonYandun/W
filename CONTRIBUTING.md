@@ -25,7 +25,10 @@ All contributors and participants are expected to adhere to our [Code of Conduct
 
 ## Architecture Overview
 
-The Wysna toolchain consists of two primary compiler engines and a unified C99 runtime:
+The Wysna toolchain consists of two primary compiler engines and a unified C99 runtime.
+Seed's batch CLI and LSP share `compiler/CompilerService.py`, which returns a
+session-bound `CheckedProgram`. Consumers get isolated syntax trees; linking and lowering
+reject stale or foreign checked results before using their type arena.
 
 ```text
 Source (.wysna)
@@ -37,18 +40,22 @@ Source (.wysna)
 [ Parser ] ───────▶ Canonical AST (node/NodeType.py)
    │
    ▼
-[ TypeChecker ] ──▶ TypeInterner / Canonical TypeId (checker/TypeInterner.py)
+[ CompilerService / CompilationSession ]
    │
    ▼
-[ HirBuilder ] ───▶ Typed HIR (hir/HirNodes.py)
+[ TypeChecker ] ──▶ CheckedProgram / Canonical TypeId
    │
-   ├──────────────────────────────┬──────────────────────────────┐
-   ▼                              ▼                              ▼
-[ Wysna Seed Interpreter ]   [ Wysna Seed HirCCodeGen ]     [ Wysna Compiler ]
-runtime/Interpreter.py       hir/HirCCodeGen.py             selfhost/src/
-   │                              │                              │
-   ▼                              ▼                              ▼
-Value Evaluation           ANSI C99 Code                  Pure Wysna Self-Host
+   ├──────────────────────────────┐
+   ▼                              ▼
+[ Interpreter / AST oracle ]  [ HirBuilder / HIR verifier ]
+                                  │
+                                  ▼
+                             [ MIR / verifier / C99 ]
+                                  │
+                                  ▼
+                             [ NativeToolchain ]
+
+Independent Wysna Compiler: selfhost/src/ → direct C99 → NativeToolchain
 ```
 
 - **Wysna Seed (`main.py`, `wysna`):** Reference implementation in Python 3. Contains the two-pass type checker, monomorphization engine, Typed HIR middle-end, and C99 native code generator.

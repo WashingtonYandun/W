@@ -5,7 +5,8 @@ from pathlib import Path
 import sys
 from urllib.parse import unquote, urlparse
 from urllib.request import url2pathname
-from compiler.CompilationSession import CompilationSession
+from compiler.CheckedProgram import SymbolInfo
+from compiler.CompilerService import CompilerService
 from error.Error import WysnaError
 from formatter.Formatter import Formatter
 from lexer.Lexer import Lexer
@@ -56,7 +57,7 @@ def nodes(node):
 class LanguageServer:
     def __init__(self, send):
         self.send = send
-        self.session = CompilationSession()
+        self.compiler = CompilerService()
         self.documents = {}
         self.checked = {}
         self.stopping = False
@@ -67,10 +68,10 @@ class LanguageServer:
         diagnostics = []
         self.checked.pop(uri, None)
         try:
-            self.checked[uri] = self.session.check_source(source, path)
+            self.checked[uri] = self.compiler.check(source, path)
         except WysnaError as error:
             for error in getattr(error, 'diagnostics', (error,)):
-                error_source = self.session.sources.snapshots.get(error.file, source)
+                error_source = self.compiler.source_text(error.file, source)
                 lines = error_source.splitlines(keepends=True)
                 start = sum(map(len, lines[:max(error.line - 1, 0)])) + max(error.col - 1, 0)
                 end = min(start + 1, len(error_source))
@@ -96,8 +97,8 @@ class LanguageServer:
         if uri in self.documents and version <= self.documents[uri]['version']:
             return
         self.documents[uri] = {'text': text, 'version': version}
-        self.session.sources.overlays[source_path(uri)] = text
-        # Recheck open dependents as well; CompilationSession invalidates changed snapshots.
+        self.compiler.set_overlay(source_path(uri), text)
+        # Recheck open dependents as well; the service invalidates changed snapshots.
         for opened in list(self.documents):
             self.publish(opened)
 
@@ -111,28 +112,11 @@ class LanguageServer:
         unit = self.checked.get(uri)
         if not unit:
             return None
-        token = self.token_at(uri, position)
-        if not token:
-            return None
-        symbol = None
-        source = self.documents[uri]['text']
-        tokens = Lexer(source).tokenize()
-        previous = next((tokens[index - 1] for index, candidate in enumerate(tokens) if candidate is not None and candidate.line == token.line and candidate.col == token.col and index > 0), None)
-        for node in nodes(unit.program):
-            if isinstance(node, IdentExpr) and (node.line, node.col) == (token.line, token.col):
-                symbol = getattr(node, 'resolved_symbol', None)
-                break
-            if isinstance(node, MemberExpr) and getattr(node, 'resolved_module_member', None):
-                if previous and (node.line, node.col) == (previous.line, previous.col) and node.property == token.value:
-                    for dependency in self.session.modules.values():
-                        candidate = dependency.checker.global_scope.lookup_symbol(node.resolved_module_member)
-                        if candidate:
-                            symbol = candidate
-                            break
+        symbol = self.symbol_at(uri, position)
         if symbol is None or not Path(getattr(symbol, 'file', '')).is_absolute():
             return None
         path = symbol.file
-        source = self.session.sources.snapshots.get(path, '')
+        source = unit.source_text(path)
         name = str(symbol.name).split('__')[-1]
         target = next((t for t in Lexer(source).tokenize()
                        if t.line == symbol.line and t.value == name), None)
@@ -156,14 +140,13 @@ class LanguageServer:
             if isinstance(node, IdentExpr) and (node.line, node.col) == (token.line, token.col):
                 symbol = getattr(node, 'resolved_symbol', None)
                 if symbol is not None:
-                    return symbol
+                    return SymbolInfo.from_symbol(symbol)
             if (isinstance(node, MemberExpr) and getattr(node, 'resolved_module_member', None)
                     and previous and (node.line, node.col) == (previous.line, previous.col)
                     and node.property == token.value):
-                for dependency in self.session.modules.values():
-                    symbol = dependency.checker.global_scope.lookup_symbol(node.resolved_module_member)
-                    if symbol:
-                        return symbol
+                symbol = unit.lookup_symbol(node.resolved_module_member)
+                if symbol:
+                    return symbol
         return None
 
     def hover(self, uri, position):
@@ -195,17 +178,7 @@ class LanguageServer:
         source = self.documents[uri]['text']
         offset = offset_at(source, position)
         location = (source[:offset].count('\n') + 1, len(source[:offset].rsplit('\n', 1)[-1]) + 1)
-        scope = unit.checker.global_scope
-        candidates = [(start, end, local) for start, end, local in unit.checker.scope_spans if start <= location <= end]
-        if candidates:
-            scope = max(candidates, key=lambda item: item[0])[2]
-        symbols = {}
-        while scope:
-            for name, symbol in scope.symbols.items():
-                if not name.startswith(('_WYSNA_', '__wysna_internal_', '__wysna_module_')) and name not in symbols:
-                    if symbol.kind != 'var' or (symbol.line, symbol.col) <= location:
-                        symbols[name] = symbol
-            scope = scope.parent
+        symbols = unit.visible_symbols(*location)
         items = [{'label': name, 'kind': 3 if symbol.kind in ('fn', 'builtin') else 6,
                   'detail': str(symbol.type)} for name, symbol in sorted(symbols.items())]
         return {'isIncomplete': False, 'items': items}
@@ -238,7 +211,7 @@ class LanguageServer:
             uri = params['textDocument']['uri']
             self.documents.pop(uri, None)
             self.checked.pop(uri, None)
-            self.session.sources.overlays.pop(source_path(uri), None)
+            self.compiler.remove_overlay(source_path(uri))
             for opened in self.documents:
                 self.publish(opened)
             self.send({'jsonrpc': '2.0', 'method': 'textDocument/publishDiagnostics', 'params': {'uri': uri, 'diagnostics': []}})

@@ -18,6 +18,8 @@ from tests.unit.test_selfhost_split_conformance import test_split_conformance
 from tests.unit.test_generic_hardening import run_generic_hardening_tests
 from tests.unit.test_cow_telemetry import run_cow_telemetry_suite
 from tests.unit.test_compilation_session import run_session_tests
+from tests.unit.test_compiler_service import run_compiler_service_tests
+from tests.unit.test_native_toolchain import run_native_toolchain_tests
 from tests.unit.test_resolved_hir import run_all as run_resolved_hir_tests
 from tests.unit.test_c03_generic_specialization import run_all as run_c03_generic_tests
 from tests.unit.test_c04_adt_layout import run_all as run_c04_adt_tests
@@ -515,6 +517,8 @@ def _run_suite_in_repo(repo_root: str) -> None:
     # 11. Copy-on-Write Telemetry & Path-Copying Asymptotics (B02)
     cow_telemetry_ok = run_cow_telemetry_suite()
     session_ok = run_session_tests()
+    service_ok = run_compiler_service_tests()
+    toolchain_ok = run_native_toolchain_tests()
     resolved_hir_ok = run_resolved_hir_tests()
     generic_c03_ok = run_c03_generic_tests()
     adt_c04_ok = run_c04_adt_tests()
@@ -555,6 +559,8 @@ def _run_suite_in_repo(repo_root: str) -> None:
     print(f"Generic Hardening:   {'1/1 (Canonical cache verified)' if hardening_ok else '0/1'}")
     print(f"CoW Telemetry (B02): {'1/1 (Asymptotics verified)' if cow_telemetry_ok else '0/1'}")
     print(f"Compilation Session: {'1/1' if session_ok else '0/1'}")
+    print(f"Compiler Service:    {'1/1' if service_ok else '0/1'}")
+    print(f"Native Toolchain:    {'1/1' if toolchain_ok else '0/1'}")
     print(f"Resolved HIR (C02):  {'1/1' if resolved_hir_ok else '0/1'}")
     print(f"Generic Specialization (C03): {'1/1' if generic_c03_ok else '0/1'}")
     print(f"ADTs & Layout Graph (C04):    {'1/1' if adt_c04_ok else '0/1'}")
@@ -586,6 +592,8 @@ def _run_suite_in_repo(repo_root: str) -> None:
         and hardening_ok
         and cow_telemetry_ok
         and session_ok
+        and service_ok
+        and toolchain_ok
         and resolved_hir_ok
         and generic_c03_ok
         and adt_c04_ok
@@ -610,7 +618,7 @@ def _run_suite_in_repo(repo_root: str) -> None:
             v_lex_passed + i_lex_passed + v_parse_passed + i_parse_passed +
             v_type_passed + i_type_passed + err_passed + fmt_passed + hir_passed +
             runtime_passed + c99_passed + hir_c99_passed + selfhost_runtime_passed +
-            examples_passed + 20
+            examples_passed + 22
         )
         print(f"ALL {total}/{total} CONFORMANCE, EXAMPLES & SELF-HOSTING TESTS PASSED (100%).")
         sys.exit(0)
