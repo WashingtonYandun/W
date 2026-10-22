@@ -977,7 +977,7 @@ class Program(Node):
 
     def to_dict(self) -> dict:
         return {
-            "w_ast_version": "0.1",
+            "wysna_ast_version": "0.1",
             "kind": "Program",
             "body": [s.to_dict() for s in self.body],
             "line": self.line,

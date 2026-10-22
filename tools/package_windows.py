@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Assemble an offline Windows W0 distribution from a wheel and pinned runtimes."""
+"""Assemble an offline Windows Wysna distribution from a wheel and pinned runtimes."""
 import argparse
 import hashlib
 import json
@@ -87,7 +87,7 @@ def assemble(wheel, output, cache, launcher_compiler=None, source_commit=None):
         stage = Path(temporary) / 'bundle'
         stage.mkdir()
         extract(wheel, stage)
-        for required in ('main.py', 'common/Version.py', 'runtime/w_runtime.h', 'stdlib/text.w'):
+        for required in ('main.py', 'common/Version.py', 'runtime/wysna_runtime.h', 'stdlib/text.wysna'):
             if not (stage / required).is_file():
                 raise ValueError('Wheel is missing ' + required)
         metadata = list(stage.glob('*.dist-info/METADATA'))
@@ -102,8 +102,7 @@ def assemble(wheel, output, cache, launcher_compiler=None, source_commit=None):
         compiler = Path(launcher_compiler).resolve() if launcher_compiler else stage / 'toolchain/zig/zig.exe'
         subprocess.run([str(compiler), 'cc', '-target', 'x86_64-windows-gnu', '-mcpu=baseline',
                         '-O2', '-municode', str(ROOT / 'packaging/windows/launcher.c'),
-                        '-o', str(stage / 'w.exe')], check=True, timeout=300)
-        shutil.copy2(stage / 'w.exe', stage / 'wlang.exe')
+                        '-o', str(stage / 'wysna.exe')], check=True, timeout=300)
         shutil.copy2(ROOT / 'LICENSE', stage / 'LICENSE')
         shutil.copy2(ROOT / 'packaging/windows/open-terminal.cmd', stage / 'open-terminal.cmd')
         (stage / 'THIRD_PARTY.txt').write_text(
@@ -111,7 +110,7 @@ def assemble(wheel, output, cache, launcher_compiler=None, source_commit=None):
             'and Zig/LLVM and their bundled libraries (toolchain/zig/LICENSE and '
             'toolchain/zig/lib).\n'
             'The complete bundled toolchain is retained, including its license notices.\n', encoding='utf-8')
-        manifest = {'version': version, 'profile': 'W0', 'platform': 'windows-x64',
+        manifest = {'version': version, 'profile': 'wysna', 'platform': 'windows-x64',
                     'source_commit': source_commit, 'components': COMPONENTS,
                     'wheel': {'name': wheel.name, 'sha256': sha256(wheel)},
                     'source_only_commands': ['test', 'bench', '--backend=selfhost']}
@@ -125,7 +124,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--wheel', type=Path, required=True)
     parser.add_argument('--output', type=Path, required=True)
-    parser.add_argument('--cache', type=Path, default=ROOT / '.w_cache/windows-downloads')
+    parser.add_argument('--cache', type=Path, default=ROOT / '.wysna_cache/windows-downloads')
     parser.add_argument('--launcher-compiler', type=Path)
     parser.add_argument('--source-commit')
     args = parser.parse_args()

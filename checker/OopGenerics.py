@@ -1,11 +1,11 @@
 """Nominal class/interface specialization in the shared type arena."""
-from checker.WType import WType
+from checker.WysnaType import WysnaType
 from error.Error import TypeError
 from node import NodeType as A
 from node.NodeType import clone_ast
 
 
-class GenericOopTemplate(WType):
+class GenericOopTemplate(WysnaType):
     def __init__(self, declaration, checker):
         self.name = declaration.name
         self.ast_decl = declaration
@@ -22,7 +22,7 @@ def specialize(template, arguments, line, col):
     checker = template.checker
     if len(arguments) != len(template.type_params):
         raise TypeError('Generic OOP type arity mismatch', file=checker.file, line=line, col=col, code='W2001')
-    key = tuple(checker.interner.from_wtype(argument) for argument in arguments)
+    key = tuple(checker.interner.from_type(argument) for argument in arguments)
     if key in template.instances:
         checker.telemetry.deduplicated_hits += 1
         return template.instances[key]
@@ -53,7 +53,7 @@ def specialize(template, arguments, line, col):
     template.active += 1
     try:
         # Install the nominal shell first so recursive class references terminate.
-        from checker.WType import ClassType, InterfaceType
+        from checker.WysnaType import ClassType, InterfaceType
         type_ = ClassType(declaration.name) if isinstance(declaration, A.ClassDecl) else InterfaceType(declaration.name, {})
         type_.template_name, type_.type_args = template.name, arguments
         template.instances[key] = type_

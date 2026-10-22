@@ -1,20 +1,32 @@
-# W Programming Language
+# Wysna Programming Language
 
 [![CI](https://github.com/WashingtonYandun/W/actions/workflows/ci.yml/badge.svg)](https://github.com/WashingtonYandun/W/actions/workflows/ci.yml)
 
 <p align="center">
-  <img src="assets/wawi.jpg" alt="W language mascot" width="160">
+  <img src="assets/wawi.jpg" alt="Wysna language mascot" width="160">
 </p>
 
-W is an experimental, statically typed programming language designed for native systems programming, CLI tooling, and high-performance applications. W0 compiles programs to portable C99 and combines deterministic reference counting (ARC), copy-on-write (CoW) value semantics, explicit error unions, and a controlled C interoperability layer.
+Wysna is an experimental, statically typed programming language designed for native systems programming, CLI tooling, and high-performance applications. Wysna Seed compiles programs to portable C99 and combines deterministic reference counting (ARC), copy-on-write (CoW) value semantics, explicit error unions, and a controlled C interoperability layer.
 
-The current release is `0.4.0a1` (alpha). W0 serves as the reference implementation, while W1 is the self-hosted compiler verified against a 4-engine parity suite.
+The current release is `0.4.0a1` (alpha). Wysna Seed serves as the reference implementation, while Wysna Compiler is the self-hosted compiler verified against a 4-engine parity suite.
 
 ---
 
-## Compiler Architecture
+## Compiler Architecture & Naming
 
-W implements a multi-stage compiler pipeline designed for verifiable transformations, deterministic memory safety, and portable native code generation:
+Wysna defines a clear separation between the language, its reference implementation, and its self-hosted production compiler:
+
+| Component | Public Name | Internal Identifier | Implementation Language | Role |
+| :--- | :--- | :---: | :--- | :--- |
+| **Language** | **Wysna** | `wysna` | — | Language specification & grammar (`.wysna`) |
+| **Reference Compiler** | **Wysna Seed** | `seed` | Python | Source of truth, type interner & bootstrap seed (formerly W0) |
+| **Self-Hosted Compiler** | **Wysna Compiler** | `selfhost` | Wysna | Production self-hosted compiler (formerly W1) |
+| **Bootstrap Stage 1** | **Stage 1** | `stage1` | Native C99 (compiled by Seed) | First self-hosted compiler binary (`compiler0.c` &rarr; `stage1`) |
+| **Bootstrap Stage 2** | **Stage 2** | `stage2` | Native C99 (recompiled by Stage 1) | Deterministic fixed-point compiler binary (`compiler1.c` &rarr; `stage2`) |
+
+### Multi-Stage Compiler Pipeline
+
+Wysna implements a multi-stage compiler pipeline designed for verifiable transformations, deterministic memory safety, and portable native code generation:
 
 | Stage | Component | Responsibility | Output Representation |
 | :--- | :--- | :--- | :--- |
@@ -22,8 +34,8 @@ W implements a multi-stage compiler pipeline designed for verifiable transformat
 | **Semantic Analysis** | Type Checker & Scopes | Scope-based symbol resolution, nominal type checking, and monomorphization | Typed High-Level IR (`HIR`) |
 | **Mid-Level IR** | Control-Flow Graph & MIR | Basic blocks, place projections, borrow checking, and CoW detach injection | Verified Mid-Level IR (`MIR`) |
 | **Backend** | C99 Code Generator | Translation of MIR to clean C99 code, ARC reference counting, and literal pooling | C99 Translation Unit (`.c`) |
-| **Native Compilation** | C Toolchain (`clang` / `gcc`) | Native compilation and linking against `w_runtime.h` and `w_host.h` | Standalone Executable (`.exe` / ELF / Mach-O) |
-| **Self-Hosting (W1)** | Self-Hosted Compiler | Bootstrap pipeline verifying fixed-point identity (`compiler0.c == compiler1.c`) | Self-Hosted Native Binary (`w1`) |
+| **Native Compilation** | C Toolchain (`clang` / `gcc`) | Native compilation and linking against `wysna_runtime.h` and `wysna_host.h` | Standalone Executable (`.exe` / ELF / Mach-O) |
+| **Self-Hosting** | Wysna Compiler | Bootstrap pipeline verifying fixed-point identity (`compiler0.c == compiler1.c`) | Self-Hosted Native Binary (`stage2`) |
 
 ---
 
@@ -33,10 +45,10 @@ Every core language feature and standard library capability is continuously veri
 
 | Engine | Role | Implementation | Status |
 | :--- | :--- | :--- | :--- |
-| **`interpreter`** | Reference behavior | Direct AST tree-walk evaluation in Python | 200/200 (100.0%) |
-| **`ast`** | Secondary baseline | Direct AST to C99 code generation | 200/200 (100.0%) |
-| **`hir`** | Primary production pipeline | Typed HIR &rarr; Verified MIR &rarr; C99 backend | 200/200 (100.0%) |
-| **`w1`** | Self-hosted compiler | Native self-hosted W1 executable | 200/200 (100.0%) |
+| **`interpreter`** | Reference behavior | Direct AST tree-walk evaluation in Python (Wysna Seed) | 201/201 (100.0%) |
+| **`ast`** | Secondary baseline | Direct AST to C99 code generation (Wysna Seed) | 201/201 (100.0%) |
+| **`hir`** | Primary production pipeline | Typed HIR &rarr; Verified MIR &rarr; C99 backend (Wysna Seed) | 201/201 (100.0%) |
+| **`selfhost`** | Self-hosted compiler | Wysna Compiler native executable (`stage2`) | 201/201 (100.0%) |
 
 See [docs/ENGINE_PARITY_MATRIX.md](docs/ENGINE_PARITY_MATRIX.md) for full breakdown and feature classifications.
 
@@ -46,27 +58,27 @@ See [docs/ENGINE_PARITY_MATRIX.md](docs/ENGINE_PARITY_MATRIX.md) for full breakd
 
 ### Windows: Standalone Installer
 
-Download `w-<version>-windows-x64-setup.exe` from [W Releases](https://github.com/WashingtonYandun/W/releases):
+Download `wysna-<version>-windows-x64-setup.exe` from [Wysna Releases](https://github.com/WashingtonYandun/W/releases):
 
 1. Run the `-setup.exe` installer.
-2. Keep the default option to add W to your system `PATH`.
+2. Keep the default option to add Wysna to your system `PATH`.
 3. Open a new terminal (PowerShell or CMD) and verify the installation:
 
 ```powershell
-w version
+wysna version
 ```
 
-Create a simple `hello.w` file:
+Create a simple `hello.wysna` file:
 
-```w
-print("Hello from W!")
+```wysna
+print("Hello from Wysna!")
 ```
 
 Run directly via the interpreter or compile to a native standalone executable:
 
 ```powershell
-w run hello.w
-w build hello.w -o hello.exe
+wysna run hello.wysna
+wysna build hello.wysna -o hello.exe
 .\hello.exe
 ```
 
@@ -79,15 +91,15 @@ Requirements: Python 3.10 or higher and a C99 compiler (`clang` or `gcc`).
 ```sh
 git clone https://github.com/WashingtonYandun/W.git
 cd W
-./w --version
-./w run examples/01_hello_world.w
-./w test
+./wysna --version
+./wysna run examples/01_hello_world.wysna
+./wysna test
 ```
 
 Compiling to a native executable:
 
 ```sh
-./w build examples/01_hello_world.w -o build/hello
+./wysna build examples/01_hello_world.wysna -o build/hello
 ./build/hello
 ```
 
@@ -99,7 +111,7 @@ Compiling to a native executable:
 
 Errors are first-class values and must be handled explicitly with `else` blocks:
 
-```w
+```wysna
 import "std/parse"
 
 fn compute_ratio(raw: str, divisor: int) -> int ! str {
@@ -117,7 +129,7 @@ show_ratio()
 
 ### 2. Algebraic Data Types & Pattern Matching
 
-```w
+```wysna
 enum Status { Active, Suspended(str), Terminated(int, str) }
 
 fn describe(status: Status) -> str {
@@ -134,7 +146,7 @@ print(describe(Status.Active))
 
 Collections (lists, dictionaries, and structs) provide value semantics with zero-copy snapshot efficiency:
 
-```w
+```wysna
 let original = [1, 2, 3, 4]
 let mut copy = original   # Shares storage until mutation
 copy.append(5)
@@ -144,7 +156,7 @@ print(copy)               # [1, 2, 3, 4, 5]
 
 ### 4. Bounded Binary I/O & Scoped Resources
 
-```w
+```wysna
 import "std/files"
 
 fn inspect_file(path: str) -> unit ! files.FileError {
@@ -161,7 +173,7 @@ inspect_file("README.md") else error { print(error.operation, error.code) }
 
 ## Standard Library Modules
 
-W provides a focused, high-performance standard library:
+Wysna provides a focused, high-performance standard library:
 
 | Module | Description | Key Functions & Types |
 | :--- | :--- | :--- |
@@ -181,14 +193,14 @@ See [docs/STDLIB.md](docs/STDLIB.md) for full API reference and examples.
 ## CLI & Tooling
 
 ```text
-w run <file.w>                 # Execute directly with reference interpreter
-w check <file.w>               # Parse and type-check without code execution
-w build <file.w> -o <bin>      # Compile to native standalone executable
-w emit-c <file.w> -o <out.c>   # Generate human-readable portable C99 code
-w fmt <file.w>                 # Format source while preserving comments and layout
-w lsp                          # Launch Language Server Protocol daemon (stdio)
-w test                         # Run full test suite across all 4 execution engines
-w bench                        # Run self-hosted performance benchmarks
+wysna run <file.wysna>                 # Execute directly with reference interpreter
+wysna check <file.wysna>               # Parse and type-check without code execution
+wysna build <file.wysna> -o <bin>      # Compile to native standalone executable
+wysna emit-c <file.wysna> -o <out.c>   # Generate human-readable portable C99 code
+wysna fmt <file.wysna>                 # Format source while preserving comments and layout
+wysna lsp                              # Launch Language Server Protocol daemon (stdio)
+wysna test                             # Run full test suite across all 4 execution engines
+wysna bench                            # Run self-hosted performance benchmarks
 ```
 
 ---
@@ -222,8 +234,8 @@ w bench                        # Run self-hosted performance benchmarks
 ├── mir/           # Mid-Level IR, CFG, place projections, and drop elaboration
 ├── node/          # AST node definitions
 ├── parser/        # Pratt parser and grammar rules
-├── runtime/       # C99 runtime headers (w_runtime.h, w_host.h)
-├── selfhost/      # Self-hosted W1 compiler source code (w1.w)
+├── runtime/       # C99 runtime headers (wysna_runtime.h, wysna_host.h)
+├── selfhost/      # Self-hosted compiler source code (compiler.wysna)
 ├── stdlib/        # Standard library implementations
 ├── tests/         # Differential testing harness and conformance suites
 ├── tooling/       # Language server (LSP) and developer utilities
@@ -234,4 +246,4 @@ w bench                        # Run self-hosted performance benchmarks
 
 ## License
 
-W is distributed under the terms of the [MIT License](LICENSE).
+Wysna is distributed under the terms of the [MIT License](LICENSE).

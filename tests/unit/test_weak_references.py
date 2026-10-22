@@ -7,7 +7,7 @@ import tempfile
 
 from parser.Parser import Parser
 from checker.TypeChecker import TypeChecker
-from error.Error import WError
+from error.Error import WysnaError
 from hir.HirBuilder import HirBuilder
 from hir.HirCCodeGen import HirCCodeGen
 from tests.unit.test_weak_control_block import run_control_block_tests
@@ -27,7 +27,7 @@ def run_weak_tests():
     for source in invalid:
         try:
             TypeChecker().check(Parser().parse(source))
-        except WError as error:
+        except WysnaError as error:
             assert error.code.startswith('W'), str(error)
         else:
             raise AssertionError('Invalid weak operation was accepted: ' + source)
@@ -47,31 +47,31 @@ def run_weak_tests():
     call.type_id = checker.interner.mk_optional(call.type_id)
     try:
         HirCCodeGen(checker.interner).generate(hir)
-    except WError as error:
+    except WysnaError as error:
         assert error.code == 'W9999', str(error)
     else:
         raise AssertionError('Malformed weak builtin result reached C emission')
     root = Path(__file__).resolve().parents[2]
-    env = dict(os.environ, W_MEM_CHECK='1')
+    env = dict(os.environ, WYSNA_MEM_CHECK='1')
     env['ASAN_OPTIONS'] = 'detect_leaks=1' if sys.platform.startswith('linux') else 'detect_leaks=0'
     with tempfile.TemporaryDirectory(prefix='w-b03-') as directory:
         for name, expected_leak in [('weak_references', False), ('class_cycle_limitation', False),
                                     ('strong_cycle', True)]:
             folder = 'memory' if expected_leak else 'runtime'
-            source = root / 'tests' / folder / (name + '.w')
+            source = root / 'tests' / folder / (name + '.wysna')
             expected = '' if expected_leak else source.with_suffix('.expected').read_text()
             if not expected_leak:
                 interpreted = subprocess.run([sys.executable, 'main.py', 'run', str(source)],
                                              cwd=root, capture_output=True, text=True, timeout=30)
                 assert interpreted.returncode == 0, interpreted.stderr
                 assert interpreted.stdout == expected, interpreted.stdout
-            for backend in ['ast', 'hir', 'w1']:
+            for backend in ['ast', 'hir', 'selfhost']:
                 c_path = Path(directory) / (name + backend + '.c')
                 binary = Path(directory) / (name + backend)
-                if backend == 'w1':
-                    from main import ensure_selfhost_w1_binary
-                    w1 = ensure_selfhost_w1_binary(str(root))
-                    command = [w1, str(source), str(c_path)]
+                if backend == 'selfhost':
+                    from main import ensure_selfhost_compiler_binary
+                    selfhost_bin = ensure_selfhost_compiler_binary(str(root))
+                    command = [selfhost_bin, str(source), str(c_path)]
                 else:
                     command = [sys.executable, 'main.py', 'emit-c']
                     if backend == 'hir':
@@ -98,7 +98,7 @@ def run_weak_tests():
                     if sys.platform.startswith('linux'):
                         assert 'LeakSanitizer: detected memory leaks' in result.stderr, result.stderr
                     opt_out_env = dict(process_env)
-                    opt_out_env.pop('W_MEM_CHECK', None)
+                    opt_out_env.pop('WYSNA_MEM_CHECK', None)
                     opt_out_env['ASAN_OPTIONS'] = 'detect_leaks=0'
                     quiet = subprocess.run([str(binary)], cwd=root, env=opt_out_env,
                                             capture_output=True, text=True, timeout=30)

@@ -1,0 +1,9 @@
+pub import "shared.wysna"
+
+pub struct Item {
+    value: int,
+}
+
+pub fn make() -> Item {
+    return Item { value: shared.value() }
+}

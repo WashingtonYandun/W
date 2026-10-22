@@ -8,15 +8,15 @@ def test_parser_suite():
     valid_dir = "tests/parser/valid"
     invalid_dir = "tests/parser/invalid"
 
-    valid_files = sorted([f for f in os.listdir(valid_dir) if f.endswith(".w")])
-    invalid_files = sorted([f for f in os.listdir(invalid_dir) if f.endswith(".w")])
+    valid_files = sorted([f for f in os.listdir(valid_dir) if f.endswith(".wysna")])
+    invalid_files = sorted([f for f in os.listdir(invalid_dir) if f.endswith(".wysna")])
 
     valid_passed = 0
     invalid_passed = 0
     failures = []
 
     print("==================================================")
-    print("W Language Parser Conformance Suite")
+    print("Wysna Parser Conformance Suite")
     print("==================================================")
 
     print(f"\n--- Parser Valid ({len(valid_files)} tests) ---")
@@ -32,7 +32,7 @@ def test_parser_suite():
             # Assert AST validity
             assert isinstance(ast, Program), f"Expected Program AST root, got {type(ast)}"
             ast_dict = ast.to_dict()
-            assert ast_dict.get("w_ast_version") == "0.1", "AST must have w_ast_version 0.1"
+            assert ast_dict.get("wysna_ast_version") == "0.1", "AST must have wysna_ast_version 0.1"
 
             # Check that AST is serializable to JSON
             json_str = json.dumps(ast_dict)

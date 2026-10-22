@@ -16,7 +16,7 @@ void *pilot_open(void) {
     PilotDatabase *handle = calloc(1, sizeof(*handle));
     if (!handle) return NULL;
     live_resources++;
-    const char *path = getenv("W_SQLITE_DB");
+    const char *path = getenv("WYSNA_SQLITE_DB");
     handle->status = sqlite3_open(path ? path : ":memory:", &handle->database);
     if (handle->database) live_resources++;
     if (handle->status == SQLITE_OK) {
@@ -146,7 +146,7 @@ int32_t pilot_live_resources(void) { return live_resources; }
 int32_t pilot_version(void) { return sqlite3_libversion_number(); }
 
 int64_t pilot_rows(void) {
-    const char *text = getenv("W_SQLITE_ROWS");
+    const char *text = getenv("WYSNA_SQLITE_ROWS");
     if (!text) return 1000;
     char *end = NULL;
     errno = 0;

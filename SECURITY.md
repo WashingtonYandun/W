@@ -25,10 +25,10 @@ If you discover a security vulnerability in the W compiler, runtime, or tooling,
 
 To help us triage and resolve the issue quickly, please provide:
 - A description of the vulnerability, including severity assessment (CVSS if available).
-- A minimal reproducing W code snippet (`.w`) or script.
-- The affected component (e.g., C99 runtime `w_runtime.h`, Typed HIR lowerer, C codegen, parser, or self-hosting compiler).
-- Exact environment details: OS, CPU architecture, compiler version (`./w version`), and C toolchain (`clang --version` or `gcc --version`).
-- Sanitizer trace if applicable (e.g., ASan/UBSan report via `./w run <file>.w --sanitize`).
+- A minimal reproducing Wysna code snippet (`.wysna`) or script.
+- The affected component (e.g., C99 runtime `wysna_runtime.h`, Typed HIR lowerer, C codegen, parser, or self-hosting compiler).
+- Exact environment details: OS, CPU architecture, compiler version (`./wysna version`), and C toolchain (`clang --version` or `gcc --version`).
+- Sanitizer trace if applicable (e.g., ASan/UBSan report via `./wysna run <file>.wysna --sanitize`).
 
 ## Security Response Process
 
@@ -41,7 +41,7 @@ When we receive a vulnerability report:
 
 ## In-Scope Security Areas
 
-- **C99 Runtime Memory Safety:** Use-after-free, double-free, dangling references, buffer overruns, or reference-count underflow/overflow in `runtime/w_runtime.h`.
+- **C99 Runtime Memory Safety:** Use-after-free, double-free, dangling references, buffer overruns, or reference-count underflow/overflow in `runtime/wysna_runtime.h`.
 - **Type Confusion:** Bypasses in the static type checker (`checker/TypeChecker.py`) or Typed HIR that allow unchecked memory access at runtime.
 - **Compiler Code Injection:** Unsanitized string literals or identifiers in AST lowering that escape into arbitrary C execution during code generation.
 - **Copy-on-Write Invariant Violations:** Observable in-place mutation of shared values across threads or scopes violating W's pure value semantics.

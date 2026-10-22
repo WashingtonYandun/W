@@ -7,7 +7,7 @@
 
 static int report_error(const wchar_t *operation) {
     DWORD error = GetLastError();
-    fwprintf(stderr, L"W: %ls failed (Windows error %lu). Reinstall W if files are missing.\n",
+    fwprintf(stderr, L"Wysna: %ls failed (Windows error %lu). Reinstall Wysna if files are missing.\n",
              operation, (unsigned long)error);
     return 1;
 }
@@ -35,7 +35,7 @@ int wmain(void) {
     while (*tail == L' ' || *tail == L'\t') ++tail;
     size_t capacity = 2 * wcslen(root) + wcslen(tail) + 128;
     if (capacity >= 32767) {
-        fwprintf(stderr, L"W: command line exceeds the Windows length limit.\n");
+        fwprintf(stderr, L"Wysna: command line exceeds the Windows length limit.\n");
         return 1;
     }
     wchar_t *python = calloc(wcslen(root) + 32, sizeof(wchar_t));

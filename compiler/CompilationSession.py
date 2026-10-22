@@ -1,12 +1,12 @@
-"""Whole-program W0 source ownership, checked-module cache and identity arena."""
+"""Whole-program Wysna Seed source ownership, checked-module cache and identity arena."""
 import hashlib
 import json
 import os
 from pathlib import Path
 from checker.TypeInterner import TypeInterner
 from checker.SymbolTable import Scope
-from checker.WType import ModuleType
-from error.Error import TypeError, WError
+from checker.WysnaType import ModuleType
+from error.Error import TypeError, WysnaError
 from node import NodeType as A
 from compiler.ModuleNames import DECLARATIONS, ModuleNames, PREFIX
 
@@ -182,7 +182,7 @@ class CompilationSession:
         try:
             checker._check_program(program)
             checker._checked_once = True
-        except WError as error:
+        except WysnaError as error:
             modules = [(module.module_id, module.names) for module in self.modules.values()]
             modules.append((module_id, names))
             for origin, exports_ in modules:
@@ -232,11 +232,19 @@ class CompilationSession:
     def import_module(self, statement, importer):
         directory = os.path.dirname(importer) if not importer.startswith('<') else os.getcwd()
         if statement.path.startswith('std/'):
-            candidate = self.path(str(Path(__file__).resolve().parent.parent / 'stdlib' / (statement.path[4:] + '.w')))
+            subpath = statement.path[4:]
+            base = Path(__file__).resolve().parent.parent / 'stdlib' / subpath
+            candidate = self.path(str(base.with_suffix('.wysna')))
         else:
             candidate = self.path(os.path.join(directory, statement.path))
+            if not os.path.isfile(candidate) and candidate not in self.sources.overlays:
+                if os.path.isfile(candidate + '.wysna') or (candidate + '.wysna') in self.sources.overlays:
+                    candidate = self.path(candidate + '.wysna')
         if not os.path.isfile(candidate) and candidate not in self.sources.overlays:
             candidate = self.path(statement.path)
+            if not os.path.isfile(candidate) and candidate not in self.sources.overlays:
+                if os.path.isfile(candidate + '.wysna') or (candidate + '.wysna') in self.sources.overlays:
+                    candidate = self.path(candidate + '.wysna')
         if not os.path.isfile(candidate) and candidate not in self.sources.overlays:
             raise TypeError(f"Module not found: '{statement.path}'", file=importer,
                             line=statement.line, col=statement.col, code='W1003')
@@ -268,7 +276,7 @@ class CompilationSession:
     def link(self, program):
         unit = program.checked_module
         if unit.generation != self.generation or program.interner is not self.interner:
-            raise WError('Checked module belongs to an invalidated compilation generation',
+            raise WysnaError('Checked module belongs to an invalidated compilation generation',
                          file=unit.path, code='W9999', stage='module-linking')
         if hasattr(program, 'linked_program'):
             return program.linked_program

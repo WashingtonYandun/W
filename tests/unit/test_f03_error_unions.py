@@ -1,8 +1,8 @@
 from checker.TypeChecker import TypeChecker
 from checker.TypeInterner import TypeInterner
-from checker.WType import BoolType, EnumType, ErrorUnionType, IntType, ResultType, StrType, StructType, is_assignable
+from checker.WysnaType import BoolType, EnumType, ErrorUnionType, IntType, ResultType, StrType, StructType, is_assignable
 from compiler.CompilationSession import CompilationSession
-from error.Error import TypeError as WTypeError
+from error.Error import TypeError as TypeError
 from formatter.Formatter import Formatter
 from hir.HirBuilder import HirBuilder
 from hir.HirDump import HirDumper
@@ -66,7 +66,7 @@ def test_checked_error_patterns_are_distinct_from_enum_variants():
 
 def test_hir_rejects_invalid_error_type_patterns_before_emission():
     from copy import deepcopy
-    from error.Error import WError
+    from error.Error import WysnaError
     from hir.HirCCodeGen import HirCCodeGen
     from hir.HirNodes import HirErrorTypePattern, HirWildcardPattern, HirEnumPattern, HirMatch
     from hir.HirVerifier import HirVerifier
@@ -96,7 +96,7 @@ def test_hir_rejects_invalid_error_type_patterns_before_emission():
                       lambda: HirCCodeGen(checker.interner, file_path='<test>').generate(broken)):
             try:
                 check()
-            except WError as error:
+            except WysnaError as error:
                 assert error.code == 'W9999'
                 assert error.stage == 'hir-verification'
             else:
@@ -114,7 +114,7 @@ fn recover() -> int { return fail() else err { match err {
 '''
     try:
         TypeChecker().check(Parser().parse(source))
-    except WTypeError as error:
+    except TypeError as error:
         assert error.code == 'W2003'
     else:
         raise AssertionError('A guarded error alternative incorrectly closed the match')
@@ -147,11 +147,11 @@ def test_module_error_patterns_preserve_distinct_nominal_identities():
     with TemporaryDirectory(prefix='w-error-identities-') as temporary:
         directory = Path(temporary)
         for name in ('left', 'right'):
-            (directory / f'{name}.w').write_text('''pub struct SharedError { message: str }
+            (directory / f'{name}.wysna').write_text('''pub struct SharedError { message: str }
 pub fn fail() -> int ! SharedError { return Err(SharedError { message: "error" }) }
 ''')
-        source = '''import "left.w"
-import "right.w"
+        source = '''import "left.wysna"
+import "right.wysna"
 fn fail() -> int ! left.SharedError | right.SharedError {
     return left.fail()
 }
@@ -160,7 +160,7 @@ fn recover() -> int { return fail() else err { match err {
     right.SharedError(error) => 2
 } } }
 '''
-        unit = CompilationSession(project_root=temporary).check_source(source, str(directory / 'main.w'))
+        unit = CompilationSession(project_root=temporary).check_source(source, str(directory / 'main.wysna'))
         patterns = list(_nodes(unit.program, ErrorTypePattern))
         assert patterns[0].type_name == 'left.SharedError'
         assert patterns[1].type_name == 'right.SharedError'
@@ -255,7 +255,7 @@ fn narrower() -> int ! SecondError { return first()? }
 """
     try:
         TypeChecker().check(Parser().parse(invalid))
-    except WTypeError as error:
+    except TypeError as error:
         assert error.code == "W2006"
     else:
         raise AssertionError("A source error outside the target error set was accepted")
@@ -276,7 +276,7 @@ fn nested() -> int ! (str ! bool) { return narrow() }
 """
     try:
         TypeChecker().check(Parser().parse(source))
-    except WTypeError as error:
+    except TypeError as error:
         assert error.code == "W2004"
     else:
         raise AssertionError("A scalar error was implicitly lifted into a nested Result error channel")
@@ -298,14 +298,14 @@ def test_error_union_accepts_module_qualified_alternatives_and_patterns():
     from pathlib import Path
 
     root = Path(__file__).resolve().parents[2]
-    fixture = root / "tests/runtime/error_union_composition.w"
+    fixture = root / "tests/runtime/error_union_composition.wysna"
     session = CompilationSession(project_root=str(root))
 
     unit = session.check_source(fixture.read_text(), str(fixture))
     from node.NodeType import ErrorTypePattern
     patterns = list(_nodes(unit.program, ErrorTypePattern))
     assert [pattern.type_name for pattern in patterns] == ['errors.ParseError', 'errors.FileError', 'int']
-    library = root / 'tests/modules/error_union/errors.w'
+    library = root / 'tests/modules/error_union/errors.wysna'
     library_patterns = list(_nodes(session.modules[str(library)].program, ErrorTypePattern))
     assert [pattern.type_name for pattern in library_patterns] == ['ParseError', 'FileError']
     assert all(pattern.source_file == str(library) for pattern in library_patterns)

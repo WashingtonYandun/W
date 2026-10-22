@@ -15,10 +15,10 @@ Fixes #(issue)
 
 ## Quality & Conformance Checklist
 
-- [ ] **Conformance Suite:** All conformance tests pass (`./w test`).
-- [ ] **Memory Safety:** Sanitizers report zero errors or leaks (`./w test --sanitize`).
+- [ ] **Conformance Suite:** All conformance tests pass (`./wysna test`).
+- [ ] **Memory Safety:** Sanitizers report zero errors or leaks (`./wysna test --sanitize`).
 - [ ] **Bootstrap Parity:** Fixed-point bootstrap SHA256 is verified (if compiler was modified).
-- [ ] **Code Formatting:** Code is formatted with `./w fmt`.
+- [ ] **Code Formatting:** Code is formatted with `./wysna fmt`.
 - [ ] **Tests Added:** Added corresponding test cases in `tests/` covering new behavior or regressions.
 - [ ] **Documentation Updated:** Update `SPEC.md` or the relevant public docs when user-visible language behavior changes.
 - [ ] **Language Boundary:** Commit messages, comments, identifiers, and docs are strictly in English.

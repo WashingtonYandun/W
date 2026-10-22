@@ -6,7 +6,7 @@ import subprocess
 import sys
 import tempfile
 
-from main import ensure_selfhost_w1_binary
+from main import ensure_selfhost_compiler_binary
 from tests.engine_harness import verify
 from tests.formatter_contract import formatter_paths, structural_ast, verify_formatting
 from tests.fuzz.typed_properties import generate_typed_properties
@@ -16,7 +16,7 @@ SEEDS = (0, 1, 2, 3, 5, 8, 13, 21)
 
 
 def test_ascii_allocation_and_lifetime_contract():
-    source = r'''#include "runtime/w_runtime.h"
+    source = r'''#include "runtime/wysna_runtime.h"
 #include <assert.h>
 
 static WVal copy_bytes(const char* bytes, size_t count) {
@@ -24,102 +24,102 @@ static WVal copy_bytes(const char* bytes, size_t count) {
     assert(buffer);
     memcpy(buffer, bytes, count);
     buffer[count] = 0;
-    return w_owned_str_n(buffer, count);
+    return wysna_owned_str_n(buffer, count);
 }
 
 static void check_offsets(WVal text, const size_t* offsets, const size_t* widths, size_t count) {
     for (int pass = 0; pass < 2; pass++) {
         size_t offset = 0, width = 0;
-        assert(!w_string_offset(text, INT64_MIN, &offset, &width));
-        assert(!w_string_offset(text, -1, &offset, &width));
+        assert(!wysna_string_offset(text, INT64_MIN, &offset, &width));
+        assert(!wysna_string_offset(text, -1, &offset, &width));
         for (size_t index = 0; index < count; index++) {
-            assert(w_string_offset(text, (int64_t)index, &offset, &width));
+            assert(wysna_string_offset(text, (int64_t)index, &offset, &width));
             assert(offset == offsets[index] && width == widths[index]);
         }
-        assert(!w_string_offset(text, (int64_t)count, &offset, &width));
-        assert(!w_string_offset(text, INT64_MAX, &offset, &width));
-        assert(w_string_length(text) == (int64_t)count);
+        assert(!wysna_string_offset(text, (int64_t)count, &offset, &width));
+        assert(!wysna_string_offset(text, INT64_MAX, &offset, &width));
+        assert(wysna_string_length(text) == (int64_t)count);
     }
 }
 
 int main(void) {
     assert(W_RUNTIME_ABI_VERSION == 2 && sizeof(WVal) <= 32);
     for (int64_t code = 0; code < 128; code++) {
-        WVal character = w_builtin_chr(w_int(code));
+        WVal character = wysna_builtin_chr(wysna_int(code));
         assert(character.tag == W_STR && character.as.string.length == 1);
-        assert(w_builtin_ord(character).as.i == code);
-        WVal retained = w_clone(character);
-        w_release(character);
-        assert(w_builtin_ord(retained).as.i == code);
-        w_release(retained);
+        assert(wysna_builtin_ord(character).as.i == code);
+        WVal retained = wysna_clone(character);
+        wysna_release(character);
+        assert(wysna_builtin_ord(retained).as.i == code);
+        wysna_release(retained);
     }
-    assert(w_g_alloc_count == 0);
-    WVal owner = w_copy_str("abc");
-    WVal character = w_index_get_owned(owner, w_int(1));
-    w_release(owner);
-    assert(w_builtin_ord(character).as.i == 'b');
-    w_release(character);
-    assert(w_g_alloc_count == 1 && w_g_free_count == 1);
-    WVal unicode = w_builtin_chr(w_int(128578));
-    WVal copied = w_index_get_owned(unicode, w_int(0));
-    w_release(unicode);
-    assert(w_builtin_ord(copied).as.i == 128578);
-    w_release(copied);
-    assert(w_eq(w_float(0.0), w_float(-0.0)));
-    assert(!w_eq(w_float(NAN), w_float(NAN)));
-    assert(!w_eq(w_str_n("a\0b", 3), w_str_n("a\0c", 3)));
-    assert(w_eq(w_str_n("a\0b", 3), w_str_n("a\0b", 3)));
+    assert(wysna_g_alloc_count == 0);
+    WVal owner = wysna_copy_str("abc");
+    WVal character = wysna_index_get_owned(owner, wysna_int(1));
+    wysna_release(owner);
+    assert(wysna_builtin_ord(character).as.i == 'b');
+    wysna_release(character);
+    assert(wysna_g_alloc_count == 1 && wysna_g_free_count == 1);
+    WVal unicode = wysna_builtin_chr(wysna_int(128578));
+    WVal copied = wysna_index_get_owned(unicode, wysna_int(0));
+    wysna_release(unicode);
+    assert(wysna_builtin_ord(copied).as.i == 128578);
+    wysna_release(copied);
+    assert(wysna_eq(wysna_float(0.0), wysna_float(-0.0)));
+    assert(!wysna_eq(wysna_float(NAN), wysna_float(NAN)));
+    assert(!wysna_eq(wysna_str_n("a\0b", 3), wysna_str_n("a\0c", 3)));
+    assert(wysna_eq(wysna_str_n("a\0b", 3), wysna_str_n("a\0b", 3)));
     char* shared_data = malloc(4);
     assert(shared_data);
     memcpy(shared_data, "x\0y", 4);
-    WVal shared = w_owned_str_n(shared_data, 3);
-    WVal alias = w_clone(shared);
-    WVal values = w_make_list(2, (WVal[]){shared, w_str("static")});
-    w_release(shared);
-    w_release(values);
-    assert(w_eq(alias, w_str_n("x\0y", 3)));
-    w_release(alias);
+    WVal shared = wysna_owned_str_n(shared_data, 3);
+    WVal alias = wysna_clone(shared);
+    WVal values = wysna_make_list(2, (WVal[]){shared, wysna_str("static")});
+    wysna_release(shared);
+    wysna_release(values);
+    assert(wysna_eq(alias, wysna_str_n("x\0y", 3)));
+    wysna_release(alias);
     const size_t mixed_offsets[] = {0, 1, 3, 7, 8};
     const size_t mixed_widths[] = {1, 2, 4, 1, 1};
-    WVal mixed = w_str_n("A\xc3\xa9\xf0\x9f\x99\x82\0Z", 9);
+    WVal mixed = wysna_str_n("A\xc3\xa9\xf0\x9f\x99\x82\0Z", 9);
     check_offsets(mixed, mixed_offsets, mixed_widths, 5);
     WVal owned_mixed = copy_bytes(mixed.as.string.data, mixed.as.string.length);
     check_offsets(owned_mixed, mixed_offsets, mixed_widths, 5);
-    WVal escaped = w_index_get_owned(owned_mixed, w_int(2));
-    w_release(owned_mixed);
-    assert(w_builtin_ord(escaped).as.i == 128578);
-    w_release(escaped);
+    WVal escaped = wysna_index_get_owned(owned_mixed, wysna_int(2));
+    wysna_release(owned_mixed);
+    assert(wysna_builtin_ord(escaped).as.i == 128578);
+    wysna_release(escaped);
     const size_t byte_offsets[] = {0, 1, 2};
     const size_t byte_widths[] = {1, 1, 1};
     WVal cached = copy_bytes("A\0Z", 3);
-    assert(w_string_length(cached) == 3);
-    alias = w_clone(cached);
-    w_release(cached);
+    assert(wysna_string_length(cached) == 3);
+    alias = wysna_clone(cached);
+    wysna_release(cached);
     check_offsets(alias, byte_offsets, byte_widths, 3);
     assert(alias.as.string.owner->codepoint_offsets == NULL);
-    w_release(alias);
+    wysna_release(alias);
     const char invalid[] = {(char)0x80, (char)0xc0, (char)0xaf};
     WVal invalid_owned = copy_bytes(invalid, sizeof(invalid));
     check_offsets(invalid_owned, byte_offsets, byte_widths, 3);
-    w_release(invalid_owned);
-    check_offsets(w_str(""), NULL, NULL, 0);
-    WVal empty_owned = w_copy_str("");
+    wysna_release(invalid_owned);
+    check_offsets(wysna_str(""), NULL, NULL, 0);
+    WVal empty_owned = wysna_copy_str("");
     check_offsets(empty_owned, NULL, NULL, 0);
-    w_release(empty_owned);
-    WVal option = w_enum_payload("Option", "Some", w_int(7));
-    assert(w_eq(option, w_int(7)));
-    w_release(option);
-    int64_t released = w_g_release_count;
-    w_release(w_unit());
-    w_release(w_none());
-    w_release(w_int(7));
-    w_release(w_float(1.5));
-    w_release(w_bool(true));
-    w_release(w_pointer(NULL));
-    w_release(w_str("static"));
-    assert(w_g_release_count == released);
-    assert(w_g_alloc_count == w_g_free_count && w_g_live_objects == 0);
-    w_runtime_cleanup();
+    wysna_release(empty_owned);
+    WVal option = wysna_enum_payload("Option", "Some", wysna_int(7));
+    assert(wysna_eq(option, wysna_int(7)));
+    wysna_release(option);
+    int64_t released = wysna_g_release_count;
+    wysna_release(wysna_unit());
+    wysna_release(wysna_none());
+    wysna_release(wysna_int(7));
+    wysna_release(wysna_float(1.5));
+    wysna_release(wysna_bool(true));
+    wysna_release(wysna_pointer(NULL));
+    wysna_release(wysna_str("static"));
+    assert(wysna_g_release_count == released);
+    assert(wysna_g_alloc_count == wysna_g_free_count && wysna_g_live_objects == 0);
+    wysna_runtime_cleanup();
     return 0;
 }
 '''
@@ -130,7 +130,7 @@ int main(void) {
         subprocess.run([os.environ.get('CC', 'cc'), '-std=c99', '-fsanitize=address,undefined',
                         '-fno-omit-frame-pointer', '-I' + str(ROOT), str(path), '-o', str(binary)],
                        check=True, capture_output=True, text=True, timeout=60)
-        environment = dict(os.environ, W_MEM_CHECK='1', UBSAN_OPTIONS='halt_on_error=1')
+        environment = dict(os.environ, WYSNA_MEM_CHECK='1', UBSAN_OPTIONS='halt_on_error=1')
         environment['ASAN_OPTIONS'] = 'detect_leaks=' + ('1' if sys.platform.startswith('linux') else '0')
         result = subprocess.run([str(binary)], env=environment, capture_output=True, text=True, timeout=30)
         assert result.returncode == 0 and result.stdout == '' and result.stderr == '', result
@@ -138,8 +138,8 @@ int main(void) {
 
 def test_formatter_preserves_guards_and_production_sources():
     paths = formatter_paths()
-    required = ['selfhost/w1.w', 'selfhost/src/07_parser_decl.w',
-                'examples/ffi/sqlite/import_csv.w', 'stdlib/text.w']
+    required = ['selfhost/compiler.wysna', 'selfhost/src/07_parser_decl.wysna',
+                'examples/ffi/sqlite/import_csv.wysna', 'stdlib/text.wysna']
     assert all(ROOT / name in paths for name in required)
     for path in paths:
         verify_formatting(path.read_text(), str(path))
@@ -169,15 +169,15 @@ def test_typed_generator_shape_and_independent_model():
 
 
 def test_typed_composition_across_engines():
-    w1 = ensure_selfhost_w1_binary(str(ROOT))
+    selfhost_bin = ensure_selfhost_compiler_binary(str(ROOT))
     with tempfile.TemporaryDirectory(prefix='w-typed-composition-') as temporary:
         for seed in SEEDS:
             source, expected, _ = generate_typed_properties(seed)
-            formatted = verify_formatting(source, 'typed_properties_' + str(seed) + '.w')
+            formatted = verify_formatting(source, 'typed_properties_' + str(seed) + '.wysna')
             for variant, code in [('source', source), ('formatted', formatted)]:
-                ok, detail = verify(code, f'typed_properties_{seed}_{variant}.w', w1, temporary,
+                ok, detail = verify(code, f'typed_properties_{seed}_{variant}.wysna', selfhost_bin, temporary,
                                     expected=expected, strict=True,
-                                    sanitize=os.environ.get('W_SANITIZE') == '1')
+                                    sanitize=os.environ.get('WYSNA_SANITIZE') == '1')
                 assert ok, f'seed {seed}, {variant}: {detail}\n{code}'
 
 

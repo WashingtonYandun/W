@@ -1,0 +1,30 @@
+{
+  "name": "wysna-lang",
+  "displayName": "Wysna Programming Language",
+  "description": "Syntax highlighting and language configuration for the Wysna Programming Language (v0.1)",
+  "version": "0.1.0",
+  "publisher": "washingtonyandun",
+  "engines": {
+    "vscode": "^1.75.0"
+  },
+  "categories": [
+    "Programming Languages"
+  ],
+  "contributes": {
+    "languages": [
+      {
+        "id": "wysna",
+        "aliases": ["Wysna", "wysna"],
+        "extensions": [".wysna"],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "wysna",
+        "scopeName": "source.wysna",
+        "path": "./syntaxes/wysna.tmLanguage.json"
+      }
+    ]
+  }
+}

@@ -6,7 +6,7 @@ import sys
 from urllib.parse import unquote, urlparse
 from urllib.request import url2pathname
 from compiler.CompilationSession import CompilationSession
-from error.Error import WError
+from error.Error import WysnaError
 from lexer.Lexer import Lexer
 from node.NodeType import Node, IdentExpr, MemberExpr
 
@@ -66,7 +66,7 @@ class LanguageServer:
         self.checked.pop(uri, None)
         try:
             self.checked[uri] = self.session.check_source(source, path)
-        except WError as error:
+        except WysnaError as error:
             for error in getattr(error, 'diagnostics', (error,)):
                 error_source = self.session.sources.snapshots.get(error.file, source)
                 lines = error_source.splitlines(keepends=True)
@@ -77,7 +77,7 @@ class LanguageServer:
                                   if t.line == error.line and t.col == error.col), None)
                     if token and hasattr(token, 'end_offset'):
                         end = token.end_offset
-                except WError:
+                except WysnaError:
                     pass
                 if error.file != path:
                     # Dependency errors must not use another file's coordinates in this document.

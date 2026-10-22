@@ -25,7 +25,7 @@ def verify_expr_types(expr: HirExpr, file_name: str) -> None:
 
 def test_hir_suite() -> None:
     print("==================================================")
-    print("W Language Typed HIR Conformance Suite (SPEC v0.1)")
+    print("Wysna Typed HIR Conformance Suite (SPEC v0.1)")
     print("==================================================")
 
     test_dirs = ["tests/runtime", "examples"]
@@ -36,7 +36,7 @@ def test_hir_suite() -> None:
     for d in test_dirs:
         if not os.path.exists(d):
             continue
-        files = sorted([f for f in os.listdir(d) if f.endswith(".w")])
+        files = sorted([f for f in os.listdir(d) if f.endswith(".wysna")])
         for f in files:
             total += 1
             path = os.path.join(d, f)

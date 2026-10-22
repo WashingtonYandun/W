@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Verify an installed W0 wheel without importing or reading its source checkout."""
+"""Verify an installed Wysna wheel without importing or reading its source checkout."""
 import argparse
 import hashlib
 import json
@@ -47,7 +47,7 @@ def audit(event, args):
             with open(DENIED, 'a', encoding='utf-8') as stream:
                 stream.write(json.dumps({{'event': event, 'path': path}}) + '\\n')
             raise PermissionError('Installed-wheel isolation rejected: ' + path)
-os.environ['W_WHEEL_GUARD'] = 'active'
+os.environ['WYSNA_WHEEL_GUARD'] = 'active'
 import sys
 sys.addaudithook(audit)
 '''.format(root=os.path.normcase(str(site_packages)), forbidden=os.path.normcase(str(forbidden)), denied=str(denied))
@@ -69,7 +69,7 @@ def lsp_messages(output):
 def validate(wheel, forbidden, report):
     with zipfile.ZipFile(wheel) as archive:
         inventory = archive.namelist()
-        assert {'main.py', 'runtime/w_runtime.h', 'stdlib/text.w'} <= set(inventory)
+        assert {'main.py', 'runtime/wysna_runtime.h', 'stdlib/text.wysna'} <= set(inventory)
         assert not any(Path(name).is_absolute() or '..' in Path(name).parts for name in inventory)
     report['inventory'] = inventory
     with tempfile.TemporaryDirectory(prefix='w installed client ') as temporary:
@@ -78,7 +78,8 @@ def validate(wheel, forbidden, report):
         venv.EnvBuilder(with_pip=True).create(prefix)
         executables = prefix / ('Scripts' if os.name == 'nt' else 'bin')
         python = executables / ('python.exe' if os.name == 'nt' else 'python')
-        cli = executables / ('w.exe' if os.name == 'nt' else 'w')
+        cli = executables / ('wysna.exe' if os.name == 'nt' else 'wysna')
+        wysna_cli = executables / ('wysna.exe' if os.name == 'nt' else 'wysna')
         environment = clean_environment()
         subprocess.run([str(python), '-m', 'pip', 'install', '--no-index', '--no-deps', str(wheel)],
                        env=environment, capture_output=True, text=True, check=True, timeout=120)
@@ -89,13 +90,13 @@ def validate(wheel, forbidden, report):
         assert cli.is_file()
         work = directory / 'project with spaces and á'
         work.mkdir()
-        (work / 'hello.w').write_text('print("hello installed")\n', encoding='utf-8')
-        (work / 'library.w').write_text('import "std/text" as text\nprint(text.join(["hello", "stdlib"], " "))\n', encoding='utf-8')
-        (work / 'invalid.w').write_text('let value: int = "wrong"\n', encoding='utf-8')
+        (work / 'hello.wysna').write_text('print("hello installed")\n', encoding='utf-8')
+        (work / 'library.wysna').write_text('import "std/text" as text\nprint(text.join(["hello", "stdlib"], " "))\n', encoding='utf-8')
+        (work / 'invalid.wysna').write_text('let value: int = "wrong"\n', encoding='utf-8')
         denied = directory / 'denied-access.jsonl'
         install_guard(site_packages, forbidden, denied)
         probe = subprocess.run([str(python), '-I', '-B', '-c',
-                                'import json,main,os;print(json.dumps({"root":main.get_repo_root(),"guard":os.getenv("W_WHEEL_GUARD")}))'],
+                                'import json,main,os;print(json.dumps({"root":main.get_repo_root(),"guard":os.getenv("WYSNA_WHEEL_GUARD")}))'],
                                env=environment, cwd=work, capture_output=True, text=True, check=True, timeout=30)
         assert json.loads(probe.stdout)['guard'] == 'active', probe
         assert not probe.stderr, probe.stderr
@@ -119,20 +120,20 @@ def validate(wheel, forbidden, report):
 
         run('version', ['version'])
         run('help', ['--help'])
-        run('check', ['check', 'hello.w'])
-        rejected = run('invalid', ['check', '--json', 'invalid.w'], code=1)
+        run('check', ['check', 'hello.wysna'])
+        rejected = run('invalid', ['check', '--json', 'invalid.wysna'], code=1)
         assert json.loads(rejected.stdout)['code'] == 'W2001'
-        run('run', ['run', 'hello.w'], expected='hello installed\n')
-        run('stdlib', ['run', 'library.w'], expected='hello stdlib\n')
-        formatted = run('fmt', ['fmt', 'library.w'])
-        (work / 'formatted.w').write_text(formatted.stdout, encoding='utf-8')
-        run('fmt-idempotence', ['fmt', 'formatted.w'], expected=formatted.stdout)
+        run('run', ['run', 'hello.wysna'], expected='hello installed\n')
+        run('stdlib', ['run', 'library.wysna'], expected='hello stdlib\n')
+        formatted = run('fmt', ['fmt', 'library.wysna'])
+        (work / 'formatted.wysna').write_text(formatted.stdout, encoding='utf-8')
+        run('fmt-idempotence', ['fmt', 'formatted.wysna'], expected=formatted.stdout)
         for command in ('tokens', 'ast', 'mir'):
-            run(command, [command, 'hello.w'])
-        run('emit-c', ['emit-c', 'library.w', '-o', 'library.c'])
-        assert '#include "runtime/w_runtime.h"' in (work / 'library.c').read_text()
+            run(command, [command, 'hello.wysna'])
+        run('emit-c', ['emit-c', 'library.wysna', '-o', 'library.c'])
+        assert '#include "runtime/wysna_runtime.h"' in (work / 'library.c').read_text()
         binary = work / ('program.exe' if os.name == 'nt' else 'program')
-        run('build', ['build', 'library.w', '-o', str(binary)])
+        run('build', ['build', 'library.wysna', '-o', str(binary)])
         native = subprocess.run([str(binary)], cwd=work, env=environment, capture_output=True, text=True, timeout=30)
         assert native.returncode == 0 and native.stdout == 'hello stdlib\n' and not native.stderr, native
         checks.append({'name': 'native-execution', 'exit_code': native.returncode, 'stdout': native.stdout})
@@ -140,22 +141,22 @@ def validate(wheel, forbidden, report):
         assert '7' in repl.stdout
         for command in ('test', 'bench'):
             unavailable = run(command + '-source-only', [command], code=1)
-            assert unavailable.stderr == 'w ' + command + ' requires a source checkout\n'
-        selfhost = run('selfhost-source-only', ['emit-c', '--backend=selfhost', 'hello.w', '-o', 'selfhost.c'], code=1)
+            assert unavailable.stderr == 'wysna ' + command + ' requires a source checkout\n'
+        selfhost = run('selfhost-source-only', ['emit-c', '--backend=selfhost', 'hello.wysna', '-o', 'selfhost.c'], code=1)
         assert '[W2013]' in selfhost.stderr
-        assert not (site_packages / '.w_cache').exists()
+        assert not (site_packages / '.wysna_cache').exists()
         no_compiler = dict(environment, CC=str(directory / 'missing compiler'), PATH='')
         for command in ('check', 'run', 'fmt', 'ast', 'tokens', 'mir'):
-            run(command + '-without-c', [command, 'hello.w'], custom_environment=no_compiler)
-        run('emit-c-without-c', ['emit-c', 'hello.w', '-o', 'without.c'], custom_environment=no_compiler)
-        unavailable = run('build-without-c', ['build', '--json', 'hello.w', '-o', str(binary)],
+            run(command + '-without-c', [command, 'hello.wysna'], custom_environment=no_compiler)
+        run('emit-c-without-c', ['emit-c', 'hello.wysna', '-o', 'without.c'], custom_environment=no_compiler)
+        unavailable = run('build-without-c', ['build', '--json', 'hello.wysna', '-o', str(binary)],
                           code=1, custom_environment=no_compiler)
         diagnostic = json.loads(unavailable.stdout)
         assert diagnostic['code'] == 'W5001' and diagnostic['stage'] == 'toolchain', diagnostic
         packets = [
             {'jsonrpc': '2.0', 'id': 1, 'method': 'initialize', 'params': {}},
             {'jsonrpc': '2.0', 'method': 'textDocument/didOpen', 'params': {'textDocument': {
-                'uri': (work / 'live.w').as_uri(), 'version': 1, 'languageId': 'w', 'text': 'let value: int = "wrong"\n'}}},
+                'uri': (work / 'live.wysna').as_uri(), 'version': 1, 'languageId': 'wysna', 'text': 'let value: int = "wrong"\n'}}},
             {'jsonrpc': '2.0', 'id': 2, 'method': 'shutdown'},
             {'jsonrpc': '2.0', 'method': 'exit'}]
         data = b''

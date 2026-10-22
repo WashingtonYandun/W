@@ -1,8 +1,8 @@
 import os
 from lexer.Lexer import Lexer
 from error.Error import LexerError
-from wtokens.Token import Token
-from wtokens.TokenType import TokenType
+from tokens.Token import Token
+from tokens.TokenType import TokenType
 
 def test_token_equality_includes_source_position():
     first = Token("item", TokenType.IDENTIFIER, line=1, col=1)
@@ -16,15 +16,15 @@ def test_lexer_suite():
     valid_dir = "tests/lexer/valid"
     invalid_dir = "tests/lexer/invalid"
 
-    valid_files = sorted([f for f in os.listdir(valid_dir) if f.endswith(".w")])
-    invalid_files = sorted([f for f in os.listdir(invalid_dir) if f.endswith(".w")])
+    valid_files = sorted([f for f in os.listdir(valid_dir) if f.endswith(".wysna")])
+    invalid_files = sorted([f for f in os.listdir(invalid_dir) if f.endswith(".wysna")])
 
     valid_passed = 0
     invalid_passed = 0
     failures = []
 
     print("==================================================")
-    print("W Language Lexer Conformance Suite (SPEC v0.1)")
+    print("Wysna Lexer Conformance Suite (SPEC v0.1)")
     print("==================================================")
 
     print(f"\n--- Lexer Valid ({len(valid_files)} tests) ---")

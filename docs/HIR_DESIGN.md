@@ -178,7 +178,7 @@ Both `gcc` and `clang` are forced by `;`-terminated C99 variable declarations to
 
 ## 5. Current role
 
-W0 lowers verified typed HIR to verified MIR for native builds and C emission. The AST backend remains available as a differential oracle (`--backend=ast`). `w mir <file.w>` prints the verified MIR representation as JSON.
+W0 lowers verified typed HIR to verified MIR for native builds and C emission. The AST backend remains available as a differential oracle (`--backend=ast`). `wysna mir <file.wysna>` prints the verified MIR representation as JSON.
 
 
 ## 6. Verification boundary

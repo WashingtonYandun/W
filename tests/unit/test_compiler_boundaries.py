@@ -1,6 +1,6 @@
 """Regression coverage for semantic and lowering error boundaries."""
 from checker.TypeChecker import TypeChecker
-from error.Error import WError
+from error.Error import WysnaError
 from hir.HirBuilder import HirBuilder
 from hir.HirCCodeGen import HirCCodeGen
 from hir.HirNodes import HirExpr, HirNode, Span
@@ -16,7 +16,7 @@ def test_compiler_boundaries():
     ]:
         try:
             TypeChecker().check(Parser().parse(declaration))
-        except WError as error:
+        except WysnaError as error:
             assert error.code == 'W2012', str(error)
         else:
             raise AssertionError('Invalid unused constraints must be rejected')
@@ -24,7 +24,7 @@ def test_compiler_boundaries():
     valid = 'fn unused[T: Printable](x: T) -> T { return x }\ninterface Printable { fn show() -> str }'
     TypeChecker().check(Parser().parse(valid))
 
-    path = 'tests/runtime/generic_pair.w'
+    path = 'tests/runtime/generic_pair.wysna'
     with open(path, encoding='utf-8') as stream:
         ast = Parser(file=path).parse(stream.read())
     checker = TypeChecker(file=path)
@@ -42,16 +42,16 @@ def test_compiler_boundaries():
                 visit(child)
     visit(module)
 
-    builder = HirBuilder(checker.interner, file_path='boundary.w')
-    generator = HirCCodeGen(checker.interner, file_path='boundary.w')
+    builder = HirBuilder(checker.interner, file_path='boundary.wysna')
+    generator = HirCCodeGen(checker.interner, file_path='boundary.wysna')
     for action in [lambda: builder._lower_expr(Expr()),
                    lambda: builder._lower_stmt(Stmt()),
                    lambda: generator.emit_expr(HirExpr(1, Span(3, 4)), [])]:
         try:
             action()
-        except WError as error:
+        except WysnaError as error:
             assert error.code == 'W9999', str(error)
-            assert error.file == 'boundary.w'
+            assert error.file == 'boundary.wysna'
             assert error.to_dict()['stage'] in ('hir', 'codegen')
         else:
             raise AssertionError('Unsupported nodes must not silently become unit')
@@ -64,7 +64,7 @@ def test_compiler_boundaries():
                        lambda: HirCCodeGen(checker.interner, file_path=path).generate(broken)]:
             try:
                 action()
-            except WError as error:
+            except WysnaError as error:
                 assert error.code == 'W9999'
                 assert error.stage == 'hir-verification'
                 assert 'HirParam.type_id' in error.message
@@ -74,7 +74,7 @@ def test_compiler_boundaries():
     broken.functions[0].return_type_id = 0
     try:
         HirVerifier(checker.interner, path).verify(broken)
-    except WError as error:
+    except WysnaError as error:
         assert 'return_type_id' in error.message
     else:
         raise AssertionError('Invalid function return types must be rejected')
@@ -84,7 +84,7 @@ def test_compiler_boundaries():
     def rejected(unit, message):
         try:
             HirCCodeGen(checker.interner, file_path=path).generate(unit)
-        except WError as error:
+        except WysnaError as error:
             assert error.code == 'W9999'
             assert message in error.message, str(error)
         else:
@@ -132,7 +132,7 @@ def test_compiler_boundaries():
 
     try:
         generator.emit_stmt(H.HirStmt(Span(7, 8)), [])
-    except WError as error:
+    except WysnaError as error:
         assert error.code == 'W9999' and error.stage == 'codegen'
         assert error.line == 7 and error.col == 8
     else:

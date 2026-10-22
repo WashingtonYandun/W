@@ -35,7 +35,7 @@ import tempfile
 from parser.Parser import Parser
 from checker.TypeChecker import TypeChecker
 from checker.TypeInterner import TypeInterner, TYPE_INT, TYPE_STR
-from checker.WType import (
+from checker.WysnaType import (
     IntType, StrType, ListType, DictType, ClassType, StructType, EnumType, is_assignable
 )
 from codegen.CCodeGen import CCodeGen
@@ -56,8 +56,8 @@ def test_declaration_order_invariance():
     }
     let o = Outer { inner: Inner { value: 42 } }
     """
-    ast1 = Parser(file="order1.w").parse(src1)
-    tc1 = TypeChecker(file="order1.w")
+    ast1 = Parser(file="order1.wysna").parse(src1)
+    tc1 = TypeChecker(file="order1.wysna")
     tc1.check(ast1)
     sym_o = tc1.global_scope.lookup_symbol("o")
     assert sym_o is not None
@@ -74,8 +74,8 @@ def test_declaration_order_invariance():
     }
     let s = Status.Ok(Payload { code: 200 })
     """
-    ast2 = Parser(file="order2.w").parse(src2)
-    tc2 = TypeChecker(file="order2.w")
+    ast2 = Parser(file="order2.wysna").parse(src2)
+    tc2 = TypeChecker(file="order2.wysna")
     tc2.check(ast2)
     sym_s = tc2.global_scope.lookup_symbol("s")
     assert sym_s is not None
@@ -94,8 +94,8 @@ def test_declaration_order_invariance():
     }
     let s = new Service(Config { port: 8080 })
     """
-    ast3 = Parser(file="order3.w").parse(src3)
-    tc3 = TypeChecker(file="order3.w")
+    ast3 = Parser(file="order3.wysna").parse(src3)
+    tc3 = TypeChecker(file="order3.wysna")
     tc3.check(ast3)
     sym_srv = tc3.global_scope.lookup_symbol("s")
     assert sym_srv is not None
@@ -112,8 +112,8 @@ def test_declaration_order_invariance():
     }
     let p = make_point(10, 20)
     """
-    ast4 = Parser(file="order4.w").parse(src4)
-    tc4 = TypeChecker(file="order4.w")
+    ast4 = Parser(file="order4.wysna").parse(src4)
+    tc4 = TypeChecker(file="order4.wysna")
     tc4.check(ast4)
     sym_p = tc4.global_scope.lookup_symbol("p")
     assert sym_p is not None
@@ -124,7 +124,7 @@ def test_declaration_order_invariance():
 
 def test_container_and_compound_invariance():
     """Verify strict invariance on collections and generic compound types."""
-    # 1. WType.is_assignable invariance check:
+    # 1. WysnaType.is_assignable invariance check:
     animal = ClassType("Animal")
     dog = ClassType("Dog", superclass=animal)
     assert is_assignable(dog, animal), "OOP subclass should be assignable to superclass"
@@ -173,8 +173,8 @@ def test_container_and_compound_invariance():
     let animals: list[Animal] = dogs
     """
     try:
-        ast = Parser(file="inv.w").parse(src_invalid)
-        tc = TypeChecker(file="inv.w")
+        ast = Parser(file="inv.wysna").parse(src_invalid)
+        tc = TypeChecker(file="inv.wysna")
         tc.check(ast)
         assert False, "Expected assignment of list[Dog] to list[Animal] to be rejected"
     except TypeError as e:
@@ -189,8 +189,8 @@ def test_contextless_inference_protection():
     # 1. Bare empty dict rejected
     src_dict = "let d = {}"
     try:
-        ast = Parser(file="dict_empty.w").parse(src_dict)
-        tc = TypeChecker(file="dict_empty.w")
+        ast = Parser(file="dict_empty.wysna").parse(src_dict)
+        tc = TypeChecker(file="dict_empty.wysna")
         tc.check(ast)
         assert False, "Expected let d = {} to be rejected with W2001"
     except TypeError as e:
@@ -198,8 +198,8 @@ def test_contextless_inference_protection():
 
     # 2. Annotated empty dict accepted
     src_dict_ok = "let d: dict[str, int] = {}"
-    ast_ok = Parser(file="dict_ok.w").parse(src_dict_ok)
-    tc_ok = TypeChecker(file="dict_ok.w")
+    ast_ok = Parser(file="dict_ok.wysna").parse(src_dict_ok)
+    tc_ok = TypeChecker(file="dict_ok.wysna")
     tc_ok.check(ast_ok)
     sym_d = tc_ok.global_scope.lookup_symbol("d")
     assert sym_d is not None
@@ -208,8 +208,8 @@ def test_contextless_inference_protection():
     # 3. Bare empty list rejected
     src_list = "let xs = []"
     try:
-        ast = Parser(file="list_empty.w").parse(src_list)
-        tc = TypeChecker(file="list_empty.w")
+        ast = Parser(file="list_empty.wysna").parse(src_list)
+        tc = TypeChecker(file="list_empty.wysna")
         tc.check(ast)
         assert False, "Expected let xs = [] to be rejected with W2001"
     except TypeError as e:
@@ -221,8 +221,8 @@ def test_contextless_inference_protection():
     let opt: list[int]? = none
     let xs = opt ?? []
     """
-    ast_c = Parser(file="coalesce.w").parse(src_coalesce)
-    tc_c = TypeChecker(file="coalesce.w")
+    ast_c = Parser(file="coalesce.wysna").parse(src_coalesce)
+    tc_c = TypeChecker(file="coalesce.wysna")
     tc_c.check(ast_c)
     sym_xs = tc_c.global_scope.lookup_symbol("xs")
     assert sym_xs is not None
@@ -241,8 +241,8 @@ def test_conflicting_generic_inference():
     let res = choose(1, "hello")
     """
     try:
-        ast = Parser(file="choose.w").parse(src_fn)
-        tc = TypeChecker(file="choose.w")
+        ast = Parser(file="choose.wysna").parse(src_fn)
+        tc = TypeChecker(file="choose.wysna")
         tc.check(ast)
         assert False, "Expected conflicting generic function arguments to be rejected"
     except TypeError as e:
@@ -257,8 +257,8 @@ def test_conflicting_generic_inference():
     let p = Pair { a: 10, b: "hello" }
     """
     try:
-        ast = Parser(file="pair.w").parse(src_struct)
-        tc = TypeChecker(file="pair.w")
+        ast = Parser(file="pair.wysna").parse(src_struct)
+        tc = TypeChecker(file="pair.wysna")
         tc.check(ast)
         assert False, "Expected conflicting generic struct fields to be rejected"
     except TypeError as e:
@@ -283,8 +283,8 @@ def test_generic_enum_argument_preservation():
     let e1 = get_left()
     let e2 = get_right()
     """
-    ast = Parser(file="either.w").parse(src)
-    tc = TypeChecker(file="either.w")
+    ast = Parser(file="either.wysna").parse(src)
+    tc = TypeChecker(file="either.wysna")
     tc.check(ast)
 
     sym_e1 = tc.global_scope.lookup_symbol("e1")
@@ -330,14 +330,14 @@ def test_native_c99_execution_and_sanitizers():
     let res = ResultContainer { total: run_computation() }
     print(res.total)
     """
-    with tempfile.TemporaryDirectory(prefix="w_c05_test_") as tmpdir:
-        w_file = os.path.join(tmpdir, "test.w")
-        with open(w_file, "w") as f:
+    with tempfile.TemporaryDirectory(prefix="wysna_c05_test_") as tmpdir:
+        wysna_file = os.path.join(tmpdir, "test.wysna")
+        with open(wysna_file, "w") as f:
             f.write(src)
 
         # 1. AST C99 backend
-        ast = Parser(file=w_file).parse(src)
-        tc_ast = TypeChecker(file=w_file)
+        ast = Parser(file=wysna_file).parse(src)
+        tc_ast = TypeChecker(file=wysna_file)
         tc_ast.check(ast)
         codegen = CCodeGen()
         c_code_ast = codegen.generate(ast)
@@ -354,7 +354,7 @@ def test_native_c99_execution_and_sanitizers():
             "-fsanitize=address,undefined",
             "-O1",
             f"-I{repo_root}",
-            "-DW_MEM_CHECK=1",
+            "-DWYSNA_MEM_CHECK=1",
             c_file_ast,
             "-o", bin_file_ast
         ]
@@ -366,8 +366,8 @@ def test_native_c99_execution_and_sanitizers():
         assert run_res.stdout.strip() == "30", f"AST C99 expected stdout '30', got '{run_res.stdout.strip()}'"
 
         # 2. HIR C99 backend
-        ast_hir = Parser(file=w_file).parse(src)
-        tc_hir = TypeChecker(file=w_file)
+        ast_hir = Parser(file=wysna_file).parse(src)
+        tc_hir = TypeChecker(file=wysna_file)
         tc_hir.check(ast_hir)
         hir_builder = HirBuilder(tc_hir.interner)
         hir_mod = hir_builder.lower(ast_hir)
@@ -402,7 +402,7 @@ def test_native_c99_execution_and_sanitizers():
 
 def run_all() -> bool:
     print("==================================================")
-    print("W Language C05 Types, Invariance & Inference Suite")
+    print("Wysna C05 Types, Invariance & Inference Suite")
     print("==================================================")
     try:
         test_declaration_order_invariance()

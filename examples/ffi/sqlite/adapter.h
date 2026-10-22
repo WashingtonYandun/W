@@ -1,5 +1,5 @@
-#ifndef W_SQLITE_PILOT_H
-#define W_SQLITE_PILOT_H
+#ifndef WYSNA_SQLITE_PILOT_H
+#define WYSNA_SQLITE_PILOT_H
 
 #include <stdbool.h>
 #include <stdint.h>

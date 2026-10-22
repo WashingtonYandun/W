@@ -3,28 +3,28 @@ requires = ["setuptools>=61.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "w-lang"
+name = "wysna"
 dynamic = ["version"]
-description = "Statically typed language with C99 compilation, ARC and copy-on-write values"
+description = "Wysna Programming Language - Statically typed language with C99 compilation, ARC and copy-on-write values"
 readme = "README.md"
 requires-python = ">=3.10"
 license = { file = "LICENSE" }
 authors = [
     { name = "Washington Yandún" }
 ]
-keywords = ["compiler", "programming-language", "self-hosting", "c99", "static-typing", "copy-on-write"]
+keywords = ["compiler", "programming-language", "self-hosting", "c99", "static-typing", "copy-on-write", "wysna"]
 dependencies = []
 
 [project.scripts]
-w = "main:main"
+wysna = "main:main"
 
 [tool.setuptools]
 py-modules = ["main", "run_conformance"]
-packages = ["lexer", "parser", "checker", "formatter", "runtime", "codegen", "common", "error", "node", "wtokens", "hir", "mir", "compiler", "tooling", "stdlib"]
+packages = ["lexer", "parser", "checker", "formatter", "runtime", "codegen", "common", "error", "node", "tokens", "hir", "mir", "compiler", "tooling", "stdlib"]
 
 [tool.setuptools.package-data]
 runtime = ["*.h"]
-stdlib = ["*.w"]
+stdlib = ["*.wysna"]
 
 [tool.setuptools.dynamic]
-version = {attr = "common.Version.W_VERSION"}
+version = {attr = "common.Version.WYSNA_VERSION"}

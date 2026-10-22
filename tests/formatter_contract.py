@@ -9,8 +9,8 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def formatter_paths():
-    patterns = ('tests/formatter/*.w', 'tests/runtime/*.w', 'examples/**/*.w',
-                'selfhost/**/*.w', 'stdlib/**/*.w')
+    patterns = ('tests/formatter/*.wysna', 'tests/runtime/*.wysna', 'examples/**/*.wysna',
+                'selfhost/**/*.wysna', 'stdlib/**/*.wysna')
     return sorted({path for pattern in patterns for path in ROOT.glob(pattern)})
 
 

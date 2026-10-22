@@ -1,6 +1,6 @@
 """Public typed-HIR backend: verify/lower to MIR, then emit C99 from MIR only."""
 from common.Telemetry import CodegenTelemetry
-from error.Error import WError
+from error.Error import WysnaError
 
 
 class HirCCodeGen:
@@ -14,7 +14,7 @@ class HirCCodeGen:
         from mir.Lowering import Lowering
         from mir.CCodeGen import CCodeGen
         if self.interner is None:
-            raise WError('HIR emission requires a type interner', file=self.file_path,
+            raise WysnaError('HIR emission requires a type interner', file=self.file_path,
                          code='W9999', stage='hir-verification')
         import time
         started = time.perf_counter()
@@ -29,7 +29,7 @@ class HirCCodeGen:
 
     def _unsupported(self, node):
         span = node.span
-        raise WError('Direct HIR emission is unsupported; lower a verified module to MIR',
+        raise WysnaError('Direct HIR emission is unsupported; lower a verified module to MIR',
                      file=span.file_path or self.file_path, line=span.line, col=span.col,
                      code='W9999', stage='codegen')
 

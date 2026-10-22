@@ -1,6 +1,6 @@
 # W MIR: Verified Intermediate Representation
 
-W0's default native pipeline is checked AST → typed and verified HIR → verified MIR → C99 → system compiler. `w emit-c` and `w build` use this pipeline; `--backend=ast` selects the secondary AST emitter, and W1 is an independent self-hosted compiler. `w mir path.w` prints verified MIR as JSON.
+W0's default native pipeline is checked AST → typed and verified HIR → verified MIR → C99 → system compiler. `wysna emit-c` and `wysna build` use this pipeline; `--backend=ast` selects the secondary AST emitter, and W1 is an independent self-hosted compiler. `wysna mir path.wysna` prints verified MIR as JSON.
 
 ## Representation
 
@@ -34,4 +34,4 @@ W1 recognizes direct ranges in its parser. A parenthesized range expression may 
 
 MIR verification covers the compiler-generated representation and its modeled ownership flow. It does not prove runtime helper correctness, external `opaque` resource ownership, or behavior outside the tested corpus. Performance measurements for the executable compiler backends are workload and platform dependent; see the repository benchmark tooling for reproducible runs.
 
-`w build --stats` reports MIR lowering, C emission, C compilation, and linking separately. C adapters supplied as source are compiled before linking. The historical `codegen` field aggregates lowering and emission; do not add it to those subphases again. `total` includes compilation and linking.
+`wysna build --stats` reports MIR lowering, C emission, C compilation, and linking separately. C adapters supplied as source are compiled before linking. The historical `codegen` field aggregates lowering and emission; do not add it to those subphases again. `total` includes compilation and linking.

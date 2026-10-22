@@ -1,7 +1,7 @@
 import os
 from typing import List, Optional
-from wtokens.Token import Token
-from wtokens.TokenType import TokenType
+from tokens.Token import Token
+from tokens.TokenType import TokenType
 from lexer.Lexer import Lexer
 from error.Error import ParserError, ParserErrors
 from node.NodeType import (
@@ -58,7 +58,7 @@ _STATEMENT_END_TOKENS = frozenset({TokenType.RBRACE, TokenType.EOF})
 
 class Parser:
     """
-    Recursive Descent + Pratt Parser for W Language v0.1.
+    Recursive Descent + Pratt Parser for Wysna v0.1.
     Never calls exit(); raises ParserError with exact diagnostic codes and positions.
     """
     def __init__(self, file: str = "<stdin>") -> None:
@@ -682,7 +682,7 @@ class Parser:
         start_tok = self.expect(TokenType.IMPORT, code="W0006", msg="Expected 'import'")
         path_tok = self.expect(TokenType.STR, code="W0006", msg="Expected string path for import")
 
-        # Derive namespace from filename (e.g. "lexer.w" -> "lexer")
+        # Derive namespace from filename (e.g. "lexer.wysna" -> "lexer")
         raw_path = str(path_tok.value)
         base = os.path.basename(raw_path)
         namespace = base.split(".")[0] if "." in base else base

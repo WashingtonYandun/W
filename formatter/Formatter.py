@@ -39,7 +39,7 @@ PRECEDENCE_MAP = {
 
 class Formatter:
     """
-    Canonical W Language v0.1 Formatter ("One True Format").
+    Canonical Wysna v0.1 Formatter ("One True Format").
     Guarantees idempotence: fmt(fmt(src)) == fmt(src).
     """
     def __init__(self, indent_width: int = 4):

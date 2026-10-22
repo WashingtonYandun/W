@@ -6,7 +6,7 @@ import subprocess
 import sys
 import tempfile
 
-from main import ensure_selfhost_w1_binary
+from main import ensure_selfhost_compiler_binary
 from common.Platform import compiler_command, executable_name
 from tests.engine_harness import run_engine, compare
 from runtime import HostAbi
@@ -15,18 +15,18 @@ ROOT = Path(__file__).resolve().parents[2]
 
 
 def test_toolkit_semantics_across_four_engines():
-    w1 = ensure_selfhost_w1_binary(str(ROOT))
-    source = (ROOT / 'tests/stdlib/toolkit.w').read_text(encoding='utf-8')
+    selfhost_bin = ensure_selfhost_compiler_binary(str(ROOT))
+    source = (ROOT / 'tests/stdlib/toolkit.wysna').read_text(encoding='utf-8')
     expected = (ROOT / 'tests/stdlib/toolkit.expected').read_text(encoding='utf-8')
     with tempfile.TemporaryDirectory() as directory:
-        results = [run_engine(engine, source, 'toolkit', w1, directory,
-                   sanitize=os.environ.get('W_SANITIZE') == '1') for engine in ('interpreter', 'ast', 'hir', 'w1')]
+        results = [run_engine(engine, source, 'toolkit', selfhost_bin, directory,
+                   sanitize=os.environ.get('WYSNA_SANITIZE') == '1') for engine in ('interpreter', 'ast', 'hir', 'selfhost')]
         ok, detail = compare(results, expected)
         assert ok, detail
 
 
 def test_streaming_files_and_filesystem_across_four_engines():
-    w1 = ensure_selfhost_w1_binary(str(ROOT))
+    selfhost_bin = ensure_selfhost_compiler_binary(str(ROOT))
     with tempfile.TemporaryDirectory(prefix='w toolkit é ') as temporary:
         directory = Path(temporary)
         path = directory / 'data é.bin'
@@ -62,12 +62,12 @@ main()
 fs.rename(PATH, MOVED) else error { exit(1) }
 print(fs.exists(PATH) else error { false }, fs.exists(MOVED) else error { false })
 fs.remove(MOVED) else error { exit(1) }
-print(path.join("root", "child"), path.basename("C:/é/file.w"), path.dirname("C:/file.w"))
+print(path.join("root", "child"), path.basename("C:/é/file.wysna"), path.dirname("C:/file.wysna"))
 '''.replace('PATH', json.dumps(str(path), ensure_ascii=False)).replace('MOVED', json.dumps(str(moved), ensure_ascii=False))
-        expected = '0 0 6\n6 0\nread true true\nfalse true\nroot/child file.w C:/\n'
-        for engine in ('interpreter', 'ast', 'hir', 'w1'):
-            result = run_engine(engine, text, 'streaming', w1, directory / engine,
-                                sanitize=os.environ.get('W_SANITIZE') == '1')
+        expected = '0 0 6\n6 0\nread true true\nfalse true\nroot/child file.wysna C:/\n'
+        for engine in ('interpreter', 'ast', 'hir', 'selfhost'):
+            result = run_engine(engine, text, 'streaming', selfhost_bin, directory / engine,
+                                sanitize=os.environ.get('WYSNA_SANITIZE') == '1')
             assert (result.exit_code, result.stdout, result.stderr) == (0, expected, ''), (
                 f"Engine {engine} failed: exit={result.exit_code}, stdout={repr(result.stdout)}, stderr={repr(result.stderr)}"
             )
@@ -75,28 +75,28 @@ print(path.join("root", "child"), path.basename("C:/é/file.w"), path.dirname("C
 
 
 def test_host_handles_reject_stale_wrong_kind_and_oversized_requests():
-    buffer = HostAbi.FUNCTIONS['w_host_buffer_new']()
+    buffer = HostAbi.FUNCTIONS['wysna_host_buffer_new']()
     assert HostAbi.buffer_append(buffer, 256) == -1
     assert HostAbi.file_read(buffer, buffer, 1) == -1
     assert HostAbi.file_read(0, buffer, 16777217) == -1
     assert HostAbi.close(buffer) == 0
-    fresh = HostAbi.FUNCTIONS['w_host_buffer_new']()
+    fresh = HostAbi.FUNCTIONS['wysna_host_buffer_new']()
     assert fresh != buffer
     assert HostAbi.buffer_append(buffer, 1) == -1
     assert HostAbi.buffer_size(fresh) == 0
     HostAbi.close(fresh)
-    code = '''#include "runtime/w_runtime.h"
+    code = '''#include "runtime/wysna_runtime.h"
 #include <assert.h>
 int main(void) {
-    void* buffer = w_host_buffer_new();
-    assert(w_host_buffer_append(buffer, 256) == -1);
-    assert(w_host_file_read(buffer, buffer, 1) == -1);
-    assert(w_host_file_read(NULL, buffer, 16777217) == -1);
-    assert(w_host_close(buffer) == 0);
-    void* fresh = w_host_buffer_new();
-    assert(fresh != buffer && w_host_buffer_append(buffer, 1) == -1);
-    assert(w_host_buffer_size(fresh) == 0);
-    assert(w_host_close(fresh) == 0 && w_host_entries == NULL);
+    void* buffer = wysna_host_buffer_new();
+    assert(wysna_host_buffer_append(buffer, 256) == -1);
+    assert(wysna_host_file_read(buffer, buffer, 1) == -1);
+    assert(wysna_host_file_read(NULL, buffer, 16777217) == -1);
+    assert(wysna_host_close(buffer) == 0);
+    void* fresh = wysna_host_buffer_new();
+    assert(fresh != buffer && wysna_host_buffer_append(buffer, 1) == -1);
+    assert(wysna_host_buffer_size(fresh) == 0);
+    assert(wysna_host_close(fresh) == 0 && wysna_host_entries == NULL);
     assert(sizeof(WVal) == 32);
     return 0;
 }
@@ -119,7 +119,7 @@ def test_large_file_processing_keeps_buffer_bounded():
         data_path.write_bytes(bytes(range(256)) * 8192)
         handle = HostAbi.allocate('buffer', bytearray(str(data_path).encode()))
         file = HostAbi.file_open(handle, 0)
-        buffer = HostAbi.FUNCTIONS['w_host_buffer_new']()
+        buffer = HostAbi.FUNCTIONS['wysna_host_buffer_new']()
         total = 0
         while True:
             count = HostAbi.file_read(file, buffer, 4096)
@@ -133,24 +133,24 @@ def test_large_file_processing_keeps_buffer_bounded():
             HostAbi.close(value)
         source = directory / 'bounded.c'
         binary = directory / executable_name('bounded')
-        source.write_text('''#include "runtime/w_runtime.h"
+        source.write_text('''#include "runtime/wysna_runtime.h"
 #include <assert.h>
 int main(int argc, char** argv) {
     (void)argc;
-    void* path = w_host_buffer_new();
-    for (const unsigned char* p = (const unsigned char*)argv[1]; *p; p++) assert(w_host_buffer_append(path, *p) == 0);
-    void* file = w_host_file_open(path, 0);
-    void* buffer = w_host_buffer_new();
+    void* path = wysna_host_buffer_new();
+    for (const unsigned char* p = (const unsigned char*)argv[1]; *p; p++) assert(wysna_host_buffer_append(path, *p) == 0);
+    void* file = wysna_host_file_open(path, 0);
+    void* buffer = wysna_host_buffer_new();
     int64_t total = 0, count;
     do {
-        count = w_host_file_read(file, buffer, 4096);
+        count = wysna_host_file_read(file, buffer, 4096);
         assert(count >= 0 && count <= 4096);
-        assert(w_host_find(buffer, 1)->capacity == 4096);
+        assert(wysna_host_find(buffer, 1)->capacity == 4096);
         total += count;
     } while (count);
     assert(total == 2097152);
-    w_host_close(file); w_host_close(buffer); w_host_close(path);
-    assert(w_host_entries == NULL);
+    wysna_host_close(file); wysna_host_close(buffer); wysna_host_close(path);
+    assert(wysna_host_entries == NULL);
     return 0;
 }
 ''', encoding='utf-8')
@@ -176,7 +176,7 @@ def test_standard_file_cleanup_runs_on_runtime_panic():
         directory = Path(temporary)
         for backend in ('interpreter', 'ast', 'hir', 'selfhost'):
             output = directory / (backend + '.bin')
-            source = directory / (backend + '.w')
+            source = directory / (backend + '.wysna')
             source.write_text('import "std/buffer"\nimport "std/files"\nfn main() {\n'
                 f'let file = files.open({json.dumps(str(output))}, 1) else error {{ exit(2) return }}\n'
                 'let data = buffer.from_text("flushed")\n'
@@ -197,7 +197,7 @@ def test_standard_file_cleanup_runs_on_runtime_panic():
 def test_resource_duplicate_owner_is_rejected_without_disposal():
     with tempfile.TemporaryDirectory() as temporary:
         directory = Path(temporary)
-        source = directory / 'owners.w'
+        source = directory / 'owners.wysna'
         source.write_text('''import "std/resources"
 extern "C" fn audit_open() -> opaque
 extern "C" fn audit_dispose(handle: opaque) -> int32
@@ -226,7 +226,7 @@ print(second.close(), audit_live(), first.close(), audit_live(), first.close())
                                         capture_output=True, text=True, timeout=120)
                 assert built.returncode == 0, built.stderr
                 command = [str(binary)]
-            result = subprocess.run(command, capture_output=True, text=True, timeout=30, env=dict(os.environ, W_MEM_CHECK='1'))
+            result = subprocess.run(command, capture_output=True, text=True, timeout=30, env=dict(os.environ, WYSNA_MEM_CHECK='1'))
             assert (result.returncode, result.stdout, result.stderr) == (0, expected, ''), result
 
 

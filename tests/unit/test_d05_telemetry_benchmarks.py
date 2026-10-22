@@ -21,7 +21,7 @@ if str(ROOT) not in sys.path:
 
 def test_cli_stats_telemetry_fields():
     print("  [TEST] CLI --stats telemetry structure and phase timings...")
-    test_w = ROOT / "tests/runtime/generic_tree_recursive.w"
+    test_w = ROOT / "tests/runtime/generic_tree_recursive.wysna"
     proc = subprocess.run(
         [sys.executable, str(ROOT / "main.py"), "emit-c", str(test_w), "--stats", "-o", os.devnull],
         capture_output=True,
@@ -51,7 +51,7 @@ def test_cli_stats_telemetry_fields():
 def test_cli_stats_stdout_separation():
     print("  [TEST] Separation of stats from program stdout (oracle cleanliness)...")
     with tempfile.TemporaryDirectory() as td:
-        source = Path(td) / "oracle_test.w"
+        source = Path(td) / "oracle_test.wysna"
         source.write_text('fn main() { print("CLEAN_STDOUT_PAYLOAD") }\n')
 
         # 1. run --stats must output payload ONLY to stdout, stats to stderr
@@ -85,15 +85,16 @@ def test_cli_stats_stdout_separation():
 def test_benchmark_harness_conformance():
     print("  [TEST] Benchmark harness equivalence and execution...")
     from bench.run_bench import run_benchmark_suite
-    w1_bin = str(ROOT / ".w_cache/w1_stage2")
+    from main import ensure_selfhost_compiler_binary
+    selfhost_bin = ensure_selfhost_compiler_binary(str(ROOT))
     # Run a subset of benchmarks or full suite
-    ok = run_benchmark_suite(str(ROOT), w1_bin, update_baseline=False)
+    ok = run_benchmark_suite(str(ROOT), selfhost_bin, update_baseline=False)
     assert ok, "Benchmark suite must pass with equivalence across engines"
 
 
 def run_all() -> bool:
     print("==================================================")
-    print("W Language D05 Telemetry & Benchmarks Suite")
+    print("Wysna D05 Telemetry & Benchmarks Suite")
     print("==================================================")
     try:
         test_cli_stats_telemetry_fields()

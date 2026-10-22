@@ -50,8 +50,8 @@ def test_canonical_deduplication_telemetry():
     let v1 = get_val(b1)
     let v2 = get_val(b2)
     """
-    ast = Parser(file="test_dedup.w").parse(code)
-    checker = TypeChecker(file="test_dedup.w")
+    ast = Parser(file="test_dedup.wysna").parse(code)
+    checker = TypeChecker(file="test_dedup.wysna")
     checker.check(ast)
 
     telem = checker.telemetry
@@ -70,8 +70,8 @@ def test_unbounded_instantiation_budget():
 
     expand(10)
     """
-    ast = Parser(file="test_growth.w").parse(code)
-    checker = TypeChecker(file="test_growth.w")
+    ast = Parser(file="test_growth.wysna").parse(code)
+    checker = TypeChecker(file="test_growth.wysna")
     caught = False
     try:
         checker.check(ast)
@@ -92,8 +92,8 @@ def test_direct_struct_recursion_cycle_detection():
 
     let n: Node[int] = Node(1, Node(2, 0))
     """
-    ast = Parser(file="test_direct.w").parse(code)
-    checker = TypeChecker(file="test_direct.w")
+    ast = Parser(file="test_direct.wysna").parse(code)
+    checker = TypeChecker(file="test_direct.wysna")
     caught = False
     try:
         checker.check(ast)
@@ -108,7 +108,7 @@ def test_direct_struct_recursion_cycle_detection():
 def test_cli_stats_output():
     repo_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     main_py = os.path.join(repo_root, "main.py")
-    test_w = os.path.join(repo_root, "tests", "runtime", "generic_tree_recursive.w")
+    test_w = os.path.join(repo_root, "tests", "runtime", "generic_tree_recursive.wysna")
     proc = subprocess.run(
         [sys.executable, main_py, "emit-c", test_w, "--stats", "-o", os.devnull],
         capture_output=True,
@@ -131,7 +131,7 @@ def test_cli_stats_output():
 
 
 def test_hardening_regressions():
-    from checker.WType import IntType, TupleType, ResultType, OptionalType, ListType, FunctionType
+    from checker.WysnaType import IntType, TupleType, ResultType, OptionalType, ListType, FunctionType
     from codegen.CCodeGen import CCodeGen
     from hir.HirBuilder import HirBuilder
     from hir.HirCCodeGen import HirCCodeGen
@@ -167,7 +167,7 @@ def test_hardening_regressions():
     template = checker.generic_fn_templates["a"]
     assert checker._monomorphize_fn(template, [IntType], 1, 1) is not None
 
-    for filename in ["generic_pair.w", "generic_tree_recursive.w"]:
+    for filename in ["generic_pair.wysna", "generic_tree_recursive.wysna"]:
         path = os.path.join("tests", "runtime", filename)
         with open(path, encoding="utf-8") as stream:
             ast = Parser(file=path).parse(stream.read())
@@ -195,7 +195,7 @@ def test_hardening_regressions():
 
 def test_run_stats_preserves_execution():
     with tempfile.TemporaryDirectory() as directory:
-        source = os.path.join(directory, "stats.w")
+        source = os.path.join(directory, "stats.wysna")
         with open(source, "w", encoding="utf-8") as stream:
             stream.write('print("executed")\n')
         for flag in ["--stats", "--metrics"]:

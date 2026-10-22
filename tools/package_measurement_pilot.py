@@ -43,7 +43,7 @@ def execute(command, **kwargs):
 
 
 def sqlite_archive(path=None):
-    cache = ROOT / '.w_cache/pilot-package'
+    cache = ROOT / '.wysna_cache/pilot-package'
     cache.mkdir(parents=True, exist_ok=True)
     target = Path(path) if path else cache / (SQLITE_ARCHIVE + '.zip')
     with cache_lock(cache / 'sqlite.lock'):
@@ -70,7 +70,7 @@ def verify_package(directory):
         shutil.copytree(directory, copied)
         binary = copied / executable_name('measurement-ingest')
         database = sandbox / 'trial database.sqlite'
-        environment = dict(os.environ, W_SQLITE_DB=str(database), W_MEM_CHECK='1')
+        environment = dict(os.environ, WYSNA_SQLITE_DB=str(database), WYSNA_MEM_CHECK='1')
         def run(arguments, code, output=None):
             result = subprocess.run([str(binary)] + arguments, env=environment,
                                     capture_output=True, text=True, timeout=60)
@@ -126,7 +126,7 @@ def package(output, archive=None):
                 (workspace / name).write_bytes(zipped.read(SQLITE_ARCHIVE + '/' + name))
         generated = workspace / 'application.c'
         execute([sys.executable, str(ROOT / 'main.py'), 'emit-c', '--backend=hir',
-                 str(ROOT / 'examples/ffi/sqlite/import_csv.w'), '-o', str(generated)])
+                 str(ROOT / 'examples/ffi/sqlite/import_csv.wysna'), '-o', str(generated)])
         objects = []
         for index, source in enumerate((generated, ROOT / 'examples/ffi/sqlite/adapter.c', workspace / 'sqlite3.c')):
             object_path = workspace / (str(index) + ('.obj' if windows else '.o'))
@@ -154,7 +154,7 @@ def package(output, archive=None):
     smoke = verify_package(output)
     (output / 'smoke.json').write_text(json.dumps(smoke, indent=2))
     digest = hashlib.sha256()
-    for relative in sorted(set(SELFHOST_BOOTSTRAP_INPUTS + ('examples/ffi/sqlite/import_csv.w',
+    for relative in sorted(set(SELFHOST_BOOTSTRAP_INPUTS + ('examples/ffi/sqlite/import_csv.wysna',
                                'examples/ffi/sqlite/adapter.c', 'examples/ffi/sqlite/adapter.h',
                                'tools/package_measurement_pilot.py'))):
         digest.update(relative.encode())
@@ -174,7 +174,7 @@ El ejecutable incluye SQLite y el runtime C; no necesita Python ni un compilador
 Es un binario experimental sin firma. No requiere privilegios de administrador.
 Usa una base nueva para esta prueba; no apunta a ninguna base existente.
 
-$env:W_SQLITE_DB = Join-Path $PWD ("trial-" + [guid]::NewGuid() + ".sqlite")
+$env:WYSNA_SQLITE_DB = Join-Path $PWD ("trial-" + [guid]::NewGuid() + ".sqlite")
 .\\measurement-ingest.exe --version
 .\\measurement-ingest.exe --check measurements.csv
 .\\measurement-ingest.exe --status
