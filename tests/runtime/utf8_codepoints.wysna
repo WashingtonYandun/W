@@ -1,5 +1,5 @@
 fn main() -> unit {
-    let s = "José"
+    let s = "Zoë"
     print(len(s))
     print(s[3])
     print(len(bytes(s)))

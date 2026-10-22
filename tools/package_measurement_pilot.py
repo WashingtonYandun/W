@@ -167,12 +167,12 @@ def package(output, archive=None):
                 'binary_sha256': hashlib.sha256(binary.read_bytes()).hexdigest(), 'smoke_passed': True,
                 'imported_dlls': dependencies, 'msvc_runtime_static': windows}
     (output / 'manifest.json').write_text(json.dumps(manifest, indent=2))
-    (output / 'START_HERE.txt').write_text('''Piloto de ingesta de mediciones
+    (output / 'START_HERE.txt').write_text('''Measurement Ingestion Pilot
 
-Windows x64: descomprime el paquete y abre PowerShell en esa carpeta.
-El ejecutable incluye SQLite y el runtime C; no necesita Python ni un compilador.
-Es un binario experimental sin firma. No requiere privilegios de administrador.
-Usa una base nueva para esta prueba; no apunta a ninguna base existente.
+Windows x64: extract the package and open PowerShell in the extracted folder.
+The executable includes SQLite and the C runtime; it requires neither Python nor a compiler.
+This is an unsigned experimental binary. Administrator privileges are not required.
+Use a new database for this trial; do not point it at an existing database.
 
 $env:WYSNA_SQLITE_DB = Join-Path $PWD ("trial-" + [guid]::NewGuid() + ".sqlite")
 .\\measurement-ingest.exe --version
@@ -189,20 +189,20 @@ $env:WYSNA_SQLITE_DB = Join-Path $PWD ("trial-" + [guid]::NewGuid() + ".sqlite")
 .\\measurement-ingest.exe append.csv
 .\\measurement-ingest.exe --status
 
-Esperado: antes del import, status 0 0 0. Tras importar, status 2 49 1.
-duplicate.csv y malformed.csv deben fallar con codigo 1 y conservar status 2 49 1.
-El check de append.csv tampoco debe cambiarlo. Tras importar append.csv: status 3 54 2.
-resources 0 confirma cierre de los handles propios; no prueba ausencia universal de fugas.
-El journal se confirma con el tercer numero de status. Guarda la base creada y la salida.
+Expected: before the import, status is 0 0 0. After importing, status is 2 49 1.
+duplicate.csv and malformed.csv should fail with exit code 1 and preserve status 2 49 1.
+Checking append.csv should not change it. After importing append.csv, status is 3 54 2.
+resources 0 confirms that owned handles were closed; it does not prove the absence of all leaks.
+The third status value confirms the journal entry. Save the created database and output.
 
-Anota modelo/Windows, tiempo hasta el primer import, errores y pasos confusos.
-Despues prueba un CSV no sensible de una tarea tuya: header id,value, enteros no negativos,
-IDs unicos, maximo 100000 filas y 8 MiB. Selecciona otra base nueva. No se suben datos.
-La prueba de este equipo no demuestra adopcion por usuarios independientes.
+Record the Windows model, time to the first import, errors, and confusing steps.
+Then try a non-sensitive CSV from one of your own tasks: header id,value, non-negative integers,
+unique IDs, at most 100000 rows, and 8 MiB. Select another new database. No data is uploaded.
+This trial on one machine does not demonstrate adoption by independent users.
 
-manifest.json identifica fuentes, compilador y binario. CHECKSUMS.sha256 permite verificar
-los archivos con Get-FileHash -Algorithm SHA256. smoke.json registra solo la prueba CI.
-SQLite: https://www.sqlite.org/copyright.html . Version y fuente fijadas en manifest.json.
+manifest.json identifies the sources, compiler, and binary. CHECKSUMS.sha256 can verify
+the files with Get-FileHash -Algorithm SHA256. smoke.json records only the CI smoke test.
+SQLite: https://www.sqlite.org/copyright.html. The version and source are pinned in manifest.json.
 ''', encoding='utf-8')
     checksums = [hashlib.sha256(path.read_bytes()).hexdigest() + '  ' + path.name
                  for path in sorted(output.iterdir()) if path.is_file() and path.name != 'CHECKSUMS.sha256']

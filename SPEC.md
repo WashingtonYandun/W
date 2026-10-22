@@ -1,8 +1,8 @@
 # Wysna Language Specification
 
-> **Estado:** Esta especificación define la candidata a release Wysna `0.5.0`. Las secciones 1–11 describen la gramática normativa; las secciones 12–14 describen contratos de implementación.
+> **Status:** This specification defines the Wysna `0.5.0` release candidate. Sections 1–11 describe the normative grammar; sections 12–14 describe implementation contracts.
 >
-> **Implementaciones:** `Wysna Seed` es la implementación de referencia que determina si un programa es válido. `Wysna Compiler` es un compilador autoalojado independiente; su subconjunto soportado se mide con el corpus público de release. La matriz de paridad documenta ese límite en [docs/ENGINE_PARITY_MATRIX.md](docs/ENGINE_PARITY_MATRIX.md).
+> **Implementations:** `Wysna Seed` is the reference implementation that determines whether a program is valid. `Wysna Compiler` is an independent self-hosted compiler; its supported subset is measured against the public release corpus. The parity matrix documents this boundary in [docs/ENGINE_PARITY_MATRIX.md](docs/ENGINE_PARITY_MATRIX.md).
 >
 > **Thesis:** Wysna is a compact, statically typed language for small native tools, with deterministic diagnostics and inspectable C99 output. This document defines the language syntax and semantics.
 
@@ -63,7 +63,7 @@ Identifiers must start with an ASCII letter (`a-z`, `A-Z`) or underscore `_`, fo
 * **UTF-8 Storage:** Strings are immutable and stored as UTF-8 in memory.
 * **Unicode Scalar Value Indexing:** `len(s)`, `s[i]`, `slice(s, start, end)`, `ord(s)`, and `chr(c)` operate strictly on **Unicode Scalar Values (Code Points)** (`U+0000..=U+D7FF` and `U+E000..=U+10FFFF`), returning a single code-point string (`str`) or code-point count:
   ```wysna
-  let s = "José"
+  let s = "Zoë"
   s[3]    # returns "é" (4th Unicode scalar value)
   len(s)  # returns 4
   ```
@@ -72,11 +72,11 @@ Identifiers must start with an ASCII letter (`a-z`, `A-Z`) or underscore `_`, fo
 * **Escape Sequences:** `\n`, `\r`, `\t`, `\\`, `\"`, `\0`, `\u{HHHH}` (1 to 6 hex digits).
 
 ### 3.4 Comments and Delimiters
-* **Comentarios:** Solo se admiten comentarios de línea que comienzan con `#`. Los comentarios de documentación comienzan con `##`.
-* **Bloques:** Las llaves `{}` delimitan bloques de `if`, `for`, `while`, `fn`, `match`, `struct`, `class` e `interface`.
-* **Separadores de sentencias:** Un salto físico de línea (`LF`, `CRLF` o `CR`) produce el separador `NEWLINE` después de un token que puede cerrar una expresión, siempre que ocurra fuera de paréntesis y corchetes. Pueden cerrar una expresión los literales, identificadores, `this`, `super`, delimitadores de cierre, el `?` posfijo, `break` y `continue`. Las líneas vacías y los saltos posteriores a comentarios siguen la misma regla. El punto y coma (`;`) es un separador explícito y puede usarse en el nivel superior o dentro de un bloque.
-* **Continuación:** Los saltos dentro de `(...)` y `[...]` se ignoran. Un salto después de un operador no termina la expresión; el operador binario que continúa la expresión debe ir al final de la línea anterior. Un salto después de `return` tampoco termina el retorno: si la expresión aparece en la siguiente línea, forma parte del retorno.
-* **Ramas:** Se permite un salto entre el bloque de `if`/`elif` y su `elif`/`else`, así como entre una expresión falible y su manejador `else err`; ese salto pertenece a la misma construcción.
+* **Comments:** Only line comments beginning with `#` are supported. Documentation comments begin with `##`.
+* **Blocks:** Braces `{}` delimit blocks for `if`, `for`, `while`, `fn`, `match`, `struct`, `class`, and `interface`.
+* **Statement separators:** A physical newline (`LF`, `CRLF`, or `CR`) produces a `NEWLINE` separator after a token that can end an expression, provided it occurs outside parentheses and brackets. Literals, identifiers, `this`, `super`, closing delimiters, postfix `?`, `break`, and `continue` can end an expression. Blank lines and newlines after comments follow the same rule. A semicolon (`;`) is an explicit separator and may be used at the top level or inside a block.
+* **Continuation:** Newlines inside `(...)` and `[...]` are ignored. A newline after an operator does not end the expression; a binary operator that continues the expression must appear at the end of the preceding line. A newline after `return` also does not end the return: if an expression appears on the next line, it is part of the return.
+* **Branches:** A newline is allowed between an `if`/`elif` block and its `elif`/`else`, and between a fallible expression and its `else err` handler; that newline belongs to the same construct.
 
 ```wysna
 let mut total = 0

@@ -1,50 +1,50 @@
-# Política de seguridad
+# Security Policy
 
-El equipo de Wysna toma en serio la seguridad, la seguridad de memoria y la corrección del compilador. Esta política explica cómo reportar vulnerabilidades, cómo respondemos y qué versiones reciben soporte.
+The Wysna team takes security, memory safety, and compiler correctness seriously. This policy explains how to report vulnerabilities, how we respond, and which versions receive support.
 
-## Versiones con soporte
+## Supported Versions
 
-Solo la línea menor más reciente recibe actualizaciones de seguridad y backports.
+Only the latest minor release line receives security updates and backports.
 
-| Versión | Soporte | Estado de seguridad |
+| Version | Supported | Security status |
 | --- | --- | --- |
-| 0.5.0 | ⏳ | Candidata no publicada; el soporte oficial comienza tras superar CI multiplataforma |
-| 0.4.0a1 | ❌ | Reemplazada por la candidata Wysna 0.5.0 |
-| 0.3.0.dev1 | ❌ | Reemplazada por la línea alpha Wysna 0.4.0 |
-| 0.2.x | ❌ | Reemplazada por Wysna 0.3.0 |
-| 0.1.x | ❌ | Versión histórica sin soporte |
-| < 0.1.0 | ❌ | Versiones experimentales sin soporte |
+| 0.5.0 | ⏳ | Unpublished candidate; official support begins after passing cross-platform CI |
+| 0.4.0a1 | ❌ | Superseded by the Wysna 0.5.0 candidate |
+| 0.3.0.dev1 | ❌ | Superseded by the Wysna 0.4.0 alpha line |
+| 0.2.x | ❌ | Superseded by Wysna 0.3.0 |
+| 0.1.x | ❌ | Historical version without support |
+| < 0.1.0 | ❌ | Experimental versions without support |
 
-## Reportar una vulnerabilidad
+## Reporting a Vulnerability
 
-Si encuentras una vulnerabilidad en el compilador, runtime o herramientas de Wysna, **no la reportes mediante un issue público de GitHub**. Usa uno de estos canales de divulgación responsable:
+If you find a vulnerability in the Wysna compiler, runtime, or tools, **do not report it through a public GitHub issue**. Use one of these responsible disclosure channels:
 
-1. **GitHub Security Advisory (preferido):** crea un reporte privado en [github.com/WashingtonYandun/Wysna/security/advisories/new](https://github.com/WashingtonYandun/Wysna/security/advisories/new).
-2. **Correo electrónico:** escribe a [washington.yandun.morales@gmail.com](mailto:washington.yandun.morales@gmail.com), con el asunto `[SECURITY]`.
+1. **GitHub Security Advisory (preferred):** create a private report at [github.com/WashingtonYandun/Wysna/security/advisories/new](https://github.com/WashingtonYandun/Wysna/security/advisories/new).
+2. **Email:** write to [washington.yandun.morales@gmail.com](mailto:washington.yandun.morales@gmail.com) with the subject `[SECURITY]`.
 
-### Información necesaria
+### Information to Include
 
-- Descripción de la vulnerabilidad y, si está disponible, evaluación de severidad (CVSS).
-- Ejemplo mínimo en Wysna (`.wysna`) o script que reproduzca el problema.
-- Componente afectado, por ejemplo runtime C99 (`runtime/wysna_runtime.h`), lowerer HIR, generador C, parser o compilador autoalojado.
-- Entorno exacto: sistema operativo, arquitectura, versión de Wysna (`./wysna version`) y toolchain C (`clang --version` o `gcc --version`).
-- Traza del sanitizer cuando corresponda (ASan/UBSan con `./wysna run <file>.wysna`).
+- Vulnerability description and, if available, severity assessment (CVSS).
+- A minimal Wysna (`.wysna`) example or script that reproduces the issue.
+- Affected component, such as the C99 runtime (`runtime/wysna_runtime.h`), HIR lowerer, C generator, parser, or self-hosted compiler.
+- Exact environment: operating system, architecture, Wysna version (`./wysna version`), and C toolchain (`clang --version` or `gcc --version`).
+- Sanitizer trace when applicable (ASan/UBSan with `./wysna run <file>.wysna`).
 
-## Proceso de respuesta
+## Response Process
 
-1. **Acuse de recibo:** confirmaremos la recepción dentro de **48 horas**.
-2. **Evaluación y triage:** investigaremos y evaluaremos la vulnerabilidad dentro de **5 días laborables**, validando reproducción e impacto.
-3. **Corrección:** desarrollaremos el arreglo en una rama privada y lo verificaremos con AddressSanitizer, UndefinedBehaviorSanitizer y pruebas diferenciales.
-4. **Release y advisory:** publicaremos una versión correctiva y un GitHub Security Advisory coordinado. Daremos crédito a quien reportó el problema, salvo que solicite anonimato.
+1. **Acknowledgment:** we will confirm receipt within **48 hours**.
+2. **Assessment and triage:** we will investigate and assess the vulnerability within **5 business days**, validating reproduction and impact.
+3. **Fix:** we will develop the fix on a private branch and verify it with AddressSanitizer, UndefinedBehaviorSanitizer, and differential tests.
+4. **Release and advisory:** we will publish a corrective version and a coordinated GitHub Security Advisory. We will credit the reporter unless they request anonymity.
 
-## Áreas dentro del alcance
+## In-Scope Areas
 
-- **Seguridad de memoria del runtime C99:** use-after-free, double-free, referencias colgantes, desbordamientos o underflow/overflow del contador de referencias en `runtime/wysna_runtime.h`.
-- **Confusión de tipos:** bypasses del verificador estático (`checker/TypeChecker.py`) o HIR tipada que permitan acceso a memoria no verificado.
-- **Inyección de código del compilador:** literales o identificadores sin sanitizar que escapen del lowering AST y produzcan ejecución C arbitraria.
-- **Invariantes de Copy-on-Write:** mutaciones visibles en valores compartidos entre ámbitos que violen la semántica de valor de Wysna.
+- **C99 runtime memory safety:** use-after-free, double-free, dangling references, and reference-count overflow or underflow in `runtime/wysna_runtime.h`.
+- **Type confusion:** bypasses in the static checker (`checker/TypeChecker.py`) or typed HIR that allow unchecked memory access.
+- **Compiler code injection:** unsanitized literals or identifiers that escape AST lowering and produce arbitrary C execution.
+- **Copy-on-Write invariants:** mutations visible across shared values that violate Wysna value semantics.
 
-## Fuera del alcance
+## Out of Scope
 
-- Denegación de servicio por archivos excesivamente grandes o expresiones muy anidadas que alcancen los límites de recursión del parser, salvo que evadan las protecciones de profundidad del AST.
-- Vulnerabilidades que requieran acceso root/administrador o manipulación de binarios locales fuera de la toolchain Wysna.
+- Denial of service caused by excessively large files or deeply nested expressions that reach parser recursion limits, unless they bypass AST depth protections.
+- Vulnerabilities requiring root/administrator access or manipulation of local binaries outside the Wysna toolchain.

@@ -35,13 +35,10 @@ RestartApplications=no
 
 [Languages]
 Name: english; MessagesFile: compiler:Default.isl
-Name: spanish; MessagesFile: compiler:Languages\Spanish.isl
 
 [CustomMessages]
 english.AddToPath=Add Wysna to my terminal PATH (recommended)
-spanish.AddToPath=Agregar Wysna al PATH de mi terminal (recomendado)
 english.OpenTerminal=Open a terminal ready to use Wysna
-spanish.OpenTerminal=Abrir una terminal lista para usar Wysna
 
 [Tasks]
 Name: addtopath; Description: {cm:AddToPath}
@@ -58,7 +55,6 @@ Filename: "{cmd}"; Parameters: "/K """"{app}\open-terminal.cmd"""""; WorkingDir:
 
 [Messages]
 english.FinishedLabel=Wysna is installed with its own runtime and C compiler.%n%nUse the Wysna Language shortcut or open a new terminal and run: wysna version%n%nNo Python, pip, virtual environment or Visual Studio setup is needed.
-spanish.FinishedLabel=Wysna incluye su propio runtime y compilador C.%n%nUsa el acceso directo Wysna Language o abre una terminal nueva y ejecuta: wysna version%n%nNo necesitas instalar Python, pip, un entorno virtual ni Visual Studio.
 
 [Code]
 const

@@ -1,34 +1,33 @@
-# Registro de cambios
+# Changelog
 
-## 0.5.0 — preparado para release
+## 0.5.0 — Release Candidate Preparation
 
-### Lenguaje y compiladores
+### Language and Compilers
 
-- Se consolida **Wysna** como identidad del lenguaje: se retiraron aliases de tokens y
-  prefijos internos heredados de los nombres experimentales anteriores.
-- Se añadieron separadores de sentencias por salto de línea y `;`. La regla cubre LF,
-  CRLF y CR; los saltos dentro de paréntesis y corchetes continúan expresiones.
-- Se unificó el manejo de signo menos: el lexer emite un operador unario y el parser
-  reconoce el límite de `INT64_MIN`.
-- Se alinearon el parser y el validador semántico del compilador autoalojado con los
-  nuevos separadores y con los saltos antes de `else`/`elif` y manejadores `else err`.
-- Se añadió una regresión de ejecución que verifica límites de sentencia, retorno,
-  ramas, manejo de errores y listas multilínea.
+- Consolidates **Wysna** as the language identity and removes token aliases and
+  internal prefixes inherited from experimental names.
+- Adds newline and `;` statement separators. The rule covers LF, CRLF, and CR;
+  newlines inside parentheses and brackets remain part of expressions.
+- Unifies negative integer handling: the lexer emits a unary operator and the parser
+  recognizes the `INT64_MIN` boundary.
+- Aligns the self-hosted compiler's parser and semantic validator with the new
+  separators and with newlines before `else`/`elif` and `else err` handlers.
+- Adds a runtime regression covering statement boundaries, returns, branches, error
+  handling, and multiline lists.
 
-### Documentación y alcance
+### Documentation and Scope
 
-- Se aclararon los roles de Wysna Seed y Wysna Compiler. Seed sigue siendo la tubería
-  de referencia AST/HIR/MIR; el compilador autoalojado mantiene su emisor C99 directo
-  y su perfil medido en la matriz de paridad.
-- Se registraron en [docs/KNOWN_LIMITS.md](docs/KNOWN_LIMITS.md) los hallazgos de
-  auditoría que siguen abiertos: representación `WVal`, coste de CoW, verificación de
-  funciones genéricas no instanciadas, benchmarks y recuperación sintáctica.
-- La ABI C existente se conserva en esta versión; sus tipos y nombres documentados
-  siguen siendo parte del contrato actual.
+- Clarifies the roles of Wysna Seed and Wysna Compiler. Seed remains the reference
+  AST/HIR/MIR pipeline; the self-hosted compiler retains its direct C99 emitter and
+  measured profile in the parity matrix.
+- Records the audit findings that remain open in [docs/KNOWN_LIMITS.md](docs/KNOWN_LIMITS.md):
+  `WVal` representation, CoW cost, checking of uninstantiated generic functions,
+  benchmarks, and parser recovery.
+- Preserves the existing C ABI in this version; its documented types and names remain
+  part of the current contract.
 
-### Verificación
+### Verification
 
-La versión solo debe etiquetarse cuando pasen las puertas `release`, la suite de
-conformidad, el bootstrap determinista, los tests Python y las validaciones de
-sanitizers/distribución en los sistemas soportados. Esta rama no afirma que una
-publicación oficial ya se haya realizado.
+Tag this version only after the `release` gates, conformance suite, deterministic
+bootstrap, Python tests, and sanitizer and distribution checks pass on supported
+systems. This branch does not claim that an official release has been published.

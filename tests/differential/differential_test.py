@@ -252,7 +252,7 @@ def generate_fuzz_input(seed: int) -> str:
             "in", "match", "return", "break", "continue", "true", "false", "none", "and", "or", "not",
             "int", "float", "bool", "str", "unit", "list", "dict", "tuple",
             "x", "y", "Foo", "Bar", "init", "main",
-            "0", "42", "-1", "3.14", '"hello"', '"José"',
+            "0", "42", "-1", "3.14", '"hello"', '"Zoë"',
             "{", "}", "(", ")", "[", "]", ":", ",", ".", "->", "=>", "?", "??", "!", "==", "!=",
             "+", "-", "*", "/", "%", "..", "..=", "=", "\n", " ",
         ]

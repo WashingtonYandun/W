@@ -20,7 +20,7 @@ fn binary_search(items: list[int], target: int) -> int? {
 }
 
 fn main() -> unit {
-    let word = "José"
+    let word = "Zoë"
     print("String:", word)
     print("Code points (len):", len(word))
     print("4th code point (word[3]):", word[3])

@@ -1,7 +1,7 @@
 # Benchmark 7: UTF-8 Unicode scalar indexing, slicing, and code-point operations
 
 fn main() -> unit {
-    let text = "WySofia—José—🚀—Language—v0.1.2"
+    let text = "WySofia—Zoë—🚀—Language—v0.1.2"
     let n = len(text)
     let mut acc = 0
     let mut i = 0

@@ -200,21 +200,20 @@ the acceptance contracts in [Service foundations](SERVICE_FOUNDATIONS.md).
 
 ---
 
-## 8. Hallazgos de auditoría que siguen abiertos en 0.5.0
+## 8. Audit Findings Still Open in 0.5.0
 
-La limpieza de identidad y los separadores por línea no equivalen a cerrar todos los
-hallazgos arquitectónicos. Estos límites siguen formando parte del alcance publicado:
+Identity cleanup and newline separators do not close every architectural finding. These
+limits remain part of the published scope:
 
-| Hallazgo | Estado en 0.5.0 | Trabajo pendiente |
+| Finding | Status in 0.5.0 | Remaining work |
 | :--- | :--- | :--- |
-| W01 · Arquitectura del compilador | Wysna Seed conserva AST/HIR/MIR como tubería principal; Wysna Compiler analiza y emite C99 directamente desde su implementación modular. | Diseñar y validar una representación intermedia compartida antes de ampliar el backend autoalojado. |
-| W03 · Tamaño de valores | En ABI de 64 bits, `WVal` ocupa 32 bytes; los slots de listas almacenan valores etiquetados completos. | Medir una representación compacta con compatibilidad explícita de runtime y FFI. |
-| W04 · Coste de CoW | Una mutación de un buffer compartido puede copiar todos sus elementos. No hay análisis de unicidad que demuestre que puede mutarse en el sitio. | Medir presión de memoria y diseñar una regla de unicidad verificable antes de cambiar ownership o ABI. |
-| W05 · Genéricos | El cuerpo de una función genérica se verifica al crear una especialización. Una función genérica que nunca se instancia puede no recibir la misma verificación de cuerpo. | Separar la verificación del cuerpo genérico de la sustitución de tipos sin perder diagnósticos concretos. |
-| W06 · Concurrencia | Runtime y biblioteca estándar síncronos y monohilo; los conteos de referencias no son atómicos. | Definir memoria compartida, ownership y sincronización antes de añadir concurrencia. |
-| W07 · Benchmarks | El conjunto actual usa cargas pequeñas y no representa presión sostenida de memoria; el coste de iniciar un proceso puede dominar mediciones cortas. | Añadir cargas largas y de memoria antes de tomar decisiones de rendimiento. |
-| W08 · Recuperación sintáctica | La recuperación sirve para recolectar diagnósticos de `check` y LSP; usa sincronización heurística y no produce un árbol recuperado ejecutable. | Documentar y probar los límites de recuperación si se expone como contrato público. |
+| W01 · Compiler architecture | Wysna Seed retains AST/HIR/MIR as its main pipeline; Wysna Compiler parses and emits C99 directly through its modular implementation. | Design and validate a shared intermediate representation before expanding the self-hosted backend. |
+| W03 · Value size | On a 64-bit ABI, `WVal` occupies 32 bytes; list slots store full tagged values. | Measure a compact representation with explicit runtime and FFI compatibility. |
+| W04 · CoW cost | Mutating a shared buffer can copy all of its elements. No uniqueness analysis proves that it can be mutated in place. | Measure memory pressure and design a verifiable uniqueness rule before changing ownership or the ABI. |
+| W05 · Generics | A generic function body is checked when a specialization is created. A generic function that is never instantiated may not receive the same body checking. | Separate generic body checking from type substitution without losing concrete diagnostics. |
+| W06 · Concurrency | The runtime and standard library are synchronous and single-threaded; reference counts are not atomic. | Define shared memory, ownership, and synchronization before adding concurrency. |
+| W07 · Benchmarks | The current suite uses small workloads and does not represent sustained memory pressure; process startup can dominate short measurements. | Add long-running and memory-intensive workloads before making performance decisions. |
+| W08 · Syntax recovery | Recovery gathers diagnostics for `check` and LSP using heuristic synchronization and does not produce an executable recovered tree. | Document and test recovery limits if it becomes a public contract. |
 
-La matriz de motores registra las diferencias de comportamiento verificadas. Las cifras de
-benchmarks describen únicamente las cargas ejecutadas; no son una promesa de rendimiento
-general.
+The engine matrix records verified behavior differences. Benchmark figures describe only
+the workloads that were run; they are not a general performance guarantee.

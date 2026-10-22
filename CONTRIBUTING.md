@@ -150,8 +150,8 @@ When modifying compiler frontend, parser, or code generation logic that affects 
 
 - **Documentation Scope:** Keep `SPEC.md` and `docs/` focused on current public contracts and usage. Maintain ADRs, audit reports, implementation histories, operational roadmaps, and session notes outside the source repository. Update the relevant existing manual instead of adding a completion report. Store generated verification output in local caches or CI artifacts.
 - **Language Policy:**
-  - Explicaciones, especificaciones y documentación del proyecto se redactan en **español**.
-  - Código, identificadores, tipos, comentarios dentro del código y mensajes de commit se redactan en **inglés**.
+  - Project explanations, specifications, and documentation are written in **English**.
+  - Code, identifiers, types, code comments, and commit messages are written in **English**.
 - **Code Formatting:**
   - Wysna source code: Run `./wysna fmt <file>.wysna` or format whole directories with `./wysna fmt examples/`.
   - Python codebase: Follow PEP 8 guidelines.

@@ -28,7 +28,7 @@ def validate(installation, report):
     with tempfile.TemporaryDirectory(prefix='wysna installed project á ') as temporary:
         work = Path(temporary)
         source = work / 'hello á & spaces.wysna'
-        source.write_text('import "std/text" as text\nprint(text.join(["hola", "Wysna"], " "))\n', encoding='utf-8')
+        source.write_text('import "std/text" as text\nprint(text.join(["hello", "Wysna"], " "))\n', encoding='utf-8')
         invalid = work / 'invalid.wysna'
         invalid.write_text('let value: int = "wrong"\n', encoding='utf-8')
 
@@ -48,18 +48,18 @@ def validate(installation, report):
         run('version', ['version'])
         run('help', ['--help'])
         run('check', ['check', str(source)])
-        run('run-stdlib-and-unicode-path', ['run', str(source)], 'hola Wysna\n')
+        run('run-stdlib-and-unicode-path', ['run', str(source)], 'hello Wysna\n')
         diagnostic = run('invalid-exit-status', ['check', '--json', str(invalid)], code=1)
         assert json.loads(diagnostic.stdout)['code'] == 'W2001', diagnostic
         run('emit-c', ['emit-c', str(source), '-o', str(work / 'generated.c')])
         run('build-without-host-toolchain', ['build', str(source), '-o', str(work / 'hello')])
-        native = run('execute-native', [], 'hola Wysna\n', executable=work / 'hello.exe')
+        native = run('execute-native', [], 'hello Wysna\n', executable=work / 'hello.exe')
         assert native.returncode == 0
         broken_environment = dict(environment, CC=str(work / 'missing-compiler.exe'))
         diagnostic = run('explicit-CC-is-honored', ['build', '--json', str(source), '-o', str(work / 'bad')],
                          code=1, custom_environment=broken_environment)
         assert json.loads(diagnostic.stdout)['code'] == 'W5001', diagnostic
-        run('run-without-compiler', ['run', str(source)], 'hola Wysna\n', custom_environment=broken_environment)
+        run('run-without-compiler', ['run', str(source)], 'hello Wysna\n', custom_environment=broken_environment)
         for command in ('test', 'bench'):
             run(command + '-source-only', [command], code=1)
         run('selfhost-source-only', ['build', '--backend=selfhost', str(source), '-o', str(work / 'selfhost')], code=1)
@@ -98,9 +98,9 @@ def validate(installation, report):
         # A portable copy must not retain absolute installation paths.
         relocated = work / 'relocated Wysna á'
         shutil.copytree(installation, relocated)
-        run('relocated-runtime', ['run', str(source)], 'hola Wysna\n', executable=relocated / 'wysna.exe')
+        run('relocated-runtime', ['run', str(source)], 'hello Wysna\n', executable=relocated / 'wysna.exe')
         run('relocated-build', ['build', str(source), '-o', str(work / 'relocated')], executable=relocated / 'wysna.exe')
-        run('relocated-native', [], 'hola Wysna\n', executable=work / 'relocated.exe')
+        run('relocated-native', [], 'hello Wysna\n', executable=work / 'relocated.exe')
     report.update(passed=True, manifest=manifest, host_dependencies_removed=True)
 
 

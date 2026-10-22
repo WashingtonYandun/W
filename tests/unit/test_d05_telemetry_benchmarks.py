@@ -1,5 +1,5 @@
 """
-test_d05_telemetry_benchmarks.py - Conformance suite for Milestone D05: Telemetría y Rendimiento.
+test_d05_telemetry_benchmarks.py - Conformance suite for Milestone D05: Telemetry and Performance.
 
 Verifies:
 1. CLI --stats telemetry structure (monomorphization, codegen, timing_ms, peak_rss_kb).
