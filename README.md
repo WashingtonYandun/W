@@ -6,13 +6,25 @@
   <img src="assets/wawi.jpg" alt="Wysna language mascot" width="160">
 </p>
 
-Wysna is an experimental, statically typed programming language designed for native systems programming, CLI tooling, and high-performance applications. Wysna0 compiles programs to portable C99 and combines deterministic reference counting (ARC), copy-on-write (CoW) value semantics, explicit error unions, and a controlled C interoperability layer.
+Wysna is an experimental, statically typed programming language designed for native systems programming, CLI tooling, and high-performance applications. Wysna Seed compiles programs to portable C99 and combines deterministic reference counting (ARC), copy-on-write (CoW) value semantics, explicit error unions, and a controlled C interoperability layer.
 
-The current release is `0.4.0a1` (alpha). Wysna0 serves as the reference implementation, while Wysna1 is the self-hosted compiler verified against a 4-engine parity suite.
+The current release is `0.4.0a1` (alpha). Wysna Seed serves as the reference implementation, while Wysna Compiler is the self-hosted compiler verified against a 4-engine parity suite.
 
 ---
 
-## Compiler Architecture
+## Compiler Architecture & Naming
+
+Wysna defines a clear separation between the language, its reference implementation, and its self-hosted production compiler:
+
+| Component | Public Name | Internal Identifier | Implementation Language | Role |
+| :--- | :--- | :---: | :--- | :--- |
+| **Language** | **Wysna** | `wysna` | — | Language specification & grammar (`.wysna`) |
+| **Reference Compiler** | **Wysna Seed** | `seed` | Python | Source of truth, type interner & bootstrap seed (formerly W0) |
+| **Self-Hosted Compiler** | **Wysna Compiler** | `selfhost` | Wysna | Production self-hosted compiler (formerly W1) |
+| **Bootstrap Stage 1** | **Stage 1** | `stage1` | Native C99 (compiled by Seed) | First self-hosted compiler binary (`compiler0.c` &rarr; `stage1`) |
+| **Bootstrap Stage 2** | **Stage 2** | `stage2` | Native C99 (recompiled by Stage 1) | Deterministic fixed-point compiler binary (`compiler1.c` &rarr; `stage2`) |
+
+### Multi-Stage Compiler Pipeline
 
 Wysna implements a multi-stage compiler pipeline designed for verifiable transformations, deterministic memory safety, and portable native code generation:
 
@@ -161,7 +173,7 @@ inspect_file("README.md") else error { print(error.operation, error.code) }
 
 ## Standard Library Modules
 
-W provides a focused, high-performance standard library:
+Wysna provides a focused, high-performance standard library:
 
 | Module | Description | Key Functions & Types |
 | :--- | :--- | :--- |
