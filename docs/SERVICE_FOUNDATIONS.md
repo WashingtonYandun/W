@@ -21,14 +21,19 @@ measurements with a fixed working set on each deployment platform.
 
 ## JSON pilot contract
 
-The first service pilot must use a bounded JSON codec before adding HTTP handlers:
-explicit maximum input bytes, nesting depth and node count; strict number grammar;
-validated UTF-8; paired Unicode surrogates; offset-bearing recoverable errors;
-trailing-input rejection; and an explicit duplicate-key policy. Preserve numeric
-lexemes until the caller chooses an integer/float conversion. Differential tests
-must compare acceptance and values with an independent JSON implementation and
-include malformed, oversized and deeply nested inputs. This document does not
-introduce a `std/json` API before those contracts are implemented and tested.
+`std/json` provides a bounded parser for the first service pilot. `json.parse` limits
+input to 1 MiB, nesting to 32 arrays/objects, and the parsed tree to 100,000 values.
+`json.parse_with_limits` permits per-call budgets up to hard ceilings of 16 MiB,
+32 levels and 100,000 values. Wysna `str` values are valid UTF-8 by the language
+contract; JSON escapes additionally require paired UTF-16 surrogates. Errors carry
+Unicode-scalar offsets, trailing input is rejected, duplicate keys keep the last
+value, and numeric lexemes remain text until callers choose a conversion.
+
+The standard-toolkit gate compares parser acceptance and decoded values with Python's
+independent `json` implementation using exact decimal parsing and last-value duplicate
+semantics. Its corpus includes malformed inputs, surrogate policy, depth limits and
+custom byte/node budgets. Any HTTP integration must retain explicit response-size and
+JSON parsing budgets.
 
 ## IO, scheduling and failure boundaries
 

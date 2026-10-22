@@ -98,6 +98,10 @@ def validate(wheel, forbidden, report):
             '    let value = json.parse("{\\"ready\\":true}") else error { return }\n'
             '    let encoded = json.stringify(value) else error { return }\n'
             '    print(encoded)\n'
+            '    json.parse_with_limits("[1,2]", 5, 32, 2) else error {\n'
+            '        print("json node budget", error.offset)\n'
+            '        json.null()\n'
+            '    }\n'
             '}\n'
             'exercise()\n', encoding='utf-8')
         (work / 'invalid.wysna').write_text('let value: int = "wrong"\n', encoding='utf-8')
@@ -132,7 +136,7 @@ def validate(wheel, forbidden, report):
         rejected = run('invalid', ['check', '--json', 'invalid.wysna'], code=1)
         assert json.loads(rejected.stdout)['code'] == 'W2001'
         run('run', ['run', 'hello.wysna'], expected='hello installed\n')
-        run('stdlib', ['run', 'library.wysna'], expected='hello stdlib\n{"ready":true}\n')
+        run('stdlib', ['run', 'library.wysna'], expected='hello stdlib\n{"ready":true}\njson node budget 3\n')
         formatted = run('fmt', ['fmt', 'library.wysna'])
         (work / 'formatted.wysna').write_text(formatted.stdout, encoding='utf-8')
         run('fmt-idempotence', ['fmt', 'formatted.wysna'], expected=formatted.stdout)
@@ -143,7 +147,7 @@ def validate(wheel, forbidden, report):
         binary = work / ('program.exe' if os.name == 'nt' else 'program')
         run('build', ['build', 'library.wysna', '-o', str(binary)])
         native = subprocess.run([str(binary)], cwd=work, env=environment, capture_output=True, text=True, timeout=30)
-        assert native.returncode == 0 and native.stdout == 'hello stdlib\n{"ready":true}\n' and not native.stderr, native
+        assert native.returncode == 0 and native.stdout == 'hello stdlib\n{"ready":true}\njson node budget 3\n' and not native.stderr, native
         checks.append({'name': 'native-execution', 'exit_code': native.returncode, 'stdout': native.stdout})
         repl = run('repl', ['repl'], input_text='print(7)\nexit\n')
         assert '7' in repl.stdout

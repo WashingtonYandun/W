@@ -26,12 +26,14 @@ Wysna distributes modules under `std/` imported via canonical paths such as `imp
   - `parse.parse_int(text) -> int ! ParseError`: parse 64-bit signed integer with whitespace trimming, optional sign, and overflow checks.
   - `parse.parse_float(text) -> float ! ParseError`: parse IEEE-754 64-bit float with fractional and exponent support.
 - `std/json`: bounded JSON parsing and deterministic compact serialization.
-  - `json.parse(text) -> Value ! JsonError`: parse one JSON value; error offsets count Unicode scalar values.
+  - `json.parse(text) -> Value ! JsonError`: parse one JSON value with defaults of 1,048,576 UTF-8 input bytes, 32 nested arrays/objects, and 100,000 JSON values; error offsets count Unicode scalar values.
+  - `json.parse_with_limits(text, max_input_bytes, max_depth, max_nodes) -> Value ! JsonError`: set per-call budgets. Bytes range from 1 to 16,777,216 (the default is 1,048,576); depth and node budgets can be reduced from hard maxima of 32 and 100,000. Invalid budgets return `JsonError` at offset 0.
+  - The node budget counts the root and every array, object, and primitive value. Object member names do not count; values from duplicate members count before the last value wins.
   - `json.stringify(value) -> str ! JsonError`: serialize compact JSON with object keys sorted by Unicode scalar value.
   - `Value` supports null, boolean, number, string, array and object values. Numbers preserve their JSON source spelling as `str`, avoiding silent binary64 precision loss.
   - `json.null()`, `boolean()`, `number()`, `string()`, `array()` and `object()` construct values. `number()` validates its input.
   - `json.is_null()`, `as_bool()`, `as_number()`, `as_string()`, `as_array()`, `as_object()`, `get()` and `at()` inspect values; optional accessors return `none` for a type mismatch or missing index/key.
-  - Objects use string keys. Repeated keys during parsing keep the last value. Parsing rejects unpaired UTF-16 surrogates, malformed number syntax, trailing content and nesting deeper than 32 containers.
+  - Objects use string keys. Repeated keys during parsing keep the last value. Parsing rejects unpaired UTF-16 surrogates, malformed number syntax, trailing content and inputs beyond the selected budgets.
 - `std/text`: string manipulation and query operations.
   - `text.join(parts, separator) -> str`: join string list with separator.
   - `text.pad_left(text, width, fill) -> str`: pad text on the left with fill character.

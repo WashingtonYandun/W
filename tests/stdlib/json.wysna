@@ -10,6 +10,18 @@ fn report_invalid(source: str, label: str) -> unit {
     })
 }
 
+fn report_limited(label: str, source: str, max_input_bytes: int, max_depth: int, max_nodes: int) -> unit {
+    let value = json.parse_with_limits(source, max_input_bytes, max_depth, max_nodes) else error {
+        print(label, "error", error.offset, error.message)
+        return
+    }
+    let encoded = json.stringify(value) else error {
+        print(label, "stringify error", error.offset, error.message)
+        return
+    }
+    print(label, "ok", encoded)
+}
+
 fn main() -> unit {
     let decoded = json.parse("{\"name\":\"Wysna\",\"items\":[true,false,null],\"number\":-12.5e+2,\"unicode\":\"\\uD83D\\uDE00\",\"text\":\"line\\nnext\\t\\\"\"}") else error {
         print("parse error", error.offset, error.message)
@@ -40,6 +52,18 @@ fn main() -> unit {
     report_invalid("\"\\uD800\"", "surrogate")
     report_invalid("01", "leading zero")
     report_invalid("1e", "exponent")
+    report_limited("byte exact", "\"😀\"", 6, 32, 100000)
+    report_limited("byte limit", "\"😀\"", 5, 32, 100000)
+    report_limited("two-byte exact", "\"é\"", 4, 32, 100000)
+    report_limited("depth exact", "[[]]", 4, 2, 100000)
+    report_limited("depth limit", "[[]]", 4, 1, 100000)
+    report_limited("node exact", "[1,2]", 5, 32, 3)
+    report_limited("node limit", "[1,2]", 5, 32, 2)
+    report_limited("duplicate node exact", "{\"x\":1,\"x\":2}", 13, 32, 3)
+    report_limited("invalid budget", "true", 0, 32, 1)
+    report_limited("byte ceiling", "true", 16777217, 32, 1)
+    report_limited("depth ceiling", "true", 4, 33, 1)
+    report_limited("node ceiling", "true", 4, 32, 100001)
     let mut too_deep = ""
     for depth in 0..33 {
         too_deep = too_deep + "["

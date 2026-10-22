@@ -7,6 +7,32 @@ pub struct JsonError {
     message: str,
 }
 
+fn utf8_width(codepoint: int) -> int {
+    if codepoint <= 127 {
+        return 1
+    }
+    if codepoint <= 2047 {
+        return 2
+    }
+    if codepoint <= 65535 {
+        return 3
+    }
+    return 4
+}
+
+fn validate_input_size(source: str, max_input_bytes: int) -> unit ! JsonError {
+    let mut total_bytes = 0
+    let mut index = 0
+    while index < len(source) {
+        let width = utf8_width(ord(source[index]))
+        if total_bytes + width > max_input_bytes {
+            return Err(JsonError { offset: index, message: "maximum JSON input byte limit exceeded" })
+        }
+        total_bytes = total_bytes + width
+        index = index + 1
+    }
+}
+
 fn is_digit(value: str) -> bool {
     if len(value) != 1 {
         return false
@@ -44,10 +70,16 @@ class Decoder {
     private source: str
     private index: int
     private depth: int
-    public fn init(source: str) -> unit {
+    private max_depth: int
+    private max_nodes: int
+    private node_count: int
+    public fn init(source: str, max_depth: int, max_nodes: int) -> unit {
         this.source = source
         this.index = 0
         this.depth = 0
+        this.max_depth = max_depth
+        this.max_nodes = max_nodes
+        this.node_count = 0
     }
     public fn peek() -> str {
         if this.index >= len(this.source) {
@@ -75,6 +107,12 @@ class Decoder {
     }
     public fn fail(message: str) -> JsonError {
         return JsonError { offset: this.index, message: message }
+    }
+    public fn reserve_node() -> unit ! JsonError {
+        if this.node_count >= this.max_nodes {
+            return Err(this.fail("maximum JSON value node limit exceeded"))
+        }
+        this.node_count = this.node_count + 1
     }
     public fn expect(value: str) -> unit ! JsonError {
         if this.take() != value {
@@ -199,8 +237,13 @@ class Decoder {
     public fn read_array() -> Value ! JsonError {
         this.index = this.index + 1
         this.depth = this.depth + 1
-        if this.depth > 32 {
-            return Err(this.fail("maximum JSON nesting depth is 32"))
+        if this.depth > this.max_depth {
+            let message = if this.max_depth == 32 {
+                "maximum JSON nesting depth is 32"
+            } else {
+                "maximum JSON nesting depth limit exceeded"
+            }
+            return Err(this.fail(message))
         }
         this.skip_space()
         let mut values: list[Value] = []
@@ -228,8 +271,13 @@ class Decoder {
     public fn read_object() -> Value ! JsonError {
         this.index = this.index + 1
         this.depth = this.depth + 1
-        if this.depth > 32 {
-            return Err(this.fail("maximum JSON nesting depth is 32"))
+        if this.depth > this.max_depth {
+            let message = if this.max_depth == 32 {
+                "maximum JSON nesting depth is 32"
+            } else {
+                "maximum JSON nesting depth limit exceeded"
+            }
+            return Err(this.fail(message))
         }
         this.skip_space()
         let mut fields: dict[str, Value] = {}
@@ -267,27 +315,34 @@ class Decoder {
         this.skip_space()
         let current = this.peek()
         if current == "\"" {
+            this.reserve_node()?
             return Value.String(this.read_string()?)
         }
         if current == "{" {
+            this.reserve_node()?
             return this.read_object()
         }
         if current == "[" {
+            this.reserve_node()?
             return this.read_array()
         }
         if current == "t" {
+            this.reserve_node()?
             this.read_literal("true")?
             return Value.Bool(true)
         }
         if current == "f" {
+            this.reserve_node()?
             this.read_literal("false")?
             return Value.Bool(false)
         }
         if current == "n" {
+            this.reserve_node()?
             this.read_literal("null")?
             return Value.Null
         }
         if current == "-" or is_digit(current) {
+            this.reserve_node()?
             return Value.Number(this.read_number()?)
         }
         return Err(this.fail("expected JSON value"))
@@ -304,7 +359,21 @@ class Decoder {
 }
 
 pub fn parse(source: str) -> Value ! JsonError {
-    return Decoder(source).document()
+    return parse_with_limits(source, 1048576, 32, 100000)
+}
+
+pub fn parse_with_limits(source: str, max_input_bytes: int, max_depth: int, max_nodes: int) -> Value ! JsonError {
+    if max_input_bytes < 1 or max_input_bytes > 16777216 {
+        return Err(JsonError { offset: 0, message: "max_input_bytes must be between 1 and 16777216" })
+    }
+    if max_depth < 1 or max_depth > 32 {
+        return Err(JsonError { offset: 0, message: "max_depth must be between 1 and 32" })
+    }
+    if max_nodes < 1 or max_nodes > 100000 {
+        return Err(JsonError { offset: 0, message: "max_nodes must be between 1 and 100000" })
+    }
+    validate_input_size(source, max_input_bytes)?
+    return Decoder(source, max_depth, max_nodes).document()
 }
 
 pub fn null() -> Value {

@@ -6,4 +6,16 @@ invalid 3 expected JSON value
 surrogate 8 high surrogate must be followed by a low surrogate
 leading zero 1 leading zero in number
 exponent 2 expected exponent digits
+byte exact ok "😀"
+byte limit error 2 maximum JSON input byte limit exceeded
+two-byte exact ok "é"
+depth exact ok [[]]
+depth limit error 2 maximum JSON nesting depth limit exceeded
+node exact ok [1,2]
+node limit error 3 maximum JSON value node limit exceeded
+duplicate node exact ok {"x":2}
+invalid budget error 0 max_input_bytes must be between 1 and 16777216
+byte ceiling error 0 max_input_bytes must be between 1 and 16777216
+depth ceiling error 0 max_depth must be between 1 and 32
+node ceiling error 0 max_nodes must be between 1 and 100000
 deep 33 maximum JSON nesting depth is 32
