@@ -25,9 +25,9 @@ def test_readme_examples_execute_in_all_engines():
 def test_standard_resources_are_bounded_in_a_persistent_process():
     source = '''import "std/buffer"
 import "std/files"
-extern "C" fn w_host_active_handles() -> int
-extern "C" fn w_host_active_bytes() -> int
-extern "C" fn w_host_buffer_size(handle: opaque) -> int
+extern "C" fn wysna_host_active_handles() -> int
+extern "C" fn wysna_host_active_bytes() -> int
+extern "C" fn wysna_host_buffer_size(handle: opaque) -> int
 fn request() -> unit ! files.FileError {
     let data = new buffer.Bytes()
     data.append(255) else error { exit(21) return }
@@ -67,19 +67,19 @@ fn missing_file() {
     }
     exit(31)
 }
-let baseline = w_host_active_handles()
+let baseline = wysna_host_active_handles()
 missing_file()
 containers_and_closures()
-if w_host_buffer_size(borrowed()) != -1 { exit(29) }
+if wysna_host_buffer_size(borrowed()) != -1 { exit(29) }
 for count in [10000, 100000] {
     for index in 0..count {
         request() else error { exit(26) }
-        if w_host_active_handles() != baseline or w_host_active_bytes() != 0 { exit(27) }
+        if wysna_host_active_handles() != baseline or wysna_host_active_bytes() != 0 { exit(27) }
     }
-    print(count, w_host_active_handles() - baseline, w_host_active_bytes())
+    print(count, wysna_host_active_handles() - baseline, wysna_host_active_bytes())
 }
 closed_alias()
-print(w_host_active_handles() - baseline)
+print(wysna_host_active_handles() - baseline)
 '''
     selfhost_bin = ensure_selfhost_compiler_binary(str(ROOT))
     with tempfile.TemporaryDirectory(prefix='w-persistent-resource-') as temporary:

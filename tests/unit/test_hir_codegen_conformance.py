@@ -30,13 +30,13 @@ def run_hir_codegen_suite() -> bool:
     failures = []
 
     for f in files:
-        w_path = os.path.join(runtime_dir, f)
+        wysna_path = os.path.join(runtime_dir, f)
         expected_path = os.path.join(runtime_dir, f.replace(".wysna", ".expected"))
         if not os.path.exists(expected_path):
             continue
 
         total += 1
-        with open(w_path, "r", encoding="utf-8") as stream:
+        with open(wysna_path, "r", encoding="utf-8") as stream:
             code = stream.read()
         with open(expected_path, "r", encoding="utf-8") as stream:
             expected_out = stream.read()
@@ -46,14 +46,14 @@ def run_hir_codegen_suite() -> bool:
             bin_path = os.path.join(tmpdir, "out.bin")
 
             try:
-                ast = Parser(file=w_path).parse(code)
-                checker = TypeChecker(file=w_path)
+                ast = Parser(file=wysna_path).parse(code)
+                checker = TypeChecker(file=wysna_path)
                 checker.check(ast)
 
-                builder = HirBuilder(checker.interner, file_path=w_path)
+                builder = HirBuilder(checker.interner, file_path=wysna_path)
                 hir_mod = builder.lower(ast)
 
-                gen = HirCCodeGen(checker.interner, file_path=w_path)
+                gen = HirCCodeGen(checker.interner, file_path=wysna_path)
                 c_code = gen.generate(hir_mod)
 
                 with open(c_path, "w", encoding="utf-8") as cf:

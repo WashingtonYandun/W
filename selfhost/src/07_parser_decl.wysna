@@ -11,7 +11,7 @@ fn parse_let_stmt(is_global: bool) -> unit {
     if is_global and check_kind("LBRACKET") and peek_tok(1).kind == "RBRACKET" {
         advance_tok()
         advance_tok()
-        val_r = ExprRes { val: "w_make_list(0, NULL)", lref: "" }
+        val_r = ExprRes { val: "wysna_make_list(0, NULL)", lref: "" }
     } else {
         val_r = parse_expr(0, true)
     }
@@ -21,7 +21,7 @@ fn parse_let_stmt(is_global: bool) -> unit {
     }
     if is_global {
         g_globals.append(vname)
-        emit_line("w_assign(&" + vname + ", " + own_expr(val_r.val) + ");")
+        emit_line("wysna_assign(&" + vname + ", " + own_expr(val_r.val) + ");")
     } else {
         let initial = snapshot_value(val_r.val)
         declare_owned_var(vname, own_expr(initial))
@@ -33,9 +33,9 @@ fn parse_return_stmt() -> unit {
     if not expression_starter(at_tok().kind) {
         emit_cleanup_until_fn()
         if g_fn_fallible {
-            emit_line("return w_ok(w_unit());")
+            emit_line("return wysna_ok(wysna_unit());")
         } else {
-            emit_line("return w_unit();")
+            emit_line("return wysna_unit();")
         }
         return
     }
@@ -44,7 +44,7 @@ fn parse_return_stmt() -> unit {
     emit_line("WVal " + ret_hold + " = " + own_expr(val_r.val) + ";")
     emit_cleanup_until_fn()
     if g_fn_fallible {
-        emit_line("return w_wrap_result(" + ret_hold + ", \"" + g_cur_err_type + "\");")
+        emit_line("return wysna_wrap_result(" + ret_hold + ", \"" + g_cur_err_type + "\");")
     } else {
         emit_line("return " + ret_hold + ";")
     }
@@ -128,7 +128,7 @@ fn parse_for_stmt() -> unit {
         idx_tmp = new_aux("_idx")
         item_tmp = new_aux("_item")
         let inclusive = range_kind == "DOT_DOT_EQ"
-        emit_line("int32_t " + count + " = w_range_count(" + first + ", " + last + ", " + str(inclusive) + ");")
+        emit_line("int32_t " + count + " = wysna_range_count(" + first + ", " + last + ", " + str(inclusive) + ");")
         emit_line("for (int32_t " + idx_tmp + " = 0; " + idx_tmp + " < " + count + "; " + idx_tmp + "++) {")
     } else {
         let iter_r = parse_expr(0, false)
@@ -142,15 +142,15 @@ fn parse_for_stmt() -> unit {
     let saved_loop = g_cur_stmts
     g_cur_stmts = empty
     if range_kind != "" {
-        emit_line("WVal " + item_tmp + " = w_int((" + first + ").as.i + (int64_t)" + idx_tmp + ");")
+        emit_line("WVal " + item_tmp + " = wysna_int((" + first + ").as.i + (int64_t)" + idx_tmp + ");")
     } else {
         emit_line("WVal " + item_tmp + " = " + iter_tmp + ".as.list->data[" + idx_tmp + "];")
     }
     if len(pat_names) == 1 {
-        declare_owned_var("v_" + pat_names[0], "w_clone(" + item_tmp + ")")
+        declare_owned_var("v_" + pat_names[0], "wysna_clone(" + item_tmp + ")")
     } else {
         for pi in 0..len(pat_names) {
-            declare_owned_var("v_" + pat_names[pi], "w_clone((" + item_tmp + ").as.tuple->items[" + str(pi) + "])")
+            declare_owned_var("v_" + pat_names[pi], "wysna_clone((" + item_tmp + ").as.tuple->items[" + str(pi) + "])")
         }
     }
     let body_v = parse_block_expr()
@@ -338,7 +338,7 @@ fn parse_class_decl() -> unit {
             for idx in 0..len(p_names) {
                 m_sig = m_sig + ", WVal v_" + p_names[idx]
             }
-            let c_mname = "w_method_" + cls_name + "__" + mname
+            let c_mname = "wysna_method_" + cls_name + "__" + mname
             g_protos.append("static WVal " + c_mname + "(" + m_sig + ");")
             let prev_fall = g_fn_fallible
             let prev_err = g_cur_err_type
@@ -348,14 +348,14 @@ fn parse_class_decl() -> unit {
             g_cur_stmts = empty
             push_scope("fn")
             let mut ret_v = parse_block_expr()
-            if unit_return { ret_v = "w_unit()" }
+            if unit_return { ret_v = "wysna_unit()" }
             let ret_hold = new_aux("_ret")
             let mut owned_return = own_expr(ret_v)
-            if unit_result_return { owned_return = "w_discard_result_value(" + owned_return + ")" }
+            if unit_result_return { owned_return = "wysna_discard_result_value(" + owned_return + ")" }
             emit_line("WVal " + ret_hold + " = " + owned_return + ";")
             pop_scope()
             if g_fn_fallible {
-                emit_line("return w_wrap_result(" + ret_hold + ", \"" + g_cur_err_type + "\");")
+                emit_line("return wysna_wrap_result(" + ret_hold + ", \"" + g_cur_err_type + "\");")
             } else {
                 emit_line("return " + ret_hold + ";")
             }
@@ -423,9 +423,9 @@ fn parse_class_decl() -> unit {
             init_call_args = init_call_args + ", v_" + eff_init_p[idx]
         }
     }
-    g_protos.append("static const WClassVTable w_vtable_" + cls_name + ";")
-    g_protos.append("static WVal w_new_" + cls_name + "(" + new_sig + ");")
-    let mut new_str = "static WVal w_new_" + cls_name + "(" + new_sig + ") {\n"
+    g_protos.append("static const WClassVTable wysna_vtable_" + cls_name + ";")
+    g_protos.append("static WVal wysna_new_" + cls_name + "(" + new_sig + ");")
+    let mut new_str = "static WVal wysna_new_" + cls_name + "(" + new_sig + ") {\n"
     if len(all_fnames) > 0 {
         let mut kj = ""
         let mut vj = ""
@@ -440,14 +440,14 @@ fn parse_class_decl() -> unit {
         let fcnt = str(len(all_fnames))
         new_str = new_str + "    const char* _k[" + fcnt + "] = { " + kj + " };\n"
         new_str = new_str + "    WVal _v[" + fcnt + "] = { " + vj + " };\n"
-        new_str = new_str + "    WVal v_self = w_make_object(\"" + cls_name + "\", " + fcnt + ", _k, _v);\n"
-        new_str = new_str + "    w_release_array(" + fcnt + ", _v);\n"
+        new_str = new_str + "    WVal v_self = wysna_make_object(\"" + cls_name + "\", " + fcnt + ", _k, _v);\n"
+        new_str = new_str + "    wysna_release_array(" + fcnt + ", _v);\n"
     } else {
-        new_str = new_str + "    WVal v_self = w_make_object(\"" + cls_name + "\", 0, NULL, NULL);\n"
+        new_str = new_str + "    WVal v_self = wysna_make_object(\"" + cls_name + "\", 0, NULL, NULL);\n"
     }
-    new_str = new_str + "    v_self.as.st->vtable = &w_vtable_" + cls_name + ";\n"
+    new_str = new_str + "    v_self.as.st->vtable = &wysna_vtable_" + cls_name + ";\n"
     if init_owner != "" {
-        new_str = new_str + "    w_release(w_method_" + init_owner + "__init(" + init_call_args + "));\n"
+        new_str = new_str + "    wysna_release(wysna_method_" + init_owner + "__init(" + init_call_args + "));\n"
     }
     new_str = new_str + "    return v_self;\n}"
     g_fn_defs.append(new_str)
@@ -464,22 +464,22 @@ fn emit_oop_dispatchers() -> unit {
             let owner = find_class_method_owner(class_.name, name)
             if owner == "" or find_class_method_arity(class_.name, name) != arity { slots.append("NULL") }
             else {
-                let adapter = "w_vinvoke_" + owner + "__" + name
+                let adapter = "wysna_vinvoke_" + owner + "__" + name
                 slots.append(adapter)
                 if not module_contains(adapters, adapter) {
                     adapters.append(adapter)
                     let mut arguments = "receiver"
                     for i in 0..arity { arguments = arguments + ", argv[" + str(i) + "]" }
-                    g_fn_defs.append("static WVal " + adapter + "(WVal receiver, int32_t argc, const WVal* argv) { (void)argc; (void)argv; return w_method_" + owner + "__" + name + "(" + arguments + "); }")
+                    g_fn_defs.append("static WVal " + adapter + "(WVal receiver, int32_t argc, const WVal* argv) { (void)argc; (void)argv; return wysna_method_" + owner + "__" + name + "(" + arguments + "); }")
                 }
             }
         }
         if len(slots) > 0 {
             let mut joined = ""
             for i in 0..len(slots) { if i > 0 { joined = joined + ", " } joined = joined + slots[i] }
-            tables.append("static const WInvoke w_slots_" + class_.name + "[" + str(len(slots)) + "] = { " + joined + " };")
-            tables.append("static const WClassVTable w_vtable_" + class_.name + " = { " + str(len(slots)) + ", w_slots_" + class_.name + " };")
-        } else { tables.append("static const WClassVTable w_vtable_" + class_.name + " = { 0, NULL };") }
+            tables.append("static const WInvoke wysna_slots_" + class_.name + "[" + str(len(slots)) + "] = { " + joined + " };")
+            tables.append("static const WClassVTable wysna_vtable_" + class_.name + " = { " + str(len(slots)) + ", wysna_slots_" + class_.name + " };")
+        } else { tables.append("static const WClassVTable wysna_vtable_" + class_.name + " = { 0, NULL };") }
     }
     for table in tables { g_fn_defs.append(table) }
     for di in 0..len(g_dispatch_names) {
@@ -493,7 +493,7 @@ fn emit_oop_dispatchers() -> unit {
             arguments = arguments + "_a" + str(i)
         }
         if arity == 0 { arguments = "NULL" } else { arguments = "(WVal[]){ " + arguments + " }" }
-        g_fn_defs.append("static WVal w_dispatch__" + name + "__" + str(arity) + "(" + signature + ") { return w_virtual_call(v_self, " + str(di) + ", " + str(arity) + ", " + arguments + "); }")
+        g_fn_defs.append("static WVal wysna_dispatch__" + name + "__" + str(arity) + "(" + signature + ") { return wysna_virtual_call(v_self, " + str(di) + ", " + str(arity) + ", " + arguments + "); }")
     }
 }
 
@@ -604,14 +604,14 @@ fn parse_fn_decl() -> unit {
     g_borrowed_vars = borrowed
     push_scope("fn")
     let mut ret_v = parse_block_expr()
-    if unit_return { ret_v = "w_unit()" }
+    if unit_return { ret_v = "wysna_unit()" }
     let ret_hold = new_aux("_ret")
     let mut owned_return = own_expr(ret_v)
-    if unit_result_return { owned_return = "w_discard_result_value(" + owned_return + ")" }
+    if unit_result_return { owned_return = "wysna_discard_result_value(" + owned_return + ")" }
     emit_line("WVal " + ret_hold + " = " + owned_return + ";")
     pop_scope()
     if g_fn_fallible {
-        emit_line("return w_wrap_result(" + ret_hold + ", \"" + g_cur_err_type + "\");")
+        emit_line("return wysna_wrap_result(" + ret_hold + ", \"" + g_cur_err_type + "\");")
     } else {
         emit_line("return " + ret_hold + ";")
     }
@@ -666,7 +666,7 @@ fn parse_extern_decl() {
         native_params = native_params + ffi_c_type(types[i], false)
         let variable = "v_" + str(i)
         wrapped_params = wrapped_params + "WVal " + variable
-        if types[i] == "int32" { arguments = arguments + "w_ffi_int32(" + variable + ")" }
+        if types[i] == "int32" { arguments = arguments + "wysna_ffi_int32(" + variable + ")" }
         elif types[i] == "int" or types[i] == "int64" { arguments = arguments + variable + ".as.i" }
         elif types[i] == "float" or types[i] == "double" { arguments = arguments + variable + ".as.f" }
         elif types[i] == "bool" { arguments = arguments + variable + ".as.b" }
@@ -678,11 +678,11 @@ fn parse_extern_decl() {
     g_protos.append("static WVal " + c_name + "(" + wrapped_params + ");")
     let call = native_name + "(" + arguments + ")"
     let mut result = ""
-    if returned == "unit" { result = call + "; return w_unit();" }
-    elif returned == "int" or returned == "int32" or returned == "int64" { result = "return w_int(" + call + ");" }
-    elif returned == "float" or returned == "double" { result = "return w_float(" + call + ");" }
-    elif returned == "bool" { result = "return w_bool(" + call + ");" }
-    elif native_name == "w_host_buffer_new" or native_name == "w_host_file_open" { result = "return w_host_owned_pointer(" + call + ");" }
-    else { result = "return w_pointer(" + call + ");" }
+    if returned == "unit" { result = call + "; return wysna_unit();" }
+    elif returned == "int" or returned == "int32" or returned == "int64" { result = "return wysna_int(" + call + ");" }
+    elif returned == "float" or returned == "double" { result = "return wysna_float(" + call + ");" }
+    elif returned == "bool" { result = "return wysna_bool(" + call + ");" }
+    elif native_name == "wysna_host_buffer_new" or native_name == "wysna_host_file_open" { result = "return wysna_host_owned_pointer(" + call + ");" }
+    else { result = "return wysna_pointer(" + call + ");" }
     g_fn_defs.append("static WVal " + c_name + "(" + wrapped_params + ") { " + result + " }")
 }

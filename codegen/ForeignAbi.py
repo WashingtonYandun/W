@@ -11,14 +11,14 @@ def foreign_wrapper(c_name, native_name, signature):
     for index, type_ in enumerate(params):
         value = 'v_' + str(index)
         field = {'int': 'i', 'int64': 'i', 'float': 'f', 'double': 'f', 'bool': 'b', 'opaque': 'pointer'}.get(type_)
-        arguments.append('w_ffi_int32(' + value + ')' if type_ == 'int32' else value + '.as.' + field)
+        arguments.append('wysna_ffi_int32(' + value + ')' if type_ == 'int32' else value + '.as.' + field)
     call = native_name + '(' + ', '.join(arguments) + ')'
     if returned == 'unit':
-        body = call + '; return w_unit();'
+        body = call + '; return wysna_unit();'
     else:
-        constructor = {'int': 'w_int', 'int64': 'w_int', 'int32': 'w_int', 'float': 'w_float',
-                       'double': 'w_float', 'bool': 'w_bool', 'opaque': 'w_pointer'}[returned]
-        if native_name in ('w_host_buffer_new', 'w_host_file_open'):
-            constructor = 'w_host_owned_pointer'
+        constructor = {'int': 'wysna_int', 'int64': 'wysna_int', 'int32': 'wysna_int', 'float': 'wysna_float',
+                       'double': 'wysna_float', 'bool': 'wysna_bool', 'opaque': 'wysna_pointer'}[returned]
+        if native_name in ('wysna_host_buffer_new', 'wysna_host_file_open'):
+            constructor = 'wysna_host_owned_pointer'
         body = 'return ' + constructor + '(' + call + ');'
     return prototype, 'static WVal ' + c_name + '(' + wrapped_params + ') { ' + body + ' }'

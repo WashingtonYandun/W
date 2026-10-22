@@ -110,14 +110,14 @@ def run_scaling_tests():
     assert reference['retention/after'] == reference['retention/before']
     hir = HirBuilder(checker.interner).lower(ast)
     with tempfile.TemporaryDirectory(prefix='w-cow-scaling-') as directory:
-        w_path = Path(directory) / 'scaling.wysna'
-        w_path.write_text(source)
+        wysna_path = Path(directory) / 'scaling.wysna'
+        wysna_path.write_text(source)
         native_reference = None
         for backend in ['ast', 'hir', 'selfhost']:
             c_path, binary = Path(directory) / (backend + '.c'), Path(directory) / backend
             if backend == 'selfhost':
                 selfhost_bin = ensure_selfhost_compiler_binary(str(root))
-                subprocess.run([selfhost_bin, str(w_path), str(c_path)], cwd=root,
+                subprocess.run([selfhost_bin, str(wysna_path), str(c_path)], cwd=root,
                                check=True, capture_output=True, text=True, timeout=60)
             else:
                 code = (CCodeGen().generate(ast) if backend == 'ast'

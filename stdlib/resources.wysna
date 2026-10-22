@@ -1,6 +1,6 @@
-extern "C" fn w_host_claim(handle: opaque) -> opaque
-extern "C" fn w_host_claim_valid(token: opaque) -> int
-extern "C" fn w_host_close(token: opaque) -> int
+extern "C" fn wysna_host_claim(handle: opaque) -> opaque
+extern "C" fn wysna_host_claim_valid(token: opaque) -> int
+extern "C" fn wysna_host_close(token: opaque) -> int
 
 pub struct ResourceError { message: str }
 
@@ -18,20 +18,20 @@ pub class Resource {
         this.handle = handle
         this.dispose = dispose
         this.closed = false
-        this.claim = w_host_claim(handle)
+        this.claim = wysna_host_claim(handle)
     }
 
     public fn borrow() -> opaque ! ResourceError {
         if this.closed { return Err(ResourceError { message: "resource is closed" }) }
-        if w_host_claim_valid(this.claim) == 0 { return Err(ResourceError { message: "resource already owned or released" }) }
+        if wysna_host_claim_valid(this.claim) == 0 { return Err(ResourceError { message: "resource already owned or released" }) }
         return this.handle
     }
 
     public fn close() -> int {
         if this.closed { return 0 }
-        if w_host_claim_valid(this.claim) == 0 { return -1 }
+        if wysna_host_claim_valid(this.claim) == 0 { return -1 }
         let status = this.dispose(this.handle)
-        if status == 0 { this.closed = true w_host_close(this.claim) }
+        if status == 0 { this.closed = true wysna_host_close(this.claim) }
         return status
     }
 }

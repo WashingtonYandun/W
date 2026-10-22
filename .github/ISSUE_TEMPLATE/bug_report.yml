@@ -59,7 +59,7 @@ body:
         - "Parser (AST)"
         - "Type Checker (WType, TypeInterner)"
         - "Typed HIR (HirBuilder, HirCCodeGen)"
-        - "C99 Runtime (w_runtime.h, ARC, CoW)"
+        - "C99 Runtime (wysna_runtime.h, ARC, CoW)"
         - "Wysna Compiler (Self-Hosted)"
         - "CLI / Formatter (w fmt)"
         - "Other / Unknown"

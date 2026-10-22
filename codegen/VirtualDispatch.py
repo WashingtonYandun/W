@@ -13,24 +13,24 @@ def emit_vtables(class_names, methods, resolve):
                 slots.append('NULL')
                 continue
             owner, _ = resolved
-            adapter = 'w_vinvoke_' + owner + '__' + name
+            adapter = 'wysna_vinvoke_' + owner + '__' + name
             slots.append(adapter)
             if adapter not in adapters:
                 adapters.add(adapter)
                 arguments = ', '.join(['receiver'] + [f'argv[{index}]' for index in range(arity)])
                 definitions.append(f'static WVal {adapter}(WVal receiver, int32_t argc, const WVal* argv) {{ '
-                                   f'(void)argc; (void)argv; return w_method_{owner}__{name}({arguments}); }}')
+                                   f'(void)argc; (void)argv; return wysna_method_{owner}__{name}({arguments}); }}')
         if slots:
-            tables.append(f'static const WInvoke w_slots_{class_name}[{len(slots)}] = {{ ' + ', '.join(slots) + ' };')
-            tables.append(f'static const WClassVTable w_vtable_{class_name} = {{ {len(slots)}, w_slots_{class_name} }};')
+            tables.append(f'static const WInvoke wysna_slots_{class_name}[{len(slots)}] = {{ ' + ', '.join(slots) + ' };')
+            tables.append(f'static const WClassVTable wysna_vtable_{class_name} = {{ {len(slots)}, wysna_slots_{class_name} }};')
         else:
-            tables.append(f'static const WClassVTable w_vtable_{class_name} = {{ 0, NULL }};')
+            tables.append(f'static const WClassVTable wysna_vtable_{class_name} = {{ 0, NULL }};')
     definitions.extend(tables)
     for slot, (name, arity) in enumerate(methods):
         parameters = ', '.join(['WVal v_self'] + [f'WVal _a{index}' for index in range(arity)])
         arguments = '(WVal[]){ ' + ', '.join(f'_a{index}' for index in range(arity)) + ' }' if arity else 'NULL'
-        definitions.append(f'static WVal w_dispatch__{name}__{arity}({parameters}) {{ '
-                           f'return w_virtual_call(v_self, {slot}, {arity}, {arguments}); }}')
+        definitions.append(f'static WVal wysna_dispatch__{name}__{arity}({parameters}) {{ '
+                           f'return wysna_virtual_call(v_self, {slot}, {arity}, {arguments}); }}')
     return definitions
 
 

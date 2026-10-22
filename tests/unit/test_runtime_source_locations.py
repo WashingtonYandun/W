@@ -84,7 +84,7 @@ def _emit_c(root: Path, source: Path, c_file: Path, backend: str, selfhost_compi
     assert result.returncode == 0, (backend, result.stdout, result.stderr)
 
 
-def test_native_runtime_panics_report_exact_w_source_location():
+def test_native_runtime_panics_report_exact_wysna_source_location():
     root = Path(__file__).resolve().parents[2]
     compiler = os.environ.get("CC", "cc")
     from main import ensure_selfhost_compiler_binary

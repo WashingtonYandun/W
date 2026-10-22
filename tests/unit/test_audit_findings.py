@@ -66,8 +66,8 @@ def test_literal_indexing_scales_linearly_by_work_not_wall_clock():
                                str(source_path), '-o', str(emitted)]
                 built = subprocess.run(command, capture_output=True, text=True, timeout=120)
                 assert built.returncode == 0, built.stderr
-                code = emitted.read_text(encoding='utf-8').replace('    w_runtime_cleanup();',
-                    '    fprintf(stderr, "scan=%" PRIu64 "\\n", w_g_string_scan_steps);\n    w_runtime_cleanup();')
+                code = emitted.read_text(encoding='utf-8').replace('    wysna_runtime_cleanup();',
+                    '    fprintf(stderr, "scan=%" PRIu64 "\\n", wysna_g_string_scan_steps);\n    wysna_runtime_cleanup();')
                 emitted.write_text(code, encoding='utf-8')
                 binary = directory / executable_name(engine)
                 flags = ['-fsanitize=address,undefined', '-fno-omit-frame-pointer'] if (os.environ.get('W_SANITIZE') == '1' and os.name != 'nt') else []
@@ -93,7 +93,7 @@ def test_matrix_invalidates_changes_without_renaming_inputs():
                 'coverage': {engine: {'passed': len(labels)} for engine in ('interpreter', 'ast', 'hir', 'selfhost')}}
     assert 'STALE' not in generate_markdown_matrix(measured)
     for altered in (dict(current, sha='changed-commit'),
-                    dict(current, inputs={**current['inputs'], 'runtime/w_runtime.h': 'changed-bytes'})):
+                    dict(current, inputs={**current['inputs'], 'runtime/wysna_runtime.h': 'changed-bytes'})):
         with patch('tools.ci_conformance.source_fingerprint', return_value=altered):
             output = generate_markdown_matrix(measured)
             assert 'STALE' in output and '100.0%' not in output and '✅' not in output

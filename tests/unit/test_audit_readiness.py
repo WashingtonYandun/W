@@ -33,21 +33,21 @@ def test_principal_regressions_across_engines():
 
 
 RUNTIME_CASES = [
-    ('print(chr(65))', 'w_builtin_chr'),
-    ('print(ord("a"))', 'w_builtin_ord'),
-    ('print(bytes("abc"))', 'w_builtin_bytes'),
-    ('print(args())', 'w_builtin_args'),
-    ('print(slice("abc", 0, 1))', 'w_builtin_slice'),
-    ('print(enumerate([1]))', 'w_builtin_enumerate'),
-    ('print(dict_items({1: "a"}))', 'w_builtin_dict_items'),
-    ('print(read_file("missing"))', 'w_builtin_read_file'),
-    ('print(write_file("missing", "text"))', 'w_builtin_write_file'),
-    ('class C {}\nprint(weak(C()))', 'w_builtin_weak_owned'),
-    ('class C {}\nprint(upgrade(weak(C())))', 'w_builtin_upgrade'),
-    ('fn f() -> int ! str { Err("bad") }\nprint(f())', 'w_err'),
-    ('fn f() -> int ! str { Ok(1) }\nprint(f())', 'w_ok'),
-    ('let x: int? = 1\nprint(x ?? 0)', 'w_unwrap_optional'),
-    ('enum E { A(int) }\nprint(E.A(1))', 'w_enum_payload'),
+    ('print(chr(65))', 'wysna_builtin_chr'),
+    ('print(ord("a"))', 'wysna_builtin_ord'),
+    ('print(bytes("abc"))', 'wysna_builtin_bytes'),
+    ('print(args())', 'wysna_builtin_args'),
+    ('print(slice("abc", 0, 1))', 'wysna_builtin_slice'),
+    ('print(enumerate([1]))', 'wysna_builtin_enumerate'),
+    ('print(dict_items({1: "a"}))', 'wysna_builtin_dict_items'),
+    ('print(read_file("missing"))', 'wysna_builtin_read_file'),
+    ('print(write_file("missing", "text"))', 'wysna_builtin_write_file'),
+    ('class C {}\nprint(weak(C()))', 'wysna_builtin_weak_owned'),
+    ('class C {}\nprint(upgrade(weak(C())))', 'wysna_builtin_upgrade'),
+    ('fn f() -> int ! str { Err("bad") }\nprint(f())', 'wysna_err'),
+    ('fn f() -> int ! str { Ok(1) }\nprint(f())', 'wysna_ok'),
+    ('let x: int? = 1\nprint(x ?? 0)', 'wysna_unwrap_optional'),
+    ('enum E { A(int) }\nprint(E.A(1))', 'wysna_enum_payload'),
 ]
 def test_runtime_result_signatures_reject_corrupted_ir():
     for source, helper in RUNTIME_CASES:
@@ -71,11 +71,11 @@ def test_runtime_result_signatures_reject_corrupted_ir():
 def test_runtime_helper_substitution_and_exhaustive_registry():
     assert set(RUNTIME_ARITIES) == RUNTIME
     module, interner = lower('print(int(65))')
-    operation = next(item for item in operations(module) if item.opcode == 'runtime' and item.data['name'] == 'w_builtin_int')
-    operation.data['name'] = 'w_builtin_chr'
+    operation = next(item for item in operations(module) if item.opcode == 'runtime' and item.data['name'] == 'wysna_builtin_int')
+    operation.data['name'] = 'wysna_builtin_chr'
     rejects(module, interner)
     module, interner = lower('print(Ok(1) == Err(1))')
-    operation = next(item for item in operations(module) if item.opcode == 'runtime' and item.data['name'] == 'w_equal')
+    operation = next(item for item in operations(module) if item.opcode == 'runtime' and item.data['name'] == 'wysna_equal')
     function = next(fn for fn in module.functions if operation in [op for block in fn.blocks for op in block.operations])
     from checker.TypeInterner import TYPE_INT, TYPE_STR
     for index, type_id in zip(operation.args, (TYPE_INT, TYPE_STR)):
@@ -84,7 +84,7 @@ def test_runtime_helper_substitution_and_exhaustive_registry():
     try:
         Verifier(interner).runtime_types(operation, [slots[index] for index in operation.args], slots[operation.result])
     except Exception as error:
-        assert 'runtime operand/result types mismatch: w_equal' in str(error), error
+        assert 'runtime operand/result types mismatch: wysna_equal' in str(error), error
     else:
         raise AssertionError('Equality accepted incompatible canonical operands')
     function_type = interner.mk_function((), TYPE_INT)

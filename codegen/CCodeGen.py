@@ -25,7 +25,7 @@ class CleanupScope:
 class CCodeGen:
     """
     Canonical W v0.1 to C99 Transpiler Backend.
-    Preserves exact value semantics (Deterministic RC + Copy-on-Write via runtime/w_runtime.h),
+    Preserves exact value semantics (Deterministic RC + Copy-on-Write via runtime/wysna_runtime.h),
     reference semantics for OOP classes, dynamic dispatch, fallible error handling,
     and deterministic LIFO lifetime cleanup across all control-flow paths (v0.1.3).
     """
@@ -84,19 +84,19 @@ class CCodeGen:
             return
         scope = self.scope_stack.pop()
         for v in reversed(scope.vars):
-            out.append(f"w_release({v});")
+            out.append(f"wysna_release({v});")
 
     def _emit_cleanup_until_fn(self, out: List[str]) -> None:
         for scope in reversed(self.scope_stack):
             for v in reversed(scope.vars):
-                out.append(f"w_release({v});")
+                out.append(f"wysna_release({v});")
             if scope.kind == "fn":
                 break
 
     def _emit_cleanup_until_loop(self, out: List[str]) -> None:
         for scope in reversed(self.scope_stack):
             for v in reversed(scope.vars):
-                out.append(f"w_release({v});")
+                out.append(f"wysna_release({v});")
             if scope.kind == "loop":
                 break
 
@@ -104,19 +104,19 @@ class CCodeGen:
         """Protect an evaluated value before later operands can mutate its owner."""
         if value.startswith("_t"):
             return value
-        if value.startswith(("w_make_", "w_new_")):
+        if value.startswith(("wysna_make_", "wysna_new_")):
             return self._bind_call(value, out)
-        return self._bind_call(f"w_clone({value})", out)
+        return self._bind_call(f"wysna_clone({value})", out)
 
     def emit_value(self, expr, out: List[str]) -> str:
         return self._snapshot(self.emit_expr(expr, out), out)
 
     def _own_expr(self, val_expr: str) -> str:
         if val_expr.startswith("_t"):
-            return f"w_move(&{val_expr})"
-        if val_expr.startswith("w_make_") or val_expr.startswith("w_new_") or val_expr.startswith("w_clone("):
+            return f"wysna_move(&{val_expr})"
+        if val_expr.startswith("wysna_make_") or val_expr.startswith("wysna_new_") or val_expr.startswith("wysna_clone("):
             return val_expr
-        return f"w_clone({val_expr})"
+        return f"wysna_clone({val_expr})"
 
     def _is_local_var(self, c_name: str) -> bool:
         for scope in reversed(self.scope_stack):
@@ -135,8 +135,8 @@ class CCodeGen:
     def c_fn(self, name: str, ns: str = "") -> str:
         prefix = ns if ns else self.current_ns
         if prefix:
-            return f"w_fn_{prefix}__{name}"
-        return f"w_fn_{name}"
+            return f"wysna_fn_{prefix}__{name}"
+        return f"wysna_fn_{name}"
 
     def escape_c_str(self, value: str) -> str:
         from codegen.CStrings import quote
@@ -156,15 +156,15 @@ class CCodeGen:
 
         # If there are no top-level executable statements and main() exists in W, call it
         non_decls = [s for s in program.body if not isinstance(s, (FnDecl, StructDecl, EnumDecl, InterfaceDecl, ClassDecl, ImportDecl))]
-        if getattr(program, "call_entrypoint", not non_decls) and "w_fn_main" in self.fallible_fns:
-            main_stmts.append("WVal _t_main = w_fn_main();")
+        if getattr(program, "call_entrypoint", not non_decls) and "wysna_fn_main" in self.fallible_fns:
+            main_stmts.append("WVal _t_main = wysna_fn_main();")
             self._emit_entrypoint_guard(main_stmts)
 
         self._pop_scope(main_stmts)
         self._emit_oop_dispatchers()
 
         lines: List[str] = [
-            '#include "runtime/w_runtime.h"',
+            '#include "runtime/wysna_runtime.h"',
             ""
         ]
 
@@ -183,12 +183,12 @@ class CCodeGen:
                 lines.append("")
 
         lines.append("int main(int argc, char** argv) {")
-        lines.append("    w_init_args(argc, argv);")
+        lines.append("    wysna_init_args(argc, argv);")
         for s in main_stmts:
             lines.append(f"    {s}")
         for gv in reversed(self.global_vars):
-            lines.append(f"    w_release({gv});")
-        lines.append("    w_runtime_cleanup();")
+            lines.append(f"    wysna_release({gv});")
+        lines.append("    wysna_runtime_cleanup();")
         lines.append("    return 0;")
         lines.append("}")
         c_code_str = "\n".join(lines) + "\n"
@@ -263,48 +263,48 @@ class CCodeGen:
     def _default_c_expr_for_type(self, type_ann: TypeNode) -> str:
         if isinstance(type_ann, NamedType):
             if type_ann.name == "int":
-                return "w_int(0LL)"
+                return "wysna_int(0LL)"
             if type_ann.name == "float":
-                return "w_float(0.0)"
+                return "wysna_float(0.0)"
             if type_ann.name == "bool":
-                return "w_bool(false)"
+                return "wysna_bool(false)"
             if type_ann.name == "str":
-                return 'w_str("")'
+                return 'wysna_str("")'
         elif isinstance(type_ann, GenericType) and type_ann.name == "Weak":
-            return "w_empty_weak()"
+            return "wysna_empty_weak()"
         elif isinstance(type_ann, AstOptionalType):
-            return "w_none()"
+            return "wysna_none()"
         elif isinstance(type_ann, AstListType):
-            return "w_make_list(0, NULL)"
+            return "wysna_make_list(0, NULL)"
         elif isinstance(type_ann, AstDictType):
-            return "w_make_dict(0, NULL, NULL)"
-        return "w_none()"
+            return "wysna_make_dict(0, NULL, NULL)"
+        return "wysna_none()"
 
     def _prepare_oop_prototypes(self) -> None:
         for cls_name in self.class_order:
             cdecl = self.classes[cls_name]
-            self.fn_Prototypes.append(f"static const WClassVTable w_vtable_{cls_name};")
+            self.fn_Prototypes.append(f"static const WClassVTable wysna_vtable_{cls_name};")
             for m in cdecl.methods:
                 params = ["WVal v_self"] + [f"WVal v_{p.name}" for p in m.params]
-                self.fn_Prototypes.append(f"static WVal w_method_{cls_name}__{m.name}({', '.join(params)});")
+                self.fn_Prototypes.append(f"static WVal wysna_method_{cls_name}__{m.name}({', '.join(params)});")
             init_res = self._find_class_method(cls_name, "init")
             if init_res is not None:
                 _, init_m = init_res
                 init_sig = ", ".join([f"WVal v_{p.name}" for p in init_m.params]) if init_m.params else "void"
             else:
                 init_sig = "void"
-            self.fn_Prototypes.append(f"static WVal w_new_{cls_name}({init_sig});")
+            self.fn_Prototypes.append(f"static WVal wysna_new_{cls_name}({init_sig});")
 
         for mname, arity in self.dispatch_methods:
             params = ["WVal v_self"] + [f"WVal _a{i}" for i in range(arity)]
-            self.fn_Prototypes.append(f"static WVal w_dispatch__{mname}__{arity}({', '.join(params)});")
+            self.fn_Prototypes.append(f"static WVal wysna_dispatch__{mname}__{arity}({', '.join(params)});")
 
     def _emit_class_decl(self, stmt: ClassDecl) -> None:
         prev_cls = self.current_class
         self.current_class = stmt
         try:
             for m in stmt.methods:
-                c_name = f"w_method_{stmt.name}__{m.name}"
+                c_name = f"wysna_method_{stmt.name}__{m.name}"
                 params = ["WVal v_self"] + [f"WVal v_{p.name}" for p in m.params]
                 prev_fallible = self.current_fn_fallible
                 prev_err_type = self.current_fn_err_type
@@ -318,15 +318,15 @@ class CCodeGen:
                 self._push_scope("fn")
                 ret_expr = self.emit_block_value(m.body, body_stmts)
                 if m.return_type is None or isinstance(m.return_type, NamedType) and m.return_type.name == 'unit':
-                    ret_expr = 'w_unit()'
+                    ret_expr = 'wysna_unit()'
                 ret_hold = self.new_aux("_ret")
                 owned_return = self._own_expr(ret_expr)
                 if isinstance(m.return_type, ResultType) and isinstance(m.return_type.ok_type, NamedType) and m.return_type.ok_type.name == 'unit':
-                    owned_return = f"w_discard_result_value({owned_return})"
+                    owned_return = f"wysna_discard_result_value({owned_return})"
                 body_stmts.append(f"WVal {ret_hold} = {owned_return};")
                 self._pop_scope(body_stmts)
                 if self.current_fn_fallible:
-                    body_stmts.append(f'return w_wrap_result({ret_hold}, "{self.current_fn_err_type}");')
+                    body_stmts.append(f'return wysna_wrap_result({ret_hold}, "{self.current_fn_err_type}");')
                 else:
                     body_stmts.append(f"return {ret_hold};")
 
@@ -338,7 +338,7 @@ class CCodeGen:
                 self.current_fn_fallible = prev_fallible
                 self.current_fn_err_type = prev_err_type
 
-            # Emit constructor helper w_new_<ClassName>
+            # Emit constructor helper wysna_new_<ClassName>
             all_fields = self._collect_class_fields(stmt.name)
             init_res = self._find_class_method(stmt.name, "init")
             if init_res is not None:
@@ -351,19 +351,19 @@ class CCodeGen:
                 init_sig = "void"
                 init_args = []
 
-            new_lines = [f"static WVal w_new_{stmt.name}({init_sig}) {{"]
+            new_lines = [f"static WVal wysna_new_{stmt.name}({init_sig}) {{"]
             if all_fields:
                 f_names = ", ".join([f'"{f.name}"' for f in all_fields])
                 f_defaults = ", ".join([self._default_c_expr_for_type(f.type_ann) for f in all_fields])
                 new_lines.append(f"    const char* _k[{len(all_fields)}] = {{ {f_names} }};")
                 new_lines.append(f"    WVal _v[{len(all_fields)}] = {{ {f_defaults} }};")
-                new_lines.append(f'    WVal v_self = w_make_object("{stmt.name}", {len(all_fields)}, _k, _v);')
-                new_lines.append(f"    w_release_array({len(all_fields)}, _v);")
+                new_lines.append(f'    WVal v_self = wysna_make_object("{stmt.name}", {len(all_fields)}, _k, _v);')
+                new_lines.append(f"    wysna_release_array({len(all_fields)}, _v);")
             else:
-                new_lines.append(f'    WVal v_self = w_make_object("{stmt.name}", 0, NULL, NULL);')
-            new_lines.append(f"    v_self.as.st->vtable = &w_vtable_{stmt.name};")
+                new_lines.append(f'    WVal v_self = wysna_make_object("{stmt.name}", 0, NULL, NULL);')
+            new_lines.append(f"    v_self.as.st->vtable = &wysna_vtable_{stmt.name};")
             if init_m is not None:
-                new_lines.append(f"    w_release(w_method_{init_cls}__init({', '.join(init_args)}));")
+                new_lines.append(f"    wysna_release(wysna_method_{init_cls}__init({', '.join(init_args)}));")
             new_lines.append("    return v_self;")
             new_lines.append("}")
             self.fn_Definitions.append("\n".join(new_lines))
@@ -392,10 +392,10 @@ class CCodeGen:
                     gv_name = f"v_{ns}_{stmt.name}" if ns else f"v_{stmt.name}"
                     if isinstance(stmt.initializer, ListExpr) and not stmt.initializer.elements:
                         # A direct global store consumes the fresh constructor immediately.
-                        val_expr = "w_make_list(0, NULL)"
+                        val_expr = "wysna_make_list(0, NULL)"
                     else:
                         val_expr = self.emit_expr(stmt.initializer, out_main_stmts)
-                    out_main_stmts.append(f"w_assign(&{gv_name}, {self._own_expr(val_expr)});")
+                    out_main_stmts.append(f"wysna_assign(&{gv_name}, {self._own_expr(val_expr)});")
                 elif ns == "" and self._is_entrypoint_call(stmt):
                     # The module calls main() explicitly at top level. Its Result must
                     # not be discarded, or a failed program would exit 0 silently.
@@ -431,15 +431,15 @@ class CCodeGen:
         self._push_scope("fn")
         ret_expr = self.emit_block_value(stmt.body, body_stmts)
         if stmt.return_type is None or isinstance(stmt.return_type, NamedType) and stmt.return_type.name == 'unit':
-            ret_expr = 'w_unit()'
+            ret_expr = 'wysna_unit()'
         ret_hold = self.new_aux("_ret")
         owned_return = self._own_expr(ret_expr)
         if isinstance(stmt.return_type, ResultType) and isinstance(stmt.return_type.ok_type, NamedType) and stmt.return_type.ok_type.name == 'unit':
-            owned_return = f"w_discard_result_value({owned_return})"
+            owned_return = f"wysna_discard_result_value({owned_return})"
         body_stmts.append(f"WVal {ret_hold} = {owned_return};")
         self._pop_scope(body_stmts)
         if self.current_fn_fallible:
-            body_stmts.append(f'return w_wrap_result({ret_hold}, "{self.current_fn_err_type}");')
+            body_stmts.append(f'return wysna_wrap_result({ret_hold}, "{self.current_fn_err_type}");')
         else:
             body_stmts.append(f"return {ret_hold};")
 
@@ -457,14 +457,14 @@ class CCodeGen:
 
     def emit_block_value(self, block: Block, out: List[str]) -> str:
         res_var = self.new_temp()
-        self._declare_owned_var(res_var, "w_unit()", out)
+        self._declare_owned_var(res_var, "wysna_unit()", out)
         inner: List[str] = []
         self._push_scope("block")
         for s in block.statements:
             self.emit_stmt(s, inner)
         if block.tail_expr is not None:
             tail_val = self.emit_expr(block.tail_expr, inner)
-            inner.append(f"w_assign(&{res_var}, {self._own_expr(tail_val)});")
+            inner.append(f"wysna_assign(&{res_var}, {self._own_expr(tail_val)});")
         self._pop_scope(inner)
         out.append("{")
         for line in inner:
@@ -488,10 +488,10 @@ class CCodeGen:
         which is indistinguishable from success for make/CI/shell.
         """
         out.append(
-            "if (_t_main.tag == W_ERR) { w_report_entrypoint_error(_t_main.as.box->val); "
-            "w_release(_t_main); w_runtime_cleanup(); return 1; }"
+            "if (_t_main.tag == W_ERR) { wysna_report_entrypoint_error(_t_main.as.box->val); "
+            "wysna_release(_t_main); wysna_runtime_cleanup(); return 1; }"
         )
-        out.append("w_release(_t_main);")
+        out.append("wysna_release(_t_main);")
 
     def emit_stmt(self, stmt: Stmt, out: List[str]) -> None:
         if isinstance(stmt, ExprStmt):
@@ -512,15 +512,15 @@ class CCodeGen:
                 out.append(f"WVal {ret_hold} = {self._own_expr(val)};")
                 self._emit_cleanup_until_fn(out)
                 if self.current_fn_fallible:
-                    out.append(f'return w_wrap_result({ret_hold}, "{self.current_fn_err_type}");')
+                    out.append(f'return wysna_wrap_result({ret_hold}, "{self.current_fn_err_type}");')
                 else:
                     out.append(f"return {ret_hold};")
             else:
                 self._emit_cleanup_until_fn(out)
                 if self.current_fn_fallible:
-                    out.append("return w_ok(w_unit());")
+                    out.append("return wysna_ok(wysna_unit());")
                 else:
-                    out.append("return w_unit();")
+                    out.append("return wysna_unit();")
             return
 
         if isinstance(stmt, BreakStmt):
@@ -591,7 +591,7 @@ class CCodeGen:
     def _emit_pattern_bindings(self, pattern: Pattern, val_expr: str, out: List[str]) -> None:
         if isinstance(pattern, IdentifierPattern):
             if pattern.name not in ("None", "none"):
-                self._declare_owned_var(f"v_{pattern.name}", f"w_clone({val_expr})", out)
+                self._declare_owned_var(f"v_{pattern.name}", f"wysna_clone({val_expr})", out)
         elif isinstance(pattern, TuplePattern):
             for idx, elem_pat in enumerate(pattern.elements):
                 sub_expr = f"({val_expr}).as.tuple->items[{idx}]"
@@ -603,19 +603,19 @@ class CCodeGen:
                 pass
             elif pattern.variant == "Some" and (pattern.enum_name is None or pattern.enum_name.split("__", 1)[0] == "Option"):
                 if pattern.args:
-                    sub_val = f"w_unwrap_optional({val_expr})"
+                    sub_val = f"wysna_unwrap_optional({val_expr})"
                     sub_tmp = self.new_aux("_some_val")
                     self._declare_owned_var(sub_tmp, sub_val, out)
                     self._emit_pattern_bindings(pattern.args[0], sub_tmp, out)
             elif pattern.variant == "Ok" and (pattern.enum_name is None or pattern.enum_name.split("__", 1)[0] == "Result"):
                 if pattern.args:
-                    sub_val = f"w_unwrap_ok({val_expr})"
+                    sub_val = f"wysna_unwrap_ok({val_expr})"
                     sub_tmp = self.new_aux("_ok_val")
                     self._declare_owned_var(sub_tmp, sub_val, out)
                     self._emit_pattern_bindings(pattern.args[0], sub_tmp, out)
             elif pattern.variant == "Err" and (pattern.enum_name is None or pattern.enum_name.split("__", 1)[0] == "Result"):
                 if pattern.args:
-                    sub_val = f"w_unwrap_err({val_expr})"
+                    sub_val = f"wysna_unwrap_err({val_expr})"
                     sub_tmp = self.new_aux("_err_val")
                     self._declare_owned_var(sub_tmp, sub_val, out)
                     self._emit_pattern_bindings(pattern.args[0], sub_tmp, out)
@@ -637,10 +637,10 @@ class CCodeGen:
             return "true"
         if isinstance(pattern, LiteralPattern):
             lit_v = self.emit_expr(pattern.literal, out)
-            return f"w_eq({val_expr}, {lit_v})"
+            return f"wysna_eq({val_expr}, {lit_v})"
         if isinstance(pattern, ErrorTypePattern):
             kind, name = self._error_type_descriptor(pattern.matched_type)
-            return f"w_value_is_error_type({val_expr}, {self.escape_c_str(kind)}, {self.escape_c_str(name)})"
+            return f"wysna_value_is_error_type({val_expr}, {self.escape_c_str(kind)}, {self.escape_c_str(name)})"
         if isinstance(pattern, EnumPattern):
             if pattern.variant in ("None", "none") and (pattern.enum_name is None or pattern.enum_name.split("__", 1)[0] == "Option"):
                 return f"(({val_expr}).tag == W_NONE || (({val_expr}).tag == W_ENUM && strcmp(({val_expr}).as.en.enum_name, \"Option\") == 0 && strcmp(({val_expr}).as.en.variant, \"None\") == 0))"
@@ -648,7 +648,7 @@ class CCodeGen:
                 base_cond = f"(!(({val_expr}).tag == W_NONE || (({val_expr}).tag == W_ENUM && strcmp(({val_expr}).as.en.enum_name, \"Option\") == 0 && strcmp(({val_expr}).as.en.variant, \"None\") == 0)))"
                 if not pattern.args:
                     return base_cond
-                sub_cond = self._emit_pattern_cond(pattern.args[0], f"w_peek_optional({val_expr})", out)
+                sub_cond = self._emit_pattern_cond(pattern.args[0], f"wysna_peek_optional({val_expr})", out)
                 if sub_cond == "true":
                     return base_cond
                 return f"({base_cond} && {sub_cond})"
@@ -656,7 +656,7 @@ class CCodeGen:
                 base_cond = f"(({val_expr}).tag == W_OK || (({val_expr}).tag == W_ENUM && strcmp(({val_expr}).as.en.enum_name, \"Result\") == 0 && strcmp(({val_expr}).as.en.variant, \"Ok\") == 0))"
                 if not pattern.args:
                     return base_cond
-                sub_cond = self._emit_pattern_cond(pattern.args[0], f"w_peek_ok({val_expr})", out)
+                sub_cond = self._emit_pattern_cond(pattern.args[0], f"wysna_peek_ok({val_expr})", out)
                 if sub_cond == "true":
                     return base_cond
                 return f"({base_cond} && {sub_cond})"
@@ -664,14 +664,14 @@ class CCodeGen:
                 base_cond = f"(({val_expr}).tag == W_ERR || (({val_expr}).tag == W_ENUM && strcmp(({val_expr}).as.en.enum_name, \"Result\") == 0 && strcmp(({val_expr}).as.en.variant, \"Err\") == 0))"
                 if not pattern.args:
                     return base_cond
-                sub_cond = self._emit_pattern_cond(pattern.args[0], f"w_peek_err({val_expr})", out)
+                sub_cond = self._emit_pattern_cond(pattern.args[0], f"wysna_peek_err({val_expr})", out)
                 if sub_cond == "true":
                     return base_cond
                 return f"({base_cond} && {sub_cond})"
 
             conds: List[str] = [f"(({val_expr}).tag == W_ENUM && strcmp(({val_expr}).as.en.variant, \"{pattern.variant}\") == 0)"]
             if pattern.enum_name:
-                conds.append(f"(w_builtin_name(({val_expr}).as.en.enum_name, \"{pattern.enum_name}\"))")
+                conds.append(f"(wysna_builtin_name(({val_expr}).as.en.enum_name, \"{pattern.enum_name}\"))")
             if not pattern.args:
                 return "(" + " && ".join(conds) + ")"
 
@@ -722,14 +722,14 @@ class CCodeGen:
         if isinstance(target, IndexExpr):
             parent = self.prepare_assignment_ref(target.object, out)
             index = self.emit_value(target.index, out)
-            return self._source_call("w_index_ref_at", f"{parent}, {index}", target)
+            return self._source_call("wysna_index_ref_at", f"{parent}, {index}", target)
         if isinstance(target, MemberExpr):
             from checker.WType import ClassType
             if isinstance(getattr(target.object, 'inferred_type', None), ClassType):
                 parent = '&' + self.emit_value(target.object, out)
             else:
                 parent = self.prepare_assignment_ref(target.object, out)
-            return f'w_member_ref({parent}, "{target.property}")'
+            return f'wysna_member_ref({parent}, "{target.property}")'
         return self.emit_lvalue_ref(target, out)
 
     def emit_lvalue_ref(self, target: Expr, out: List[str]) -> str:
@@ -740,10 +740,10 @@ class CCodeGen:
         if isinstance(target, IndexExpr):
             obj_ref = self.emit_lvalue_ref(target.object, out)
             idx_val = self.emit_value(target.index, out)
-            return self._source_call("w_index_ref_at", f"{obj_ref}, {idx_val}", target)
+            return self._source_call("wysna_index_ref_at", f"{obj_ref}, {idx_val}", target)
         if isinstance(target, MemberExpr):
             obj_ref = self.emit_lvalue_ref(target.object, out)
-            return f'w_member_ref({obj_ref}, "{target.property}")'
+            return f'wysna_member_ref({obj_ref}, "{target.property}")'
         # Fallback for temporary receiver
         val = self.emit_expr(target, out)
         if val.startswith("_t"):
@@ -768,8 +768,8 @@ class CCodeGen:
                 return "Option" if entry.tag == "optional" else "Result"
         return fallback
 
-    def function_value(self, name, arity, out, environment="w_unit()", captured=False):
-        adapter = "w_adapter_" + name
+    def function_value(self, name, arity, out, environment="wysna_unit()", captured=False):
+        adapter = "wysna_adapter_" + name
         if adapter not in self.function_adapters:
             self.function_adapters.add(adapter)
             self.fn_Prototypes.append(f"static WVal {adapter}(WVal environment, int32_t argc, const WVal* argv);")
@@ -777,20 +777,20 @@ class CCodeGen:
             body = f"static WVal {adapter}(WVal environment, int32_t argc, const WVal* argv) {{\n"
             body += "    (void)environment; (void)argv;\n"
             body += f'    if (argc != {arity}) {{ fprintf(stderr, "[W4003] RuntimeError: Call arity mismatch\\n"); exit(1); }}\n'
-            body += f"    return w_fn_{name}({args});\n}}"
+            body += f"    return wysna_fn_{name}({args});\n}}"
             self.fn_Definitions.append(body)
-        return self._bind_call(f"w_function_new({adapter}, {environment})", out)
+        return self._bind_call(f"wysna_function_new({adapter}, {environment})", out)
 
     def indirect_call(self, callee, args, out):
         function = self.emit_value(callee, out)
         values = [self.emit_value(argument, out) for argument in args]
         array = "(WVal[]){ " + ", ".join(values) + " }" if values else "NULL"
-        return self._bind_call(f"w_call({function}, {len(values)}, {array})", out)
+        return self._bind_call(f"wysna_call({function}, {len(values)}, {array})", out)
 
     def emit_expr(self, expr: Expr, out: List[str]) -> str:
         value = self._emit_expr_impl(expr, out)
         if hasattr(expr, "force_result_wrap_id"):
-            return self._bind_call(f"w_ok({self._own_expr(value)})", out)
+            return self._bind_call(f"wysna_ok({self._own_expr(value)})", out)
         return value
 
     def _emit_expr_impl(self, expr: Expr, out: List[str]) -> str:
@@ -801,60 +801,60 @@ class CCodeGen:
             return self.function_value(expr.function_name, len(expr.inferred_type.params), out, self._own_expr(environment), True)
         if isinstance(expr, IntLiteral):
             if expr.value == -9223372036854775808:
-                return "w_int((-9223372036854775807LL - 1LL))"
-            return f"w_int({expr.value}LL)"
+                return "wysna_int((-9223372036854775807LL - 1LL))"
+            return f"wysna_int({expr.value}LL)"
 
         if isinstance(expr, FloatLiteral):
             s = repr(expr.value)
-            return f"w_float({s})"
+            return f"wysna_float({s})"
 
         if isinstance(expr, StringLiteral):
             if len(expr.value) <= 1:
-                return f"w_str_n({self.escape_c_str(expr.value)}, {len(expr.value.encode('utf-8'))})"
+                return f"wysna_str_n({self.escape_c_str(expr.value)}, {len(expr.value.encode('utf-8'))})"
             literal = self.new_aux("_literal")
             out.append(f"static WStringLiteral {literal} = {{0}};")
-            return f"w_literal_str_n(&{literal}, {self.escape_c_str(expr.value)}, {len(expr.value.encode('utf-8'))})"
+            return f"wysna_literal_str_n(&{literal}, {self.escape_c_str(expr.value)}, {len(expr.value.encode('utf-8'))})"
 
         if isinstance(expr, BoolLiteral):
-            return "w_bool(true)" if expr.value else "w_bool(false)"
+            return "wysna_bool(true)" if expr.value else "wysna_bool(false)"
 
         if isinstance(expr, NoneLiteral):
-            return "w_none()"
+            return "wysna_none()"
 
         if isinstance(expr, ThisExpr):
             return "v_self"
 
         if isinstance(expr, NewExpr):
             arg_vals = [self.emit_value(a, out) for a in expr.args]
-            return self._bind_call(f"w_new_{expr.class_name}({', '.join(arg_vals)})", out)
+            return self._bind_call(f"wysna_new_{expr.class_name}({', '.join(arg_vals)})", out)
 
         if isinstance(expr, IdentExpr):
             if hasattr(expr, "function_reference"):
                 return self.function_value(expr.function_reference, len(expr.inferred_type.params), out)
             if expr.name in ("None", "none") and not hasattr(expr, "resolved_symbol"):
-                return "w_none()"
+                return "wysna_none()"
             if hasattr(expr, "resolved_enum_name"):
                 en_name = expr.resolved_enum_name
-                return f'w_enum("{en_name}", "{expr.name}")'
+                return f'wysna_enum("{en_name}", "{expr.name}")'
             return self.c_var(expr.name)
 
         if isinstance(expr, UnaryExpr):
             op_val = self.emit_expr(expr.operand, out)
             if expr.op == "-":
-                return f"w_neg({op_val})"
+                return f"wysna_neg({op_val})"
             if expr.op == "not":
-                return f"w_bool(!({op_val}).as.b)"
+                return f"wysna_bool(!({op_val}).as.b)"
 
         if isinstance(expr, BinaryExpr):
             if expr.op == "and":
                 lhs = self.emit_expr(expr.left, out)
                 res = self.new_temp()
-                self._declare_owned_var(res, "w_bool(false)", out)
+                self._declare_owned_var(res, "wysna_bool(false)", out)
                 out.append(f"if (({lhs}).as.b) {{")
                 self._push_scope("block")
                 rhs_stmts: List[str] = []
                 rhs = self.emit_expr(expr.right, rhs_stmts)
-                rhs_stmts.append(f"{res} = w_bool(({rhs}).as.b);")
+                rhs_stmts.append(f"{res} = wysna_bool(({rhs}).as.b);")
                 self._pop_scope(rhs_stmts)
                 for s in rhs_stmts:
                     out.append(f"    {s}")
@@ -864,12 +864,12 @@ class CCodeGen:
             if expr.op == "or":
                 lhs = self.emit_expr(expr.left, out)
                 res = self.new_temp()
-                self._declare_owned_var(res, "w_bool(true)", out)
+                self._declare_owned_var(res, "wysna_bool(true)", out)
                 out.append(f"if (!({lhs}).as.b) {{")
                 self._push_scope("block")
                 rhs_stmts = []
                 rhs = self.emit_expr(expr.right, rhs_stmts)
-                rhs_stmts.append(f"{res} = w_bool(({rhs}).as.b);")
+                rhs_stmts.append(f"{res} = wysna_bool(({rhs}).as.b);")
                 self._pop_scope(rhs_stmts)
                 for s in rhs_stmts:
                     out.append(f"    {s}")
@@ -879,27 +879,27 @@ class CCodeGen:
             lhs = self.emit_value(expr.left, out)
             rhs = self.emit_expr(expr.right, out)
             op_map = {
-                "+": "w_add",
-                "-": "w_sub",
-                "*": "w_mul",
-                "/": "w_div",
-                "%": "w_mod",
-                "<": "w_lt",
-                "<=": "w_le",
-                ">": "w_gt",
-                ">=": "w_ge",
+                "+": "wysna_add",
+                "-": "wysna_sub",
+                "*": "wysna_mul",
+                "/": "wysna_div",
+                "%": "wysna_mod",
+                "<": "wysna_lt",
+                "<=": "wysna_le",
+                ">": "wysna_gt",
+                ">=": "wysna_ge",
             }
             if expr.op in op_map:
                 call = f"{op_map[expr.op]}({lhs}, {rhs})"
                 if expr.op == "/":
-                    return self._source_call("w_div_at", f"{lhs}, {rhs}", expr)
+                    return self._source_call("wysna_div_at", f"{lhs}, {rhs}", expr)
                 if expr.op == "%":
-                    return self._source_call("w_mod_at", f"{lhs}, {rhs}", expr)
+                    return self._source_call("wysna_mod_at", f"{lhs}, {rhs}", expr)
                 return self._bind_call(call, out) if expr.op == "+" else call
             if expr.op == "==":
-                return f"w_bool(w_eq({lhs}, {rhs}))"
+                return f"wysna_bool(wysna_eq({lhs}, {rhs}))"
             if expr.op == "!=":
-                return f"w_bool(!w_eq({lhs}, {rhs}))"
+                return f"wysna_bool(!wysna_eq({lhs}, {rhs}))"
 
         if isinstance(expr, CoalesceExpr):
             lhs = self.emit_expr(expr.left, out)
@@ -909,12 +909,12 @@ class CCodeGen:
             self._push_scope("block")
             rhs_stmts = []
             rhs = self.emit_expr(expr.right, rhs_stmts)
-            rhs_stmts.append(f"w_assign(&{res}, {self._own_expr(rhs)});")
+            rhs_stmts.append(f"wysna_assign(&{res}, {self._own_expr(rhs)});")
             self._pop_scope(rhs_stmts)
             for s in rhs_stmts:
                 out.append(f"    {s}")
             out.append("} else {")
-            out.append(f"    w_assign(&{res}, w_unwrap_optional({res}));")
+            out.append(f"    wysna_assign(&{res}, wysna_unwrap_optional({res}));")
             out.append("}")
             return res
 
@@ -922,7 +922,7 @@ class CCodeGen:
             s_val = self.emit_value(expr.start, out)
             e_val = self.emit_expr(expr.end, out)
             inc = "true" if expr.inclusive else "false"
-            return self._bind_call(f"w_make_range({s_val}, {e_val}, {inc})", out)
+            return self._bind_call(f"wysna_make_range({s_val}, {e_val}, {inc})", out)
 
         if isinstance(expr, PostfixTryExpr):
             op_val = self.emit_expr(expr.operand, out)
@@ -935,7 +935,7 @@ class CCodeGen:
             out.append(f"if ({str(channel_enabled).lower()} && ({tmp}.tag == W_NONE)) {{")
             for cl in none_cleanup:
                 out.append(f"    {cl}")
-            out.append("    return w_none();")
+            out.append("    return wysna_none();")
             out.append("}")
 
             err_hold = self.new_aux("_err")
@@ -943,14 +943,14 @@ class CCodeGen:
             self._emit_cleanup_until_fn(err_cleanup)
             channel_enabled = expr.propagation_kind == "result"
             out.append(f"if ({str(channel_enabled).lower()} && ({tmp}.tag == W_ERR)) {{")
-            out.append(f"    WVal {err_hold} = w_clone({tmp});")
+            out.append(f"    WVal {err_hold} = wysna_clone({tmp});")
             for cl in err_cleanup:
                 out.append(f"    {cl}")
             out.append(f"    return {err_hold};")
             out.append("}")
 
             unwrapped = self.new_temp()
-            helper = "w_unwrap_optional" if expr.propagation_kind == "optional" else "w_unwrap_ok"
+            helper = "wysna_unwrap_optional" if expr.propagation_kind == "optional" else "wysna_unwrap_ok"
             self._declare_owned_var(unwrapped, f"{helper}({tmp})", out)
             return unwrapped
         if isinstance(expr, ElseErrExpr):
@@ -958,19 +958,19 @@ class CCodeGen:
             tmp = self.new_temp()
             self._declare_owned_var(tmp, self._own_expr(op_val), out)
             res = self.new_temp()
-            self._declare_owned_var(res, "w_unit()", out)
+            self._declare_owned_var(res, "wysna_unit()", out)
             out.append(f"if ({tmp}.tag == W_ERR || {tmp}.tag == W_NONE) {{")
             self._push_scope("block")
             handler_stmts: List[str] = []
             if expr.err_name is not None:
-                self._declare_owned_var(f"v_{expr.err_name}", f"w_unwrap_err({tmp})", handler_stmts)
+                self._declare_owned_var(f"v_{expr.err_name}", f"wysna_unwrap_err({tmp})", handler_stmts)
             h_val = self.emit_block_value(expr.handler, handler_stmts)
-            handler_stmts.append(f"w_assign(&{res}, {self._own_expr(h_val)});")
+            handler_stmts.append(f"wysna_assign(&{res}, {self._own_expr(h_val)});")
             self._pop_scope(handler_stmts)
             for s in handler_stmts:
                 out.append(f"    {s}")
             out.append("} else {")
-            out.append(f"    w_assign(&{res}, w_unwrap_success({tmp}));")
+            out.append(f"    wysna_assign(&{res}, wysna_unwrap_success({tmp}));")
             out.append("}")
             return res
 
@@ -981,25 +981,25 @@ class CCodeGen:
             self._declare_owned_var(rhs_hold, self._own_expr(val), out)
             if isinstance(expr.target, IdentExpr):
                 c_target = self.c_var(expr.target.name)
-                out.append(f"w_assign(&{c_target}, w_move(&{rhs_hold}));")
+                out.append(f"wysna_assign(&{c_target}, wysna_move(&{rhs_hold}));")
                 return c_target
-            return self._bind_call(f"w_clone(w_assign({lref}, w_move(&{rhs_hold})))", out)
+            return self._bind_call(f"wysna_clone(wysna_assign({lref}, wysna_move(&{rhs_hold})))", out)
 
         if isinstance(expr, MemberExpr):
             if isinstance(expr.object, IdentExpr):
                 if expr.object.name in self.enum_names and not hasattr(expr.object, 'resolved_symbol'):
                     if expr.object.name == "Option" and expr.property in ("None", "none"):
-                        return "w_none()"
-                    return f'w_enum("{self._enum_name(expr, expr.object.name)}", "{expr.property}")'
+                        return "wysna_none()"
+                    return f'wysna_enum("{self._enum_name(expr, expr.object.name)}", "{expr.property}")'
                 if f"v_{expr.object.name}_{expr.property}" in self.global_vars:
                     return f"v_{expr.object.name}_{expr.property}"
             obj_val = self.emit_expr(expr.object, out)
-            return self._bind_call(f'w_clone(w_member_get({obj_val}, "{expr.property}"))', out)
+            return self._bind_call(f'wysna_clone(wysna_member_get({obj_val}, "{expr.property}"))', out)
 
         if isinstance(expr, IndexExpr):
             obj_val = self.emit_value(expr.object, out)
             idx_val = self.emit_expr(expr.index, out)
-            call = self._source_call("w_index_get_owned_at", f"{obj_val}, {idx_val}", expr)
+            call = self._source_call("wysna_index_get_owned_at", f"{obj_val}, {idx_val}", expr)
             return self._bind_call(call, out)
 
         if isinstance(expr, CallExpr):
@@ -1011,76 +1011,76 @@ class CCodeGen:
                 arg_vals = [self.emit_value(a, out) for a in expr.args]
 
                 if fn_name == "Some" and len(arg_vals) == 1:
-                    return self._bind_call(f"w_enum_payload(\"Option\", \"Some\", {self._own_expr(arg_vals[0])})", out)
+                    return self._bind_call(f"wysna_enum_payload(\"Option\", \"Some\", {self._own_expr(arg_vals[0])})", out)
                 if fn_name == "Ok" and len(arg_vals) == 1:
-                    return self._bind_call(f"w_ok({self._own_expr(arg_vals[0])})", out)
+                    return self._bind_call(f"wysna_ok({self._own_expr(arg_vals[0])})", out)
                 if fn_name == "Err" and len(arg_vals) == 1:
-                    return self._bind_call(f"w_err({self._own_expr(arg_vals[0])})", out)
+                    return self._bind_call(f"wysna_err({self._own_expr(arg_vals[0])})", out)
 
                 if fn_name in self.enum_variants and not hasattr(expr.callee, 'resolved_symbol'):
                     en_name = self.enum_variants[fn_name]
                     if len(arg_vals) == 0:
-                        return f'w_enum("{en_name}", "{fn_name}")'
+                        return f'wysna_enum("{en_name}", "{fn_name}")'
                     elif len(arg_vals) == 1:
-                        return self._bind_call(f'w_enum_payload("{en_name}", "{fn_name}", {self._own_expr(arg_vals[0])})', out)
+                        return self._bind_call(f'wysna_enum_payload("{en_name}", "{fn_name}", {self._own_expr(arg_vals[0])})', out)
                     else:
                         tup_tmp = self.new_temp()
                         elems_c = ", ".join(arg_vals)
                         out.append(f"WVal _elems_{tup_tmp}[{len(arg_vals)}] = {{ {elems_c} }};")
-                        out.append(f"WVal {tup_tmp} = w_make_tuple({len(arg_vals)}, _elems_{tup_tmp});")
-                        return self._bind_call(f'w_enum_payload("{en_name}", "{fn_name}", {self._own_expr(tup_tmp)})', out)
+                        out.append(f"WVal {tup_tmp} = wysna_make_tuple({len(arg_vals)}, _elems_{tup_tmp});")
+                        return self._bind_call(f'wysna_enum_payload("{en_name}", "{fn_name}", {self._own_expr(tup_tmp)})', out)
 
                 if fn_name == "join_strings":
-                    return self._bind_call(f"w_builtin_join_strings({arg_vals[0]}, {arg_vals[1]})", out)
+                    return self._bind_call(f"wysna_builtin_join_strings({arg_vals[0]}, {arg_vals[1]})", out)
 
                 if fn_name == "print":
                     if not arg_vals:
-                        return self._bind_call("w_builtin_print(0, NULL)", out)
+                        return self._bind_call("wysna_builtin_print(0, NULL)", out)
                     arr_tmp = self.new_aux("_arr")
                     elems_c = ", ".join(arg_vals)
                     out.append(f"WVal {arr_tmp}[{len(arg_vals)}] = {{ {elems_c} }};")
-                    return self._bind_call(f"w_builtin_print({len(arg_vals)}, {arr_tmp})", out)
+                    return self._bind_call(f"wysna_builtin_print({len(arg_vals)}, {arr_tmp})", out)
 
                 if fn_name == "eprint":
                     if not arg_vals:
-                        return self._bind_call("w_builtin_eprint(0, NULL)", out)
+                        return self._bind_call("wysna_builtin_eprint(0, NULL)", out)
                     arr_tmp = self.new_aux("_arr")
                     elems_c = ", ".join(arg_vals)
                     out.append(f"WVal {arr_tmp}[{len(arg_vals)}] = {{ {elems_c} }};")
-                    return self._bind_call(f"w_builtin_eprint({len(arg_vals)}, {arr_tmp})", out)
+                    return self._bind_call(f"wysna_builtin_eprint({len(arg_vals)}, {arr_tmp})", out)
 
                 if fn_name == "weak" and len(arg_vals) == 1:
-                    return self._bind_call(f"w_builtin_weak_owned({self._own_expr(arg_vals[0])})", out)
+                    return self._bind_call(f"wysna_builtin_weak_owned({self._own_expr(arg_vals[0])})", out)
                 builtin_1 = {
-                    "weak": "w_builtin_weak", "upgrade": "w_builtin_upgrade",
-                    "len": "w_builtin_len",
-                    "str": "w_builtin_str",
-                    "int": "w_builtin_int",
-                    "float": "w_builtin_float",
-                    "ord": "w_builtin_ord",
-                    "chr": "w_builtin_chr",
-                    "bytes": "w_builtin_bytes",
-                    "enumerate": "w_builtin_enumerate",
-                    "dict_items": "w_builtin_dict_items",
-                    "read_file": "w_builtin_read_file",
+                    "weak": "wysna_builtin_weak", "upgrade": "wysna_builtin_upgrade",
+                    "len": "wysna_builtin_len",
+                    "str": "wysna_builtin_str",
+                    "int": "wysna_builtin_int",
+                    "float": "wysna_builtin_float",
+                    "ord": "wysna_builtin_ord",
+                    "chr": "wysna_builtin_chr",
+                    "bytes": "wysna_builtin_bytes",
+                    "enumerate": "wysna_builtin_enumerate",
+                    "dict_items": "wysna_builtin_dict_items",
+                    "read_file": "wysna_builtin_read_file",
                 }
                 if fn_name in builtin_1 and len(arg_vals) == 1:
                     return self._bind_call(f"{builtin_1[fn_name]}({arg_vals[0]})", out)
 
                 if fn_name == "args" and len(arg_vals) == 0:
-                    return self._bind_call("w_builtin_args()", out)
+                    return self._bind_call("wysna_builtin_args()", out)
 
                 if fn_name == "exit" and len(arg_vals) == 1:
-                    return self._bind_call(f"w_builtin_exit({arg_vals[0]})", out)
+                    return self._bind_call(f"wysna_builtin_exit({arg_vals[0]})", out)
 
                 if fn_name == "write_file" and len(arg_vals) == 2:
-                    return self._bind_call(f"w_builtin_write_file({arg_vals[0]}, {arg_vals[1]})", out)
+                    return self._bind_call(f"wysna_builtin_write_file({arg_vals[0]}, {arg_vals[1]})", out)
 
                 if fn_name == "slice" and len(arg_vals) == 3:
-                    return self._bind_call(f"w_builtin_slice({arg_vals[0]}, {arg_vals[1]}, {arg_vals[2]})", out)
+                    return self._bind_call(f"wysna_builtin_slice({arg_vals[0]}, {arg_vals[1]}, {arg_vals[2]})", out)
 
                 if fn_name in self.classes:
-                    return self._bind_call(f"w_new_{fn_name}({', '.join(arg_vals)})", out)
+                    return self._bind_call(f"wysna_new_{fn_name}({', '.join(arg_vals)})", out)
 
                 c_callee = self.c_fn(fn_name)
                 return self._bind_call(f"{c_callee}({', '.join(arg_vals)})", out)
@@ -1095,21 +1095,21 @@ class CCodeGen:
                     en_name = obj_expr.name
                     arg_vals = [self.emit_value(a, out) for a in expr.args]
                     if (en_name == "Result" or en_name.startswith("Result__")) and method == "Ok" and len(arg_vals) == 1:
-                        return self._bind_call(f"w_ok({self._own_expr(arg_vals[0])})", out)
+                        return self._bind_call(f"wysna_ok({self._own_expr(arg_vals[0])})", out)
                     if (en_name == "Result" or en_name.startswith("Result__")) and method == "Err" and len(arg_vals) == 1:
-                        return self._bind_call(f"w_err({self._own_expr(arg_vals[0])})", out)
+                        return self._bind_call(f"wysna_err({self._own_expr(arg_vals[0])})", out)
                     if (en_name == "Option" or en_name.startswith("Option__")) and method in ("None", "none"):
-                        return "w_none()"
+                        return "wysna_none()"
                     if len(arg_vals) == 0:
-                        return f'w_enum("{en_name}", "{method}")'
+                        return f'wysna_enum("{en_name}", "{method}")'
                     elif len(arg_vals) == 1:
-                        return self._bind_call(f'w_enum_payload("{en_name}", "{method}", {self._own_expr(arg_vals[0])})', out)
+                        return self._bind_call(f'wysna_enum_payload("{en_name}", "{method}", {self._own_expr(arg_vals[0])})', out)
                     else:
                         tup_tmp = self.new_temp()
                         elems_c = ", ".join(arg_vals)
                         out.append(f"WVal _elems_{tup_tmp}[{len(arg_vals)}] = {{ {elems_c} }};")
-                        out.append(f"WVal {tup_tmp} = w_make_tuple({len(arg_vals)}, _elems_{tup_tmp});")
-                        return self._bind_call(f'w_enum_payload("{en_name}", "{method}", {self._own_expr(tup_tmp)})', out)
+                        out.append(f"WVal {tup_tmp} = wysna_make_tuple({len(arg_vals)}, _elems_{tup_tmp});")
+                        return self._bind_call(f'wysna_enum_payload("{en_name}", "{method}", {self._own_expr(tup_tmp)})', out)
 
                 # super.init(...) or super.method(...)
                 if isinstance(obj_expr, SuperExpr):
@@ -1119,8 +1119,8 @@ class CCodeGen:
                         resolved = self._find_class_method(self.current_class.superclass, method)
                         if resolved is not None:
                             def_cls, _ = resolved
-                            return self._bind_call(f"w_method_{def_cls}__{method}({', '.join(call_args)})", out)
-                    return "w_unit()"
+                            return self._bind_call(f"wysna_method_{def_cls}__{method}({', '.join(call_args)})", out)
+                    return "wysna_unit()"
 
                 # Check if module call: mod.fn(...)
                 if isinstance(obj_expr, IdentExpr):
@@ -1135,50 +1135,50 @@ class CCodeGen:
                 if method == "append" and isinstance(receiver_type, ListType):
                     lref = self.prepare_assignment_ref(obj_expr, out)
                     arg_v = self.emit_value(expr.args[0], out)
-                    return self._bind_call(f"w_list_append({lref}, {arg_v})", out)
+                    return self._bind_call(f"wysna_list_append({lref}, {arg_v})", out)
                 if method == "pop" and isinstance(receiver_type, ListType):
                     lref = self.prepare_assignment_ref(obj_expr, out)
-                    call = self._source_call("w_list_pop_at", lref, expr)
+                    call = self._source_call("wysna_list_pop_at", lref, expr)
                     return self._bind_call(call, out)
                 if method == "clear" and isinstance(receiver_type, ListType):
                     lref = self.prepare_assignment_ref(obj_expr, out)
-                    return self._bind_call(f"w_list_clear({lref})", out)
+                    return self._bind_call(f"wysna_list_clear({lref})", out)
                 if method == "get" and isinstance(receiver_type, DictType):
                     obj_v = self.emit_value(obj_expr, out)
                     arg_v = self.emit_value(expr.args[0], out)
-                    return self._bind_call(f"w_dict_get({obj_v}, {arg_v})", out)
+                    return self._bind_call(f"wysna_dict_get({obj_v}, {arg_v})", out)
                 if method == "keys" and isinstance(receiver_type, DictType):
                     obj_v = self.emit_value(obj_expr, out)
-                    return self._bind_call(f"w_dict_keys({obj_v})", out)
+                    return self._bind_call(f"wysna_dict_keys({obj_v})", out)
                 if method == "values" and isinstance(receiver_type, DictType):
                     obj_v = self.emit_value(obj_expr, out)
-                    return self._bind_call(f"w_dict_values({obj_v})", out)
+                    return self._bind_call(f"wysna_dict_values({obj_v})", out)
 
                 # OOP dynamic method dispatch
                 obj_v = self.emit_value(obj_expr, out)
                 arg_vals = [self.emit_value(a, out) for a in expr.args]
                 call_args = [obj_v] + arg_vals
-                return self._bind_call(f"w_dispatch__{method}__{len(arg_vals)}({', '.join(call_args)})", out)
+                return self._bind_call(f"wysna_dispatch__{method}__{len(arg_vals)}({', '.join(call_args)})", out)
 
         if isinstance(expr, ListExpr):
             if not expr.elements:
-                return self._bind_call("w_make_list(0, NULL)", out)
+                return self._bind_call("wysna_make_list(0, NULL)", out)
             elem_vals = [self.emit_value(e, out) for e in expr.elements]
             arr_tmp = self.new_aux("_arr")
             out.append(f"WVal {arr_tmp}[{len(elem_vals)}] = {{ {', '.join(elem_vals)} }};")
-            return self._bind_call(f"w_make_list({len(elem_vals)}, {arr_tmp})", out)
+            return self._bind_call(f"wysna_make_list({len(elem_vals)}, {arr_tmp})", out)
 
         if isinstance(expr, TupleExpr):
             if not expr.elements:
-                return self._bind_call("w_make_tuple(0, NULL)", out)
+                return self._bind_call("wysna_make_tuple(0, NULL)", out)
             elem_vals = [self.emit_value(e, out) for e in expr.elements]
             arr_tmp = self.new_aux("_arr")
             out.append(f"WVal {arr_tmp}[{len(elem_vals)}] = {{ {', '.join(elem_vals)} }};")
-            return self._bind_call(f"w_make_tuple({len(elem_vals)}, {arr_tmp})", out)
+            return self._bind_call(f"wysna_make_tuple({len(elem_vals)}, {arr_tmp})", out)
 
         if isinstance(expr, DictExpr):
             if not expr.entries:
-                return self._bind_call("w_make_dict(0, NULL, NULL)", out)
+                return self._bind_call("wysna_make_dict(0, NULL, NULL)", out)
             pairs = [(self.emit_value(e.key, out), self.emit_value(e.value, out)) for e in expr.entries]
             k_vals = [key for key, _ in pairs]
             v_vals = [value for _, value in pairs]
@@ -1186,11 +1186,11 @@ class CCodeGen:
             v_tmp = self.new_aux("_v")
             out.append(f"WVal {k_tmp}[{len(k_vals)}] = {{ {', '.join(k_vals)} }};")
             out.append(f"WVal {v_tmp}[{len(v_vals)}] = {{ {', '.join(v_vals)} }};")
-            return self._bind_call(f"w_make_dict({len(k_vals)}, {k_tmp}, {v_tmp})", out)
+            return self._bind_call(f"wysna_make_dict({len(k_vals)}, {k_tmp}, {v_tmp})", out)
 
         if isinstance(expr, StructInitExpr):
             if not expr.fields:
-                return self._bind_call(f'w_make_struct("{expr.struct_name}", 0, NULL, NULL)', out)
+                return self._bind_call(f'wysna_make_struct("{expr.struct_name}", 0, NULL, NULL)', out)
             evaluated = {field.name: self.emit_value(field.value, out) for field in expr.fields}
             field_order = list(expr.inferred_type.fields)
             f_names = [f'"{name}"' for name in field_order]
@@ -1199,17 +1199,17 @@ class CCodeGen:
             v_tmp = self.new_aux("_v")
             out.append(f"const char* {k_tmp}[{len(f_names)}] = {{ {', '.join(f_names)} }};")
             out.append(f"WVal {v_tmp}[{len(f_vals)}] = {{ {', '.join(f_vals)} }};")
-            return self._bind_call(f'w_make_struct("{expr.struct_name}", {len(f_names)}, {k_tmp}, {v_tmp})', out)
+            return self._bind_call(f'wysna_make_struct("{expr.struct_name}", {len(f_names)}, {k_tmp}, {v_tmp})', out)
 
         if isinstance(expr, IfExpr):
             res = self.new_temp()
-            self._declare_owned_var(res, "w_unit()", out)
+            self._declare_owned_var(res, "wysna_unit()", out)
             cond_v = self.emit_expr(expr.condition, out)
             out.append(f"if (({cond_v}).as.b) {{")
             self._push_scope("block")
             then_stmts: List[str] = []
             then_v = self.emit_block_value(expr.then_branch, then_stmts)
-            then_stmts.append(f"w_assign(&{res}, {self._own_expr(then_v)});")
+            then_stmts.append(f"wysna_assign(&{res}, {self._own_expr(then_v)});")
             self._pop_scope(then_stmts)
             for s in then_stmts:
                 out.append(f"    {s}")
@@ -1224,11 +1224,11 @@ class CCodeGen:
             subj_tmp = self.new_temp()
             self._declare_owned_var(subj_tmp, self._own_expr(subj_v), out)
             res = self.new_temp()
-            self._declare_owned_var(res, "w_unit()", out)
+            self._declare_owned_var(res, "wysna_unit()", out)
             self._emit_match_arms(expr.arms, 0, subj_tmp, res, out)
             return res
 
-        return "w_unit()"
+        return "wysna_unit()"
 
     def _emit_elif_chain(self, elifs: List, idx: int, else_branch: Optional[Block], res_var: str, out: List[str]) -> None:
         if idx < len(elifs):
@@ -1241,7 +1241,7 @@ class CCodeGen:
             self._push_scope("block")
             eb_stmts: List[str] = []
             eb_v = self.emit_block_value(eb.body, eb_stmts)
-            eb_stmts.append(f"w_assign(&{res_var}, {self._own_expr(eb_v)});")
+            eb_stmts.append(f"wysna_assign(&{res_var}, {self._own_expr(eb_v)});")
             self._pop_scope(eb_stmts)
             for s in eb_stmts:
                 inner.append(f"    {s}")
@@ -1256,7 +1256,7 @@ class CCodeGen:
             self._push_scope("block")
             else_stmts: List[str] = []
             else_v = self.emit_block_value(else_branch, else_stmts)
-            else_stmts.append(f"w_assign(&{res_var}, {self._own_expr(else_v)});")
+            else_stmts.append(f"wysna_assign(&{res_var}, {self._own_expr(else_v)});")
             self._pop_scope(else_stmts)
             for s in else_stmts:
                 out.append(f"    {s}")
@@ -1280,7 +1280,7 @@ class CCodeGen:
             self._push_scope("block")
             body = []
             result = self.emit_block_value(arm.body, body)
-            body.append(f"w_assign(&{res_var}, {self._own_expr(result)});")
+            body.append(f"wysna_assign(&{res_var}, {self._own_expr(result)});")
             body.append(f"{matched} = true;")
             self._pop_scope(body)
             inner.extend("    " + line for line in body)
@@ -1301,7 +1301,7 @@ class CCodeGen:
         arm_stmts: List[str] = []
         self._emit_pattern_bindings(arm.pattern, subj_tmp, arm_stmts)
         arm_v = self.emit_block_value(arm.body, arm_stmts)
-        arm_stmts.append(f"w_assign(&{res_var}, {self._own_expr(arm_v)});")
+        arm_stmts.append(f"wysna_assign(&{res_var}, {self._own_expr(arm_v)});")
         self._pop_scope(arm_stmts)
         for s in arm_stmts:
             out.append(f"    {s}")

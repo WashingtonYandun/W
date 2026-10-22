@@ -131,7 +131,7 @@ def validate(wheel, forbidden, report):
         for command in ('tokens', 'ast', 'mir'):
             run(command, [command, 'hello.wysna'])
         run('emit-c', ['emit-c', 'library.wysna', '-o', 'library.c'])
-        assert '#include "runtime/w_runtime.h"' in (work / 'library.c').read_text()
+        assert '#include "runtime/wysna_runtime.h"' in (work / 'library.c').read_text()
         binary = work / ('program.exe' if os.name == 'nt' else 'program')
         run('build', ['build', 'library.wysna', '-o', str(binary)])
         native = subprocess.run([str(binary)], cwd=work, env=environment, capture_output=True, text=True, timeout=30)
@@ -144,7 +144,7 @@ def validate(wheel, forbidden, report):
             assert unavailable.stderr == 'wysna ' + command + ' requires a source checkout\n'
         selfhost = run('selfhost-source-only', ['emit-c', '--backend=selfhost', 'hello.wysna', '-o', 'selfhost.c'], code=1)
         assert '[W2013]' in selfhost.stderr
-        assert not (site_packages / '.w_cache').exists()
+        assert not (site_packages / '.wysna_cache').exists()
         no_compiler = dict(environment, CC=str(directory / 'missing compiler'), PATH='')
         for command in ('check', 'run', 'fmt', 'ast', 'tokens', 'mir'):
             run(command + '-without-c', [command, 'hello.wysna'], custom_environment=no_compiler)

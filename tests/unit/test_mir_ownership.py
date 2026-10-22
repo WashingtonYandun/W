@@ -37,12 +37,12 @@ print(read("hello"))'''
     original = deepcopy(module)
     optimize_parameter_reads(module, interner)
     functions = {function.name: function for function in module.functions}
-    assert not parameter_clones(functions['w_fn_read'])
-    assert not parameter_clones(functions['w_fn_container'])
+    assert not parameter_clones(functions['wysna_fn_read'])
+    assert not parameter_clones(functions['wysna_fn_container'])
     for name in ('escape', 'result', 'local', 'list_read'):
-        assert parameter_clones(functions['w_fn_' + name]), name
-    original_global = next(function for function in original.functions if function.name == 'w_fn_global_read')
-    assert functions['w_fn_global_read'] == original_global
+        assert parameter_clones(functions['wysna_fn_' + name]), name
+    original_global = next(function for function in original.functions if function.name == 'wysna_fn_global_read')
+    assert functions['wysna_fn_global_read'] == original_global
     # Applying the pass again must not change the verified representation.
     once = dump(module)
     optimize_parameter_reads(module, interner)
@@ -88,39 +88,39 @@ def test_result_release_uses_no_temporary_heap_for_leaves_or_shared_boxes():
 static size_t allocation_calls;
 static void* counted_malloc(size_t size) { allocation_calls++; return malloc(size); }
 #define malloc counted_malloc
-#include "runtime/w_runtime.h"
+#include "runtime/wysna_runtime.h"
 #undef malloc
 
 static void release_without_allocation(WVal value) {
     size_t before = allocation_calls;
-    w_release(value);
+    wysna_release(value);
     assert(allocation_calls == before);
 }
 
 int main(void) {
-    WVal leaves[] = {w_unit(), w_none(), w_int(7), w_float(NAN), w_bool(true),
-                     w_pointer(NULL), w_str("static"), w_copy_str("owned")};
+    WVal leaves[] = {wysna_unit(), wysna_none(), wysna_int(7), wysna_float(NAN), wysna_bool(true),
+                     wysna_pointer(NULL), wysna_str("static"), wysna_copy_str("owned")};
     for (size_t index = 0; index < sizeof(leaves) / sizeof(leaves[0]); index++) {
-        WVal result = index % 2 ? w_err(leaves[index]) : w_ok(leaves[index]);
-        WVal shared = w_clone(result);
+        WVal result = index % 2 ? wysna_err(leaves[index]) : wysna_ok(leaves[index]);
+        WVal shared = wysna_clone(result);
         release_without_allocation(result);
         assert(shared.as.box->refcount == 1);
         release_without_allocation(shared);
     }
-    WVal compound = w_ok(w_make_list(1, (WVal[]){w_int(9)}));
-    WVal alias = w_clone(compound);
+    WVal compound = wysna_ok(wysna_make_list(1, (WVal[]){wysna_int(9)}));
+    WVal alias = wysna_clone(compound);
     release_without_allocation(compound);
     assert(alias.as.box->val.as.list->data[0].as.i == 9);
-    w_release(alias);
-    WVal boxed_string = w_ok(w_copy_str("child"));
-    WVal container = w_make_list(1, &boxed_string);
-    w_release(boxed_string);
-    w_release(container);
-    WVal deep = w_copy_str("bottom");
-    for (int index = 0; index < 100000; index++) deep = index % 2 ? w_ok(deep) : w_err(deep);
-    w_release(deep);
-    assert(w_g_alloc_count == w_g_free_count && w_g_live_objects == 0);
-    w_runtime_cleanup();
+    wysna_release(alias);
+    WVal boxed_string = wysna_ok(wysna_copy_str("child"));
+    WVal container = wysna_make_list(1, &boxed_string);
+    wysna_release(boxed_string);
+    wysna_release(container);
+    WVal deep = wysna_copy_str("bottom");
+    for (int index = 0; index < 100000; index++) deep = index % 2 ? wysna_ok(deep) : wysna_err(deep);
+    wysna_release(deep);
+    assert(wysna_g_alloc_count == wysna_g_free_count && wysna_g_live_objects == 0);
+    wysna_runtime_cleanup();
     return 0;
 }
 '''

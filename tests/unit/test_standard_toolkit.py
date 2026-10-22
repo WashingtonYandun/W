@@ -75,28 +75,28 @@ print(path.join("root", "child"), path.basename("C:/é/file.wysna"), path.dirnam
 
 
 def test_host_handles_reject_stale_wrong_kind_and_oversized_requests():
-    buffer = HostAbi.FUNCTIONS['w_host_buffer_new']()
+    buffer = HostAbi.FUNCTIONS['wysna_host_buffer_new']()
     assert HostAbi.buffer_append(buffer, 256) == -1
     assert HostAbi.file_read(buffer, buffer, 1) == -1
     assert HostAbi.file_read(0, buffer, 16777217) == -1
     assert HostAbi.close(buffer) == 0
-    fresh = HostAbi.FUNCTIONS['w_host_buffer_new']()
+    fresh = HostAbi.FUNCTIONS['wysna_host_buffer_new']()
     assert fresh != buffer
     assert HostAbi.buffer_append(buffer, 1) == -1
     assert HostAbi.buffer_size(fresh) == 0
     HostAbi.close(fresh)
-    code = '''#include "runtime/w_runtime.h"
+    code = '''#include "runtime/wysna_runtime.h"
 #include <assert.h>
 int main(void) {
-    void* buffer = w_host_buffer_new();
-    assert(w_host_buffer_append(buffer, 256) == -1);
-    assert(w_host_file_read(buffer, buffer, 1) == -1);
-    assert(w_host_file_read(NULL, buffer, 16777217) == -1);
-    assert(w_host_close(buffer) == 0);
-    void* fresh = w_host_buffer_new();
-    assert(fresh != buffer && w_host_buffer_append(buffer, 1) == -1);
-    assert(w_host_buffer_size(fresh) == 0);
-    assert(w_host_close(fresh) == 0 && w_host_entries == NULL);
+    void* buffer = wysna_host_buffer_new();
+    assert(wysna_host_buffer_append(buffer, 256) == -1);
+    assert(wysna_host_file_read(buffer, buffer, 1) == -1);
+    assert(wysna_host_file_read(NULL, buffer, 16777217) == -1);
+    assert(wysna_host_close(buffer) == 0);
+    void* fresh = wysna_host_buffer_new();
+    assert(fresh != buffer && wysna_host_buffer_append(buffer, 1) == -1);
+    assert(wysna_host_buffer_size(fresh) == 0);
+    assert(wysna_host_close(fresh) == 0 && wysna_host_entries == NULL);
     assert(sizeof(WVal) == 32);
     return 0;
 }
@@ -119,7 +119,7 @@ def test_large_file_processing_keeps_buffer_bounded():
         data_path.write_bytes(bytes(range(256)) * 8192)
         handle = HostAbi.allocate('buffer', bytearray(str(data_path).encode()))
         file = HostAbi.file_open(handle, 0)
-        buffer = HostAbi.FUNCTIONS['w_host_buffer_new']()
+        buffer = HostAbi.FUNCTIONS['wysna_host_buffer_new']()
         total = 0
         while True:
             count = HostAbi.file_read(file, buffer, 4096)
@@ -133,24 +133,24 @@ def test_large_file_processing_keeps_buffer_bounded():
             HostAbi.close(value)
         source = directory / 'bounded.c'
         binary = directory / executable_name('bounded')
-        source.write_text('''#include "runtime/w_runtime.h"
+        source.write_text('''#include "runtime/wysna_runtime.h"
 #include <assert.h>
 int main(int argc, char** argv) {
     (void)argc;
-    void* path = w_host_buffer_new();
-    for (const unsigned char* p = (const unsigned char*)argv[1]; *p; p++) assert(w_host_buffer_append(path, *p) == 0);
-    void* file = w_host_file_open(path, 0);
-    void* buffer = w_host_buffer_new();
+    void* path = wysna_host_buffer_new();
+    for (const unsigned char* p = (const unsigned char*)argv[1]; *p; p++) assert(wysna_host_buffer_append(path, *p) == 0);
+    void* file = wysna_host_file_open(path, 0);
+    void* buffer = wysna_host_buffer_new();
     int64_t total = 0, count;
     do {
-        count = w_host_file_read(file, buffer, 4096);
+        count = wysna_host_file_read(file, buffer, 4096);
         assert(count >= 0 && count <= 4096);
-        assert(w_host_find(buffer, 1)->capacity == 4096);
+        assert(wysna_host_find(buffer, 1)->capacity == 4096);
         total += count;
     } while (count);
     assert(total == 2097152);
-    w_host_close(file); w_host_close(buffer); w_host_close(path);
-    assert(w_host_entries == NULL);
+    wysna_host_close(file); wysna_host_close(buffer); wysna_host_close(path);
+    assert(wysna_host_entries == NULL);
     return 0;
 }
 ''', encoding='utf-8')

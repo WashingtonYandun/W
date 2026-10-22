@@ -46,7 +46,7 @@ class Lowering:
         for declaration in hir.classes:
             self.layout_class(declaration)
         for declaration in hir.functions:
-            name = 'w_fn_' + declaration.name
+            name = 'wysna_fn_' + declaration.name
             if hasattr(declaration, 'extern_types'):
                 self.module.externs[name] = {'native': declaration.extern_name,
                                             'signature': declaration.extern_types,
@@ -56,9 +56,9 @@ class Lowering:
                 self.lower_function(declaration, name)
         for declaration in hir.classes:
             for method in declaration.methods:
-                self.lower_function(method, f'w_method_{declaration.name}__{method.name}', declaration)
+                self.lower_function(method, f'wysna_method_{declaration.name}__{method.name}', declaration)
             self.lower_constructor(declaration)
-        self.begin('w_program', TYPE_UNIT, Source(self.file))
+        self.begin('wysna_program', TYPE_UNIT, Source(self.file))
         last = hir.top_level_stmts[-1] if hir.top_level_stmts else None
         explicit = (isinstance(last, H.HirExprStmt) and isinstance(last.expr, H.HirDirectCall)
                     and last.expr.fn_name == 'main')
@@ -71,7 +71,7 @@ class Lowering:
         if not explicit and getattr(hir, 'call_entrypoint', not hir.top_level_stmts):
             entry = next((fn for fn in hir.functions if fn.name == 'main'), None)
             if entry:
-                entry_value = self.call('w_fn_main', [], entry.return_type_id, entry)
+                entry_value = self.call('wysna_fn_main', [], entry.return_type_id, entry)
         if self.current is not None:
             value = entry_value if entry_value is not None else self.constant(None, TYPE_UNIT)
             self.function.return_type = self.slot_by_id[value].type_id
@@ -218,7 +218,7 @@ class Lowering:
 
     def return_value(self, value, node=None):
         if self.fallible:
-            value = self.runtime('w_wrap_result', [value], self.function.return_type, node,
+            value = self.runtime('wysna_wrap_result', [value], self.function.return_type, node,
                                  moves=[0])
             self.current.operations[-1].data['error_type'] = self.err_type
         escaped = self.slot(self.function.return_type, 'return', tracked=False)
@@ -244,7 +244,7 @@ class Lowering:
 
     def default(self, type_id):
         if self.interner.get_entry(type_id).tag == 'weak':
-            return self.runtime('w_empty_weak', [], type_id)
+            return self.runtime('wysna_empty_weak', [], type_id)
         value = '' if type_id == TYPE_STR else False if type_id == TYPE_BOOL else 0 if type_id == TYPE_INT else 0.0 if self.interner.get_entry(type_id).data == 'float' else None
         result = self.constant(value, type_id)
         self.current.operations[-1].data['default'] = True
@@ -252,7 +252,7 @@ class Lowering:
 
     def lower_constructor(self, declaration):
         layout = self.module.layouts[declaration.type_id]
-        self.begin('w_new_' + declaration.name, declaration.type_id, self.source(declaration))
+        self.begin('wysna_new_' + declaration.name, declaration.type_id, self.source(declaration))
         init = layout.methods.get('init')
         arguments = []
         if init:
@@ -263,7 +263,7 @@ class Lowering:
         self.op('construct', result, values, {'kind': 'object', 'layout': declaration.type_id}, node=declaration)
         self.op('set_vtable', args=[result], data={'class': declaration.name})
         if init:
-            self.call('w_method_' + init[0] + '__init', [result] + arguments, init[2], declaration)
+            self.call('wysna_method_' + init[0] + '__init', [result] + arguments, init[2], declaration)
         self.return_value(result, declaration)
         self.finish()
 
@@ -412,20 +412,20 @@ class Lowering:
         if isinstance(node, H.HirBlock):
             return self.block(node)
         if isinstance(node, H.HirUnaryOp):
-            return self.runtime('w_neg' if node.op == '-' else 'w_not', [self.expr(node.operand)], type_id, node)
+            return self.runtime('wysna_neg' if node.op == '-' else 'wysna_not', [self.expr(node.operand)], type_id, node)
         if isinstance(node, H.HirBinaryOp):
             if node.op in ('and', 'or'):
                 return self.logical(node)
             left, right = self.expr(node.left), self.expr(node.right)
-            names = {'+': 'w_add', '-': 'w_sub', '*': 'w_mul', '/': 'w_div_at', '%': 'w_mod_at',
-                     '<': 'w_lt', '<=': 'w_le', '>': 'w_gt', '>=': 'w_ge', '==': 'w_equal', '!=': 'w_not_equal'}
+            names = {'+': 'wysna_add', '-': 'wysna_sub', '*': 'wysna_mul', '/': 'wysna_div_at', '%': 'wysna_mod_at',
+                     '<': 'wysna_lt', '<=': 'wysna_le', '>': 'wysna_gt', '>=': 'wysna_ge', '==': 'wysna_equal', '!=': 'wysna_not_equal'}
             return self.runtime(names[node.op], [left, right], type_id, node, source=node.op in ('/', '%'))
         if isinstance(node, H.HirCoerce):
             value = self.expr(node.expr)
             if node.kind == 'wrap_ok':
-                return self.runtime('w_ok', [value], type_id, node, moves=[0])
+                return self.runtime('wysna_ok', [value], type_id, node, moves=[0])
             if node.kind == 'int_to_float':
-                return self.runtime('w_builtin_float', [value], type_id, node)
+                return self.runtime('wysna_builtin_float', [value], type_id, node)
             # Identity/upcast retain physical representation while changing static type.
             result = self.slot(type_id)
             self.store(result, value, node)
@@ -437,11 +437,11 @@ class Lowering:
                 return self.constant(None, type_id, node)
             if node.payload is not None:
                 value = self.expr(node.payload)
-                helper = 'w_ok' if builtin == 'Result' and variant == 'Ok' else 'w_err' if builtin == 'Result' and variant == 'Err' else 'w_enum_payload'
+                helper = 'wysna_ok' if builtin == 'Result' and variant == 'Ok' else 'wysna_err' if builtin == 'Result' and variant == 'Err' else 'wysna_enum_payload'
                 result = self.runtime(helper, [value], type_id, node, moves=[0])
                 self.current.operations[-1].data.update(enum=name, variant=variant)
                 return result
-            result = self.runtime('w_enum', [], type_id, node)
+            result = self.runtime('wysna_enum', [], type_id, node)
             self.current.operations[-1].data.update(enum=name, variant=variant)
             return result
         if isinstance(node, (H.HirConstructList, H.HirConstructTuple, H.HirConstructDict, H.HirConstructStruct)):
@@ -459,9 +459,9 @@ class Lowering:
                 data['kind'] = 'list' if isinstance(node, H.HirConstructList) else 'tuple'
             return self.op('construct', self.slot(type_id), values, data, node=node)
         if isinstance(node, H.HirConstructObject):
-            return self.call('w_new_' + node.class_name, [self.expr(arg) for arg in node.args], type_id, node)
+            return self.call('wysna_new_' + node.class_name, [self.expr(arg) for arg in node.args], type_id, node)
         if isinstance(node, H.HirRange):
-            result = self.runtime('w_make_range', [self.expr(node.start), self.expr(node.end)], type_id, node)
+            result = self.runtime('wysna_make_range', [self.expr(node.start), self.expr(node.end)], type_id, node)
             self.current.operations[-1].data['inclusive'] = node.inclusive
             return result
         if isinstance(node, H.HirFieldRead):
@@ -469,12 +469,12 @@ class Lowering:
             index, _ = self.field_index(node.object.type_id, node.field_name, node)
             return self.op('load_field', self.slot(type_id), [value], {'index': index, 'layout': node.object.type_id}, node=node)
         if isinstance(node, H.HirIndexRead):
-            return self.runtime('w_index_get_owned_at', [self.expr(node.object), self.expr(node.index)], type_id, node, source=True)
+            return self.runtime('wysna_index_get_owned_at', [self.expr(node.object), self.expr(node.index)], type_id, node, source=True)
         if isinstance(node, H.HirDirectCall):
-            return self.call('w_fn_' + node.target.fn_name, [self.expr(arg) for arg in node.args], type_id, node)
+            return self.call('wysna_fn_' + node.target.fn_name, [self.expr(arg) for arg in node.args], type_id, node)
         if isinstance(node, H.HirBuiltinCall):
             values = [self.expr(arg) for arg in node.args]
-            name = 'w_builtin_weak_owned' if node.builtin_name == 'weak' else 'w_builtin_' + node.builtin_name
+            name = 'wysna_builtin_weak_owned' if node.builtin_name == 'weak' else 'wysna_builtin_' + node.builtin_name
             return self.runtime(name, values, type_id, node, moves=[0] if node.builtin_name == 'weak' else [])
         if isinstance(node, H.HirMethodCall):
             if isinstance(node.target, H.CollectionCallTarget):
@@ -484,19 +484,19 @@ class Lowering:
                     values = [self.expr(arg) for arg in node.args]
                     return self.op('mutate', self.slot(type_id), values, {'place': place, 'method': method}, node=node)
                 values = [self.expr(node.receiver)] + [self.expr(arg) for arg in node.args]
-                return self.runtime('w_dict_' + method, values, type_id, node)
+                return self.runtime('wysna_dict_' + method, values, type_id, node)
             if isinstance(node.receiver, H.HirSuperRef):
                 parent = self.module.layouts[self.classes[self.current_class.superclass].type_id]
                 owner = parent.methods[node.method_name][0]
                 values = [self.expr(node.receiver)] + [self.expr(arg) for arg in node.args]
-                return self.call(f'w_method_{owner}__{node.method_name}', values, type_id, node)
+                return self.call(f'wysna_method_{owner}__{node.method_name}', values, type_id, node)
             values = [self.expr(node.receiver)] + [self.expr(arg) for arg in node.args]
             return self.op('virtual', self.slot(type_id), values, {'slot': node.target.slot}, node=node)
         if isinstance(node, (H.HirFunctionRef, H.HirClosure)):
             args = [self.expr(node.environment)] if isinstance(node, H.HirClosure) else []
             arity = len(self.interner.get_entry(type_id).data[0])
             return self.op('function', self.slot(type_id), args,
-                           {'name': 'w_fn_' + node.name, 'arity': arity, 'captured': bool(args)},
+                           {'name': 'wysna_fn_' + node.name, 'arity': arity, 'captured': bool(args)},
                            moves=[0] if args else [], node=node)
         if isinstance(node, H.HirIndirectCall):
             values = [self.expr(node.callee)] + [self.expr(arg) for arg in node.args]
@@ -579,14 +579,14 @@ class Lowering:
                 returned = self.constant(None, self.function.return_type)
             else:
                 error_type = self.interner.get_entry(operand.type_id).data[1]
-                error = self.runtime('w_unwrap_err', [value], error_type, node)
-                returned = self.runtime('w_err', [error], self.function.return_type, node, moves=[0])
+                error = self.runtime('wysna_unwrap_err', [value], error_type, node)
+                returned = self.runtime('wysna_err', [error], self.function.return_type, node, moves=[0])
             self.return_value(returned, node)
         else:
             if isinstance(node, H.HirElseHandle) and node.err_var:
                 entry = self.interner.get_entry(operand.type_id)
                 error_type = entry.data[1] if entry.tag == 'result' else TYPE_NONE
-                binder = self.runtime('w_unwrap_err', [value], error_type, node)
+                binder = self.runtime('wysna_unwrap_err', [value], error_type, node)
                 self.bindings[-1][('name', node.err_var)] = self.slot_by_id[binder]
                 symbol = getattr(node, 'symbol_id', None)
                 if symbol:
@@ -599,7 +599,7 @@ class Lowering:
             self.jump(done)
         self.current = succeeded
         self.push()
-        helper = 'w_unwrap_optional' if isinstance(node, H.HirCoalesce) or isinstance(node, H.HirTryPropagate) and node.kind == 'optional' else 'w_unwrap_ok' if isinstance(node, H.HirTryPropagate) else 'w_unwrap_success'
+        helper = 'wysna_unwrap_optional' if isinstance(node, H.HirCoalesce) or isinstance(node, H.HirTryPropagate) and node.kind == 'optional' else 'wysna_unwrap_ok' if isinstance(node, H.HirTryPropagate) else 'wysna_unwrap_success'
         unwrapped = self.runtime(helper, [value], node.type_id, node)
         self.store(result, unwrapped)
         self.pop()
@@ -625,11 +625,11 @@ class Lowering:
             return self.op('clone', self.slot(child.type_id), [value])
         if channel in ('tuple', 'enum_tuple'):
             if channel == 'enum_tuple':
-                value = self.runtime('w_enum_payload_owned', [value], self.interner.mk_tuple(
+                value = self.runtime('wysna_enum_payload_owned', [value], self.interner.mk_tuple(
                     tuple(part.type_id for _, _, part in self.pattern_children_cache)), child)
                 self.current.operations[-1].data['variant'] = pattern.variant_name
             return self.op('tuple_get', self.slot(child.type_id), [value], {'index': index})
-        helper = {'optional': 'w_unwrap_optional', 'ok': 'w_unwrap_ok', 'err': 'w_unwrap_err', 'enum': 'w_enum_payload_owned'}[channel]
+        helper = {'optional': 'wysna_unwrap_optional', 'ok': 'wysna_unwrap_ok', 'err': 'wysna_unwrap_err', 'enum': 'wysna_enum_payload_owned'}[channel]
         result = self.runtime(helper, [value], child.type_id, child)
         if channel == 'enum':
             self.current.operations[-1].data['variant'] = pattern.variant_name

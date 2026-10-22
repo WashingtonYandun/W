@@ -27,14 +27,14 @@ Although W surface syntax has no ownership annotations, the C99 code generators 
 enum ValueOwnership {
     BORROWED      # Unowned view of an existing binding/parameter/field (e.g., local variable `x`, parameter `p`)
     OWNED         # Freshly allocated or retained WVal bound to a scope-tracked temporary `_tN` (refcount >= 1)
-    TRANSFERRED   # Ownership moved out of a temporary (`w_move(&_tN)`) or newly cloned (`w_clone(expr)`) into a destination
+    TRANSFERRED   # Ownership moved out of a temporary (`wysna_move(&_tN)`) or newly cloned (`wysna_clone(expr)`) into a destination
 }
 ```
 
 ### Ownership Transition Helper (`_own_expr`)
 When a value is stored into a new variable (`let x = ...`), assigned (`x = ...`), or prepared for return (`return ...`):
-- If the source expression is an `OWNED` temporary (`_tN`) registered in the current `CleanupScope`, the compiler emits **`w_move(&_tN)`** (`OWNED` $\rightarrow$ `TRANSFERRED`). `w_move` copies the `WVal` struct and overwrites `_tN` with `w_unit()` (`W_UNIT`), transferring the existing +1 reference count in $O(1)$ time with **zero redundant `retain`/`release` traffic**.
-- If the source expression is a `BORROWED` reference (e.g., local variable `y`, parameter `p`), the compiler emits **`w_clone(y)`** (`BORROWED` $\rightarrow$ `TRANSFERRED`), incrementing `refcount` by +1 so the new binding owns an independent reference while `y` remains valid for its own scope cleanup.
+- If the source expression is an `OWNED` temporary (`_tN`) registered in the current `CleanupScope`, the compiler emits **`wysna_move(&_tN)`** (`OWNED` $\rightarrow$ `TRANSFERRED`). `wysna_move` copies the `WVal` struct and overwrites `_tN` with `wysna_unit()` (`W_UNIT`), transferring the existing +1 reference count in $O(1)$ time with **zero redundant `retain`/`release` traffic**.
+- If the source expression is a `BORROWED` reference (e.g., local variable `y`, parameter `p`), the compiler emits **`wysna_clone(y)`** (`BORROWED` $\rightarrow$ `TRANSFERRED`), incrementing `refcount` by +1 so the new binding owns an independent reference while `y` remains valid for its own scope cleanup.
 
 ---
 
@@ -52,55 +52,55 @@ struct CleanupScope {
 ### 3.1 Registration Rules
 - **Function Parameters:** Remain `BORROWED` for the duration of the call (owned by the caller's frame) and are **not** registered in the callee's `CleanupScope`. If a parameter is mutated in-place (or via `this`), CoW or object mutation operates on the target slot.
 - **Local Bindings (`let x = ...`):** Initialized via `_own_expr(rhs)` and registered in the innermost `CleanupScope`.
-- **Heap-Producing Temporaries (`_tN`):** Function calls, collection literals (`w_make_list`, `w_make_dict`, `w_make_tuple`), `struct` literals (`w_make_struct`), `class` instantiations (`w_new_Class`), string operations, and `w_unwrap_ok` are bound to `_tN` and immediately registered in the innermost `CleanupScope`.
+- **Heap-Producing Temporaries (`_tN`):** Function calls, collection literals (`wysna_make_list`, `wysna_make_dict`, `wysna_make_tuple`), `struct` literals (`wysna_make_struct`), `class` instantiations (`wysna_new_Class`), string operations, and `wysna_unwrap_ok` are bound to `_tN` and immediately registered in the innermost `CleanupScope`.
   - *Note:* Auxiliary C initializer arrays use distinct prefixes (`_arrN`, `_kN`, `_vN`) so that `_tN` exclusively denotes scope-managed `WVal` temporaries.
 
 ### 3.2 Four Deterministic Exit Rules (LIFO Order)
 
 1. **Normal Scope Exit (`}`):**
-   When closing a C lexical block (`if`, `elif`, `else`, `while`, `for`, `match` arm, or function body), the top `CleanupScope` is popped and `w_release(v);` is emitted for each registered variable in **reverse declaration order (LIFO)**.
+   When closing a C lexical block (`if`, `elif`, `else`, `while`, `for`, `match` arm, or function body), the top `CleanupScope` is popped and `wysna_release(v);` is emitted for each registered variable in **reverse declaration order (LIFO)**.
 
 2. **`return expr` (Return Transfer Protocol):**
    To prevent releasing a local variable before returning it (e.g., `let x = [1, 2, 3]; return x`), `return` executes a 4-step protocol:
    ```c
-   WVal _ret0 = w_clone(x);   /* or w_move(&_tN) if returning a temporary */
-   /* Emit LIFO w_release(...) for ALL active scopes down to "fn" (without popping for subsequent unreachable code) */
-   w_release(x);
-   return _ret0;              /* or return w_ok(_ret0); in fallible T ! E functions */
+   WVal _ret0 = wysna_clone(x);   /* or wysna_move(&_tN) if returning a temporary */
+   /* Emit LIFO wysna_release(...) for ALL active scopes down to "fn" (without popping for subsequent unreachable code) */
+   wysna_release(x);
+   return _ret0;              /* or return wysna_ok(_ret0); in fallible T ! E functions */
    ```
    Because `_ret0` holds its own +1 reference (or moved reference from `_tN`), releasing `x` and all active temporaries in LIFO order safely decrements the scope's references while `_ret0` survives intact with `refcount >= 1`.
 
 3. **Postfix Propagation (`expr?`):**
    Evaluating `expr?` binds the operand to a scope-tracked temporary `_t0 = _own_expr(op);`:
-   - **On `W_NONE` (`T?` propagation):** Emits LIFO `w_release` across all active scopes down to `"fn"` (which includes `_t0` itself) and returns `w_none()`.
-   - **On `W_ERR` (`T ! E` propagation):** Clones `_err = w_clone(_t0);`, emits LIFO `w_release` across all active scopes down to `"fn"`, and returns `_err`.
-   - **On `W_OK` / non-`none`:** Extracts the payload (`_unw = w_unwrap_ok(_t0)` or `_t0`), registers `_unw` in the current `CleanupScope`, and continues execution.
+   - **On `W_NONE` (`T?` propagation):** Emits LIFO `wysna_release` across all active scopes down to `"fn"` (which includes `_t0` itself) and returns `wysna_none()`.
+   - **On `W_ERR` (`T ! E` propagation):** Clones `_err = wysna_clone(_t0);`, emits LIFO `wysna_release` across all active scopes down to `"fn"`, and returns `_err`.
+   - **On `W_OK` / non-`none`:** Extracts the payload (`_unw = wysna_unwrap_ok(_t0)` or `_t0`), registers `_unw` in the current `CleanupScope`, and continues execution.
 
 4. **`break` and `continue` (Loop-Bounded Cleanup):**
-   Emits LIFO `w_release` for every `CleanupScope` from the innermost scope outward **up to and including the nearest `"loop"` scope**, then emits `break;` or `continue;`. Variables in scopes enclosing the loop remain untouched.
+   Emits LIFO `wysna_release` for every `CleanupScope` from the innermost scope outward **up to and including the nearest `"loop"` scope**, then emits `break;` or `continue;`. Variables in scopes enclosing the loop remain untouched.
 
 ---
 
-## 4. Safe Reassignment & Slot Mutation (`w_assign` / `w_slot_assign`)
+## 4. Safe Reassignment & Slot Mutation (`wysna_assign` / `wysna_slot_assign`)
 
 Reassigning a mutable local variable (`x = rhs`) or container/struct slot (`a[i] = rhs`, `s.f = rhs`) must release the old value stored in the destination while remaining safe under self-assignment (`x = x`, `x = x[0]`):
 1. The right-hand side is evaluated and converted to an owned value **first** (`_own_expr(rhs)`).
-2. `w_assign(&x, owned_rhs)` releases the previous value in `*dst` (`w_release(*dst)`) and writes `owned_rhs` into `*dst`.
+2. `wysna_assign(&x, owned_rhs)` releases the previous value in `*dst` (`wysna_release(*dst)`) and writes `owned_rhs` into `*dst`.
 
 ---
 
 ## 5. Runtime RC Instrumentation & Leak Verification (`W_MEM_CHECK=1`)
 
-In `runtime/w_runtime.h`, all heap-allocated runtime payloads (`WListBuf`, `WDictBuf`, `WTupleBuf`, `WStructBuf` for both `W_STRUCT` and `W_OBJECT`, and `WBoxBuf` for `W_OK`/`W_ERR`) carry an `int32_t refcount` header and participate in global telemetry counters:
-- `w_g_alloc_count`: Total heap buffer allocations (`refcount = 1`).
-- `w_g_free_count`: Total heap buffer deallocations when `refcount` reaches `0`.
-- `w_g_retain_count`: Total `w_clone` increments on heap buffers.
-- `w_g_release_count`: Total `w_release` decrements on heap buffers.
-- `w_g_live_objects`: Currently live heap buffers (`w_g_alloc_count - w_g_free_count`).
+In `runtime/wysna_runtime.h`, all heap-allocated runtime payloads (`WListBuf`, `WDictBuf`, `WTupleBuf`, `WStructBuf` for both `W_STRUCT` and `W_OBJECT`, and `WBoxBuf` for `W_OK`/`W_ERR`) carry an `int32_t refcount` header and participate in global telemetry counters:
+- `wysna_g_alloc_count`: Total heap buffer allocations (`refcount = 1`).
+- `wysna_g_free_count`: Total heap buffer deallocations when `refcount` reaches `0`.
+- `wysna_g_retain_count`: Total `wysna_clone` increments on heap buffers.
+- `wysna_g_release_count`: Total `wysna_release` decrements on heap buffers.
+- `wysna_g_live_objects`: Currently live heap buffers (`wysna_g_alloc_count - wysna_g_free_count`).
 
 ### Safety Invariants
-1. **Refcount Underflow / Double-Free Detection:** Both `w_clone` and `w_release` assert `refcount > 0`. Upon deallocation, `refcount` is poisoned to `-1` before `free()`. Any subsequent `w_clone` or `w_release` on a freed buffer immediately aborts with `[W4003] Runtime error: memory safety violation (refcount underflow / double free)`.
-2. **Zero-Leak Exit Verification (`W_MEM_CHECK=1`):** At the end of `main()`, after releasing top-level and global bindings, `w_runtime_cleanup()` checks `getenv("W_MEM_CHECK")`. When set to `"1"`, if `w_g_live_objects != 0` or `w_g_alloc_count != w_g_free_count`, the process aborts with `[W4003]` and prints exact allocation/free/live counters.
+1. **Refcount Underflow / Double-Free Detection:** Both `wysna_clone` and `wysna_release` assert `refcount > 0`. Upon deallocation, `refcount` is poisoned to `-1` before `free()`. Any subsequent `wysna_clone` or `wysna_release` on a freed buffer immediately aborts with `[W4003] Runtime error: memory safety violation (refcount underflow / double free)`.
+2. **Zero-Leak Exit Verification (`W_MEM_CHECK=1`):** At the end of `main()`, after releasing top-level and global bindings, `wysna_runtime_cleanup()` checks `getenv("W_MEM_CHECK")`. When set to `"1"`, if `wysna_g_live_objects != 0` or `wysna_g_alloc_count != wysna_g_free_count`, the process aborts with `[W4003]` and prints exact allocation/free/live counters.
 
 This check is intentionally opt-in. It reports logical W runtime buffers only, runs during
 normal cleanup, and does not collect strong cycles. A runtime panic calls `exit()` and
@@ -118,9 +118,9 @@ the default C99 emitter.
 
 ## Managed strings and constructor contracts
 
-The runtime ownership contract for strings is: `w_str` borrows static storage; `w_owned_str` consumes a heap buffer and creates its RC owner; `w_copy_str` copies borrowed input such as argv. Dynamic strings participate in clone/release and allocation counters. `w_add` and `w_index_get_owned` results are registered owned temporaries in both native backends and Wysna Compiler. The borrowed `w_index_get` remains restricted to internal projection paths; dictionary value queries use the owned optional path.
+The runtime ownership contract for strings is: `wysna_str` borrows static storage; `wysna_owned_str` consumes a heap buffer and creates its RC owner; `wysna_copy_str` copies borrowed input such as argv. Dynamic strings participate in clone/release and allocation counters. `wysna_add` and `wysna_index_get_owned` results are registered owned temporaries in both native backends and Wysna Compiler. The borrowed `wysna_index_get` remains restricted to internal projection paths; dictionary value queries use the owned optional path.
 
-`w_ok`, `w_err` and `w_enum_payload` consume their payload. Generated constructor calls move registered temporaries or clone borrowed arguments. `w_unwrap_optional`, `w_unwrap_ok`, `w_unwrap_err` and `w_unwrap_success` return owned values; peek helpers borrow. Class fields and collection slots own their stored values. Leak counters include string owners; LSan remains necessary to find allocations outside the instrumented ownership model.
+`wysna_ok`, `wysna_err` and `wysna_enum_payload` consume their payload. Generated constructor calls move registered temporaries or clone borrowed arguments. `wysna_unwrap_optional`, `wysna_unwrap_ok`, `wysna_unwrap_err` and `wysna_unwrap_success` return owned values; peek helpers borrow. Class fields and collection slots own their stored values. Leak counters include string owners; LSan remains necessary to find allocations outside the instrumented ownership model.
 
 ## Runtime helper inventory and evaluation contract
 
@@ -131,55 +131,55 @@ one release obligation, including when it happens to be an immediate scalar.
 
 ### Helpers that consume ownership
 
-- `w_release` and `w_release_array` consume one reference per value/array element.
-- `w_move` transfers the slot's ownership and resets it to unit.
-- `w_assign` consumes its owned source, releases the old destination, stores the
+- `wysna_release` and `wysna_release_array` consume one reference per value/array element.
+- `wysna_move` transfers the slot's ownership and resets it to unit.
+- `wysna_assign` consumes its owned source, releases the old destination, stores the
   source, and returns a **borrowed** view of that destination. The caller must
   protect a self-aliasing source before calling it.
-- `w_ok`, `w_err`, `w_enum_payload` consume their payload; `w_wrap_result` consumes
+- `wysna_ok`, `wysna_err`, `wysna_enum_payload` consume their payload; `wysna_wrap_result` consumes
   its input and returns it or a new success wrapper. They do not clone payloads.
-- `w_owned_str` consumes a malloc buffer; `w_copy_str` borrows bytes and copies them.
+- `wysna_owned_str` consumes a malloc buffer; `wysna_copy_str` borrows bytes and copies them.
 
 ### Borrowed input, owned output
 
-- `w_clone` retains managed storage. Immediate values and borrowed static strings
+- `wysna_clone` retains managed storage. Immediate values and borrowed static strings
   require no retain, and release is a no-op for them.
-- `w_unwrap_optional`, `w_unwrap_ok`, `w_unwrap_err`, `w_unwrap_success` retain their
+- `wysna_unwrap_optional`, `wysna_unwrap_ok`, `wysna_unwrap_err`, `wysna_unwrap_success` retain their
   returned payload; the source wrapper may be released independently.
-- `w_index_get_owned` and `w_dict_get` retain their result. Present dictionary
+- `wysna_index_get_owned` and `wysna_dict_get` retain their result. Present dictionary
   values are wrapped, including present None. String indexing returns an owned value: a single ASCII character uses static storage; other characters use an independently managed buffer. The caller releases both the same way.
-- `w_make_list`, `w_make_tuple`, `w_make_dict`, `w_make_struct`, `w_make_object`
-  borrow their initializer arrays and clone the stored values. `w_make_range`
+- `wysna_make_list`, `wysna_make_tuple`, `wysna_make_dict`, `wysna_make_struct`, `wysna_make_object`
+  borrow their initializer arrays and clone the stored values. `wysna_make_range`
   creates an owned list. Field/variant/type names come from static generated C.
-- `w_dict_keys`, `w_dict_values`, `w_builtin_bytes`, `w_builtin_enumerate`,
-  `w_builtin_dict_items` create owned containers and retain contained values.
-- `w_add` borrows operands; string addition returns owned storage. Numeric results
+- `wysna_dict_keys`, `wysna_dict_values`, `wysna_builtin_bytes`, `wysna_builtin_enumerate`,
+  `wysna_builtin_dict_items` create owned containers and retain contained values.
+- `wysna_add` borrows operands; string addition returns owned storage. Numeric results
   from add/sub/mul/div/mod/neg/lt/le/gt/ge are immediate values.
-- `w_builtin_str`, `w_builtin_chr`, `w_builtin_slice` return owned strings.
-  `str(existing_string)` retains its buffer. `w_builtin_read_file` and
-  `w_builtin_write_file` return owned results, including owned error payloads.
-- `w_builtin_args` returns an owned list of copied strings; `w_init_args` only
-  borrows process argv until copying. `w_to_cstr` returns malloc storage requiring
-  `free`, not `w_release`; print/eprint and string conversion consume that buffer.
+- `wysna_builtin_str`, `wysna_builtin_chr`, `wysna_builtin_slice` return owned strings.
+  `str(existing_string)` retains its buffer. `wysna_builtin_read_file` and
+  `wysna_builtin_write_file` return owned results, including owned error payloads.
+- `wysna_builtin_args` returns an owned list of copied strings; `wysna_init_args` only
+  borrows process argv until copying. `wysna_to_cstr` returns malloc storage requiring
+  `free`, not `wysna_release`; print/eprint and string conversion consume that buffer.
 
 ### Short-lived borrows and mutable slots
 
-- `w_peek_optional`, `w_peek_ok`, `w_peek_err`, `w_member_get` return borrowed
+- `wysna_peek_optional`, `wysna_peek_ok`, `wysna_peek_err`, `wysna_member_get` return borrowed
   payloads. Keep the owner alive and unchanged until cloning/consuming the borrow.
-- Legacy `w_index_get` borrows list/dict elements but owns a string-index result.
-  Generated value reads use `w_index_get_owned`; Wysna Compiler retains the legacy expression
+- Legacy `wysna_index_get` borrows list/dict elements but owns a string-index result.
+  Generated value reads use `wysna_index_get_owned`; Wysna Compiler retains the legacy expression
   only as lvalue metadata, without executing a discarded value read.
-- `w_index_ref` and `w_member_ref` borrow the root slot, may detach value storage,
+- `wysna_index_ref` and `wysna_member_ref` borrow the root slot, may detach value storage,
   and return a mutable slot pointer. Indices are evaluated once into stable values.
   Slot pointers cannot be cached across unrelated mutations of their container.
-- `w_list_append` borrows the item and clones it into the destination, detaching
-  as needed. `w_list_pop` transfers the removed element's ownership to its caller.
-  `w_list_clear` releases removed elements. All three borrow the destination slot.
-- `w_list_detach`, `w_dict_detach`, `w_struct_detach` replace the borrowed slot's
+- `wysna_list_append` borrows the item and clones it into the destination, detaching
+  as needed. `wysna_list_pop` transfers the removed element's ownership to its caller.
+  `wysna_list_clear` releases removed elements. All three borrow the destination slot.
+- `wysna_list_detach`, `wysna_dict_detach`, `wysna_struct_detach` replace the borrowed slot's
   buffer and clone shared children; callers retain ownership of the root slot.
-- `w_unit`, `w_none`, `w_int`, `w_float`, `w_bool`, `w_enum` produce immediate or
-  payload-free values. `w_str` borrows static bytes. `w_eq`, `w_is_none`,
-  `w_builtin_name`, UTF-8 helpers, len/int/float/ord borrow inputs and return
+- `wysna_unit`, `wysna_none`, `wysna_int`, `wysna_float`, `wysna_bool`, `wysna_enum` produce immediate or
+  payload-free values. `wysna_str` borrows static bytes. `wysna_eq`, `wysna_is_none`,
+  `wysna_builtin_name`, UTF-8 helpers, len/int/float/ord borrow inputs and return
   scalars. Print/eprint borrow arguments and return unit.
 
 ### Generated calls, evaluation and exits
@@ -223,16 +223,16 @@ this contract. Wysna Compiler support remains limited to the fixtures documented
 
 Class ownership is recorded in a control block with strong and weak counts and a
 nullable object pointer. One implicit weak reference protects the block while the
-object is alive. `w_clone`/`w_release` update strong counts for objects and weak
+object is alive. `wysna_clone`/`wysna_release` update strong counts for objects and weak
 counts for handles. At strong zero, invalidate the object pointer, release fields,
 destroy object storage and drop the implicit weak reference. A self-stored weak
 handle therefore cannot free its control block during object teardown.
 
-`w_builtin_weak` borrows a class reference and returns one owned weak handle.
-`w_builtin_weak_owned` consumes the evaluated language-call snapshot immediately,
+`wysna_builtin_weak` borrows a class reference and returns one owned weak handle.
+`wysna_builtin_weak_owned` consumes the evaluated language-call snapshot immediately,
 so weak creation does not accidentally keep its target alive until scope cleanup.
-`w_builtin_upgrade` borrows a weak handle and returns a retained strong object or
-None. `w_empty_weak` owns a new expired control block for a default weak field;
+`wysna_builtin_upgrade` borrows a weak handle and returns a retained strong object or
+None. `wysna_empty_weak` owns a new expired control block for a default weak field;
 constructor initializer arrays release their temporary defaults after storing
 clones. Weak identity remains stable until the final handle is released.
 

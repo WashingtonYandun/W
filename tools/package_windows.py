@@ -87,7 +87,7 @@ def assemble(wheel, output, cache, launcher_compiler=None, source_commit=None):
         stage = Path(temporary) / 'bundle'
         stage.mkdir()
         extract(wheel, stage)
-        for required in ('main.py', 'common/Version.py', 'runtime/w_runtime.h', 'stdlib/text.wysna'):
+        for required in ('main.py', 'common/Version.py', 'runtime/wysna_runtime.h', 'stdlib/text.wysna'):
             if not (stage / required).is_file():
                 raise ValueError('Wheel is missing ' + required)
         metadata = list(stage.glob('*.dist-info/METADATA'))
@@ -124,7 +124,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--wheel', type=Path, required=True)
     parser.add_argument('--output', type=Path, required=True)
-    parser.add_argument('--cache', type=Path, default=ROOT / '.w_cache/windows-downloads')
+    parser.add_argument('--cache', type=Path, default=ROOT / '.wysna_cache/windows-downloads')
     parser.add_argument('--launcher-compiler', type=Path)
     parser.add_argument('--source-commit')
     args = parser.parse_args()
