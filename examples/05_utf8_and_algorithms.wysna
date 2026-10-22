@@ -20,10 +20,10 @@ fn binary_search(items: list[int], target: int) -> int? {
 }
 
 fn main() -> unit {
-    let word = "Zoë"
+    let word = "naïve"
     print("String:", word)
     print("Code points (len):", len(word))
-    print("4th code point (word[3]):", word[3])
+    print("3rd code point (word[2]):", word[2])
     print("UTF-8 byte count:", len(bytes(word)))
 
     let sorted_nums = [2, 5, 8, 12, 16, 23, 38, 56, 72, 91]
