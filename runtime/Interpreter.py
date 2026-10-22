@@ -26,6 +26,7 @@ from runtime.Environment import (
     Environment, ReturnSignal, BreakSignal, ContinueSignal,
     PropagationSignal, create_global_environment
 )
+from runtime.ExecutionContext import ExecutionContext
 
 class Interpreter:
     """
@@ -33,10 +34,20 @@ class Interpreter:
     Executes AST programs preserving strict value semantics (ARC + CoW)
     for structs/collections and reference semantics for class instances.
     """
-    def __init__(self, stdout: Optional[TextIO] = None, file: str = "<stdin>"):
+    def __init__(self, stdout: Optional[TextIO] = None, file: str = "<stdin>",
+                 execution_context: Optional[ExecutionContext] = None):
         self.file = file
-        self.stdout = stdout if stdout is not None else sys.stdout
-        self.global_env = create_global_environment(stdout=self.stdout)
+        self.execution_context = execution_context or ExecutionContext.from_process()
+        self.stdout = stdout if stdout is not None else self.execution_context.stdout
+        if stdout is not None and execution_context is not None:
+            from dataclasses import replace
+            self.execution_context = replace(execution_context, stdout=stdout)
+        elif stdout is not None:
+            self.execution_context = ExecutionContext.from_process(stdout=stdout)
+        self.global_env = create_global_environment(
+            stdout=self.stdout,
+            execution_context=self.execution_context,
+        )
 
     def interpret(self, program: Program) -> WysnaValue:
         if not hasattr(program, "session") and any(isinstance(node, ImportDecl) for node in program.body):

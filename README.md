@@ -194,7 +194,7 @@ See [docs/STDLIB.md](docs/STDLIB.md) for full API reference and examples.
 ## CLI & Tooling
 
 ```text
-wysna run <file.wysna>                 # Execute directly with reference interpreter
+wysna run <file.wysna> [-- args...]    # Execute with program arguments
 wysna check <file.wysna>               # Parse and type-check without code execution
 wysna build <file.wysna> -o <bin>      # Compile to native standalone executable
 wysna emit-c <file.wysna> -o <out.c>   # Generate human-readable portable C99 code
@@ -203,6 +203,9 @@ wysna lsp                              # Launch Language Server Protocol daemon 
 wysna test                             # Run full test suite across all 4 execution engines
 wysna bench                            # Run self-hosted performance benchmarks
 ```
+
+Arguments after `--` are available through `args()`. The interpreter uses `"wysna"` as
+`args()[0]`; a native executable receives the operating system's argument vector.
 
 ---
 

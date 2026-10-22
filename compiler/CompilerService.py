@@ -129,10 +129,11 @@ class CompilerService:
         linked = self._session.link(checked._unit.program)
         return clone_syntax(linked, detached=True)
 
-    def interpret(self, checked, stdout=None, foreign_libraries=()):
+    def interpret(self, checked, stdout=None, foreign_libraries=(), execution_context=None):
         self._validate(checked)
         from runtime.Interpreter import Interpreter
-        interpreter = Interpreter(stdout=stdout, file=checked.source.file)
+        interpreter = Interpreter(stdout=stdout, file=checked.source.file,
+                                  execution_context=execution_context)
         interpreter.foreign_libraries = foreign_libraries
         return interpreter.interpret(self._linked_ast(checked))
 
