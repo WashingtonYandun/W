@@ -1,7 +1,7 @@
 from typing import Any, List, Optional, Union
 
 class Node:
-    """Base class for all W AST nodes with line/col tracking."""
+    """Base class for all Wysna AST nodes with line/col tracking."""
     def __init__(self, line: int = 1, col: int = 1):
         self.line = line
         self.col = col

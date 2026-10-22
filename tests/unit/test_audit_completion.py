@@ -123,7 +123,7 @@ int main(void) {
     return 0;
 }
 '''
-    with tempfile.TemporaryDirectory(prefix='w-ascii-contract-') as temporary:
+    with tempfile.TemporaryDirectory(prefix='wysna-ascii-contract-') as temporary:
         path = Path(temporary) / 'contract.c'
         binary = Path(temporary) / 'contract'
         path.write_text(source)
@@ -170,7 +170,7 @@ def test_typed_generator_shape_and_independent_model():
 
 def test_typed_composition_across_engines():
     selfhost_bin = ensure_selfhost_compiler_binary(str(ROOT))
-    with tempfile.TemporaryDirectory(prefix='w-typed-composition-') as temporary:
+    with tempfile.TemporaryDirectory(prefix='wysna-typed-composition-') as temporary:
         for seed in SEEDS:
             source, expected, _ = generate_typed_properties(seed)
             formatted = verify_formatting(source, 'typed_properties_' + str(seed) + '.wysna')

@@ -3,7 +3,7 @@ test_c03_generic_specialization.py - Comprehensive verification for C03 Generic 
 
 Verifies:
 1. Collision freedom: user identifiers with '__' alongside generic specializations.
-2. Reserved compiler prefix rejection (_W_ and __w_ user identifiers).
+2. Reserved compiler prefix rejection (_WYSNA_ and __wysna_internal_ user identifiers).
 3. Specialization worklist states and regular recursion termination.
 4. Direct and mutual structural expansion cycle detection with instantiation chain diagnostics (W2011).
 5. Deterministic topological sorting and PYTHONHASHSEED invariance.
@@ -66,7 +66,7 @@ def test_collision_freedom():
     assert spec_entry.state == SpecializationState.COMPLETE
     assert spec_entry.specialized_type is not None
     assert spec_entry.specialized_type.name != "Box__int", "Mangled name must not collide with user Box__int"
-    assert spec_entry.specialized_type.name.startswith("_W_G_"), "Specialization must carry canonical _W_G_ prefix"
+    assert spec_entry.specialized_type.name.startswith("_WYSNA_G_"), "Specialization must carry canonical _WYSNA_G_ prefix"
 
     # Verify user fn id__int and generic id[int]
     user_fn = checker.global_scope.lookup_symbol("id__int")
@@ -77,20 +77,20 @@ def test_collision_freedom():
     spec_fn_entry = checker.specializations[spec_fn_keys[0]]
     assert spec_fn_entry.state == SpecializationState.COMPLETE
     assert spec_fn_entry.specialized_symbol.name != "id__int"
-    assert spec_fn_entry.specialized_symbol.name.startswith("_W_G_")
+    assert spec_fn_entry.specialized_symbol.name.startswith("_WYSNA_G_")
 
     print("  [PASS] Collision freedom between user '__' identifiers and generic specializations")
 
 
 def test_reserved_compiler_prefix():
-    """Verify that user identifiers starting with _W_ or __w_ are rejected."""
+    """Verify that user identifiers starting with _WYSNA_ or __wysna_internal_ are rejected."""
     invalid_codes = [
-        "struct _W_Custom { x: int }",
-        "struct __w_internal { x: int }",
-        "fn _W_func() -> int { return 1 }",
-        "fn __w_func() -> int { return 1 }",
-        "let _W_var = 10",
-        "let __w_var = 10",
+        "struct _WYSNA_Custom { x: int }",
+        "struct __wysna_internal_Custom { x: int }",
+        "fn _WYSNA_func() -> int { return 1 }",
+        "fn __wysna_internal_func() -> int { return 1 }",
+        "let _WYSNA_var = 10",
+        "let __wysna_internal_var = 10",
     ]
     for code in invalid_codes:
         try:
@@ -101,7 +101,7 @@ def test_reserved_compiler_prefix():
         else:
             raise AssertionError(f"Expected compiler prefix rejection for: {code}")
 
-    print("  [PASS] Reserved compiler prefix (_W_, __w_) protection")
+    print("  [PASS] Reserved compiler prefix (_WYSNA_, __wysna_internal_) protection")
 
 
 def test_regular_recursion_termination():

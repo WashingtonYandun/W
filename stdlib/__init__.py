@@ -1,1 +1,1 @@
-"""W source modules distributed with the compiler."""
+"""Wysna source modules distributed with the compiler."""

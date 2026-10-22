@@ -64,7 +64,7 @@ def test_bootstrap_tracks_extracted_semantics():
 
 def test_seeded_semantic_properties():
     selfhost_bin = ensure_selfhost_compiler_binary(str(ROOT))
-    with tempfile.TemporaryDirectory(prefix='w-semantic-properties-') as temporary:
+    with tempfile.TemporaryDirectory(prefix='wysna-semantic-properties-') as temporary:
         for seed in (17, 29, 37, 51, 63, 101, 202, 303):
             source, expected = generate_properties(seed)
             ok, detail = verify(source, f'audit_properties_{seed}.wysna', selfhost_bin, temporary,

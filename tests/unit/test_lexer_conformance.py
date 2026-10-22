@@ -12,6 +12,31 @@ def test_token_equality_includes_source_position():
     assert first == same_position
     assert first != different_position
 
+def test_newline_terminators_and_context_free_minus():
+    source = "invoke()\n-offset\nreturn\nvalue\n[1,\n2];"
+    tokens = Lexer(source).tokenize()
+    token_types = [token.type for token in tokens]
+
+    call_close = next(index for index, token in enumerate(tokens)
+                      if token.type == TokenType.RPAREN and token.line == 1)
+    assert token_types[call_close + 1] == TokenType.NEWLINE
+    assert token_types[call_close + 2] == TokenType.MINUS
+    assert token_types.count(TokenType.MINUS) == 1
+
+    return_index = token_types.index(TokenType.RETURN)
+    value_index = token_types.index(TokenType.IDENTIFIER, return_index + 1)
+    assert TokenType.NEWLINE not in token_types[return_index + 1:value_index]
+
+    bracket_start = token_types.index(TokenType.LBRACKET)
+    bracket_end = token_types.index(TokenType.RBRACKET, bracket_start)
+    assert TokenType.NEWLINE not in token_types[bracket_start:bracket_end + 1]
+    assert TokenType.SEMICOLON in token_types
+
+    for source in ("first()\nsecond()", "first()\rsecond()", "first()\r\nsecond()"):
+        stream = Lexer(source).tokenize()
+        assert [token.type for token in stream].count(TokenType.NEWLINE) == 1
+        assert next(token for token in stream if token.type == TokenType.NEWLINE).value == "\n"
+
 def test_lexer_suite():
     valid_dir = "tests/lexer/valid"
     invalid_dir = "tests/lexer/invalid"

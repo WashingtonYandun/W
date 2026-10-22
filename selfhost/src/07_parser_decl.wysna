@@ -184,6 +184,8 @@ fn parse_struct_decl() -> unit {
     }
     expect_kind("LBRACE")
     while not check_kind("RBRACE") and not is_eof() {
+        skip_statement_separators()
+        if check_kind("RBRACE") or is_eof() { break }
         expect_kind("IDENT")
         expect_kind("COLON")
         if check_kind("RBRACE") or check_kind("EOF") {
@@ -209,6 +211,8 @@ fn parse_enum_decl() -> unit {
     }
     expect_kind("LBRACE")
     while not check_kind("RBRACE") and not is_eof() {
+        skip_statement_separators()
+        if check_kind("RBRACE") or is_eof() { break }
         let variant = expect_kind("IDENT")
         let mut arity = 0
         if match_kind("LPAREN") {
@@ -236,6 +240,8 @@ fn parse_interface_decl() -> unit {
     expect_kind("IDENT")
     expect_kind("LBRACE")
     while not check_kind("RBRACE") and not is_eof() {
+        skip_statement_separators()
+        if check_kind("RBRACE") or is_eof() { break }
         expect_kind("FN")
         expect_kind("IDENT")
         expect_kind("LPAREN")
@@ -287,6 +293,8 @@ fn parse_class_decl() -> unit {
     g_cur_super = sup_name
     expect_kind("LBRACE")
     while not check_kind("RBRACE") and not is_eof() {
+        skip_statement_separators()
+        if check_kind("RBRACE") or is_eof() { break }
         let mut is_pub = true
         if check_kind("PUBLIC") {
             advance_tok()
@@ -655,8 +663,9 @@ fn parse_extern_decl() {
     expect_kind("ARROW")
     let returned = expect_kind("IDENT").val
     let mut native_name = name
-    if len(name) > 6 and slice(name, 0, 6) == "__w1_m" {
-        for i in 6..len(name) - 1 { if slice(name, i, i + 2) == "__" { native_name = slice(name, i + 2, len(name)) break } }
+    let module_prefix = "__wysna_module_"
+    if len(name) > len(module_prefix) and slice(name, 0, len(module_prefix)) == module_prefix {
+        for i in len(module_prefix)..len(name) - 1 { if slice(name, i, i + 2) == "__" { native_name = slice(name, i + 2, len(name)) break } }
     }
     let mut native_params = ""
     let mut wrapped_params = ""

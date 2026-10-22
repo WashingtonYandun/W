@@ -108,9 +108,9 @@ def test_direct_struct_recursion_cycle_detection():
 def test_cli_stats_output():
     repo_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     main_py = os.path.join(repo_root, "main.py")
-    test_w = os.path.join(repo_root, "tests", "runtime", "generic_tree_recursive.wysna")
+    test_program = os.path.join(repo_root, "tests", "runtime", "generic_tree_recursive.wysna")
     proc = subprocess.run(
-        [sys.executable, main_py, "emit-c", test_w, "--stats", "-o", os.devnull],
+        [sys.executable, main_py, "emit-c", test_program, "--stats", "-o", os.devnull],
         capture_output=True,
         text=True,
         cwd=repo_root,

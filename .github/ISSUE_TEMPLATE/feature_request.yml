@@ -6,36 +6,36 @@ body:
   - type: markdown
     attributes:
       value: |
-        Thank you for helping shape the future of W! Before proposing new syntax or features, please check the Language Specification and current public documentation.
+        Before proposing new syntax or features, please check the language specification and current public documentation.
   - type: textarea
     id: problem
     attributes:
       label: Problem or Motivation
-      description: Is your feature request related to a problem? What cannot currently be done easily or cleanly in W?
-      placeholder: "I'm always frustrated when..."
+      description: What problem would this feature solve, or what is currently difficult to do in Wysna?
+      placeholder: "I need to be able to..."
     validations:
       required: true
   - type: textarea
     id: solution
     attributes:
       label: Proposed Solution or Syntax
-      description: Describe your proposed syntax, semantics, and how it should look in W code.
-      render: w
+      description: Describe the proposed syntax and semantics with a Wysna example.
+      render: wysna
       placeholder: |
-        // Proposed W code example
+        # Proposed Wysna code example
     validations:
       required: true
   - type: textarea
     id: alternatives
     attributes:
       label: Alternatives Considered
-      description: What other designs or existing workarounds have you considered?
+      description: What other designs or workarounds have you considered?
     validations:
       false
   - type: textarea
     id: impact
     attributes:
       label: Impact on Self-Hosting & Runtime
-      description: How does this affect the C99 runtime, ARC/CoW invariants, or the Wysna Compiler (self-hosted)?
+      description: How would this affect the C99 runtime, ARC/CoW invariants, or the Wysna Compiler?
     validations:
       false

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build and run the W measurement importer with explicit persistent storage."""
+"""Build and run the Wysna measurement importer with explicit persistent storage."""
 import argparse
 import hashlib
 import json

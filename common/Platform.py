@@ -49,7 +49,7 @@ def cache_lock(path, timeout=600):
                     break
                 except OSError:
                     if time.monotonic() >= deadline:
-                        raise TimeoutError('Timed out waiting for the W bootstrap cache lock')
+                        raise TimeoutError('Timed out waiting for the Wysna bootstrap cache lock')
                     time.sleep(0.05)
             try:
                 yield

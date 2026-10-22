@@ -165,7 +165,7 @@ static inline bool wysna_value_is_error_type(WVal value, const char* kind, const
 
 typedef WVal (*WInvoke)(WVal environment, int32_t argc, const WVal* argv);
 
-/* Native runtime failures retain the source operation that last entered W. */
+/* Native runtime failures retain the source operation that last entered Wysna. */
 static const char* wysna_g_source_file = NULL;
 static int32_t wysna_g_source_line = 0;
 static int32_t wysna_g_source_col = 0;
@@ -241,7 +241,7 @@ static inline void wysna_cow_reset_stats(void) {
 }
 
 /*
- * Logical container allocation tracking for W runtime.
+ * Logical container allocation tracking for Wysna runtime.
  * NOTE on WYSNA_MEM_CHECK vs ASan/LSan:
  * wysna_mem_on_alloc() and wysna_mem_on_free() track high-level container lifecycle
  * (lists, dicts, objects, structs, tuples, strings) as a fast runtime invariant.
@@ -2073,12 +2073,10 @@ static inline char* wysna_format_float(double value) {
 /* Formatting & String Conversion (matching Wysna Seed Values.__str__ exactly) */
 /* Internal module identity is retained for equality/dispatch, not display. */
 static inline const char* wysna_nominal_display_name(const char* name) {
-    if (strncmp(name, "__wm_", 5) == 0) {
-        const char* boundary = strstr(name + 5, "__");
-        if (boundary) return boundary + 2;
-    }
-    if (strncmp(name, "__w1_m", 6) == 0) {
-        const char* boundary = strstr(name + 6, "__");
+    static const char module_prefix[] = "__wysna_module_";
+    const size_t module_prefix_len = sizeof(module_prefix) - 1;
+    if (strncmp(name, module_prefix, module_prefix_len) == 0) {
+        const char* boundary = strstr(name + module_prefix_len, "__");
         if (boundary) return boundary + 2;
     }
     return name;
@@ -2778,7 +2776,7 @@ static inline WVal wysna_builtin_write_file(WVal path, WVal content) {
 /*
  * Propagates an unhandled `Err` out of the program entrypoint.
  *
- * W has no stack unwinding, so a fallible `main` returns its error as a value.
+ * Wysna has no stack unwinding, so a fallible `main` returns its error as a value.
  * Discarding that value would make a failed program indistinguishable from a
  * successful one (exit code 0, no output) to make/CI/shell. The entrypoint
  * therefore reports the error on stderr and signals failure to the caller,

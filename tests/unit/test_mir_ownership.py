@@ -124,7 +124,7 @@ int main(void) {
     return 0;
 }
 '''
-    with tempfile.TemporaryDirectory(prefix='w-result-release-') as temporary:
+    with tempfile.TemporaryDirectory(prefix='wysna-result-release-') as temporary:
         path = Path(temporary) / 'contract.c'
         binary = Path(temporary) / 'contract'
         path.write_text(source)
@@ -142,7 +142,7 @@ def test_parameter_lifetimes_across_engines():
     from main import ensure_selfhost_compiler_binary
     from tests.engine_harness import verify
     path = ROOT / 'tests/runtime/mir_parameter_lifetime.wysna'
-    with tempfile.TemporaryDirectory(prefix='w-parameter-lifetime-') as temporary:
+    with tempfile.TemporaryDirectory(prefix='wysna-parameter-lifetime-') as temporary:
         ok, detail = verify(path.read_text(), str(path.relative_to(ROOT)),
                             ensure_selfhost_compiler_binary(str(ROOT)), temporary,
                             expected=path.with_suffix('.expected').read_text(), strict=True,

@@ -1,6 +1,6 @@
-# W MIR: Verified Intermediate Representation
+# Wysna Seed MIR: Verified Intermediate Representation
 
-W0's default native pipeline is checked AST → typed and verified HIR → verified MIR → C99 → system compiler. `wysna emit-c` and `wysna build` use this pipeline; `--backend=ast` selects the secondary AST emitter, and W1 is an independent self-hosted compiler. `wysna mir path.wysna` prints verified MIR as JSON.
+Wysna Seed's default native pipeline is checked AST → typed and verified HIR → verified MIR → C99 → system compiler. `wysna emit-c` and `wysna build` use this pipeline; `--backend=ast` selects the secondary AST emitter. Wysna Compiler is an independent self-hosted implementation with a direct C99 emitter and does not currently use Seed's HIR/MIR pipeline. `wysna mir path.wysna` prints verified MIR as JSON.
 
 ## Representation
 
@@ -14,19 +14,19 @@ Fields use offsets in the complete layout, including inherited fields. Mutable p
 
 `mir/Verifier.py` checks identities, the type arena, signatures, offsets, storage, arity, effects, and successors. Dataflow intersects definitely initialized slots and joins possibly live references at joins and backedges. It rejects reads from consumed values, moves from borrowed values, and returns with owned references still pending. The default native emitter consumes this verified representation. Verification does not prove the C helpers correct or track external `opaque` handles. Runtime helpers have explicit arity and operand/result relationships; compatibility uses canonical TypeIds, and enum payload reads retain the resolved variant.
 
-Before emission, an ownership pass removes copies of immutable `str` parameters when the temporary has a single definition and no consuming use, return, or mutable-place use. Read-only uses then borrow the parameter whose lifetime is protected by the caller. Copies that escape through moves keep their ownership; globals, locals, and other parameter types are excluded. MIR is verified before and after this pass, and `w mir` shows the optimized representation.
+Before emission, an ownership pass removes copies of immutable `str` parameters when the temporary has a single definition and no consuming use, return, or mutable-place use. Read-only uses then borrow the parameter whose lifetime is protected by the caller. Copies that escape through moves keep their ownership; globals, locals, and other parameter types are excluded. MIR is verified before and after this pass, and `wysna mir` shows the optimized representation.
 
 ## Storage and ABI
 
 Local variables, parameters, and returns of type `int`, `float`, and `bool` use `int64_t`, `double`, and `bool`. Internal counters and predicates are scalars as well. Globals, strings, lists, tuples, structs, objects, optionals, and results still use `WVal`. Adapters convert at function-value, closure, and virtual-dispatch boundaries; runtime helpers use `WVal`; the external scalar/opaque C ABI uses its declared C widths.
 
-There are no specialized lists or unboxed payload layouts. Runtime ABI v2 stores string metadata inside its variant. The tagged value occupies 32 bytes in the measured arm64 ABI; converting a scalar to a collection element boxes it again. Effect classification is conservative and does not perform interprocedural purity analysis.
+There are no specialized lists or unboxed payload layouts. Runtime ABI v2 stores string metadata inside its variant. The tagged value occupies 32 bytes in the measured arm64 ABI; converting a scalar to a collection element boxes it again. This is a known memory-density cost retained by the current runtime ABI. Effect classification is conservative and does not perform interprocedural purity analysis.
 
 ## Ranges
 
-`for item in start..end` and `..=` capture bounds once, from left to right, validate the range size, and use a counter without creating a list. The 100-million-element limit applies even when the loop body immediately executes `break`. An inclusive range ending at `INT64_MAX` keeps the existing error behavior. Ranges used as values remain lists with CoW semantics; W does not add a range type.
+`for item in start..end` and `..=` capture bounds once, from left to right, validate the range size, and use a counter without creating a list. The 100-million-element limit applies even when the loop body immediately executes `break`. An inclusive range ending at `INT64_MAX` keeps the existing error behavior. Ranges used as values remain lists with CoW semantics; Wysna does not add a range type.
 
-W1 recognizes direct ranges in its parser. A parenthesized range expression may use the materialized-list path. Public semantics are the same, but this optimization is not applied uniformly to equivalent syntax.
+Wysna Compiler recognizes direct ranges in its parser. A parenthesized range expression may use the materialized-list path. Public semantics are the same, but this optimization is not applied uniformly to equivalent syntax.
 
 ## Verification and limits
 

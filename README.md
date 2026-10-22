@@ -6,51 +6,51 @@
   <img src="assets/wawi.jpg" alt="Wysna language mascot" width="160">
 </p>
 
-Wysna is an experimental, statically typed programming language designed for native systems programming, CLI tooling, and high-performance applications. Wysna Seed compiles programs to portable C99 and combines deterministic reference counting (ARC), copy-on-write (CoW) value semantics, explicit error unions, and a controlled C interoperability layer.
+Wysna is an experimental statically typed language for native programming, CLI tools, and high-performance applications. Wysna Seed compiles to portable C99 and combines deterministic reference counting (ARC), copy-on-write (CoW) value semantics, explicit error unions, and controlled C interoperability.
 
-The current release is `0.4.0a1` (alpha). Wysna Seed serves as the reference implementation, while Wysna Compiler is the self-hosted compiler verified against a 4-engine parity suite.
+This branch prepares Wysna `0.5.0`. Wysna Seed is the reference compiler and primary production implementation. Wysna Compiler is a modular self-hosted compiler for bootstrap; its supported subset is measured by the four-engine matrix.
 
 ---
 
-## Compiler Architecture & Naming
+## Compiler Architecture and Naming
 
-Wysna defines a clear separation between the language, its reference implementation, and its self-hosted production compiler:
+Wysna distinguishes the language from its two compiler implementations. The self-hosted compiler is not yet the default production pipeline.
 
-| Component | Public Name | Internal Identifier | Implementation Language | Role |
+| Component | Public name | Internal identifier | Implementation language | Role |
 | :--- | :--- | :---: | :--- | :--- |
-| **Language** | **Wysna** | `wysna` | — | Language specification & grammar (`.wysna`) |
-| **Reference Compiler** | **Wysna Seed** | `seed` | Python | Source of truth, type interner & bootstrap seed (formerly W0) |
-| **Self-Hosted Compiler** | **Wysna Compiler** | `selfhost` | Wysna | Production self-hosted compiler (formerly W1) |
-| **Bootstrap Stage 1** | **Stage 1** | `stage1` | Native C99 (compiled by Seed) | First self-hosted compiler binary (`compiler0.c` &rarr; `stage1`) |
-| **Bootstrap Stage 2** | **Stage 2** | `stage2` | Native C99 (recompiled by Stage 1) | Deterministic fixed-point compiler binary (`compiler1.c` &rarr; `stage2`) |
+| **Language** | **Wysna** | `wysna` | — | Specification and grammar (`.wysna`) |
+| **Reference compiler** | **Wysna Seed** | `seed` | Python | Reference semantics, type interner, HIR/MIR, and default C99 pipeline |
+| **Self-hosted compiler** | **Wysna Compiler** | `selfhost` | Wysna | Independent bootstrap compiler with a narrower, measured feature profile |
+| **Bootstrap stage 1** | **Stage 1** | `stage1` | Native C99 (compiled by Seed) | First self-hosted compiler binary (`compiler0.c` &rarr; `stage1`) |
+| **Bootstrap stage 2** | **Stage 2** | `stage2` | Native C99 (recompiled by Stage 1) | Compiler binary at the deterministic fixed point (`compiler1.c` &rarr; `stage2`) |
 
-### Multi-Stage Compiler Pipeline
+### Wysna Seed Compiler Pipeline
 
-Wysna implements a multi-stage compiler pipeline designed for verifiable transformations, deterministic memory safety, and portable native code generation:
+Wysna Seed uses multiple stages for type analysis and portable native code generation. Wysna Compiler is a separate self-hosted implementation that currently emits C99 directly.
 
-| Stage | Component | Responsibility | Output Representation |
+| Stage | Component | Responsibility | Output representation |
 | :--- | :--- | :--- | :--- |
-| **Frontend** | Lexer & Pratt Parser | UTF-8 scanning, operator-precedence parsing, and syntax diagnostics | Abstract Syntax Tree (`AST`) |
-| **Semantic Analysis** | Type Checker & Scopes | Scope-based symbol resolution, nominal type checking, and monomorphization | Typed High-Level IR (`HIR`) |
-| **Mid-Level IR** | Control-Flow Graph & MIR | Basic blocks, place projections, borrow checking, and CoW detach injection | Verified Mid-Level IR (`MIR`) |
-| **Backend** | C99 Code Generator | Translation of MIR to clean C99 code, ARC reference counting, and literal pooling | C99 Translation Unit (`.c`) |
-| **Native Compilation** | C Toolchain (`clang` / `gcc`) | Native compilation and linking against `wysna_runtime.h` and `wysna_host.h` | Standalone Executable (`.exe` / ELF / Mach-O) |
-| **Self-Hosting** | Wysna Compiler | Bootstrap pipeline verifying fixed-point identity (`compiler0.c == compiler1.c`) | Self-Hosted Native Binary (`stage2`) |
+| **Seed frontend** | Lexer and Pratt parser | UTF-8 scanning, operator precedence, and syntax diagnostics | Abstract syntax tree (`AST`) |
+| **Seed semantics** | Type checker and scopes | Symbol resolution, nominal typing, and monomorphization | Typed high-level IR (`HIR`) |
+| **Seed middle end** | Control-flow graph and MIR | Basic blocks, projections, ownership verification, and CoW operations | Verified middle-level IR (`MIR`) |
+| **Seed backend** | C99 generator | MIR-to-C99 translation, ARC, and literal pooling | C99 translation unit (`.c`) |
+| **Native compilation** | C toolchain (`clang` / `gcc`) | Compilation and linking against `wysna_runtime.h` and `wysna_host.h` | Standalone executable (`.exe` / ELF / Mach-O) |
+| **Self-hosting** | Wysna Compiler | Direct C99 emission; the fixed point validates deterministic output, not IR parity | Native self-hosted binary (`stage2`) |
 
 ---
 
-## Engine Parity & Conformance
+## Engine Parity and Conformance
 
-Every core language feature and standard library capability is continuously verified across 4 execution engines:
+Every core and standard-library function is continuously checked across four engines:
 
 | Engine | Role | Implementation | Status |
 | :--- | :--- | :--- | :--- |
-| **`interpreter`** | Reference behavior | Direct AST tree-walk evaluation in Python (Wysna Seed) | 202/202 (100.0%) |
-| **`ast`** | Secondary baseline | Direct AST to C99 code generation (Wysna Seed) | 202/202 (100.0%) |
-| **`hir`** | Primary production pipeline | Typed HIR &rarr; Verified MIR &rarr; C99 backend (Wysna Seed) | 202/202 (100.0%) |
-| **`selfhost`** | Self-hosted compiler | Wysna Compiler native executable (`stage2`) | 202/202 (100.0%) |
+| **`interpreter`** | Reference behavior | Direct AST interpretation in Python (Wysna Seed) | 203/203 (100.0%) |
+| **`ast`** | Secondary oracle | Direct C99 generation from AST (Wysna Seed) | 203/203 (100.0%) |
+| **`hir`** | Primary production pipeline | Typed HIR &rarr; verified MIR &rarr; C99 backend (Wysna Seed) | 203/203 (100.0%) |
+| **`selfhost`** | Self-hosted compiler | Native Wysna Compiler executable (`stage2`) | 203/203 (100.0%) |
 
-See [docs/ENGINE_PARITY_MATRIX.md](docs/ENGINE_PARITY_MATRIX.md) for full breakdown and feature classifications.
+See [docs/ENGINE_PARITY_MATRIX.md](docs/ENGINE_PARITY_MATRIX.md) for details and function categories.
 
 ---
 

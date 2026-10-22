@@ -2,7 +2,25 @@ import os
 import json
 from parser.Parser import Parser
 from error.Error import DIAGNOSTIC_CODES, ParserError
-from node.NodeType import Program
+from node.NodeType import ExprStmt, IdentExpr, Program, UnaryExpr
+
+
+def test_newline_statement_boundaries():
+    program = Parser().parse("invoke(item)\n-offset\nreturn\nvalue")
+    assert len(program.body) == 3
+    assert isinstance(program.body[0], ExprStmt)
+    assert isinstance(program.body[1].expr, UnaryExpr)
+    assert isinstance(program.body[1].expr.operand, IdentExpr)
+    assert isinstance(program.body[2].value, IdentExpr)
+
+    minimum = Parser().parse("let minimum = -9223372036854775808")
+    assert minimum.body[0].initializer.value == -9223372036854775808
+
+    separated = Parser().parse("let value = 1; print(value)")
+    assert len(separated.body) == 2
+
+    multiline = Parser().parse("let values = [1,\n2]")
+    assert len(multiline.body[0].initializer.elements) == 2
 
 def test_parser_suite():
     valid_dir = "tests/parser/valid"
@@ -56,7 +74,7 @@ def test_parser_suite():
             print(f"  [FAIL] {f}: Expected ParserError, but AST produced: {ast}")
             failures.append((f, "Expected ParserError but succeeded"))
         except ParserError as err:
-            assert err.code in DIAGNOSTIC_CODES, f"Expected a canonical W diagnostic code, got {err.code}"
+            assert err.code in DIAGNOSTIC_CODES, f"Expected a canonical Wysna diagnostic code, got {err.code}"
             assert err.stage == "parser", f"Expected parser-stage diagnostic, got {err.stage}"
             assert err.line >= 1 and err.col >= 1, f"Invalid position line={err.line}, col={err.col}"
             print(f"  [PASS] {f}: Caught {err.code} at line {err.line}:{err.col} -> {err.message}")

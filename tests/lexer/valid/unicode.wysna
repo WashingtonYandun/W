@@ -1,6 +1,6 @@
-# TOKENS: STR STR STR STR STR EOF
-"José"
-"año"
-"pingüino"
+# TOKENS: STR NEWLINE STR NEWLINE STR NEWLINE STR NEWLINE STR NEWLINE EOF
+"Zoë"
+"naïve"
+"penguin"
 "🦀"
-"こんにちは"
+"façade"

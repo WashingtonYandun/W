@@ -36,7 +36,7 @@ fn module_directory(path: str) -> str {
     if boundary < 0 { return "" }
     return slice(path, 0, boundary + 1)
 }
-fn module_name(index: int, name: str) -> str { return "__w1_m" + str(index) + "__" + name }
+fn module_name(index: int, name: str) -> str { return "__wysna_module_" + str(index) + "__" + name }
 fn module_contains(names: list[str], name: str) -> bool {
     for candidate in names { if candidate == name { return true } }
     return false
@@ -73,7 +73,7 @@ fn module_expand(src: str, path: str, entry: bool) -> int {
     let tokens = tokenize(src)
     for token in tokens {
         if token.kind == "IDENT" {
-            if (len(token.val) >= 6 and slice(token.val, 0, 6) == "__w1_m") or (len(token.val) >= 5 and slice(token.val, 0, 5) == "__wm_") or (len(token.val) >= 3 and slice(token.val, 0, 3) == "_W_") { report_error("W1002", token.line, token.col, "reserved compiler namespace") }
+            if (len(token.val) >= 8 and slice(token.val, 0, 8) == "__wysna_") or (len(token.val) >= 7 and slice(token.val, 0, 7) == "_WYSNA_") { report_error("W1002", token.line, token.col, "reserved compiler namespace") }
         }
     }
     let mut depth = 0

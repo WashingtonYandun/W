@@ -9,6 +9,18 @@ fn sem_match(kind: str) -> bool {
     if sem_is(kind) { sem_take() return true }
     return false
 }
+fn sem_skip_separators() {
+    while sem_is("NEWLINE") or sem_is("SEMICOLON") { sem_take() }
+}
+fn sem_skip_newlines_before_branch() {
+    let saved = sem_pos
+    while sem_is("NEWLINE") { sem_take() }
+    let mut branch = sem_is("ELIF")
+    if sem_is("ELSE") {
+        if sem_tokens[sem_pos + 1].kind == "LBRACE" or sem_tokens[sem_pos + 1].kind == "IDENT" and sem_tokens[sem_pos + 2].kind == "LBRACE" { branch = true }
+    }
+    if not branch { sem_pos = saved }
+}
 fn sem_error(code: str, message: str) {
     report_error(code, sem_at().line, sem_at().col, message)
 }
@@ -338,7 +350,9 @@ fn sem_collect_record(kind: str) {
     }
     if kind == "class" { sem_classes.append(SemClass { name: name, parent: parent, interfaces: interfaces }) }
     sem_expect("LBRACE")
-    while not sem_is("RBRACE") {
+    while true {
+        sem_skip_separators()
+        if sem_is("RBRACE") { break }
         let mut visible = true
         if sem_match("PRIVATE") { visible = false } else { sem_match("PUBLIC") }
         if sem_is("FN") { sem_collect_function(name + ".", visible) }
@@ -948,6 +962,9 @@ fn sem_expression(minimum: int, allow_struct: bool) -> SemValue {
     sem_statement_context = false
     let mut left = sem_prefix(allow_struct, statement)
     while true {
+        let saved = sem_pos
+        while sem_is("NEWLINE") { sem_take() }
+        if not sem_is("ELSE") or not (sem_tokens[sem_pos + 1].kind == "LBRACE" or sem_tokens[sem_pos + 1].kind == "IDENT" and sem_tokens[sem_pos + 2].kind == "LBRACE") { sem_pos = saved }
         let call_position = sem_pos + sem_token_offset
         let call_line = sem_at().line
         let call_col = sem_at().col
@@ -1120,6 +1137,7 @@ fn sem_if(statement: bool) -> SemValue {
     let mut initialized = sem_initialized
     let mut all_return = first.terminates
     let mut common = first.type_id
+    sem_skip_newlines_before_branch()
     while sem_match("ELIF") {
         sem_initialized = initial
         sem_require(sem_expression(0, false).type_id, sem_bool, "W2001")
@@ -1131,6 +1149,7 @@ fn sem_if(statement: bool) -> SemValue {
             if all_return { common = branch.type_id }
         }
         all_return = all_return and branch.terminates
+        sem_skip_newlines_before_branch()
     }
     sem_initialized = initial
     if sem_match("ELSE") {
@@ -1368,7 +1387,9 @@ fn sem_match_expression(statement: bool) -> SemValue {
     let initial = sem_initialized
     let mut initialized = initial
     let mut live_branches = 0
-    while not sem_is("RBRACE") {
+    while true {
+        sem_skip_separators()
+        if sem_is("RBRACE") { break }
         let saved_variables = sem_variables
         sem_initialized = initial
         sem_depth = sem_depth + 1
@@ -1435,7 +1456,9 @@ fn sem_block(statement: bool) -> SemFlow {
     sem_depth = sem_depth + 1
     let mut tail = sem_unit
     let mut terminates = false
-    while not sem_is("RBRACE") and not sem_is("EOF") {
+    while true {
+        sem_skip_separators()
+        if sem_is("RBRACE") or sem_is("EOF") { break }
         if sem_is("LET") { sem_let() tail = sem_unit }
         elif sem_match("RETURN") {
             let previous = sem_expected
@@ -1715,7 +1738,9 @@ fn sem_validate(tokens: list[Token]) {
     surrounded.append(Token { kind: "EOF", val: "", line: 1, col: 1 })
     sem_reset(surrounded)
     sem_pos = 1
-    while not sem_is("EOF") {
+    while true {
+        sem_skip_separators()
+        if sem_is("EOF") { break }
         sem_match("PUB")
         if sem_match("EXTERN") {
             if sem_expect("STR").val != "C" { sem_error("W2013", "only C ABI is supported") }
@@ -1736,7 +1761,9 @@ fn sem_validate(tokens: list[Token]) {
     sem_validate_inheritance()
     sem_validate_layout_cycles()
     sem_pos = 1
-    while not sem_is("RBRACE") and not sem_is("EOF") {
+    while true {
+        sem_skip_separators()
+        if sem_is("RBRACE") or sem_is("EOF") { break }
         sem_match("PUB")
         let mut declaration = false
         for function in sem_functions {

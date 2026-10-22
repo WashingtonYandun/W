@@ -25,7 +25,7 @@ from tests.engine_harness import asdict, compare, run_engine, unsupported_reason
 
 
 def generate_typed_program(seed: int) -> str:
-    """Generate a fully valid, statically typed W program exercising ADTs, CoW, OOP, and errors."""
+    """Generate a fully valid, statically typed Wysna program exercising ADTs, CoW, OOP, and errors."""
     rng = random.Random(seed)
     int_a = rng.randint(1, 50)
     int_b = rng.randint(2, 20)
@@ -398,7 +398,7 @@ def run_semantic_fuzz_suite(
     total_checks = 0
     passed_checks = 0
 
-    with tempfile.TemporaryDirectory(prefix="w-fuzz-") as tmpdir:
+    with tempfile.TemporaryDirectory(prefix="wysna-fuzz-") as tmpdir:
         work_dir = Path(tmpdir)
 
         # 1. Positive Typed Programs Fuzzing & Determinism

@@ -1,8 +1,8 @@
 # Wysna Language Specification
 
-> **Status:** The current alpha toolchain is `0.4.0a1`. Sections 1–11 describe the frozen core grammar and are normative; sections 12–14 describe implementation contracts.
+> **Status:** This specification defines the Wysna `0.5.0` release candidate. Sections 1–11 describe the normative grammar; sections 12–14 describe implementation contracts.
 >
-> **Targets:** `Wysna Seed` is the reference implementation and the authority on whether a program is valid. `Wysna Compiler` is an independent self-hosted compiler whose supported subset is measured by the public release corpus. The measured support boundary is documented in [docs/ENGINE_PARITY_MATRIX.md](docs/ENGINE_PARITY_MATRIX.md).
+> **Implementations:** `Wysna Seed` is the reference implementation that determines whether a program is valid. `Wysna Compiler` is an independent self-hosted compiler; its supported subset is measured against the public release corpus. The parity matrix documents this boundary in [docs/ENGINE_PARITY_MATRIX.md](docs/ENGINE_PARITY_MATRIX.md).
 >
 > **Thesis:** Wysna is a compact, statically typed language for small native tools, with deterministic diagnostics and inspectable C99 output. This document defines the language syntax and semantics.
 
@@ -63,7 +63,7 @@ Identifiers must start with an ASCII letter (`a-z`, `A-Z`) or underscore `_`, fo
 * **UTF-8 Storage:** Strings are immutable and stored as UTF-8 in memory.
 * **Unicode Scalar Value Indexing:** `len(s)`, `s[i]`, `slice(s, start, end)`, `ord(s)`, and `chr(c)` operate strictly on **Unicode Scalar Values (Code Points)** (`U+0000..=U+D7FF` and `U+E000..=U+10FFFF`), returning a single code-point string (`str`) or code-point count:
   ```wysna
-  let s = "José"
+  let s = "Zoë"
   s[3]    # returns "é" (4th Unicode scalar value)
   len(s)  # returns 4
   ```
@@ -72,8 +72,21 @@ Identifiers must start with an ASCII letter (`a-z`, `A-Z`) or underscore `_`, fo
 * **Escape Sequences:** `\n`, `\r`, `\t`, `\\`, `\"`, `\0`, `\u{HHHH}` (1 to 6 hex digits).
 
 ### 3.4 Comments and Delimiters
-* **Comments:** Only line comments starting with `#`. Doc-comments start with `##`.
-* **Delimiters:** Braces `{}` are mandatory for blocks (`if`, `for`, `while`, `fn`, `match`, `struct`, `class`, `interface`). Semicolons are not used.
+* **Comments:** Only line comments beginning with `#` are supported. Documentation comments begin with `##`.
+* **Blocks:** Braces `{}` delimit blocks for `if`, `for`, `while`, `fn`, `match`, `struct`, `class`, and `interface`.
+* **Statement separators:** A physical newline (`LF`, `CRLF`, or `CR`) produces a `NEWLINE` separator after a token that can end an expression, provided it occurs outside parentheses and brackets. Literals, identifiers, `this`, `super`, closing delimiters, postfix `?`, `break`, and `continue` can end an expression. Blank lines and newlines after comments follow the same rule. A semicolon (`;`) is an explicit separator and may be used at the top level or inside a block.
+* **Continuation:** Newlines inside `(...)` and `[...]` are ignored. A newline after an operator does not end the expression; a binary operator that continues the expression must appear at the end of the preceding line. A newline after `return` also does not end the return: if an expression appears on the next line, it is part of the return.
+* **Branches:** A newline is allowed between an `if`/`elif` block and its `elif`/`else`, and between a fallible expression and its `else err` handler; that newline belongs to the same construct.
+
+```wysna
+let mut total = 0
+let next_value = 3
+total = total +
+    next_value
+
+process(item)
+-offset # a separate unary-negative expression
+```
 
 ---
 
@@ -232,7 +245,7 @@ Evaluation follows an explicit 12-level precedence hierarchy:
 | **12** | `=` | Assignment | Right |
 
 ### 5.1 Deterministic Left-to-Right Evaluation Order
-W guarantees **strict left-to-right ($L \rightarrow R$) evaluation order** across all composite expressions, independent of target C compiler argument ordering:
+Wysna guarantees **strict left-to-right ($L \rightarrow R$) evaluation order** across all composite expressions, independent of target C compiler argument ordering:
 * **Function and Method Calls:** In `foo(a(), b(), c())`, the receiver (if any) is evaluated first, followed by `a()`, `b()`, and `c()` in strict left-to-right order before invoking `foo`.
 * **Binary Expressions:** In `f() + g() * h()`, sub-expressions evaluate left-to-right within each operator node (`f()` before the product `g() * h()`, and `g()` before `h()`). Short-circuit operators (`and`, `or`, `??`) evaluate their left operand first and evaluate their right operand only when required.
 * **Assignments:** In indexed or member assignments (`a()[b()] = c()` or `obj().field = val()`), the target container, index/member, and right-hand value are evaluated deterministically.
@@ -346,7 +359,7 @@ match tok.kind {
 
 ## 7. Error Handling (`T ! E`)
 
-W does not use non-local stack-unwinding exceptions. Fallible functions declare their error type explicitly:
+Wysna does not use non-local stack-unwinding exceptions. Fallible functions declare their error type explicitly:
 
 ```wysna
 fn read_file(path: str) -> str ! IoError {
@@ -423,7 +436,7 @@ Optional/Option and fallible/Result spellings share canonical type identity. Opt
 2. **Deterministic Single-Threaded Reference Counting + CoW:**
    - Backing buffers use lightweight single-threaded reference counting (`int32_t refcount`) without atomic synchronization overhead.
    - Buffers are shared on assignment or parameter passing by incrementing `refcount`.
-   - When a mutating operation occurs (`append`, `pop`, `clear`, indexed assignment, or field assignment on a `struct`), any buffer along the access path with `refcount > 1` is detached (`w_cow_detach`) before applying the mutation.
+   - When a mutating operation occurs (`append`, `pop`, `clear`, indexed assignment, or field assignment on a `struct`), any buffer along the access path with `refcount > 1` is detached (`wysna_cow_detach`) before applying the mutation.
 3. **Reference Types (`class`):**
    - Unlike `struct`, instances of `class` (`W_OBJECT`) have reference identity semantics: assigning `let b = a` shares the same underlying instance without CoW detachment on field mutation.
 4. **Acyclic Value-Storage Subgraph:**
@@ -473,7 +486,7 @@ fn compile(source: str) {
 
 ## 10. AI & Tooling Contract
 
-1. **Canonical Formatter (`w fmt`):**
+1. **Canonical Formatter (`wysna fmt`):**
    - Every valid Wysna program has exactly one canonical formatted representation.
    - The formatter is idempotent: `fmt(fmt(source)) == fmt(source)`.
 2. **Stable Diagnostic Codes & Structured JSON Diagnostics (`wysna check --json`):**

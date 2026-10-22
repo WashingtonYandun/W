@@ -138,6 +138,10 @@ fn is_space(c: int) -> bool {
     return c == 32 or c == 9 or c == 10 or c == 13
 }
 
+fn line_terminates_statement(kind: str) -> bool {
+    return kind == "INT" or kind == "FLOAT" or kind == "STR" or kind == "TRUE" or kind == "FALSE" or kind == "NONE" or kind == "IDENT" or kind == "THIS" or kind == "SUPER" or kind == "RPAREN" or kind == "RBRACKET" or kind == "RBRACE" or kind == "QUESTION" or kind == "BREAK" or kind == "CONTINUE"
+}
+
 fn hex_val(c: int) -> int {
     if c >= 48 and c <= 57 {
         return c - 48
@@ -257,20 +261,28 @@ fn tokenize(src: str) -> list[Token] {
     let mut i = 0
     let mut line = 1
     let mut col = 1
+    let mut paren_depth = 0
+    let mut bracket_depth = 0
     while i < n {
         let ch = src[i]
         let code = ord(ch)
-        if is_space(code) {
-            if code == 10 {
-                line = line + 1
-                col = 1
-            } else {
-                col = col + 1
+        if code == 10 or code == 13 {
+            if paren_depth == 0 and bracket_depth == 0 and len(tokens) > 0 and line_terminates_statement(tokens[len(tokens) - 1].kind) {
+                tokens.append(Token { kind: "NEWLINE", val: "\n", line: line, col: col })
             }
+            line = line + 1
+            col = 1
+            i = i + 1
+            if code == 13 and i < n and ord(src[i]) == 10 {
+                i = i + 1
+            }
+        } elif is_space(code) {
+            col = col + 1
             i = i + 1
         } elif ch == "#" {
-            while i < n and ord(src[i]) != 10 {
+            while i < n and ord(src[i]) != 10 and ord(src[i]) != 13 {
                 i = i + 1
+                col = col + 1
             }
         } elif is_alpha(code) {
             let start = i
@@ -476,6 +488,8 @@ fn tokenize(src: str) -> list[Token] {
                     kind = "RBRACKET"
                 } elif ch == "," {
                     kind = "COMMA"
+                } elif ch == ";" {
+                    kind = "SEMICOLON"
                 } elif ch == ":" {
                     kind = "COLON"
                 } elif ch == "." {
@@ -505,6 +519,10 @@ fn tokenize(src: str) -> list[Token] {
                     report_error("W0001", line, start_col, "unexpected character '" + ch + "'")
                 }
                 tokens.append(Token { kind: kind, val: ch, line: line, col: start_col })
+                if kind == "LPAREN" { paren_depth = paren_depth + 1
+                } elif kind == "RPAREN" { if paren_depth > 0 { paren_depth = paren_depth - 1 }
+                } elif kind == "LBRACKET" { bracket_depth = bracket_depth + 1
+                } elif kind == "RBRACKET" { if bracket_depth > 0 { bracket_depth = bracket_depth - 1 } }
                 i = i + 1
                 col = col + 1
             }
@@ -548,6 +566,22 @@ fn match_kind(k: str) -> bool {
         return true
     }
     return false
+}
+
+fn skip_statement_separators() {
+    while check_kind("NEWLINE") or check_kind("SEMICOLON") {
+        advance_tok()
+    }
+}
+
+fn skip_newlines_before_branch() {
+    let saved = g_pos
+    while check_kind("NEWLINE") {
+        advance_tok()
+    }
+    if not check_kind("ELIF") and not check_kind("ELSE") {
+        g_pos = saved
+    }
 }
 
 fn expect_kind(k: str) -> Token {
@@ -605,7 +639,7 @@ fn module_directory(path: str) -> str {
     if boundary < 0 { return "" }
     return slice(path, 0, boundary + 1)
 }
-fn module_name(index: int, name: str) -> str { return "__w1_m" + str(index) + "__" + name }
+fn module_name(index: int, name: str) -> str { return "__wysna_module_" + str(index) + "__" + name }
 fn module_contains(names: list[str], name: str) -> bool {
     for candidate in names { if candidate == name { return true } }
     return false
@@ -642,7 +676,7 @@ fn module_expand(src: str, path: str, entry: bool) -> int {
     let tokens = tokenize(src)
     for token in tokens {
         if token.kind == "IDENT" {
-            if (len(token.val) >= 6 and slice(token.val, 0, 6) == "__w1_m") or (len(token.val) >= 5 and slice(token.val, 0, 5) == "__wm_") or (len(token.val) >= 3 and slice(token.val, 0, 3) == "_W_") { report_error("W1002", token.line, token.col, "reserved compiler namespace") }
+            if (len(token.val) >= 8 and slice(token.val, 0, 8) == "__wysna_") or (len(token.val) >= 7 and slice(token.val, 0, 7) == "_WYSNA_") { report_error("W1002", token.line, token.col, "reserved compiler namespace") }
         }
     }
     let mut depth = 0
@@ -1553,6 +1587,8 @@ fn parse_block_expr() -> str {
     push_scope("block")
     let mut tail_val = "wysna_unit()"
     while not check_kind("RBRACE") and not is_eof() {
+        skip_statement_separators()
+        if check_kind("RBRACE") or is_eof() { break }
         if check_kind("LET") {
             parse_let_stmt(false)
             tail_val = "wysna_unit()"
@@ -1577,6 +1613,7 @@ fn parse_block_expr() -> str {
             tail_val = "wysna_unit()"
         } else {
             let expr_r = parse_expr(0, true)
+            skip_statement_separators()
             if check_kind("RBRACE") {
                 tail_val = expr_r.val
             } else {
@@ -1623,6 +1660,7 @@ fn parse_if_expr() -> ExprRes {
 }
 
 fn parse_elif_chain(res: str) -> unit {
+    skip_newlines_before_branch()
     if match_kind("ELIF") {
         emit_line("else {")
         push_scope("block")
@@ -1799,6 +1837,8 @@ fn parse_match_arms(subj_tmp: str, res: str) -> unit {
     let matched = new_aux("_match_taken")
     emit_line("bool " + matched + " = false;")
     while not check_kind("RBRACE") and not is_eof() {
+        skip_statement_separators()
+        if check_kind("RBRACE") or is_eof() { break }
         let empty_bindings: list[str] = []
         g_pattern_bind_lines = empty_bindings
         g_pattern_bind_names = empty_bindings
@@ -1819,6 +1859,7 @@ fn parse_match_arms(subj_tmp: str, res: str) -> unit {
             emit_line("wysna_assign(&" + res + ", " + own_expr(arm_value) + ");")
         } else {
             let arm_value = parse_expr(0, true)
+            skip_statement_separators()
             emit_line("wysna_assign(&" + res + ", " + own_expr(arm_value.val) + ");")
         }
         emit_line(matched + " = true;")
@@ -1913,6 +1954,8 @@ fn parse_prefix_expr(allow_struct: bool) -> ExprRes {
                 let mut f_names: list[str] = []
                 let mut f_vals: list[str] = []
                 while not check_kind("RBRACE") and not is_eof() {
+                    skip_statement_separators()
+                    if check_kind("RBRACE") or is_eof() { break }
                     let f_tok = expect_kind("IDENT")
                     expect_kind("COLON")
                     let f_v = parse_expr(0, true)
@@ -1977,7 +2020,7 @@ fn parse_prefix_expr(allow_struct: bool) -> ExprRes {
     if match_kind("MINUS") {
         # SPEC 5 puts unary at level 3, tighter than multiplicative (level 4), so the
         # operand stops below `* / %`. A literal operand folds into a negative constant
-        # so negated whole-number literals emit identically to W0's C99 backend, which
+        # so negated whole-number literals emit identically to Wysna Seed's C99 backend, which
         # is what keeps the three-stage bootstrap hash a fixed point.
         if check_kind("INT") {
             let mut lit = advance_tok().val
@@ -2125,6 +2168,14 @@ fn parse_expr(min_prec: int, allow_struct: bool) -> ExprRes {
     let mut left = parse_prefix_expr(allow_struct)
     while true {
         while true {
+            if check_kind("NEWLINE") and peek_tok(1).kind == "ELSE" {
+                let saved = g_pos
+                while check_kind("NEWLINE") { advance_tok() }
+                let mut starts_match_arm = false
+                if check_kind("ELSE") and peek_tok(1).kind == "FAT_ARROW" { starts_match_arm = true }
+                if check_kind("ELSE") and peek_tok(1).kind == "IDENT" and peek_tok(2).kind == "FAT_ARROW" { starts_match_arm = true }
+                if starts_match_arm { g_pos = saved }
+            }
             if check_kind("LPAREN") {
                 let call_tok = at_tok()
                 let mut collection = false
@@ -2636,6 +2687,8 @@ fn parse_struct_decl() -> unit {
     }
     expect_kind("LBRACE")
     while not check_kind("RBRACE") and not is_eof() {
+        skip_statement_separators()
+        if check_kind("RBRACE") or is_eof() { break }
         expect_kind("IDENT")
         expect_kind("COLON")
         if check_kind("RBRACE") or check_kind("EOF") {
@@ -2661,6 +2714,8 @@ fn parse_enum_decl() -> unit {
     }
     expect_kind("LBRACE")
     while not check_kind("RBRACE") and not is_eof() {
+        skip_statement_separators()
+        if check_kind("RBRACE") or is_eof() { break }
         let variant = expect_kind("IDENT")
         let mut arity = 0
         if match_kind("LPAREN") {
@@ -2688,6 +2743,8 @@ fn parse_interface_decl() -> unit {
     expect_kind("IDENT")
     expect_kind("LBRACE")
     while not check_kind("RBRACE") and not is_eof() {
+        skip_statement_separators()
+        if check_kind("RBRACE") or is_eof() { break }
         expect_kind("FN")
         expect_kind("IDENT")
         expect_kind("LPAREN")
@@ -2739,6 +2796,8 @@ fn parse_class_decl() -> unit {
     g_cur_super = sup_name
     expect_kind("LBRACE")
     while not check_kind("RBRACE") and not is_eof() {
+        skip_statement_separators()
+        if check_kind("RBRACE") or is_eof() { break }
         let mut is_pub = true
         if check_kind("PUBLIC") {
             advance_tok()
@@ -3107,8 +3166,9 @@ fn parse_extern_decl() {
     expect_kind("ARROW")
     let returned = expect_kind("IDENT").val
     let mut native_name = name
-    if len(name) > 6 and slice(name, 0, 6) == "__w1_m" {
-        for i in 6..len(name) - 1 { if slice(name, i, i + 2) == "__" { native_name = slice(name, i + 2, len(name)) break } }
+    let module_prefix = "__wysna_module_"
+    if len(name) > len(module_prefix) and slice(name, 0, len(module_prefix)) == module_prefix {
+        for i in len(module_prefix)..len(name) - 1 { if slice(name, i, i + 2) == "__" { native_name = slice(name, i + 2, len(name)) break } }
     }
     let mut native_params = ""
     let mut wrapped_params = ""
@@ -3172,6 +3232,8 @@ fn compile_source(src: str) -> str {
     let mut has_top_stmts = false
     push_scope("fn")
     while not is_eof() {
+        skip_statement_separators()
+        if is_eof() { break }
         if match_kind("PUB") { continue }
         if check_kind("EXTERN") { parse_extern_decl() }
         elif check_kind("STRUCT") {
@@ -3342,6 +3404,18 @@ fn sem_take() -> Token {
 fn sem_match(kind: str) -> bool {
     if sem_is(kind) { sem_take() return true }
     return false
+}
+fn sem_skip_separators() {
+    while sem_is("NEWLINE") or sem_is("SEMICOLON") { sem_take() }
+}
+fn sem_skip_newlines_before_branch() {
+    let saved = sem_pos
+    while sem_is("NEWLINE") { sem_take() }
+    let mut branch = sem_is("ELIF")
+    if sem_is("ELSE") {
+        if sem_tokens[sem_pos + 1].kind == "LBRACE" or sem_tokens[sem_pos + 1].kind == "IDENT" and sem_tokens[sem_pos + 2].kind == "LBRACE" { branch = true }
+    }
+    if not branch { sem_pos = saved }
 }
 fn sem_error(code: str, message: str) {
     report_error(code, sem_at().line, sem_at().col, message)
@@ -3672,7 +3746,9 @@ fn sem_collect_record(kind: str) {
     }
     if kind == "class" { sem_classes.append(SemClass { name: name, parent: parent, interfaces: interfaces }) }
     sem_expect("LBRACE")
-    while not sem_is("RBRACE") {
+    while true {
+        sem_skip_separators()
+        if sem_is("RBRACE") { break }
         let mut visible = true
         if sem_match("PRIVATE") { visible = false } else { sem_match("PUBLIC") }
         if sem_is("FN") { sem_collect_function(name + ".", visible) }
@@ -4282,6 +4358,9 @@ fn sem_expression(minimum: int, allow_struct: bool) -> SemValue {
     sem_statement_context = false
     let mut left = sem_prefix(allow_struct, statement)
     while true {
+        let saved = sem_pos
+        while sem_is("NEWLINE") { sem_take() }
+        if not sem_is("ELSE") or not (sem_tokens[sem_pos + 1].kind == "LBRACE" or sem_tokens[sem_pos + 1].kind == "IDENT" and sem_tokens[sem_pos + 2].kind == "LBRACE") { sem_pos = saved }
         let call_position = sem_pos + sem_token_offset
         let call_line = sem_at().line
         let call_col = sem_at().col
@@ -4454,6 +4533,7 @@ fn sem_if(statement: bool) -> SemValue {
     let mut initialized = sem_initialized
     let mut all_return = first.terminates
     let mut common = first.type_id
+    sem_skip_newlines_before_branch()
     while sem_match("ELIF") {
         sem_initialized = initial
         sem_require(sem_expression(0, false).type_id, sem_bool, "W2001")
@@ -4465,6 +4545,7 @@ fn sem_if(statement: bool) -> SemValue {
             if all_return { common = branch.type_id }
         }
         all_return = all_return and branch.terminates
+        sem_skip_newlines_before_branch()
     }
     sem_initialized = initial
     if sem_match("ELSE") {
@@ -4702,7 +4783,9 @@ fn sem_match_expression(statement: bool) -> SemValue {
     let initial = sem_initialized
     let mut initialized = initial
     let mut live_branches = 0
-    while not sem_is("RBRACE") {
+    while true {
+        sem_skip_separators()
+        if sem_is("RBRACE") { break }
         let saved_variables = sem_variables
         sem_initialized = initial
         sem_depth = sem_depth + 1
@@ -4769,7 +4852,9 @@ fn sem_block(statement: bool) -> SemFlow {
     sem_depth = sem_depth + 1
     let mut tail = sem_unit
     let mut terminates = false
-    while not sem_is("RBRACE") and not sem_is("EOF") {
+    while true {
+        sem_skip_separators()
+        if sem_is("RBRACE") or sem_is("EOF") { break }
         if sem_is("LET") { sem_let() tail = sem_unit }
         elif sem_match("RETURN") {
             let previous = sem_expected
@@ -5049,7 +5134,9 @@ fn sem_validate(tokens: list[Token]) {
     surrounded.append(Token { kind: "EOF", val: "", line: 1, col: 1 })
     sem_reset(surrounded)
     sem_pos = 1
-    while not sem_is("EOF") {
+    while true {
+        sem_skip_separators()
+        if sem_is("EOF") { break }
         sem_match("PUB")
         if sem_match("EXTERN") {
             if sem_expect("STR").val != "C" { sem_error("W2013", "only C ABI is supported") }
@@ -5070,7 +5157,9 @@ fn sem_validate(tokens: list[Token]) {
     sem_validate_inheritance()
     sem_validate_layout_cycles()
     sem_pos = 1
-    while not sem_is("RBRACE") and not sem_is("EOF") {
+    while true {
+        sem_skip_separators()
+        if sem_is("RBRACE") or sem_is("EOF") { break }
         sem_match("PUB")
         let mut declaration = false
         for function in sem_functions {

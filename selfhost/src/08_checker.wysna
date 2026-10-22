@@ -32,6 +32,8 @@ fn compile_source(src: str) -> str {
     let mut has_top_stmts = false
     push_scope("fn")
     while not is_eof() {
+        skip_statement_separators()
+        if is_eof() { break }
         if match_kind("PUB") { continue }
         if check_kind("EXTERN") { parse_extern_decl() }
         elif check_kind("STRUCT") {

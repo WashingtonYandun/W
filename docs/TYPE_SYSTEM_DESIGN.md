@@ -1,6 +1,6 @@
 # Type System Architecture
 
-This document describes W0's canonical type representation and checking rules. A
+This document describes Wysna Seed's canonical type representation and checking rules. A
 ¶TypeInterner¶ assigns a stable ¶TypeId¶ to each structural type; nominal declarations
 use ¶DefId¶ identities. Generic substitution, assignability, variance, and ownership
 capabilities operate on these structured types.
@@ -153,7 +153,7 @@ struct TypeCapabilities {
     needs_release: bool      # Requires RC decrement & potential deallocation on scope exit
     is_value: bool           # Exhibits independent value semantics (scalars, str, list, dict, tuple, struct, enum)
     is_reference: bool       # Exhibits shared identity semantics (class, interface)
-    is_copyable: bool        # Can be assigned/passed by value (all W types are copyable; collections/structs use CoW)
+    is_copyable: bool        # Can be assigned/passed by value (all Wysna types are copyable; collections/structs use CoW)
     has_identity: bool       # Supports shared mutable identity across aliases (true only for class/interface)
     is_comparable: bool      # Supports == and != operators
     is_valid_dict_key: bool  # Permitted as K in dict[K, V] (checked by W2010)

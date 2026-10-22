@@ -3,6 +3,6 @@ fn read_and_wrap(path: str) -> str ! IoError {
     return "[" + content + "]"
 }
 
-let w = write_file("tests/runtime/temp_file.txt", "hello W")
+let write_result = write_file("tests/runtime/temp_file.txt", "hello Wysna")
 let ok_res = read_and_wrap("tests/runtime/temp_file.txt")
 print(ok_res)

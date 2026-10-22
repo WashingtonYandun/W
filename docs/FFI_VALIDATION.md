@@ -1,4 +1,4 @@
-# Validating W's C Interoperability
+# Validating Wysna's C Interoperability
 
 - **Status:** The SQLite pilot and CSV import flow are implemented; a production profile has not been approved.
 
@@ -12,9 +12,9 @@ A valid import persists its rows and an `imports(row_count, input_bytes, importe
 
 ## Ownership and adapter costs
 
-The FFI carries scalars and `opaque` handles, not W strings or buffers. The database path comes from `WYSNA_SQLITE_DB`. `adapter.c` owns fixed SQL statements, the connection, and prepared statements; this adapter is product code that must be maintained. `pilot_close` closes statements and the connection, and `pilot_dispose` frees the control block. Repeated close is valid; use after close returns `SQLITE_MISUSE`. Using a handle after destruction or destroying it twice remains an unsafe error that W does not prevent.
+The FFI carries scalars and `opaque` handles, not Wysna strings or buffers. The database path comes from `WYSNA_SQLITE_DB`. `adapter.c` owns fixed SQL statements, the connection, and prepared statements; this adapter is product code that must be maintained. `pilot_close` closes statements and the connection, and `pilot_dispose` frees the control block. Repeated close is valid; use after close returns `SQLITE_MISUSE`. Using a handle after destruction or destroying it twice remains an unsafe error that Wysna does not prevent.
 
-The W helper that acquires the resource routes every later exit through one cleanup point. Errors returned by `populate` are handled before leaving. This pilot does not require a new `defer/with` construct. External counters check that connections, control blocks, and statements are no longer live. `WYSNA_MEM_CHECK` checks only W allocations on normal exit; `exit()` bypasses that check. Sanitizers and external counters are needed for this CLI, which returns process exit codes.
+The Wysna helper that acquires the resource routes every later exit through one cleanup point. Errors returned by `populate` are handled before leaving. This pilot does not require a new `defer/with` construct. External counters check that connections, control blocks, and statements are no longer live. `WYSNA_MEM_CHECK` checks only Wysna allocations on normal exit; `exit()` bypasses that check. Sanitizers and external counters are needed for this CLI, which returns process exit codes.
 
 ## Reproducing the checks
 
@@ -36,19 +36,19 @@ cc -std=c99 -O2 -c examples/ffi/sqlite/adapter.c -o .wysna_cache/sqlite-import/a
 WYSNA_SQLITE_DB=.wysna_cache/sqlite-import/measurements.sqlite .wysna_cache/sqlite-import/import_csv measurements.csv
 ```
 
-The runner tests C, AST, and HIR, then invokes W1 directly without running the W0 checker over the input. An independent Python connection compares persisted rows rather than checking output alone. The test appends data in a second run and exercises 14 failures, including an error after an earlier valid row has been inserted. It requires rollback, the expected exit status, no live external resources, and no sanitizer output. Linux enables LSan; macOS does not support it. The system SQLite library is not rebuilt with sanitizers. The earlier `measurements.wysna` pilot retains C/AST/HIR checks for repeated close and use after close.
+The runner tests C, AST, and HIR, then invokes Wysna Compiler directly without running the Wysna Seed checker over the input. An independent Python connection compares persisted rows rather than checking output alone. The test appends data in a second run and exercises 14 failures, including an error after an earlier valid row has been inserted. It requires rollback, the expected exit status, no live external resources, and no sanitizer output. Linux enables LSan; macOS does not support it. The system SQLite library is not rebuilt with sanitizers. The earlier `measurements.wysna` pilot retains C/AST/HIR checks for repeated close and use after close.
 
 ## Measurement and interpretation
 
-Each JSON report records the compiler, platform, linked SQLite version, flags, commands, build time for each program, samples, binary size, and peak resident memory. The shared adapter build is excluded from each program's runtime; the W1 bootstrap is reported separately. One warm-up run is discarded.
+Each JSON report records the compiler, platform, linked SQLite version, flags, commands, build time for each program, samples, binary size, and peak resident memory. The shared adapter build is excluded from each program's runtime; the Wysna Compiler bootstrap is reported separately. One warm-up run is discarded.
 
 `tools/measure_process.py` runs exactly one child in a fresh measurement process, so `ru_maxrss` does not inherit peaks from previous runs. Darwin reports bytes and Linux reports KiB; both are converted to bytes. Time includes process startup, SQLite, and I/O, but excludes launching the Python helper. RSS and binary size depend on platform, flags, and SDK. These numbers describe the full workflow, not the isolated cost of the FFI.
 
-W provides typed errors and control flow, but this pilot still needs a manual adapter and has higher representation costs than C. It validates one concrete integration path; it does not establish a general performance advantage or production readiness.
+Wysna provides typed errors and control flow, but this pilot still needs a manual adapter and has higher representation costs than C. It validates one concrete integration path; it does not establish a general performance advantage or production readiness.
 
 ## Application commands
 
-Python builds and launches the native W application. Data commands require an explicit
+Python builds and launches the native Wysna application. Data commands require an explicit
 SQLite path; no data is sent to a service.
 
 ```sh

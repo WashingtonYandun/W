@@ -1,5 +1,5 @@
 ## 06_game_of_life.wysna
-## Conway's Game of Life in W v0.1 (Glider simulation with ARC + Copy-on-Write value semantics).
+## Conway's Game of Life in Wysna (Glider simulation with ARC + Copy-on-Write value semantics).
 
 struct Grid {
     width: int

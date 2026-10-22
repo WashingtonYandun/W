@@ -1,4 +1,4 @@
-"""C scalar/opaque adapters with explicit width checks and no W allocation transfer."""
+"""C scalar/opaque adapters with explicit width checks and no Wysna allocation transfer."""
 C_TYPES = {'int': 'int64_t', 'int64': 'int64_t', 'int32': 'int32_t',
            'float': 'double', 'double': 'double', 'bool': 'bool', 'opaque': 'void*', 'unit': 'void'}
 

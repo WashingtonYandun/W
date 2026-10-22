@@ -1,6 +1,6 @@
-String: José
-Code points (len): 4
-4th code point (word[3]): é
-UTF-8 byte count: 5
+String: naïve
+Code points (len): 5
+3rd code point (word[2]): ï
+UTF-8 byte count: 6
 Index of 23: 5
 Index of 42: -1

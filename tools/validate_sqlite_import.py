@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Verify and measure atomic CSV imports in C, AST C99, HIR C99 and direct W1."""
+"""Verify and measure atomic CSV imports in C, AST C99, HIR C99 and Wysna Compiler."""
 import argparse
 from contextlib import closing
 import json
@@ -72,7 +72,7 @@ def validate(rows=10000, samples=3, sanitize=False):
               'flags': flags, 'bootstrap_seconds': bootstrap_seconds,
               'memory_method': 'one isolated child ru_maxrss; Darwin bytes, Linux KiB converted to bytes',
               'engines': {}}
-    with tempfile.TemporaryDirectory(prefix='w-sqlite-import-') as temporary:
+    with tempfile.TemporaryDirectory(prefix='wysna-sqlite-import-') as temporary:
         directory = Path(temporary)
         adapter = directory / 'adapter.o'
         execute(compiler + flags + ['-Wall', '-Wextra', '-Werror', '-c', str(PILOT / 'adapter.c'), '-o', str(adapter)])

@@ -783,7 +783,7 @@ class HirBuilder:
             )
         elif isinstance(node, GenericType):
             args_mangled = "__".join(self._get_type_name_from_node(a) for a in node.type_args)
-            mangled_name = f"_W_G_{len(node.name)}_{node.name}__{args_mangled}"
+            mangled_name = f"_WYSNA_G_{len(node.name)}_{node.name}__{args_mangled}"
             if mangled_name in self.structs:
                 return self.interner.mk_struct(mangled_name)
             if mangled_name in self.enums:
@@ -803,7 +803,7 @@ class HirBuilder:
             return " | ".join(self._get_type_name_from_node(member) for member in node.error_types)
         if isinstance(node, GenericType):
             args = "__".join(self._get_type_name_from_node(a) for a in node.type_args)
-            return f"_W_G_{len(node.name)}_{node.name}__{args}"
+            return f"_WYSNA_G_{len(node.name)}_{node.name}__{args}"
         if isinstance(node, AstOptionalType):
             return f"opt__{self._get_type_name_from_node(node.inner)}"
         if isinstance(node, AstListType):

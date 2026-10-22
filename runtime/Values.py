@@ -2,8 +2,9 @@ import weakref
 from typing import Any, Dict, List, Optional
 
 def nominal_display_name(name):
-    if name.startswith('__wm_'):
-        boundary = name.find('__', 5)
+    module_prefix = '__wysna_module_'
+    if name.startswith(module_prefix):
+        boundary = name.find('__', len(module_prefix))
         if boundary >= 0:
             return name[boundary + 2:]
     return name

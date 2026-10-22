@@ -19,6 +19,10 @@ fn is_space(c: int) -> bool {
     return c == 32 or c == 9 or c == 10 or c == 13
 }
 
+fn line_terminates_statement(kind: str) -> bool {
+    return kind == "INT" or kind == "FLOAT" or kind == "STR" or kind == "TRUE" or kind == "FALSE" or kind == "NONE" or kind == "IDENT" or kind == "THIS" or kind == "SUPER" or kind == "RPAREN" or kind == "RBRACKET" or kind == "RBRACE" or kind == "QUESTION" or kind == "BREAK" or kind == "CONTINUE"
+}
+
 fn hex_val(c: int) -> int {
     if c >= 48 and c <= 57 {
         return c - 48
@@ -138,20 +142,28 @@ fn tokenize(src: str) -> list[Token] {
     let mut i = 0
     let mut line = 1
     let mut col = 1
+    let mut paren_depth = 0
+    let mut bracket_depth = 0
     while i < n {
         let ch = src[i]
         let code = ord(ch)
-        if is_space(code) {
-            if code == 10 {
-                line = line + 1
-                col = 1
-            } else {
-                col = col + 1
+        if code == 10 or code == 13 {
+            if paren_depth == 0 and bracket_depth == 0 and len(tokens) > 0 and line_terminates_statement(tokens[len(tokens) - 1].kind) {
+                tokens.append(Token { kind: "NEWLINE", val: "\n", line: line, col: col })
             }
+            line = line + 1
+            col = 1
+            i = i + 1
+            if code == 13 and i < n and ord(src[i]) == 10 {
+                i = i + 1
+            }
+        } elif is_space(code) {
+            col = col + 1
             i = i + 1
         } elif ch == "#" {
-            while i < n and ord(src[i]) != 10 {
+            while i < n and ord(src[i]) != 10 and ord(src[i]) != 13 {
                 i = i + 1
+                col = col + 1
             }
         } elif is_alpha(code) {
             let start = i
@@ -357,6 +369,8 @@ fn tokenize(src: str) -> list[Token] {
                     kind = "RBRACKET"
                 } elif ch == "," {
                     kind = "COMMA"
+                } elif ch == ";" {
+                    kind = "SEMICOLON"
                 } elif ch == ":" {
                     kind = "COLON"
                 } elif ch == "." {
@@ -386,6 +400,10 @@ fn tokenize(src: str) -> list[Token] {
                     report_error("W0001", line, start_col, "unexpected character '" + ch + "'")
                 }
                 tokens.append(Token { kind: kind, val: ch, line: line, col: start_col })
+                if kind == "LPAREN" { paren_depth = paren_depth + 1
+                } elif kind == "RPAREN" { if paren_depth > 0 { paren_depth = paren_depth - 1 }
+                } elif kind == "LBRACKET" { bracket_depth = bracket_depth + 1
+                } elif kind == "RBRACKET" { if bracket_depth > 0 { bracket_depth = bracket_depth - 1 } }
                 i = i + 1
                 col = col + 1
             }

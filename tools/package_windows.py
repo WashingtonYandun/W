@@ -83,7 +83,7 @@ def assemble(wheel, output, cache, launcher_compiler=None, source_commit=None):
     cache.mkdir(parents=True, exist_ok=True)
     archives = {name: download(component, cache) for name, component in COMPONENTS.items()}
     output.parent.mkdir(parents=True, exist_ok=True)
-    with tempfile.TemporaryDirectory(prefix='w-windows-package-', dir=output.parent) as temporary:
+    with tempfile.TemporaryDirectory(prefix='wysna-windows-package-', dir=output.parent) as temporary:
         stage = Path(temporary) / 'bundle'
         stage.mkdir()
         extract(wheel, stage)

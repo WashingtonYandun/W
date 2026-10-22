@@ -61,7 +61,7 @@ int main(void) {
 
 def run_control_block_tests():
     root = Path(__file__).resolve().parents[2]
-    with tempfile.TemporaryDirectory(prefix='w-weak-control-') as directory:
+    with tempfile.TemporaryDirectory(prefix='wysna-weak-control-') as directory:
         source, binary = Path(directory) / 'test.c', Path(directory) / 'test'
         source.write_text(CONTRACT)
         built = subprocess.run([os.environ.get('CC', 'cc'), '-std=c99', '-g',

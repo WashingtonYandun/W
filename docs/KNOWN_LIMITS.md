@@ -1,6 +1,6 @@
 # Known Limits and Deferred Decisions
 
-This file records what W does **not** do, why, and what it would take to change it. It
+This file records what Wysna does **not** do, why, and what it would take to change it. It
 tracks deferred decisions separately from defects. Items marked *open decision* change
 the language surface and need an explicit decision before implementation.
 
@@ -13,14 +13,14 @@ rewritten into a synthetic environment struct and the lambda receives it as a hi
 first parameter (`checker/ClosureConversion.py`). Neither reading a later write nor
 writing through the capture is possible:
 
-```w
+```wysna
 let mut n = 0
 let f = |v: int| -> unit { let x = n; print(x + v) }
 n = 10
 f(1)          # prints 1, not 11 -- `n` was snapshotted at 0
 ```
 
-```w
+```wysna
 let mut xs = [1]
 let f = |v: int| -> unit { xs.append(v) }
                           # W3001: Cannot call mutating method 'append' on a captured
@@ -37,7 +37,7 @@ reason about.
 
 **Cost.** The stateful-closure idiom is not expressible:
 
-```w
+```wysna
 fn make_counter() -> fn() -> int {
     # There is no way to write this. The usual workaround is a class with a private
     # field, or threading an explicit accumulator through every call.
@@ -47,7 +47,7 @@ fn make_counter() -> fn() -> int {
 **What a fix requires.** Real sharing needs one allocation per captured mutable
 variable that both the enclosing frame and the closure read and write through. That
 means the checker must decide which locals become cells (any local captured by a lambda
-and mutated anywhere), the interpreter, the HIR and the W1 backend must all agree on the
+and mutated anywhere), the interpreter, the HIR and Wysna Compiler must all agree on the
 representation, and the ARC/CoW interaction has to be re-verified with the sanitizers.
 This is a language change, not a patch.
 
@@ -79,26 +79,29 @@ category, especially inherited classes and monomorphized generic types.
 
 ---
 
-## 3. W1 support is bounded by the tested corpus
+## 3. Wysna Compiler support is bounded by the tested corpus
 
-W1 is a self-hosted compiler with a narrower supported profile than W0. Its measured
-coverage is maintained in the [engine parity matrix](ENGINE_PARITY_MATRIX.md); passing
-the listed fixtures does not guarantee equivalent behaviour for every W program.
+Wysna Compiler is a self-hosted compiler with a narrower supported profile than Wysna
+Seed. Its measured coverage is maintained in the [engine parity matrix](ENGINE_PARITY_MATRIX.md); passing
+the listed fixtures does not guarantee equivalent behaviour for every Wysna program.
 
-W1 expands imported modules into a token stream and qualifies module names, but it does
-not share W0's typed compilation sessions or canonical declaration arena. The bootstrap
+Wysna Compiler has modular source files under `selfhost/src/`, bundled into
+`selfhost/compiler.wysna`. It parses and checks source using its own implementation and
+emits C99 directly; it does not currently construct the Seed AST/HIR/MIR pipeline or
+share Seed's typed compilation sessions and canonical declaration arena. The bootstrap
 fixed point demonstrates deterministic self-hosting, not universal language parity or
 semantic correctness outside the tested programs.
 
-Installed wheels contain W0, its C runtime header and the standard library; Python
-remains a prerequisite. W1 bootstrap, `w test` and `w bench` require a source checkout.
-El instalador autónomo de Windows incluye un runtime Python privado y Zig como
-toolchain C99 para W0; no necesita un entorno virtual ni un SDK C del host. Se prueba
-por separado del wheel, incluida instalación, reparación y desinstalación. Su alcance
-inicial es Windows 10/11 x64; las bibliotecas FFI externas no se incluyen. La generación
-en CI no establece por sí sola una release publicada, firma o validación manual.
-Missing W1 sources produce `W2013` before any bootstrap-cache write. W0 native builds
-require a host C99 toolchain; an unavailable or invalid compiler command produces
+Installed wheels contain Wysna Seed, its C runtime header and the standard library;
+Python remains a prerequisite. Wysna Compiler bootstrap, `wysna test` and `wysna bench`
+require a source checkout. The standalone Windows installer includes a private Python
+runtime and Zig as the C99 toolchain for Wysna Seed; it needs no virtual environment or
+host C SDK. It is tested separately from the wheel, including installation, repair, and
+uninstallation. Its initial scope is Windows 10/11 x64; external FFI libraries are not
+included. CI generation does not by itself establish a published, signed, or manually
+validated release.
+Missing Wysna Compiler sources produce `W2013` before any bootstrap-cache write. Wysna
+Seed native builds require a host C99 toolchain; an unavailable or invalid compiler command produces
 `W5001` with stage `toolchain`, rather than an internal compiler error. This checks
 command availability, not the completeness of a host SDK or external FFI libraries.
 
@@ -107,13 +110,13 @@ command availability, not the completeness of a host SDK or external FFI librari
 
 **What happens.**
 
-Native AST C99, HIR C99, and W1 builds now report exact source locations for the
+Native AST C99, HIR C99, and Wysna Compiler builds now report exact source locations for the
 operational panic cases `W4001` (division/modulo by zero) and `W4002` (invalid list,
 string, or dictionary reads; invalid list index writes; and `list.pop()` on an empty
 list). The location is attached to the runtime operation itself, so nested expressions
 do not accidentally report the location of a later operand.
 
-The runtime still falls back to `[Wxxxx] RuntimeError: ...` for calls made without a W
+The runtime still falls back to `[Wxxxx] RuntimeError: ...` for calls made without a Wysna
 source span and for other runtime failures, especially internal `W4003` memory/type
 invariant failures. This is deliberate: those failures are not reliably attributable to
 one user expression. The interpreter continues to report its existing source spans.
@@ -177,7 +180,7 @@ a proposed memory model; do not treat this as an implicit promise that ARC is th
 | :--- | :--- |
 | Chained assignment | HIR uses `HirAssignment`; the value is preserved and each index is evaluated once. The artificial depth limit was removed. |
 | Parser error recovery | Check and LSP recover up to 100 syntax diagnostics. JSON preserves the first error and adds `diagnostics`; recovered programs never execute. |
-| `w fmt` coverage | The gate checks idempotence and AST preservation across fixtures, runtime programs, recursive examples, the standard library, and self-hosted sources. It also runs generated trees before and after formatting. |
+| `wysna fmt` coverage | The gate checks idempotence and AST preservation across fixtures, runtime programs, recursive examples, the standard library, and self-hosted sources. It also runs generated trees before and after formatting. |
 | LSP | `initialize`, `didOpen/didChange/didClose`, `definition`, `hover`, `completion`, document formatting and `publishDiagnostics`. No references, rename, signature help, semantic tokens or incremental sync. |
 | Dictionary keys | `int`, `str`, `bool`, `enum` only; `float` and composites containing it are rejected with `W2010`. |
 | `NetError` | Declared in the prelude (`checker/SymbolTable.py`) and referenced by a parser fixture, but nothing produces one. Either implement a network module or remove the type. |
@@ -194,3 +197,23 @@ Standard File/Bytes owners now release host storage at last reference; they do n
 extend that guarantee to arbitrary FFI pointers or strong cycles. IO remains
 synchronous. JSON, task isolation, cancellation and nonblocking networking require
 the acceptance contracts in [Service foundations](SERVICE_FOUNDATIONS.md).
+
+---
+
+## 8. Audit Findings Still Open in 0.5.0
+
+Identity cleanup and newline separators do not close every architectural finding. These
+limits remain part of the published scope:
+
+| Finding | Status in 0.5.0 | Remaining work |
+| :--- | :--- | :--- |
+| W01 · Compiler architecture | Wysna Seed retains AST/HIR/MIR as its main pipeline; Wysna Compiler parses and emits C99 directly through its modular implementation. | Design and validate a shared intermediate representation before expanding the self-hosted backend. |
+| W03 · Value size | On a 64-bit ABI, `WVal` occupies 32 bytes; list slots store full tagged values. | Measure a compact representation with explicit runtime and FFI compatibility. |
+| W04 · CoW cost | Mutating a shared buffer can copy all of its elements. No uniqueness analysis proves that it can be mutated in place. | Measure memory pressure and design a verifiable uniqueness rule before changing ownership or the ABI. |
+| W05 · Generics | A generic function body is checked when a specialization is created. A generic function that is never instantiated may not receive the same body checking. | Separate generic body checking from type substitution without losing concrete diagnostics. |
+| W06 · Concurrency | The runtime and standard library are synchronous and single-threaded; reference counts are not atomic. | Define shared memory, ownership, and synchronization before adding concurrency. |
+| W07 · Benchmarks | The current suite uses small workloads and does not represent sustained memory pressure; process startup can dominate short measurements. | Add long-running and memory-intensive workloads before making performance decisions. |
+| W08 · Syntax recovery | Recovery gathers diagnostics for `check` and LSP using heuristic synchronization and does not produce an executable recovered tree. | Document and test recovery limits if it becomes a public contract. |
+
+The engine matrix records verified behavior differences. Benchmark figures describe only
+the workloads that were run; they are not a general performance guarantee.

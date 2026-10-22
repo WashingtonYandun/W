@@ -34,10 +34,10 @@ def run_expansion_tests():
         'tests/regressions/nul_string.wysna': '3 [97, 0, 98] false\n1\n',
         'tests/generic_oop/repository.wysna': '42 hello\n',
         'tests/generic_oop/modules/main.wysna': '42 hello\n',
-        'tests/stdlib/basic.wysna': '[3, 1, 2, 1] [1, 1, 2, 3] [2, 2, 4, 6]\nuno, dos ["a", "b"]\n3 7\n',
+        'tests/stdlib/basic.wysna': '[3, 1, 2, 1] [1, 1, 2, 3] [2, 2, 4, 6]\none, two ["a", "b"]\n3 7\n',
         'examples/algorithms/two_sum.wysna': '[1, 2]\n',
     }
-    with tempfile.TemporaryDirectory(prefix='w-expansion-') as temporary:
+    with tempfile.TemporaryDirectory(prefix='wysna-expansion-') as temporary:
         directory = Path(temporary)
         for label, expected in positive.items():
             source = (ROOT / label).read_text()
@@ -92,7 +92,7 @@ def run_expansion_tests():
 def test_lsp():
     outgoing = []
     server = LanguageServer(outgoing.append)
-    with tempfile.TemporaryDirectory(prefix='w-lsp-') as temporary:
+    with tempfile.TemporaryDirectory(prefix='wysna-lsp-') as temporary:
         directory = Path(temporary).resolve()
         library = directory / 'library.wysna'
         library.write_text('pub fn plus(x: int) -> int { return x + 1 }\n')
@@ -118,7 +118,7 @@ def test_lsp():
     source = '"😀" + missing\n'
     assert position_at(source, source.index('missing')) == {'line': 0, 'character': 7}
     assert offset_at(source, {'line': 0, 'character': 7}) == source.index('missing')
-    token = Lexer(source).tokenize()[-2]
+    token = next(token for token in Lexer(source).tokenize() if token.value == 'missing')
     assert source[token.start_offset:token.end_offset] == 'missing'
     request = {'jsonrpc': '2.0', 'id': 1, 'method': 'initialize', 'params': {}}
     payload = json.dumps(request).encode()

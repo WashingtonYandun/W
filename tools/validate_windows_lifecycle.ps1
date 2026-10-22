@@ -7,12 +7,12 @@ $installerPath = (Resolve-Path $Installer).Path
 $repoRoot = Split-Path $PSScriptRoot -Parent
 $uninstallKey = 'Software\Microsoft\Windows\CurrentVersion\Uninstall\{E7DFAD44-C0AF-447A-BD57-39A0498CA07A}_is1'
 if ([Microsoft.Win32.Registry]::CurrentUser.OpenSubKey($uninstallKey)) {
-    throw 'This lifecycle test requires a disposable Windows account without an existing W installer.'
+    throw 'This lifecycle test requires a disposable Windows account without an existing Wysna installer.'
 }
 New-Item -ItemType Directory -Force $ReportDirectory | Out-Null
 $reportRoot = (Resolve-Path $ReportDirectory).Path
-$workspace = Join-Path ([System.IO.Path]::GetTempPath()) ('w lifecycle á ' + [guid]::NewGuid())
-$installRoot = Join-Path $workspace 'installed W with spaces'
+$workspace = Join-Path ([System.IO.Path]::GetTempPath()) ('wysna lifecycle á ' + [guid]::NewGuid())
+$installRoot = Join-Path $workspace 'installed Wysna with spaces'
 $unrelatedDirectory = Join-Path $workspace 'unrelated tools'
 $project = Join-Path $workspace 'user project.wysna'
 New-Item -ItemType Directory -Force $unrelatedDirectory | Out-Null
@@ -36,7 +36,7 @@ function Get-UserPath {
     return $environmentKey.GetValue('Path', '', [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames)
 }
 
-function Uninstall-W([string]$Name) {
+function Uninstall-Wysna([string]$Name) {
     $log = Join-Path $reportRoot ($Name + '.log')
     $process = Start-Process -FilePath (Join-Path $installRoot 'unins000.exe') `
         -ArgumentList @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', "/LOG=`"$log`"") -Wait -PassThru
@@ -58,7 +58,7 @@ try {
     & (Join-Path $installRoot 'wysna.exe') check $project
     if ($LASTEXITCODE -ne 0) { throw 'Repair did not preserve a working compiler.' }
     if (!(Test-Path (Join-Path $installRoot 'stdlib/text.wysna'))) { throw 'Repair did not restore the standard library.' }
-    Uninstall-W 'uninstall'
+    Uninstall-Wysna 'uninstall'
     $installed = $false
     if ((Get-UserPath) -cne $baseline) { throw 'Uninstall removed unrelated PATH entries.' }
     if (!(Test-Path $project)) { throw 'Uninstall removed a user project.' }
@@ -70,7 +70,7 @@ try {
     Run-Installer 'preexisting-path-install' @('/TASKS=addtopath')
     $installed = $true
     if ((Get-UserPath) -cne $preexisting) { throw 'A preexisting PATH entry was duplicated.' }
-    Uninstall-W 'preexisting-path-uninstall'
+    Uninstall-Wysna 'preexisting-path-uninstall'
     $installed = $false
     if ((Get-UserPath) -cne $preexisting) { throw 'An unowned PATH entry was removed.' }
 
@@ -81,7 +81,7 @@ try {
     if ((Get-UserPath) -cne $baseline) { throw 'The PATH opt-out was ignored.' }
     & (Join-Path $installRoot 'wysna.exe') version
     if ($LASTEXITCODE -ne 0) { throw 'Direct execution failed without PATH registration.' }
-    Uninstall-W 'no-path-uninstall'
+    Uninstall-Wysna 'no-path-uninstall'
     $installed = $false
     if ((Get-UserPath) -cne $baseline) { throw 'Uninstall changed PATH after opting out.' }
     @{ passed = $true; install = $true; repair = $true; uninstall = $true; projects_preserved = $true;
@@ -90,7 +90,7 @@ try {
 } finally {
     try {
         if ($installed -and (Test-Path (Join-Path $installRoot 'unins000.exe'))) {
-            Uninstall-W 'cleanup'
+            Uninstall-Wysna 'cleanup'
         }
     } finally {
         if ($null -eq $originalPath) {

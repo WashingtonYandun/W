@@ -75,7 +75,7 @@ non-owning ID and does not prolong lifetime. A stale ID fails validation. Explic
 `close() -> int` consumes the host entry once, returns 0 on success and -1 on IO
 failure; repeated close returns 0. Closing one alias closes all aliases. A fallback
 close at last release is best effort; call close explicitly to observe flush errors.
-No arbitrary W finalizer runs during release. Strong ARC cycles are not collected.
+No arbitrary Wysna finalizer runs during release. Strong ARC cycles are not collected.
 Raw FFI `opaque` pointers and `resources.Resource` disposal callbacks still require
 explicit close or `resources.scope`; they do not acquire automatic user finalizers.
 Scope helpers close after success or a returned error; panic/exit/cancellation is

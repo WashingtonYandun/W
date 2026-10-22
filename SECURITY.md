@@ -1,52 +1,50 @@
 # Security Policy
 
-The W programming language team takes security, memory safety, and compiler correctness seriously. This document outlines how to report security issues, our response process, and supported versions.
+The Wysna team takes security, memory safety, and compiler correctness seriously. This policy explains how to report vulnerabilities, how we respond, and which versions receive support.
 
 ## Supported Versions
 
 Only the latest minor release line receives security updates and backports.
 
-| Version | Supported          | Security Status |
-| ------- | ------------------ | --------------- |
-| 0.4.0a1 | :white_check_mark: | Experimental alpha; no production profile approved |
-| 0.3.0.dev1 | :x: | Superseded by the W 0.4.0 alpha line |
-| 0.2.x | :x: | Superseded by W 0.3.0 |
-| 0.1.x   | :x:                | Unsupported historical release |
-| < 0.1.0 | :x:                | Unsupported experimental releases |
+| Version | Supported | Security status |
+| --- | --- | --- |
+| 0.5.0 | ⏳ | Unpublished candidate; official support begins after passing cross-platform CI |
+| 0.4.0a1 | ❌ | Superseded by the Wysna 0.5.0 candidate |
+| 0.3.0.dev1 | ❌ | Superseded by the Wysna 0.4.0 alpha line |
+| 0.2.x | ❌ | Superseded by Wysna 0.3.0 |
+| 0.1.x | ❌ | Historical version without support |
+| < 0.1.0 | ❌ | Experimental versions without support |
 
 ## Reporting a Vulnerability
 
-If you discover a security vulnerability in the Wysna compiler, runtime, or tooling, please **do not report it via a public GitHub issue**. Instead, follow one of these responsible disclosure methods:
+If you find a vulnerability in the Wysna compiler, runtime, or tools, **do not report it through a public GitHub issue**. Use one of these responsible disclosure channels:
 
-1. **GitHub Security Advisory (Preferred):** Open a private report at [github.com/WashingtonYandun/Wysna/security/advisories/new](https://github.com/WashingtonYandun/Wysna/security/advisories/new).
-2. **Direct Email:** Send an encrypted or plain email to [washington.yandun.morales@gmail.com](mailto:washington.yandun.morales@gmail.com) with the subject prefix `[SECURITY]`.
+1. **GitHub Security Advisory (preferred):** create a private report at [github.com/WashingtonYandun/Wysna/security/advisories/new](https://github.com/WashingtonYandun/Wysna/security/advisories/new).
+2. **Email:** write to [washington.yandun.morales@gmail.com](mailto:washington.yandun.morales@gmail.com) with the subject `[SECURITY]`.
 
-### What to Include in Your Report
+### Information to Include
 
-To help us triage and resolve the issue quickly, please provide:
-- A description of the vulnerability, including severity assessment (CVSS if available).
-- A minimal reproducing Wysna code snippet (`.wysna`) or script.
-- The affected component (e.g., C99 runtime `wysna_runtime.h`, Typed HIR lowerer, C codegen, parser, or self-hosting compiler).
-- Exact environment details: OS, CPU architecture, compiler version (`./wysna version`), and C toolchain (`clang --version` or `gcc --version`).
-- Sanitizer trace if applicable (e.g., ASan/UBSan report via `./wysna run <file>.wysna --sanitize`).
+- Vulnerability description and, if available, severity assessment (CVSS).
+- A minimal Wysna (`.wysna`) example or script that reproduces the issue.
+- Affected component, such as the C99 runtime (`runtime/wysna_runtime.h`), HIR lowerer, C generator, parser, or self-hosted compiler.
+- Exact environment: operating system, architecture, Wysna version (`./wysna version`), and C toolchain (`clang --version` or `gcc --version`).
+- Sanitizer trace when applicable (ASan/UBSan with `./wysna run <file>.wysna`).
 
-## Security Response Process
+## Response Process
 
-When we receive a vulnerability report:
+1. **Acknowledgment:** we will confirm receipt within **48 hours**.
+2. **Assessment and triage:** we will investigate and assess the vulnerability within **5 business days**, validating reproduction and impact.
+3. **Fix:** we will develop the fix on a private branch and verify it with AddressSanitizer, UndefinedBehaviorSanitizer, and differential tests.
+4. **Release and advisory:** we will publish a corrective version and a coordinated GitHub Security Advisory. We will credit the reporter unless they request anonymity.
 
-1. **Acknowledgement:** We will acknowledge receipt of your report within **48 hours**.
-2. **Assessment & Triage:** We will investigate and assess the vulnerability within **5 business days**, validating reproduction and impact.
-3. **Remediation & Patching:** A fix will be developed in a private security branch and verified with AddressSanitizer, UndefinedBehaviorSanitizer, and differential oracle testing.
-4. **Release & Advisory:** A patch release and coordinated public GitHub Security Advisory will be published. Reporters will be credited unless they request anonymity.
+## In-Scope Areas
 
-## In-Scope Security Areas
+- **C99 runtime memory safety:** use-after-free, double-free, dangling references, and reference-count overflow or underflow in `runtime/wysna_runtime.h`.
+- **Type confusion:** bypasses in the static checker (`checker/TypeChecker.py`) or typed HIR that allow unchecked memory access.
+- **Compiler code injection:** unsanitized literals or identifiers that escape AST lowering and produce arbitrary C execution.
+- **Copy-on-Write invariants:** mutations visible across shared values that violate Wysna value semantics.
 
-- **C99 Runtime Memory Safety:** Use-after-free, double-free, dangling references, buffer overruns, or reference-count underflow/overflow in `runtime/wysna_runtime.h`.
-- **Type Confusion:** Bypasses in the static type checker (`checker/TypeChecker.py`) or Typed HIR that allow unchecked memory access at runtime.
-- **Compiler Code Injection:** Unsanitized string literals or identifiers in AST lowering that escape into arbitrary C execution during code generation.
-- **Copy-on-Write Invariant Violations:** Observable in-place mutation of shared values across threads or scopes violating W's pure value semantics.
+## Out of Scope
 
-## Out-of-Scope
-
-- Denial-of-Service via excessively large input files or deeply nested expressions causing recursion limits during parsing (unless bypassing AST depth guards).
-- Vulnerabilities requiring root/administrator access or tampering with local binaries outside the W toolchain.
+- Denial of service caused by excessively large files or deeply nested expressions that reach parser recursion limits, unless they bypass AST depth protections.
+- Vulnerabilities requiring root/administrator access or manipulation of local binaries outside the Wysna toolchain.

@@ -1,6 +1,6 @@
-# Typed High-Level IR (HIR)
+# Wysna Seed Typed High-Level IR (HIR)
 
-HIR is W0's typed intermediate representation and the input to the default C99 backend.
+HIR is Wysna Seed's typed intermediate representation and the input to its default C99 backend.
 It carries canonical types, resolved symbols and fields, and explicit control-flow and
 assignment semantics from the checker. The verifier rejects malformed internal
 representations before lowering to verified MIR. MIR makes control flow, ownership
@@ -11,7 +11,7 @@ see [MIR design](MIR_DESIGN.md).
 
 ```mermaid
 flowchart TD
-    A["W source"] --> B["Lexer and parser"]
+    A["Wysna source"] --> B["Lexer and parser"]
     B --> C["AST"]
     C --> D["Declaration collection and type checking"]
     D --> E["Typed HIR"]
@@ -126,7 +126,7 @@ unsupported error patterns before C emission.
 
 ## 3. Explicit Copy-on-Write (`HirCowPath`) Lowering
 
-One of W's defining semantic guarantees is that **mutating a nested value container never mutates aliased value bindings**, whereas mutating a field through a `class` instance mutates the shared reference object.
+One of Wysna's defining semantic guarantees is that **mutating a nested value container never mutates aliased value bindings**, whereas mutating a field through a `class` instance mutates the shared reference object.
 
 In Typed HIR, any mutating target (`a[i][j] = x`, `b.rows[0].append(1)`, `s.inner.count = 2`) is lowered to a structured `HirLValuePath`:
 
@@ -155,13 +155,13 @@ When the TypeChecker / HIR Builder constructs an lvalue path from an expression 
 
 ## 4. Evaluation Order Lowering (`L→R` Sequence Points)
 
-Per `SPEC.md` Section 5.4, W guarantees strict left-to-right evaluation of all sub-expressions. Because C99 leaves function argument and binary operand evaluation order unspecified between sequence points, HIR lowering normalizes compound expressions into ordered statements. Effects that belong to an expression remain in a `Sequence(statements, value)` node and are emitted at that exact expression site. This is required for right operands of `and`, `or`, and `??`: the backend emits those sequences inside the conditional branch that evaluates the operand, so skipped operands cannot mutate state.
+Per `SPEC.md` Section 5.4, Wysna guarantees strict left-to-right evaluation of all sub-expressions. Because C99 leaves function argument and binary operand evaluation order unspecified between sequence points, HIR lowering normalizes compound expressions into ordered statements. Effects that belong to an expression remain in a `Sequence(statements, value)` node and are emitted at that exact expression site. This is required for right operands of `and`, `or`, and `??`: the backend emits those sequences inside the conditional branch that evaluates the operand, so skipped operands cannot mutate state.
 
 Ordinary call arguments and strict binary operands are still emitted left-to-right as ordered C statements before the consuming operation:
 
 ### Example
-Surface W code:
-```w
+Surface Wysna code:
+```wysna
 let y = add( bump(x), bump(x) * 2 )
 ```
 Lowered HIR block statements:
@@ -178,7 +178,7 @@ Both `gcc` and `clang` are forced by `;`-terminated C99 variable declarations to
 
 ## 5. Current role
 
-W0 lowers verified typed HIR to verified MIR for native builds and C emission. The AST backend remains available as a differential oracle (`--backend=ast`). `wysna mir <file.wysna>` prints the verified MIR representation as JSON.
+Wysna Seed lowers verified typed HIR to verified MIR for native builds and C emission. The AST backend remains available as a differential oracle (`--backend=ast`). `wysna mir <file.wysna>` prints the verified MIR representation as JSON.
 
 
 ## 6. Verification boundary

@@ -7,7 +7,7 @@
 
 ## 1. Design Goals
 
-W uses **deterministic single-threaded Reference Counting (RC) + Copy-on-Write (CoW)** without a tracing garbage collector and without exposing user-facing lifetime or borrow annotations.
+Wysna uses **deterministic single-threaded Reference Counting (RC) + Copy-on-Write (CoW)** without a tracing garbage collector and without exposing user-facing lifetime or borrow annotations.
 
 The compiler enforces deterministic lifetime management across **all control-flow paths**:
 1. Normal lexical block exit (`}`).
@@ -21,7 +21,7 @@ The compiler enforces deterministic lifetime management across **all control-flo
 
 ## 2. Internal `ValueOwnership` Classification
 
-Although W surface syntax has no ownership annotations, the C99 code generators (Wysna Seed and Wysna Compiler) classify every C expression yielding a `WVal` into one of three internal ownership states:
+Although Wysna surface syntax has no ownership annotations, the C99 code generators (Wysna Seed and Wysna Compiler) classify every C expression yielding a `WVal` into one of three internal ownership states:
 
 ```text
 enum ValueOwnership {
@@ -102,7 +102,7 @@ In `runtime/wysna_runtime.h`, all heap-allocated runtime payloads (`WListBuf`, `
 1. **Refcount Underflow / Double-Free Detection:** Both `wysna_clone` and `wysna_release` assert `refcount > 0`. Upon deallocation, `refcount` is poisoned to `-1` before `free()`. Any subsequent `wysna_clone` or `wysna_release` on a freed buffer immediately aborts with `[W4003] Runtime error: memory safety violation (refcount underflow / double free)`.
 2. **Zero-Leak Exit Verification (`WYSNA_MEM_CHECK=1`):** At the end of `main()`, after releasing top-level and global bindings, `wysna_runtime_cleanup()` checks `getenv("WYSNA_MEM_CHECK")`. When set to `"1"`, if `wysna_g_live_objects != 0` or `wysna_g_alloc_count != wysna_g_free_count`, the process aborts with `[W4003]` and prints exact allocation/free/live counters.
 
-This check is intentionally opt-in. It reports logical W runtime buffers only, runs during
+This check is intentionally opt-in. It reports logical Wysna runtime buffers only, runs during
 normal cleanup, and does not collect strong cycles. A runtime panic calls `exit()` and
 does not reach this check. Development and CI use ASan/LSan separately for byte-level
 memory diagnostics; `WYSNA_MEM_CHECK` is not a substitute for those tools.
