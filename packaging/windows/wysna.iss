@@ -1,8 +1,8 @@
 #ifndef BundleDir
   #error BundleDir must point to a verified Windows bundle
 #endif
-#ifndef WVersion
-  #error WVersion must identify the packaged compiler
+#ifndef WysnaVersion
+  #error WysnaVersion must identify the packaged compiler
 #endif
 #ifndef OutputDir
   #define OutputDir "."
@@ -11,7 +11,7 @@
 [Setup]
 AppId={{E7DFAD44-C0AF-447A-BD57-39A0498CA07A}
 AppName=Wysna Language
-AppVersion={#WVersion}
+AppVersion={#WysnaVersion}
 AppPublisher=Washington Yandun
 AppPublisherURL=https://github.com/WashingtonYandun/wysna
 DefaultDirName={localappdata}\Programs\Wysna
@@ -26,7 +26,7 @@ ChangesEnvironment=yes
 Compression=lzma2/fast
 SolidCompression=yes
 OutputDir={#OutputDir}
-OutputBaseFilename=wysna-{#WVersion}-windows-x64-setup
+OutputBaseFilename=wysna-{#WysnaVersion}-windows-x64-setup
 UninstallDisplayIcon={app}\wysna.exe
 LicenseFile={#BundleDir}\LICENSE
 WizardStyle=modern

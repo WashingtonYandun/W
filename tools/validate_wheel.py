@@ -47,7 +47,7 @@ def audit(event, args):
             with open(DENIED, 'a', encoding='utf-8') as stream:
                 stream.write(json.dumps({{'event': event, 'path': path}}) + '\\n')
             raise PermissionError('Installed-wheel isolation rejected: ' + path)
-os.environ['W_WHEEL_GUARD'] = 'active'
+os.environ['WYSNA_WHEEL_GUARD'] = 'active'
 import sys
 sys.addaudithook(audit)
 '''.format(root=os.path.normcase(str(site_packages)), forbidden=os.path.normcase(str(forbidden)), denied=str(denied))
@@ -96,7 +96,7 @@ def validate(wheel, forbidden, report):
         denied = directory / 'denied-access.jsonl'
         install_guard(site_packages, forbidden, denied)
         probe = subprocess.run([str(python), '-I', '-B', '-c',
-                                'import json,main,os;print(json.dumps({"root":main.get_repo_root(),"guard":os.getenv("W_WHEEL_GUARD")}))'],
+                                'import json,main,os;print(json.dumps({"root":main.get_repo_root(),"guard":os.getenv("WYSNA_WHEEL_GUARD")}))'],
                                env=environment, cwd=work, capture_output=True, text=True, check=True, timeout=30)
         assert json.loads(probe.stdout)['guard'] == 'active', probe
         assert not probe.stderr, probe.stderr

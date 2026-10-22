@@ -27,4 +27,4 @@ runtime = ["*.h"]
 stdlib = ["*.wysna"]
 
 [tool.setuptools.dynamic]
-version = {attr = "common.Version.W_VERSION"}
+version = {attr = "common.Version.WYSNA_VERSION"}

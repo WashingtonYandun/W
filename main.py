@@ -15,7 +15,7 @@ from hir.HirBuilder import HirBuilder
 from hir.HirCCodeGen import HirCCodeGen
 from error.Error import WysnaError
 
-from common.Version import W_VERSION
+from common.Version import WYSNA_VERSION
 from common.Platform import cache_lock, compiler_command, executable_name, peak_rss_kb
 
 
@@ -404,7 +404,7 @@ def run_pipeline(
 
 def repl(show_tokens: bool = False, show_ast: bool = False) -> None:
     print("==================================================")
-    print(f"Wysna REPL v{W_VERSION} (Type 'exit' to quit)")
+    print(f"Wysna REPL v{WYSNA_VERSION} (Type 'exit' to quit)")
     print("==================================================")
 
     parser = Parser(file="<repl>")
@@ -413,7 +413,7 @@ def repl(show_tokens: bool = False, show_ast: bool = False) -> None:
 
     while True:
         try:
-            line = input("w> ")
+            line = input("wysna> ")
         except (EOFError, KeyboardInterrupt):
             print("\nExiting.")
             break
@@ -442,7 +442,7 @@ def repl(show_tokens: bool = False, show_ast: bool = False) -> None:
 def print_help(prog: Optional[str] = None) -> None:
     if prog is None:
         prog = "wysna"
-    print(f"Wysna Language Compiler & Toolchain v{W_VERSION}")
+    print(f"Wysna Language Compiler & Toolchain v{WYSNA_VERSION}")
     print("Usage:")
     print(f"  {prog} lsp                                       # LSP over stdio")
     print(f"  {prog} repl                                    # Start interactive REPL")
@@ -546,7 +546,7 @@ def main() -> None:
                 run_suite()
                 return
         elif subcmd == "version":
-            print(f"Wysna Language Compiler v{W_VERSION} (Wysna Seed + Wysna Compiler Self-Hosted C99)")
+            print(f"Wysna Language Compiler v{WYSNA_VERSION} (Wysna Seed + Wysna Compiler Self-Hosted C99)")
             return
         elif subcmd == "check":
             check_only = True
@@ -597,7 +597,7 @@ def main() -> None:
                 print(f"Error: Unknown backend '{b_val}'. Valid backends: hir, ast, selfhost", file=sys.stderr)
                 sys.exit(1)
         elif arg in ("--version", "-v"):
-            print(f"Wysna Language Compiler v{W_VERSION} (Wysna Seed + Wysna Compiler Self-Hosted C99)")
+            print(f"Wysna Language Compiler v{WYSNA_VERSION} (Wysna Seed + Wysna Compiler Self-Hosted C99)")
             sys.exit(0)
         elif arg == "--emit-c":
             i += 1
