@@ -39,7 +39,7 @@ Wysna Seed uses multiple stages for type analysis and portable native code gener
 
 ---
 
-## Paridad de motores y conformidad
+## Engine Parity and Conformance
 
 Every core and standard-library function is continuously checked across four engines:
 
