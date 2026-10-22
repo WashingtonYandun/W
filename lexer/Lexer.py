@@ -61,6 +61,7 @@ class Lexer:
 
             if ch in ('\n', '\r'):
                 line, col = self.line, self.col
+                newline_start = self.pos
                 if ch == '\r':
                     self.pos += 1
                     if self.peek() == '\n':
@@ -72,6 +73,7 @@ class Lexer:
                 if (paren_depth == 0 and bracket_depth == 0 and tokens
                         and tokens[-1].type in _LINE_TERMINATOR_TOKENS):
                     tokens.append(Token(value="\n", type=TokenType.NEWLINE, line=line, col=col))
+                    self._stamp(tokens[-1], newline_start)
                 continue
 
             # Comments: skip until a line ending or EOF.
