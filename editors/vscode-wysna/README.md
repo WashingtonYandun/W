@@ -1,6 +1,8 @@
 # Wysna Language Support for VS Code / Cursor / Antigravity
 
-Provides syntax highlighting, comment toggling (`#`), and bracket auto-closing for `.wysna` source files according to `SPEC.md v0.1`.
+Provides syntax highlighting, comment toggling (`#`), and bracket auto-closing for `.wysna` source files according to `SPEC.md v0.1`. The compiler's stdio LSP also provides diagnostics, completion, definition, hover, and document formatting when connected through an LSP client.
+
+The extension currently contributes syntax support only. To use compiler language features, configure an LSP client to launch `wysna lsp` (or `python -m main lsp` from a source checkout) over stdio.
 
 ## Install in 1 Command
 
