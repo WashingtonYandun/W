@@ -8,7 +8,7 @@ def test_deep_runtime_operations_are_iterative():
     repository_root = Path(__file__).resolve().parents[2]
     source = repository_root / "tests" / "runtime" / "deep_runtime.c"
 
-    with tempfile.TemporaryDirectory(prefix="w-deep-runtime-") as temporary_directory:
+    with tempfile.TemporaryDirectory(prefix="wysna-deep-runtime-") as temporary_directory:
         executable = Path(temporary_directory) / "deep-runtime"
         compiler = os.environ.get("CC", "cc")
         compiled = subprocess.run(

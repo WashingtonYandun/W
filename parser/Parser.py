@@ -96,6 +96,9 @@ class Parser:
         body: List[Stmt] = []
 
         while not self.is_at_end():
+            self._skip_statement_separators()
+            if self.is_at_end():
+                break
             stmt = self._recover_statement(allow_top_level=True)
             if stmt is not None:
                 body.append(stmt)
@@ -131,6 +134,9 @@ class Parser:
         while not self.is_at_end():
             token = self.at()
             if depth == 0:
+                if token.type in (TokenType.NEWLINE, TokenType.SEMICOLON):
+                    self._skip_statement_separators()
+                    return
                 if self.pos > start and token.type in starters:
                     return
                 if token.type == TokenType.RBRACE and not top_level:
@@ -343,6 +349,24 @@ class Parser:
             lit = IntLiteral(token.value, line=token.line, col=token.col)
             return LiteralPattern(literal=lit, line=token.line, col=token.col)
 
+        if self.match(TokenType.MINUS):
+            literal_token = self.expect(
+                TokenType.INT,
+                code="W0002",
+                msg="Expected an integer after unary '-' in pattern",
+            )
+            magnitude = int(literal_token.value)
+            if magnitude > 1 << 63:
+                raise ParserError(
+                    message=f"Integer literal '-{magnitude}' is below the int64 minimum",
+                    line=token.line,
+                    col=token.col,
+                    file=self.file,
+                    code="W0002",
+                )
+            literal = IntLiteral(value=-magnitude, line=token.line, col=token.col)
+            return LiteralPattern(literal=literal, line=token.line, col=token.col)
+
         if self.match(TokenType.STR):
             lit = StringLiteral(token.value, line=token.line, col=token.col)
             return LiteralPattern(literal=lit, line=token.line, col=token.col)
@@ -426,39 +450,28 @@ class Parser:
         expr = self.parse_expr()
         return ExprStmt(expr=expr, line=expr.line, col=expr.col)
 
+    def _skip_statement_separators(self) -> None:
+        while self.match(TokenType.NEWLINE, TokenType.SEMICOLON):
+            pass
+
     def _require_statement_end(self) -> None:
-        """Rejects a second expression where a statement separator is required.
-
-        W has no statement terminator, so a statement ends at a line break, `}`, or
-        EOF. Without this check a typo such as `0x10` silently becomes the identifier
-        `x10`, which then surfaces as a bogus name-resolution error instead of a
-        syntax error.
-
-        This is applied to declarations, not to bare expression statements: a block
-        body is a sequence of expressions and the language permits several on one
-        line (`else err { report_error(...) "" }` appears in the standard library).
-        Tightening that is a separate language decision.
-        """
+        """Reject a second literal while accepting established inline statement forms."""
         token = self.at()
         if token.type in _STATEMENT_END_TOKENS:
+            return
+        if self.at().type in (TokenType.NEWLINE, TokenType.SEMICOLON):
+            self._skip_statement_separators()
             return
         previous = self.tokens[self.pos - 1] if self.pos > 0 else token
         if token.line > previous.end_line:
             return
-        # A literal or an opening delimiter here can only be a second, unterminated
-        # expression: the expression parser already consumed every postfix operator,
-        # binary operator and member access, so nothing can legitimately follow a
-        # completed initializer on the same line. An identifier is deliberately allowed
-        # through, because a block body is a statement sequence and
-        # `else { let a = f() b = 2 }` is accepted W; tightening that is a separate
-        # language decision recorded in docs/KNOWN_LIMITS.md.
         if token.type not in (TokenType.INT, TokenType.FLOAT, TokenType.STR,
                               TokenType.TRUE, TokenType.FALSE, TokenType.NONE,
                               TokenType.LPAREN, TokenType.LBRACKET):
             return
         raise ParserError(
             message=f"Unexpected '{token.type.name}' after a complete expression; "
-                    f"statements must be separated by a line break",
+                    f"statements must be separated by a line break or ';'",
             line=token.line,
             col=token.col,
             file=self.file,
@@ -529,6 +542,9 @@ class Parser:
 
         methods: List[InterfaceMethod] = []
         while not self.check(TokenType.RBRACE) and not self.is_at_end():
+            self._skip_statement_separators()
+            if self.check(TokenType.RBRACE) or self.is_at_end():
+                break
             self.match(TokenType.PUBLIC)
             fn_tok = self.expect(TokenType.FN, code="W0006", msg="Expected 'fn' in interface method declaration")
             m_name = self.expect(TokenType.IDENTIFIER, code="W0006", msg="Expected method name after 'fn'")
@@ -576,6 +592,9 @@ class Parser:
         methods: List[MethodDecl] = []
 
         while not self.check(TokenType.RBRACE) and not self.is_at_end():
+            self._skip_statement_separators()
+            if self.check(TokenType.RBRACE) or self.is_at_end():
+                break
             is_public = True
             if self.match(TokenType.PUBLIC):
                 is_public = True
@@ -645,6 +664,9 @@ class Parser:
 
         fields: List[StructField] = []
         while not self.check(TokenType.RBRACE) and not self.is_at_end():
+            self._skip_statement_separators()
+            if self.check(TokenType.RBRACE) or self.is_at_end():
+                break
             f_name = self.expect(TokenType.IDENTIFIER, code="W0006", msg="Expected struct field name")
             self.expect(TokenType.COLON, code="W0006", msg="Expected ':' after struct field name")
             f_type = self.parse_type()
@@ -662,6 +684,9 @@ class Parser:
 
         variants: List[VariantDecl] = []
         while not self.check(TokenType.RBRACE) and not self.is_at_end():
+            self._skip_statement_separators()
+            if self.check(TokenType.RBRACE) or self.is_at_end():
+                break
             v_tok = self.expect(TokenType.IDENTIFIER, code="W0006", msg="Expected enum variant identifier")
             payload_types: List[TypeNode] = []
             if self.match(TokenType.LPAREN):
@@ -747,6 +772,9 @@ class Parser:
         tail_expr: Optional[Expr] = None
 
         while not self.check(TokenType.RBRACE) and not self.is_at_end():
+            self._skip_statement_separators()
+            if self.check(TokenType.RBRACE) or self.is_at_end():
+                break
             stmt = self._recover_statement()
             if stmt is not None:
                 statements.append(stmt)
@@ -773,6 +801,13 @@ class Parser:
         while True:
             # 1. Postfix operators (Calls, Member access, Indexing, Postfix '?')
             while True:
+                if self.check(TokenType.NEWLINE) and self.peek(1).type == TokenType.ELSE:
+                    saved = self.pos
+                    self.advance()
+                    if self.check(TokenType.ELSE) and not self._begins_match_arm():
+                        continue
+                    self.pos = saved
+
                 if self.check(TokenType.LPAREN):
                     # Call expression
                     paren = self.advance()
@@ -1031,6 +1066,9 @@ class Parser:
                     self.advance()  # consume '{'
                     fields: List[FieldInit] = []
                     while not self.check(TokenType.RBRACE) and not self.is_at_end():
+                        self._skip_statement_separators()
+                        if self.check(TokenType.RBRACE) or self.is_at_end():
+                            break
                         f_tok = self.expect(TokenType.IDENTIFIER, code="W0001", msg="Expected struct field name")
                         self.expect(TokenType.COLON, code="W0001", msg="Expected ':' after struct field name")
                         f_val = self.parse_expr()
@@ -1060,6 +1098,7 @@ class Parser:
                         file=self.file,
                         code="W0002",
                     )
+                return IntLiteral(value=-operand.value, line=token.line, col=token.col)
             return UnaryExpr(op=token.value, operand=operand, line=token.line, col=token.col)
 
         # Parenthesized expressions & Tuples
@@ -1097,18 +1136,15 @@ class Parser:
         # Dict Literals: { key: value, ... }
         if self.match(TokenType.LBRACE):
             entries: List[DictEntry] = []
-            if not self.check(TokenType.RBRACE):
+            while not self.check(TokenType.RBRACE) and not self.is_at_end():
+                self._skip_statement_separators()
+                if self.check(TokenType.RBRACE) or self.is_at_end():
+                    break
                 k = self.parse_expr()
                 self.expect(TokenType.COLON, code="W0001", msg="Expected ':' after dict key")
                 v = self.parse_expr()
                 entries.append(DictEntry(key=k, value=v, line=k.line, col=k.col))
-                while self.match(TokenType.COMMA):
-                    if self.check(TokenType.RBRACE):
-                        break
-                    k = self.parse_expr()
-                    self.expect(TokenType.COLON, code="W0001", msg="Expected ':' after dict key")
-                    v = self.parse_expr()
-                    entries.append(DictEntry(key=k, value=v, line=k.line, col=k.col))
+                self.match(TokenType.COMMA)
             self.expect(TokenType.RBRACE, code="W0006", msg="Unterminated dict literal, expected '}'")
             return DictExpr(entries=entries, line=token.line, col=token.col)
 
@@ -1134,13 +1170,17 @@ class Parser:
         then_branch = self.parse_block()
 
         elif_branches: List[ElifBranch] = []
-        while self.match(TokenType.ELIF):
+        while True:
+            self._skip_newlines_before_branch()
+            if not self.match(TokenType.ELIF):
+                break
             e_tok = self.tokens[self.pos - 1]
             elif_cond = self.parse_expr(allow_struct_init=False)
             elif_body = self.parse_block()
             elif_branches.append(ElifBranch(condition=elif_cond, body=elif_body, line=e_tok.line, col=e_tok.col))
 
         else_branch: Optional[Block] = None
+        self._skip_newlines_before_branch()
         if self.match(TokenType.ELSE):
             else_branch = self.parse_block()
 
@@ -1153,6 +1193,13 @@ class Parser:
             col=start_tok.col
         )
 
+    def _skip_newlines_before_branch(self) -> None:
+        saved = self.pos
+        while self.match(TokenType.NEWLINE):
+            pass
+        if not (self.check(TokenType.ELIF) or self.check(TokenType.ELSE)):
+            self.pos = saved
+
     def parse_match_expr(self) -> MatchExpr:
         start_tok = self.expect(TokenType.MATCH, code="W0006", msg="Expected 'match'")
         subject = self.parse_expr(allow_struct_init=False)
@@ -1160,6 +1207,9 @@ class Parser:
 
         arms: List[MatchArm] = []
         while not self.check(TokenType.RBRACE) and not self.is_at_end():
+            self._skip_statement_separators()
+            if self.check(TokenType.RBRACE) or self.is_at_end():
+                break
             arm_tok = self.at()
             pattern: Pattern
             if self.match(TokenType.ELSE):

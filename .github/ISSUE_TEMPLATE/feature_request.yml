@@ -1,41 +1,41 @@
-name: Feature Request
-description: Propose a new language feature, syntax extension, compiler flag, or standard library capability.
+name: Solicitar una función
+description: Propón una función del lenguaje, extensión de sintaxis, opción del compilador o capacidad de biblioteca estándar.
 title: "[Feature]: "
 labels: ["enhancement", "design"]
 body:
   - type: markdown
     attributes:
       value: |
-        Thank you for helping shape the future of W! Before proposing new syntax or features, please check the Language Specification and current public documentation.
+        Antes de proponer sintaxis o funciones nuevas, revisa la especificación del lenguaje y la documentación pública actual.
   - type: textarea
     id: problem
     attributes:
-      label: Problem or Motivation
-      description: Is your feature request related to a problem? What cannot currently be done easily or cleanly in W?
-      placeholder: "I'm always frustrated when..."
+      label: Problema o motivación
+      description: ¿Qué problema resuelve o qué tarea resulta difícil con Wysna hoy?
+      placeholder: "Necesito poder..."
     validations:
       required: true
   - type: textarea
     id: solution
     attributes:
-      label: Proposed Solution or Syntax
-      description: Describe your proposed syntax, semantics, and how it should look in W code.
-      render: w
+      label: Solución o sintaxis propuesta
+      description: Describe la sintaxis y semántica propuestas con un ejemplo Wysna.
+      render: wysna
       placeholder: |
-        // Proposed W code example
+        # Ejemplo de código Wysna
     validations:
       required: true
   - type: textarea
     id: alternatives
     attributes:
-      label: Alternatives Considered
-      description: What other designs or existing workarounds have you considered?
+      label: Alternativas consideradas
+      description: ¿Qué otros diseños o soluciones alternativas consideraste?
     validations:
       false
   - type: textarea
     id: impact
     attributes:
-      label: Impact on Self-Hosting & Runtime
-      description: How does this affect the C99 runtime, ARC/CoW invariants, or the Wysna Compiler (self-hosted)?
+      label: Impacto en autoalojamiento y runtime
+      description: ¿Cómo afecta al runtime C99, las invariantes ARC/CoW o Wysna Compiler?
     validations:
       false

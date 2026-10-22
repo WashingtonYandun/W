@@ -20,7 +20,7 @@ ROOT = Path(__file__).resolve().parents[2]
 
 def test_principal_regressions_across_engines():
     selfhost_bin = ensure_selfhost_compiler_binary(str(ROOT))
-    with tempfile.TemporaryDirectory(prefix='w-readiness-') as directory:
+    with tempfile.TemporaryDirectory(prefix='wysna-readiness-') as directory:
         for path in sorted((ROOT / 'tests/runtime').glob('readiness_*.wysna')):
             ok, detail = verify(path.read_text(), str(path.relative_to(ROOT)), selfhost_bin, directory,
                                 expected=path.with_suffix('.expected').read_text(), strict=True,
@@ -103,7 +103,7 @@ def test_recovery_reports_multiple_errors_without_returning_a_partial_program():
         raise AssertionError('Recovered syntax errors must prevent execution')
     assert len(diagnostics) >= 3
     assert [error['line'] for error in diagnostics] == sorted(error['line'] for error in diagnostics)
-    with tempfile.TemporaryDirectory(prefix='w-diagnostics-') as directory:
+    with tempfile.TemporaryDirectory(prefix='wysna-diagnostics-') as directory:
         path = Path(directory) / 'broken.wysna'
         path.write_text(source)
         result = subprocess.run([sys.executable, str(ROOT / 'main.py'), 'check', '--json', str(path)],
@@ -118,7 +118,7 @@ def test_compositional_patterns_and_closures():
     from tests.fuzz.readiness_properties import generate_readiness_case
     from tests.formatter_contract import verify_formatting
     selfhost_bin = ensure_selfhost_compiler_binary(str(ROOT))
-    with tempfile.TemporaryDirectory(prefix='w-readiness-properties-') as directory:
+    with tempfile.TemporaryDirectory(prefix='wysna-readiness-properties-') as directory:
         for seed in (0, 1, 3, 8, 13, 21, 34, 55):
             source, expected = generate_readiness_case(seed)
             formatted = verify_formatting(source)
@@ -148,7 +148,7 @@ def run_readiness_tests():
 
 def test_pilot_package_rejects_unverified_sqlite_sources():
     from tools.package_measurement_pilot import sqlite_archive
-    with tempfile.TemporaryDirectory(prefix='w-package-integrity-') as directory:
+    with tempfile.TemporaryDirectory(prefix='wysna-package-integrity-') as directory:
         archive = Path(directory) / 'sqlite.zip'
         archive.write_bytes(b'not the pinned SQLite source archive')
         try:
@@ -175,7 +175,7 @@ def test_scoped_foreign_resources():
     expected = ('Ok(9) 0 0\n0 0\nresource is closed\n'
                 'Err(ResourceError { message: "body failed" }) 0 0\n0 0\nresource is closed\n'
                 'Err(ResourceError { message: "body failed" }) 5 1\n0 0\nresource is closed\n')
-    with tempfile.TemporaryDirectory(prefix='w-scoped-resource-') as directory:
+    with tempfile.TemporaryDirectory(prefix='wysna-scoped-resource-') as directory:
         suffix = '.dll' if os.name == 'nt' else '.dylib' if sys.platform == 'darwin' else '.so'
         shared = Path(directory) / ('adapter' + suffix)
         subprocess.run(compiler_command() + ['-std=c99', '-dynamiclib' if sys.platform == 'darwin' else '-shared',
@@ -220,7 +220,7 @@ def test_lsp_publishes_recovered_syntax_diagnostics():
 
 
 def test_native_build_reports_independent_compile_and_link_phases():
-    with tempfile.TemporaryDirectory(prefix='w-build-phases-') as directory:
+    with tempfile.TemporaryDirectory(prefix='wysna-build-phases-') as directory:
         binary = Path(directory) / 'program'
         result = subprocess.run([sys.executable, str(ROOT / 'main.py'), 'build', '--stats',
             str(ROOT / 'examples/01_hello_world.wysna'), '-o', str(binary)], capture_output=True, text=True, timeout=60)

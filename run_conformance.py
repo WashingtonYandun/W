@@ -308,7 +308,7 @@ def _run_suite_in_repo(repo_root: str) -> None:
 
     print(f"Typed HIR Lowering:  {hir_passed}/{len(hir_files)}")
 
-    # 7. Runtime Interpreter (W0) Tests
+    # 7. Wysna Seed Runtime Interpreter Tests
     runtime_dir = "tests/runtime"
     runtime_files = sorted([f for f in os.listdir(runtime_dir) if f.endswith(".wysna")]) if os.path.exists(runtime_dir) else []
     runtime_passed = 0
@@ -503,7 +503,7 @@ def _run_suite_in_repo(repo_root: str) -> None:
             except Exception as e:
                 print(f"  [HIR C99 FAIL] {f}: {e}")
 
-    # 12. Modular W1 Split Conformance
+    # 12. Modular Wysna Compiler Source Conformance
     test_split_conformance()
     split_ok = True
 

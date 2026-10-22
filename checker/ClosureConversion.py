@@ -59,7 +59,7 @@ def convert_lambda(checker, expression):
     body = clone_ast(expression.body, dict(outer_symbols))
     # The counter lives on the compilation session, not on the checker. A checker is
     # created per module, so a per-checker counter restarted at 1 in every module and
-    # two importing modules each holding one lambda both produced `_W_Closure_1_Env`.
+    # two importing modules each holding one lambda both produced `_WYSNA_Closure_1_Env`.
     # The linked program then had two structs under that name with different fields,
     # which the interpreter reported as an uncaught KeyError and the C backend as an
     # unresolved HIR field. Keeping one counter per compilation makes it unique.
@@ -70,7 +70,7 @@ def convert_lambda(checker, expression):
     else:
         checker.closure_counter += 1
         serial = checker.closure_counter
-    name = '_W_Closure_' + str(serial)
+    name = '_WYSNA_Closure_' + str(serial)
     environment_name = name + '_Env'
     environment_parameter = '__wysna_environment'
 

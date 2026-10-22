@@ -202,7 +202,7 @@ class LanguageServer:
         symbols = {}
         while scope:
             for name, symbol in scope.symbols.items():
-                if not name.startswith(('_W_', '__w_', '__wm_')) and name not in symbols:
+                if not name.startswith(('_WYSNA_', '__wysna_internal_', '__wysna_module_')) and name not in symbols:
                     if symbol.kind != 'var' or (symbol.line, symbol.col) <= location:
                         symbols[name] = symbol
             scope = scope.parent

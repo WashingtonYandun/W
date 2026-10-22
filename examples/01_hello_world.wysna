@@ -1,8 +1,8 @@
 ## 01_hello_world.wysna
-## Basic functions, type annotations, ranges, and loops in W v0.1.
+## Basic functions, type annotations, ranges, and loops in Wysna v0.5.0.
 
 fn greet(name: str) -> str {
-    return "Hello, " + name + "! Welcome to W v0.1."
+    return "Hello, " + name + "! Welcome to Wysna v0.5.0."
 }
 
 fn sum_range(limit: int) -> int {

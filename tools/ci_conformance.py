@@ -212,7 +212,7 @@ def main():
     passed = 0
     feature_coverage = {}
     coverage = {engine: {'passed': 0, 'failed': 0, 'unsupported': 0} for engine in ENGINES}
-    with tempfile.TemporaryDirectory(prefix='w-ci-') as directory:
+    with tempfile.TemporaryDirectory(prefix='wysna-ci-') as directory:
         for path in fixtures:
             label = path.relative_to(ROOT).as_posix()
             expected = path.with_suffix('.expected').read_text() if path in positives else None

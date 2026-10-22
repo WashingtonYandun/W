@@ -1,5 +1,5 @@
 ## 05_utf8_and_algorithms.wysna
-## UTF-8 code-point semantics and classic algorithms in W v0.1.
+## UTF-8 code-point semantics and classic algorithms in Wysna.
 
 fn binary_search(items: list[int], target: int) -> int? {
     let mut low = 0

@@ -15,7 +15,7 @@ def test_readme_examples_execute_in_all_engines():
     blocks = re.findall(r'```wysna\n(.*?)```', text, re.S)
     assert len(blocks) == 5
     selfhost_bin = ensure_selfhost_compiler_binary(str(ROOT))
-    with tempfile.TemporaryDirectory(prefix='w-doc-contract-') as temporary:
+    with tempfile.TemporaryDirectory(prefix='wysna-doc-contract-') as temporary:
         for index, source in enumerate(blocks):
             ok, detail = verify(source, f'readme_{index}.wysna', selfhost_bin, temporary, strict=True,
                                 sanitize=os.environ.get('WYSNA_SANITIZE') == '1')
@@ -61,7 +61,7 @@ fn containers_and_closures() {
     if callback() != 8 { exit(28) }
 }
 fn missing_file() {
-    let missing = files.open("w-missing-resource-contract/file", 0) else error {
+    let missing = files.open("wysna-missing-resource-contract/file", 0) else error {
         if error.code <= 0 or error.domain <= 0 { exit(23) }
         return
     }
@@ -82,7 +82,7 @@ closed_alias()
 print(wysna_host_active_handles() - baseline)
 '''
     selfhost_bin = ensure_selfhost_compiler_binary(str(ROOT))
-    with tempfile.TemporaryDirectory(prefix='w-persistent-resource-') as temporary:
+    with tempfile.TemporaryDirectory(prefix='wysna-persistent-resource-') as temporary:
         ok, detail = verify(source, 'persistent_resources.wysna', selfhost_bin, temporary, strict=True,
                             expected='10000 0 0\n100000 0 0\n0\n', run_timeout=300,
                             sanitize=os.environ.get('WYSNA_SANITIZE') == '1')
@@ -92,7 +92,7 @@ print(wysna_host_active_handles() - baseline)
 def test_fallible_unit_tail_parity():
     source = ROOT / 'tests/runtime/fallible_unit_tails.wysna'
     selfhost_bin = ensure_selfhost_compiler_binary(str(ROOT))
-    with tempfile.TemporaryDirectory(prefix='w-unit-result-') as temporary:
+    with tempfile.TemporaryDirectory(prefix='wysna-unit-result-') as temporary:
         ok, detail = verify(source.read_text(), str(source), selfhost_bin, temporary, strict=True,
                             expected=source.with_suffix('.expected').read_text(),
                             sanitize=os.environ.get('WYSNA_SANITIZE') == '1')
@@ -105,7 +105,7 @@ def test_unit_tail_rejects_incompatible_error_channels():
                'fn action() -> unit ! str { let problem = Err(42)\nproblem }',
                'fn failure() -> int ! int { Err(7) }\nfn action() -> unit ! str { if true { failure() } else { 42 } }']
     selfhost_bin = ensure_selfhost_compiler_binary(str(ROOT))
-    with tempfile.TemporaryDirectory(prefix='w-unit-error-channel-') as temporary:
+    with tempfile.TemporaryDirectory(prefix='wysna-unit-error-channel-') as temporary:
         for index, source in enumerate(sources):
             for engine in ('interpreter', 'ast', 'hir', 'selfhost'):
                 result = run_engine(engine, source, 'unit_error_channel.wysna', selfhost_bin, Path(temporary) / str(index) / engine)
@@ -126,7 +126,7 @@ fn write_failure() -> unit ! files.FileError {
 write_failure() else error { print(error.operation == "write", error.code > 0, error.domain > 0) }
 '''
     selfhost_bin = ensure_selfhost_compiler_binary(str(ROOT))
-    with tempfile.TemporaryDirectory(prefix='w-flush-failure-') as temporary:
+    with tempfile.TemporaryDirectory(prefix='wysna-flush-failure-') as temporary:
         ok, detail = verify(source, 'flush_failure.wysna', selfhost_bin, temporary, strict=True,
                             expected='true true true\n', sanitize=os.environ.get('WYSNA_SANITIZE') == '1')
         assert ok, detail

@@ -9,7 +9,7 @@ def run_formatter_tests() -> bool:
     failed = 0
 
     print("==========================================")
-    print("W v0.1 Formatter Idempotence Suite")
+    print("Wysna Formatter Idempotence Suite")
     print("==========================================")
 
     for fpath in files:

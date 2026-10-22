@@ -279,6 +279,8 @@ fn parse_block_expr() -> str {
     push_scope("block")
     let mut tail_val = "wysna_unit()"
     while not check_kind("RBRACE") and not is_eof() {
+        skip_statement_separators()
+        if check_kind("RBRACE") or is_eof() { break }
         if check_kind("LET") {
             parse_let_stmt(false)
             tail_val = "wysna_unit()"
@@ -303,6 +305,7 @@ fn parse_block_expr() -> str {
             tail_val = "wysna_unit()"
         } else {
             let expr_r = parse_expr(0, true)
+            skip_statement_separators()
             if check_kind("RBRACE") {
                 tail_val = expr_r.val
             } else {
@@ -349,6 +352,7 @@ fn parse_if_expr() -> ExprRes {
 }
 
 fn parse_elif_chain(res: str) -> unit {
+    skip_newlines_before_branch()
     if match_kind("ELIF") {
         emit_line("else {")
         push_scope("block")
@@ -525,6 +529,8 @@ fn parse_match_arms(subj_tmp: str, res: str) -> unit {
     let matched = new_aux("_match_taken")
     emit_line("bool " + matched + " = false;")
     while not check_kind("RBRACE") and not is_eof() {
+        skip_statement_separators()
+        if check_kind("RBRACE") or is_eof() { break }
         let empty_bindings: list[str] = []
         g_pattern_bind_lines = empty_bindings
         g_pattern_bind_names = empty_bindings
@@ -545,6 +551,7 @@ fn parse_match_arms(subj_tmp: str, res: str) -> unit {
             emit_line("wysna_assign(&" + res + ", " + own_expr(arm_value) + ");")
         } else {
             let arm_value = parse_expr(0, true)
+            skip_statement_separators()
             emit_line("wysna_assign(&" + res + ", " + own_expr(arm_value.val) + ");")
         }
         emit_line(matched + " = true;")
@@ -639,6 +646,8 @@ fn parse_prefix_expr(allow_struct: bool) -> ExprRes {
                 let mut f_names: list[str] = []
                 let mut f_vals: list[str] = []
                 while not check_kind("RBRACE") and not is_eof() {
+                    skip_statement_separators()
+                    if check_kind("RBRACE") or is_eof() { break }
                     let f_tok = expect_kind("IDENT")
                     expect_kind("COLON")
                     let f_v = parse_expr(0, true)
@@ -703,7 +712,7 @@ fn parse_prefix_expr(allow_struct: bool) -> ExprRes {
     if match_kind("MINUS") {
         # SPEC 5 puts unary at level 3, tighter than multiplicative (level 4), so the
         # operand stops below `* / %`. A literal operand folds into a negative constant
-        # so negated whole-number literals emit identically to W0's C99 backend, which
+        # so negated whole-number literals emit identically to Wysna Seed's C99 backend, which
         # is what keeps the three-stage bootstrap hash a fixed point.
         if check_kind("INT") {
             let mut lit = advance_tok().val
@@ -851,6 +860,14 @@ fn parse_expr(min_prec: int, allow_struct: bool) -> ExprRes {
     let mut left = parse_prefix_expr(allow_struct)
     while true {
         while true {
+            if check_kind("NEWLINE") and peek_tok(1).kind == "ELSE" {
+                let saved = g_pos
+                while check_kind("NEWLINE") { advance_tok() }
+                let mut starts_match_arm = false
+                if check_kind("ELSE") and peek_tok(1).kind == "FAT_ARROW" { starts_match_arm = true }
+                if check_kind("ELSE") and peek_tok(1).kind == "IDENT" and peek_tok(2).kind == "FAT_ARROW" { starts_match_arm = true }
+                if starts_match_arm { g_pos = saved }
+            }
             if check_kind("LPAREN") {
                 let call_tok = at_tok()
                 let mut collection = false

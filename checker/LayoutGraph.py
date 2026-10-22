@@ -288,7 +288,7 @@ def build_layout_graph_from_declarations(
         for f in s.fields:
             classify_type_node(f.type_ann, s.name, f.name, f.line, f.col)
 
-    # 2. Process enum variants (all variant payloads are heap-indirect in W)
+    # 2. Process enum variants (all variant payloads are heap-indirect in Wysna)
     for e in enum_decls:
         for v in e.variants:
             if hasattr(v, "payload_types") and v.payload_types:

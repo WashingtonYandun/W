@@ -119,7 +119,7 @@ def package(output, archive=None):
     windows = os.name == 'nt'
     flags = ['-std=c99', '-O2'] + (['-fms-runtime-lib=static', '-D_CRT_SECURE_NO_WARNINGS'] if windows else [])
     library = sqlite_archive(archive)
-    with tempfile.TemporaryDirectory(prefix='w-package-') as temporary:
+    with tempfile.TemporaryDirectory(prefix='wysna-package-') as temporary:
         workspace = Path(temporary)
         with zipfile.ZipFile(library) as zipped:
             for name in ('sqlite3.c', 'sqlite3.h'):

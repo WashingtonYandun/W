@@ -106,7 +106,7 @@ def run_metrics_contract():
         value.ensure_unique()
         assert cow_telemetry.copied_slots == 0
     root = Path(__file__).resolve().parents[2]
-    with tempfile.TemporaryDirectory(prefix='w-cow-contract-') as directory:
+    with tempfile.TemporaryDirectory(prefix='wysna-cow-contract-') as directory:
         source, binary = Path(directory) / 'contract.c', Path(directory) / 'contract'
         source.write_text(NATIVE_CONTRACT)
         subprocess.run([os.environ.get('CC', 'cc'), '-std=c99', '-fsanitize=address,undefined',

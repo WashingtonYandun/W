@@ -54,7 +54,7 @@ def run_weak_tests():
     root = Path(__file__).resolve().parents[2]
     env = dict(os.environ, WYSNA_MEM_CHECK='1')
     env['ASAN_OPTIONS'] = 'detect_leaks=1' if sys.platform.startswith('linux') else 'detect_leaks=0'
-    with tempfile.TemporaryDirectory(prefix='w-b03-') as directory:
+    with tempfile.TemporaryDirectory(prefix='wysna-b03-') as directory:
         for name, expected_leak in [('weak_references', False), ('class_cycle_limitation', False),
                                     ('strong_cycle', True)]:
             folder = 'memory' if expected_leak else 'runtime'

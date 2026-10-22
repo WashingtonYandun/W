@@ -13,10 +13,10 @@ Verifies:
      - Dict of lists (detaches dict).
      - Class instance in CoW list (field mutation retains shared reference semantics, slot mutation detaches list).
   3. Strict parity across all four execution engines:
-     - W0 Python Interpreter
-     - W0 AST C99 (under ASan, UBSan, and WYSNA_MEM_CHECK=1)
-     - W0 HIR C99 (under ASan, UBSan, and WYSNA_MEM_CHECK=1)
-     - W1 Self-Hosted Stage 2 (under ASan, UBSan, and WYSNA_MEM_CHECK=1)
+     - Wysna Seed Python Interpreter
+     - Wysna Seed AST C99 (under ASan, UBSan, and WYSNA_MEM_CHECK=1)
+     - Wysna Seed HIR C99 (under ASan, UBSan, and WYSNA_MEM_CHECK=1)
+     - Wysna Compiler Stage 2 (under ASan, UBSan, and WYSNA_MEM_CHECK=1)
 """
 
 import os

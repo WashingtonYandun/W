@@ -4,7 +4,7 @@ test_d05_telemetry_benchmarks.py - Conformance suite for Milestone D05: Telemetr
 Verifies:
 1. CLI --stats telemetry structure (monomorphization, codegen, timing_ms, peak_rss_kb).
 2. Separation of stats: check outputs JSON to stdout, run/build output stats to stderr, preserving program stdout clean.
-3. Benchmark suite conformance (W0 Interpreter == W0 Typed HIR C99 == W1 Stage-2 C99).
+3. Benchmark suite conformance (Wysna Seed Interpreter == Wysna Seed HIR C99 == Wysna Compiler Stage-2 C99).
 """
 
 import json
@@ -21,9 +21,9 @@ if str(ROOT) not in sys.path:
 
 def test_cli_stats_telemetry_fields():
     print("  [TEST] CLI --stats telemetry structure and phase timings...")
-    test_w = ROOT / "tests/runtime/generic_tree_recursive.wysna"
+    test_program = ROOT / "tests/runtime/generic_tree_recursive.wysna"
     proc = subprocess.run(
-        [sys.executable, str(ROOT / "main.py"), "emit-c", str(test_w), "--stats", "-o", os.devnull],
+        [sys.executable, str(ROOT / "main.py"), "emit-c", str(test_program), "--stats", "-o", os.devnull],
         capture_output=True,
         text=True,
         cwd=str(ROOT),

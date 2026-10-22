@@ -28,7 +28,7 @@ fn format_task(task: Task) -> str {
 fn main() -> unit {
     let backlog = [
         Task { id: 1, title: "Freeze SPEC.md v0.1", status: TaskStatus.Completed },
-        Task { id: 2, title: "Self-host W1 compiler", status: TaskStatus.Completed },
+        Task { id: 2, title: "Self-host Wysna Compiler", status: TaskStatus.Completed },
         Task { id: 3, title: "Ship global CLI installer", status: TaskStatus.InProgress },
         Task { id: 4, title: "Write benchmarks", status: TaskStatus.Todo },
     ]

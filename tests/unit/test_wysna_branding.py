@@ -26,9 +26,9 @@ def test_wysna_cli_help_and_version():
     assert "<file.wysna>" in res.stdout
 
 
-def test_w_cli_removed():
-    w_bin = ROOT / "w"
-    assert not w_bin.exists()
+def test_legacy_w_cli_removed():
+    legacy_w_bin = ROOT / "w"
+    assert not legacy_w_bin.exists()
 
 
 def test_wysna_file_execution_interpreter_and_native():

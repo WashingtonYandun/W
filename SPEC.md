@@ -1,8 +1,8 @@
 # Wysna Language Specification
 
-> **Status:** The current alpha toolchain is `0.4.0a1`. Sections 1–11 describe the frozen core grammar and are normative; sections 12–14 describe implementation contracts.
+> **Estado:** Esta especificación define la candidata a release Wysna `0.5.0`. Las secciones 1–11 describen la gramática normativa; las secciones 12–14 describen contratos de implementación.
 >
-> **Targets:** `Wysna Seed` is the reference implementation and the authority on whether a program is valid. `Wysna Compiler` is an independent self-hosted compiler whose supported subset is measured by the public release corpus. The measured support boundary is documented in [docs/ENGINE_PARITY_MATRIX.md](docs/ENGINE_PARITY_MATRIX.md).
+> **Implementaciones:** `Wysna Seed` es la implementación de referencia que determina si un programa es válido. `Wysna Compiler` es un compilador autoalojado independiente; su subconjunto soportado se mide con el corpus público de release. La matriz de paridad documenta ese límite en [docs/ENGINE_PARITY_MATRIX.md](docs/ENGINE_PARITY_MATRIX.md).
 >
 > **Thesis:** Wysna is a compact, statically typed language for small native tools, with deterministic diagnostics and inspectable C99 output. This document defines the language syntax and semantics.
 
@@ -72,8 +72,21 @@ Identifiers must start with an ASCII letter (`a-z`, `A-Z`) or underscore `_`, fo
 * **Escape Sequences:** `\n`, `\r`, `\t`, `\\`, `\"`, `\0`, `\u{HHHH}` (1 to 6 hex digits).
 
 ### 3.4 Comments and Delimiters
-* **Comments:** Only line comments starting with `#`. Doc-comments start with `##`.
-* **Delimiters:** Braces `{}` are mandatory for blocks (`if`, `for`, `while`, `fn`, `match`, `struct`, `class`, `interface`). Semicolons are not used.
+* **Comentarios:** Solo se admiten comentarios de línea que comienzan con `#`. Los comentarios de documentación comienzan con `##`.
+* **Bloques:** Las llaves `{}` delimitan bloques de `if`, `for`, `while`, `fn`, `match`, `struct`, `class` e `interface`.
+* **Separadores de sentencias:** Un salto físico de línea (`LF`, `CRLF` o `CR`) produce el separador `NEWLINE` después de un token que puede cerrar una expresión, siempre que ocurra fuera de paréntesis y corchetes. Pueden cerrar una expresión los literales, identificadores, `this`, `super`, delimitadores de cierre, el `?` posfijo, `break` y `continue`. Las líneas vacías y los saltos posteriores a comentarios siguen la misma regla. El punto y coma (`;`) es un separador explícito y puede usarse en el nivel superior o dentro de un bloque.
+* **Continuación:** Los saltos dentro de `(...)` y `[...]` se ignoran. Un salto después de un operador no termina la expresión; el operador binario que continúa la expresión debe ir al final de la línea anterior. Un salto después de `return` tampoco termina el retorno: si la expresión aparece en la siguiente línea, forma parte del retorno.
+* **Ramas:** Se permite un salto entre el bloque de `if`/`elif` y su `elif`/`else`, así como entre una expresión falible y su manejador `else err`; ese salto pertenece a la misma construcción.
+
+```wysna
+let mut total = 0
+let next_value = 3
+total = total +
+    next_value
+
+process(item)
+-offset # a separate unary-negative expression
+```
 
 ---
 
@@ -232,7 +245,7 @@ Evaluation follows an explicit 12-level precedence hierarchy:
 | **12** | `=` | Assignment | Right |
 
 ### 5.1 Deterministic Left-to-Right Evaluation Order
-W guarantees **strict left-to-right ($L \rightarrow R$) evaluation order** across all composite expressions, independent of target C compiler argument ordering:
+Wysna guarantees **strict left-to-right ($L \rightarrow R$) evaluation order** across all composite expressions, independent of target C compiler argument ordering:
 * **Function and Method Calls:** In `foo(a(), b(), c())`, the receiver (if any) is evaluated first, followed by `a()`, `b()`, and `c()` in strict left-to-right order before invoking `foo`.
 * **Binary Expressions:** In `f() + g() * h()`, sub-expressions evaluate left-to-right within each operator node (`f()` before the product `g() * h()`, and `g()` before `h()`). Short-circuit operators (`and`, `or`, `??`) evaluate their left operand first and evaluate their right operand only when required.
 * **Assignments:** In indexed or member assignments (`a()[b()] = c()` or `obj().field = val()`), the target container, index/member, and right-hand value are evaluated deterministically.
@@ -346,7 +359,7 @@ match tok.kind {
 
 ## 7. Error Handling (`T ! E`)
 
-W does not use non-local stack-unwinding exceptions. Fallible functions declare their error type explicitly:
+Wysna does not use non-local stack-unwinding exceptions. Fallible functions declare their error type explicitly:
 
 ```wysna
 fn read_file(path: str) -> str ! IoError {
@@ -423,7 +436,7 @@ Optional/Option and fallible/Result spellings share canonical type identity. Opt
 2. **Deterministic Single-Threaded Reference Counting + CoW:**
    - Backing buffers use lightweight single-threaded reference counting (`int32_t refcount`) without atomic synchronization overhead.
    - Buffers are shared on assignment or parameter passing by incrementing `refcount`.
-   - When a mutating operation occurs (`append`, `pop`, `clear`, indexed assignment, or field assignment on a `struct`), any buffer along the access path with `refcount > 1` is detached (`w_cow_detach`) before applying the mutation.
+   - When a mutating operation occurs (`append`, `pop`, `clear`, indexed assignment, or field assignment on a `struct`), any buffer along the access path with `refcount > 1` is detached (`wysna_cow_detach`) before applying the mutation.
 3. **Reference Types (`class`):**
    - Unlike `struct`, instances of `class` (`W_OBJECT`) have reference identity semantics: assigning `let b = a` shares the same underlying instance without CoW detachment on field mutation.
 4. **Acyclic Value-Storage Subgraph:**
@@ -473,7 +486,7 @@ fn compile(source: str) {
 
 ## 10. AI & Tooling Contract
 
-1. **Canonical Formatter (`w fmt`):**
+1. **Canonical Formatter (`wysna fmt`):**
    - Every valid Wysna program has exactly one canonical formatted representation.
    - The formatter is idempotent: `fmt(fmt(source)) == fmt(source)`.
 2. **Stable Diagnostic Codes & Structured JSON Diagnostics (`wysna check --json`):**

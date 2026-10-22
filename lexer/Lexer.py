@@ -4,13 +4,13 @@ from common.constants import KEYWORDS
 from error.Error import LexerError
 from typing import List, Optional
 
-# Tokens that can end an expression. A '-' immediately after one of these is
-# binary subtraction; anywhere else it is prefix negation.
-_VALUE_END_TOKENS = frozenset({
+# Tokens after which a physical line break terminates the preceding statement.
+_LINE_TERMINATOR_TOKENS = frozenset({
     TokenType.INT, TokenType.FLOAT, TokenType.STR,
     TokenType.TRUE, TokenType.FALSE, TokenType.NONE,
     TokenType.IDENTIFIER, TokenType.THIS, TokenType.SUPER,
     TokenType.RPAREN, TokenType.RBRACKET, TokenType.RBRACE,
+    TokenType.QUESTION, TokenType.BREAK, TokenType.CONTINUE,
 })
 
 class Lexer:
@@ -48,18 +48,35 @@ class Lexer:
 
     def tokenize(self) -> List[Token]:
         tokens: List[Token] = []
+        paren_depth = 0
+        bracket_depth = 0
 
         while self.pos < self.length:
             ch = self.peek()
 
-            # Whitespace handling
-            if ch in (' ', '\t', '\r', '\n'):
+            # Horizontal whitespace is insignificant; line endings may delimit statements.
+            if ch in (' ', '\t'):
                 self.advance()
                 continue
 
-            # Comments: skip until newline or EOF
+            if ch in ('\n', '\r'):
+                line, col = self.line, self.col
+                if ch == '\r':
+                    self.pos += 1
+                    if self.peek() == '\n':
+                        self.pos += 1
+                    self.line += 1
+                    self.col = 1
+                else:
+                    self.advance()
+                if (paren_depth == 0 and bracket_depth == 0 and tokens
+                        and tokens[-1].type in _LINE_TERMINATOR_TOKENS):
+                    tokens.append(Token(value="\n", type=TokenType.NEWLINE, line=line, col=col))
+                continue
+
+            # Comments: skip until a line ending or EOF.
             if ch == '#':
-                while self.peek() is not None and self.peek() != '\n':
+                while self.peek() is not None and self.peek() not in ('\n', '\r'):
                     self.advance()
                 continue
 
@@ -76,21 +93,6 @@ class Lexer:
                     file=self.file,
                     code="W0002"
                 )
-
-            # Negative integer literals. `-9223372036854775808` is representable as
-            # int64 but its magnitude is not, so the sign has to be part of the
-            # literal when the minus is in prefix position. Deciding on the previous
-            # token (rather than on a later parser look-back) keeps this correct for
-            # binary subtraction: in `0 - 9223372036854775808` the minus follows a
-            # value, so the literal is rejected as out of range.
-            if (ch == '-' and self._minus_is_prefix(tokens)
-                    and self.peek(1) is not None and self.peek(1).isascii() and self.peek(1).isdigit()):
-                self.advance()  # consume '-'
-                tokens.append(self._lex_number(start_line, start_col, negated=True))
-                tokens[-1].value = -tokens[-1].value
-                tokens[-1].start_offset = token_start
-                self._stamp(tokens[-1], token_start)
-                continue
 
             # Numbers (Integers & Floats)
             if ch.isascii() and ch.isdigit():
@@ -111,22 +113,21 @@ class Lexer:
                 continue
 
             # Multi-character & single-character operators
-            tokens.append(self._lex_operator(start_line, start_col))
+            token = self._lex_operator(start_line, start_col)
+            tokens.append(token)
+            if token.type == TokenType.LPAREN:
+                paren_depth += 1
+            elif token.type == TokenType.RPAREN:
+                paren_depth = max(0, paren_depth - 1)
+            elif token.type == TokenType.LBRACKET:
+                bracket_depth += 1
+            elif token.type == TokenType.RBRACKET:
+                bracket_depth = max(0, bracket_depth - 1)
             self._stamp(tokens[-1], token_start)
 
         # Append EOF token
         tokens.append(Token(value=None, type=TokenType.EOF, line=self.line, col=self.col))
         return tokens
-
-    def _minus_is_prefix(self, tokens: List[Token]) -> bool:
-        """True when a '-' at the current position negates rather than subtracts.
-
-        A minus is prefix when nothing can end an expression precedes it: the start
-        of the file, or any token that is not a literal, identifier, `)` or `]`.
-        """
-        if not tokens:
-            return True
-        return tokens[-1].type not in _VALUE_END_TOKENS
 
     def _stamp(self, token, start):
         token.start_offset = start
@@ -134,7 +135,7 @@ class Lexer:
         token.end_line = self.line
         token.end_col = self.col
 
-    def _lex_number(self, start_line: int, start_col: int, negated: bool = False) -> Token:
+    def _lex_number(self, start_line: int, start_col: int) -> Token:
         num_str = ""
         is_float = False
         prev_was_underscore = False
@@ -219,7 +220,7 @@ class Lexer:
         clean_str = num_str.replace("_", "")
 
         # A literal immediately followed by an identifier character is malformed:
-        # W has no hex, binary, octal or exponent notation, so `0x10` and `1e5` used
+        # Wysna has no hex, binary, octal or exponent notation, so `0x10` and `1e5` used
         # to lex as `0`/`1` plus the identifiers `x10`/`e5`, which surfaced later as a
         # bogus "unknown identifier" instead of a numeric-literal error.
         trailing = self.peek()
@@ -241,10 +242,9 @@ class Lexer:
                 if len(clean_str) > 20:
                     raise ValueError("Integer literal exceeds 64-bit range")
                 ival = int(clean_str)
-                # A negated literal may reach 2^63, which int64 can represent as
-                # INT64_MIN even though its magnitude is not representable.
-                limit = 9223372036854775808 if negated else 9223372036854775807
-                if ival > limit:
+                # Keep the magnitude of INT64_MIN available for the parser's unary
+                # minus rule. Positive out-of-range literals are rejected by typing.
+                if ival > 9223372036854775808:
                     raise ValueError("Integer literal exceeds 64-bit range")
                 return Token(value=ival, type=TokenType.INT, line=start_line, col=start_col)
         except (ValueError, OverflowError):
@@ -273,7 +273,7 @@ class Lexer:
                     code="W0003"
                 )
 
-            if ch == '\n':
+            if ch in ('\n', '\r'):
                 raise LexerError(
                     message="Unterminated string literal (newline in single-line string)",
                     line=start_line,
@@ -480,6 +480,7 @@ class Lexer:
             '%': TokenType.PERCENT,
             ':': TokenType.COLON,
             ',': TokenType.COMMA,
+            ';': TokenType.SEMICOLON,
             '(': TokenType.LPAREN,
             ')': TokenType.RPAREN,
             '{': TokenType.LBRACE,

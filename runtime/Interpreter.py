@@ -100,7 +100,7 @@ class Interpreter:
                 last_val = self.call_function(main_fn, [])
 
         # A program whose module body ends in `main()` returns the entrypoint
-        # Result through that expression statement. W has no stack unwinding, so
+        # Result through that expression statement. Wysna has no stack unwinding, so
         # an unhandled `Err` must still reach the process exit status: discarding
         # it would make a failing program indistinguishable from a success.
         if isinstance(last_val, WysnaErr):

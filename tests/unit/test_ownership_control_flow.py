@@ -18,7 +18,7 @@ def run_ownership_tests():
                                  cwd=root, capture_output=True, text=True, timeout=30)
     assert interpreted.returncode == 0, interpreted.stderr
     assert interpreted.stdout == expected, interpreted.stdout
-    with tempfile.TemporaryDirectory(prefix='w-b01-') as directory:
+    with tempfile.TemporaryDirectory(prefix='wysna-b01-') as directory:
         for backend in ['ast', 'hir', 'selfhost']:
             c_path = Path(directory) / (backend + '.c')
             binary = Path(directory) / backend

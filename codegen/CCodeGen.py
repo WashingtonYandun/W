@@ -24,7 +24,7 @@ class CleanupScope:
 
 class CCodeGen:
     """
-    Canonical W v0.1 to C99 Transpiler Backend.
+    Wysna Seed AST-to-C99 reference backend.
     Preserves exact value semantics (Deterministic RC + Copy-on-Write via runtime/wysna_runtime.h),
     reference semantics for OOP classes, dynamic dispatch, fallible error handling,
     and deterministic LIFO lifetime cleanup across all control-flow paths (v0.1.3).
@@ -154,7 +154,7 @@ class CCodeGen:
         self._push_scope("fn")
         self._emit_module_body(program, ns="", out_main_stmts=main_stmts)
 
-        # If there are no top-level executable statements and main() exists in W, call it
+        # If there are no top-level executable statements and main() exists in Wysna, call it
         non_decls = [s for s in program.body if not isinstance(s, (FnDecl, StructDecl, EnumDecl, InterfaceDecl, ClassDecl, ImportDecl))]
         if getattr(program, "call_entrypoint", not non_decls) and "wysna_fn_main" in self.fallible_fns:
             main_stmts.append("WVal _t_main = wysna_fn_main();")
@@ -473,7 +473,7 @@ class CCodeGen:
         return res_var
 
     def _is_entrypoint_call(self, stmt: Stmt) -> bool:
-        """True when `stmt` is the bare `main()` line that closes a W program."""
+        """True when `stmt` is the bare `main()` line that closes a Wysna program."""
         return (isinstance(stmt, ExprStmt)
                 and isinstance(stmt.expr, CallExpr)
                 and isinstance(stmt.expr.callee, IdentExpr)
@@ -483,7 +483,7 @@ class CCodeGen:
     def _emit_entrypoint_guard(self, out: List[str]) -> None:
         """Emits the entrypoint Result check and the mandatory release of `_t_main`.
 
-        W has no stack unwinding: a fallible entrypoint returns its error as a
+        Wysna has no stack unwinding: a fallible entrypoint returns its error as a
         value. Discarding it would make a failing program exit 0 with no output,
         which is indistinguishable from success for make/CI/shell.
         """

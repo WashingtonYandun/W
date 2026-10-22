@@ -123,7 +123,7 @@ print(fail() else error { match error { A(detail) => detail.value, B(_) => 0 } }
 
 def test_range_iteration_and_limits_across_engines():
     selfhost_bin = ensure_selfhost_compiler_binary(str(ROOT))
-    with tempfile.TemporaryDirectory(prefix='w-mir-contracts-') as directory:
+    with tempfile.TemporaryDirectory(prefix='wysna-mir-contracts-') as directory:
         for name in ('mir_range_iteration', 'mir_range_limit', 'mir_range_overflow'):
             path = ROOT / 'tests/runtime' / (name + '.wysna')
             ok, detail = verify(path.read_text(), str(path.relative_to(ROOT)), selfhost_bin, directory,
@@ -133,7 +133,7 @@ def test_range_iteration_and_limits_across_engines():
 
 
 def test_mir_inspection_and_default_backend():
-    with tempfile.TemporaryDirectory(prefix='w-mir-cli-') as directory:
+    with tempfile.TemporaryDirectory(prefix='wysna-mir-cli-') as directory:
         path = Path(directory) / 'source.wysna'
         path.write_text('for index in 0..3 { print(index) }')
         result = subprocess.run([sys.executable, str(ROOT / 'main.py'), 'mir', str(path)],
@@ -153,7 +153,7 @@ def test_mir_inspection_and_default_backend():
 
 
 def test_bootstrap_cache_serializes_processes():
-    with tempfile.TemporaryDirectory(prefix='w-bootstrap-lock-') as directory:
+    with tempfile.TemporaryDirectory(prefix='wysna-bootstrap-lock-') as directory:
         (Path(directory) / 'selfhost').mkdir()
         (Path(directory) / 'selfhost' / 'compiler.wysna').write_text('print(0)\n')
         script = """import sys, time

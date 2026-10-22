@@ -115,7 +115,7 @@ def test_explicit_call_targets_and_field_ids():
         let h = helper()
         print(px, h)
         let g = Greeter()
-        let msg = g.greet("W")
+        let msg = g.greet("Wysna")
         print(msg)
     }
     """

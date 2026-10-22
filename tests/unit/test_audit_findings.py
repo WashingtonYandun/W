@@ -25,7 +25,7 @@ def test_nominal_equality_and_undeclared_super_constructor_are_rejected():
         'enum A { X }\nenum B { X }\nprint((A.X, true) == (B.X, true))',
         'class A {}\nclass B extends A { fn init() { super.init() } }\nlet value = B()',
     ]
-    with tempfile.TemporaryDirectory(prefix='w-nominal-contracts-') as temporary:
+    with tempfile.TemporaryDirectory(prefix='wysna-nominal-contracts-') as temporary:
         directory = Path(temporary)
         module = directory / 'nominals.wysna'
         module.write_text('pub struct A { x: int }\npub enum E { X }\npub fn make() -> A { A { x: 1 } }\npub fn event() -> E { E.X }\n', encoding='utf-8')
@@ -42,7 +42,7 @@ def test_nominal_equality_and_undeclared_super_constructor_are_rejected():
 def test_literal_indexing_scales_linearly_by_work_not_wall_clock():
     selfhost_bin = ensure_selfhost_compiler_binary(str(ROOT))
     metrics = {engine: [] for engine in ('ast', 'hir', 'selfhost')}
-    with tempfile.TemporaryDirectory(prefix='w-string-scaling-') as temporary:
+    with tempfile.TemporaryDirectory(prefix='wysna-string-scaling-') as temporary:
         directory = Path(temporary)
         for count in (128, 256, 512):
             text = 'abé\0' * count

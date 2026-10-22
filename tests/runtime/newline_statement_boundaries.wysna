@@ -1,0 +1,26 @@
+fn failure() -> int ! str {
+    return Err("line error")
+}
+
+fn main() -> unit {
+    let value = 5
+    print(value)
+    -3
+
+    let recovered = failure()
+    else error {
+        print("recovered", error)
+        9
+    }
+    print(recovered)
+
+    let selected = if true { 4 }
+    else { 5 }
+    print(selected)
+
+    let values = [1,
+        2]
+    print(values)
+}
+
+main()

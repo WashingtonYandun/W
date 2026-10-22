@@ -58,7 +58,6 @@ def test_checked_error_patterns_are_distinct_from_enum_variants():
     assert list(_nodes(module, HirEnumPattern))[0].variant_name == 'Missing'
     dump = HirDumper().format_pattern(lowered[0])
     assert 'error_type(FirstError, type_id=' in dump
-    assert '__W_ERROR_TYPE__' not in dump
     assert [Formatter().format_pattern(pattern) for pattern in errors] == [
         'FirstError(error)', 'FirstError(_)', 'SecondError(_)'
     ]
@@ -144,7 +143,7 @@ def test_module_error_patterns_preserve_distinct_nominal_identities():
     from tempfile import TemporaryDirectory
     from node.NodeType import ErrorTypePattern
 
-    with TemporaryDirectory(prefix='w-error-identities-') as temporary:
+    with TemporaryDirectory(prefix='wysna-error-identities-') as temporary:
         directory = Path(temporary)
         for name in ('left', 'right'):
             (directory / f'{name}.wysna').write_text('''pub struct SharedError { message: str }

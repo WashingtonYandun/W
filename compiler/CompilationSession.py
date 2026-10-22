@@ -64,7 +64,7 @@ class CompilationSession:
         self.check_counts = {}
         # One closure-name counter per compilation: a per-module counter restarts at 1
         # in every module, so two modules each holding a lambda produced the same
-        # `_W_Closure_N_Env` and `_W_Closure_N`, and the linked program broke.
+        # `_WYSNA_Closure_N_Env` and `_WYSNA_Closure_N`, and the linked program broke.
         self.closure_counter = 0
         self.root_path = None
         self._options_key = self.options_key()
@@ -138,8 +138,8 @@ class CompilationSession:
         elif isinstance(node, A.Node):
             for field in ('name', 'namespace', 'err_name'):
                 name = getattr(node, field, None)
-                if isinstance(name, str) and name.startswith(PREFIX):
-                    raise TypeError('The __wm_ namespace is reserved for module identities',
+                if isinstance(name, str) and name.startswith((PREFIX, '_WYSNA_', '__wysna_internal_')):
+                    raise TypeError('The Wysna compiler namespace is reserved for internal identities',
                                     file=path, line=node.line, col=node.col, code='W1002')
             for child in vars(node).values():
                 if isinstance(child, (A.Node, list)):
@@ -160,8 +160,8 @@ class CompilationSession:
                     node.name in ('Option', 'Result', 'Weak') or node.name.startswith(('Option__', 'Result__'))):
                 raise TypeError('Builtin Option/Result/Weak identities are reserved',
                                 file=path, line=node.line, col=node.col, code='W1002')
-            if isinstance(node, DECLARATIONS) and node.name.startswith(PREFIX):
-                raise TypeError('The __wm_ namespace is reserved for module identities',
+            if isinstance(node, DECLARATIONS) and node.name.startswith((PREFIX, '_WYSNA_', '__wysna_internal_')):
+                raise TypeError('The Wysna compiler namespace is reserved for internal identities',
                                 file=path, line=node.line, col=node.col, code='W1002')
         names = ModuleNames(program, module_id).qualify(program) if imported else {
             node.name: node.name for node in program.body if isinstance(node, DECLARATIONS)}

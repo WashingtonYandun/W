@@ -1,5 +1,5 @@
 import "std/text"
-# W paths use '/' for composition; the Windows file adapter accepts UTF-8 paths.
+# Wysna paths use '/' for composition; the Windows file adapter accepts UTF-8 paths.
 pub fn is_absolute(path: str) -> bool {
     if len(path) == 0 { return false }
     if path[0] == "/" or path[0] == "\\" { return true }

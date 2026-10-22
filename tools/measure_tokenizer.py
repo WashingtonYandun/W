@@ -19,7 +19,7 @@ def measure(samples=5):
     source += '\nfn measure() -> unit ! IoError { let text = read_file(args()[1])?\nprint(len(tokenize(text))) }\nmeasure() else err { print(err.message) }\n'
     report = {'samples': samples, 'platform': sys.platform, 'compiler': os.environ.get('CC', 'cc'),
               'workload': 'unmodified Wysna Compiler tokenizer; alpha + beta newline; owned source read_file', 'rows': []}
-    with tempfile.TemporaryDirectory(prefix='w-tokenizer-scaling-') as temporary:
+    with tempfile.TemporaryDirectory(prefix='wysna-tokenizer-scaling-') as temporary:
         directory = Path(temporary)
         path, binary = directory / 'lexer.wysna', directory / 'lexer'
         path.write_text(source)

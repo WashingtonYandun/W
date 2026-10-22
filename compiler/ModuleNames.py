@@ -2,7 +2,7 @@
 from node import NodeType as A
 
 DECLARATIONS = (A.FnDecl, A.StructDecl, A.EnumDecl, A.InterfaceDecl, A.ClassDecl, A.LetDecl)
-PREFIX = '__wm_'
+PREFIX = '__wysna_module_'
 
 
 def pattern_names(pattern):

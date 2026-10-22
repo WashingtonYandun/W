@@ -1,4 +1,4 @@
-# Differential test for 64-bit two's complement wrapping and C99/W truncation-toward-zero division/modulo
+# Differential test for 64-bit two's complement wrapping and C99/Wysna truncation-toward-zero division/modulo
 
 fn main() -> unit {
     let max_i: int = 9223372036854775807

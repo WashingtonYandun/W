@@ -148,7 +148,7 @@ def test_documentation_consistency():
     documented_counts = {name: int(count) for name, count in _re.findall(
         r'\| \*\*`([^`]+)`\*\* \| (\d+) \|', content)}
     assert documented_counts == dict(expected_counts), 'Feature rows must match the current corpus, not only its total'
-    assert f"{corpus_size}/{corpus_size} (100.0%)" in content, "Doc must record current measured W1 corpus parity"
+    assert f"{corpus_size}/{corpus_size} (100.0%)" in content, "Doc must record current measured Wysna Compiler corpus parity"
     assert "error_unions" in content, "Doc must record error-union coverage"
     profile = json.loads((ROOT / "tests/engine_profiles.json").read_text())
     error_union_fixtures = [

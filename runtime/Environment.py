@@ -90,7 +90,7 @@ class Environment:
 
 
 def create_global_environment(stdout: Optional[TextIO] = None) -> Environment:
-    """Pre-populates the top-level execution environment with W standard built-ins."""
+    """Pre-populates the top-level execution environment with Wysna standard built-ins."""
     env = Environment()
     out = stdout if stdout is not None else sys.stdout
 

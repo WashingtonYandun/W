@@ -1,25 +1,25 @@
-name: Bug Report
-description: Report a reproducible bug or incorrect compiler/runtime behavior in W.
+name: Reportar un error
+description: Reporta un error reproducible del compilador o runtime de Wysna.
 title: "[Bug]: "
 labels: ["bug", "triage"]
 body:
   - type: markdown
     attributes:
       value: |
-        Thank you for reporting an issue! Please check existing issues before submitting to avoid duplicates.
+        Revisa los issues existentes antes de enviar uno nuevo para evitar duplicados.
   - type: textarea
     id: description
     attributes:
-      label: Bug Description
-      description: A clear and concise description of what the bug is.
-      placeholder: Describe the unexpected behavior...
+      label: Descripción del error
+      description: Explica el error de forma clara y concreta.
+      placeholder: Describe el comportamiento inesperado...
     validations:
       required: true
   - type: textarea
     id: reproduction
     attributes:
-      label: Minimal Reproducing Code (.wysna)
-      description: Provide a minimal, self-contained Wysna source snippet demonstrating the issue.
+      label: Código mínimo para reproducir (.wysna)
+      description: Incluye un ejemplo mínimo y autocontenido de código Wysna.
       render: wysna
       placeholder: |
         fn main() {
@@ -30,30 +30,30 @@ body:
   - type: textarea
     id: expected
     attributes:
-      label: Expected Behavior
-      description: What did you expect to happen?
+      label: Comportamiento esperado
+      description: ¿Qué esperabas que ocurriera?
     validations:
       required: true
   - type: textarea
     id: actual
     attributes:
-      label: Actual Output / Error Message
-      description: Paste the compiler or runtime output, error diagnostics, or exit codes.
+      label: Salida real o mensaje de error
+      description: Pega la salida del compilador o runtime, los diagnósticos o el código de salida.
       render: shell
     validations:
       required: true
   - type: input
     id: version
     attributes:
-      label: Wysna Version
-      description: Output of `./wysna version` or `./wysna --version`.
-      placeholder: "wysna version 0.2.0"
+      label: Versión de Wysna
+      description: Salida de `./wysna version` o `./wysna --version`.
+      placeholder: "Wysna 0.5.0"
     validations:
       required: true
   - type: dropdown
     id: component
     attributes:
-      label: Affected Component
+      label: Componente afectado
       options:
         - "Lexer / Tokenizer"
         - "Parser (AST)"
@@ -61,15 +61,15 @@ body:
         - "Typed HIR (HirBuilder, HirCCodeGen)"
         - "C99 Runtime (wysna_runtime.h, ARC, CoW)"
         - "Wysna Compiler (Self-Hosted)"
-        - "CLI / Formatter (w fmt)"
-        - "Other / Unknown"
+        - "CLI / Formateador (wysna fmt)"
+        - "Otro / Desconocido"
     validations:
       required: true
   - type: textarea
     id: environment
     attributes:
-      label: Environment & Toolchain
-      description: Operating System, C compiler version (`clang --version` or `gcc --version`), Python version.
+      label: Entorno y toolchain
+      description: Sistema operativo, compilador C (`clang --version` o `gcc --version`) y versión de Python.
       placeholder: |
         - OS: macOS Sonoma / Linux Ubuntu 22.04 / Windows (WSL)
         - C Compiler: Apple Clang 16.0 / GCC 12.2

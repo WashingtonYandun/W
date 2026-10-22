@@ -35,7 +35,7 @@ def validate(rows=1000, samples=3, sanitize=False):
               'platform': sys.platform, 'compiler': execute(compiler + ['--version']).stdout,
               'flags': flags, 'engines': {}, 'peak_memory_bytes': None}
     expected_total = rows * 4294967296 + rows * (rows - 1) // 2 * 10
-    with tempfile.TemporaryDirectory(prefix='w-sqlite-ffi-') as temporary:
+    with tempfile.TemporaryDirectory(prefix='wysna-sqlite-ffi-') as temporary:
         directory = Path(temporary)
         adapter = directory / 'adapter.o'
         execute(compiler + flags + ['-Wall', '-Wextra', '-Werror', '-c', str(PILOT / 'adapter.c'), '-o', str(adapter)])

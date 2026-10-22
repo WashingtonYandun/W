@@ -109,7 +109,7 @@ def run_scaling_tests():
     validate_scaling(reference, dimensions)
     assert reference['retention/after'] == reference['retention/before']
     hir = HirBuilder(checker.interner).lower(ast)
-    with tempfile.TemporaryDirectory(prefix='w-cow-scaling-') as directory:
+    with tempfile.TemporaryDirectory(prefix='wysna-cow-scaling-') as directory:
         wysna_path = Path(directory) / 'scaling.wysna'
         wysna_path.write_text(source)
         native_reference = None

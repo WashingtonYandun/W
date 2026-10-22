@@ -118,7 +118,7 @@ def mangle_generic_name(
     if template_name in ("Option", "Result"):
         return f"{template_name}__{args_part}"
     mod_prefix = f"{len(module_name)}_{module_name}__" if module_name else ""
-    return f"_W_G_{mod_prefix}{len(template_name)}_{template_name}__{args_part}"
+    return f"_WYSNA_G_{mod_prefix}{len(template_name)}_{template_name}__{args_part}"
 
 
 def type_strictly_contains(sub: WysnaType, container: WysnaType) -> bool:
@@ -345,7 +345,7 @@ class TypeChecker:
         # Reject user declarations starting with reserved compiler prefixes
         for stmt in program.body:
             if hasattr(stmt, "name") and isinstance(stmt.name, str) and not hasattr(stmt, "specialization_shell"):
-                if stmt.name.startswith("_W_") or stmt.name.startswith("__w_"):
+                if stmt.name.startswith("_WYSNA_") or stmt.name.startswith("__wysna_internal_"):
                     raise TypeError(
                         message=f"Identifier '{stmt.name}' is reserved for internal compiler use",
                         line=stmt.line,
@@ -876,7 +876,7 @@ class TypeChecker:
     # The synthetic parameter name introduced by closure conversion. Captured
     # variables are immutable snapshots today, so a mutation attempt is rejected -- but
     # the diagnostic has to name the captured variable, not a compiler internal.
-    CLOSURE_ENVIRONMENT_PARAMETER = '__wysna_environment'
+    CLOSURE_ENVIRONMENT_PARAMETER = '__wysna_internal_environment'
 
     def _binding_error_name(self, symbol) -> str:
         if symbol is not None and getattr(symbol, 'name', None) == self.CLOSURE_ENVIRONMENT_PARAMETER:
@@ -969,7 +969,7 @@ class TypeChecker:
             self.current_scope = old_scope
 
     def _check_let_decl(self, stmt: LetDecl) -> None:
-        if stmt.name.startswith("_W_") or stmt.name.startswith("__w_"):
+        if stmt.name.startswith("_WYSNA_") or stmt.name.startswith("__wysna_internal_"):
             raise TypeError(
                 message=f"Identifier '{stmt.name}' is reserved for internal compiler use",
                 line=stmt.line,

@@ -1,4 +1,4 @@
-"""Native runtime panics must point at the W operation that caused them."""
+"""Native runtime panics must point at the Wysna operation that caused them."""
 
 import os
 from pathlib import Path
@@ -91,7 +91,7 @@ def test_native_runtime_panics_report_exact_wysna_source_location():
 
     selfhost_compiler = ensure_selfhost_compiler_binary(str(root))
 
-    with tempfile.TemporaryDirectory(prefix="w-f02-locations-") as directory:
+    with tempfile.TemporaryDirectory(prefix="wysna-f02-locations-") as directory:
         temp = Path(directory)
         for backend in ("ast", "hir", "selfhost"):
             for name, source_text, line, marker, message in CASES:

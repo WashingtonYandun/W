@@ -35,6 +35,22 @@ fn match_kind(k: str) -> bool {
     return false
 }
 
+fn skip_statement_separators() {
+    while check_kind("NEWLINE") or check_kind("SEMICOLON") {
+        advance_tok()
+    }
+}
+
+fn skip_newlines_before_branch() {
+    let saved = g_pos
+    while check_kind("NEWLINE") {
+        advance_tok()
+    }
+    if not check_kind("ELIF") and not check_kind("ELSE") {
+        g_pos = saved
+    }
+}
+
 fn expect_kind(k: str) -> Token {
     let tok = at_tok()
     if tok.kind != k {

@@ -16,14 +16,14 @@ parity or measures code coverage.
 
 | Feature Category | Fixtures | Wysna Seed (Interpreter) | Wysna Seed (AST C99) | Wysna Seed (HIR C99) | Wysna Compiler (Self-Hosted) | Status / Milestone |
 | :--- | :---: | :---: | :---: | :---: | :---: | :--- |
-| **`core`** | 157 | ✅ 157/157 | ✅ 157/157 | ✅ 157/157 | ✅ 157/157 | Declared supported |
+| **`core`** | 158 | ✅ 158/158 | ✅ 158/158 | ✅ 158/158 | ✅ 158/158 | Declared supported |
 | **`generics`** | 15 | ✅ 15/15 | ✅ 15/15 | ✅ 15/15 | ✅ 15/15 | Declared supported |
 | **`checked_modules`** | 1 | ✅ 1/1 | ✅ 1/1 | ✅ 1/1 | ✅ 1/1 | Declared supported |
 | **`error_unions`** | 8 | ✅ 8/8 | ✅ 8/8 | ✅ 8/8 | ✅ 8/8 | Declared supported |
 | **`functions`** | 5 | ✅ 5/5 | ✅ 5/5 | ✅ 5/5 | ✅ 5/5 | Declared supported |
 | **`stdlib`** | 3 | ✅ 3/3 | ✅ 3/3 | ✅ 3/3 | ✅ 3/3 | Declared supported |
 | **`regressions`** | 13 | ✅ 13/13 | ✅ 13/13 | ✅ 13/13 | ✅ 13/13 | Declared supported |
-| **Total Verified** | **202** | **202/202 (100.0%)** | **202/202 (100.0%)** | **202/202 (100.0%)** | **202/202 (100.0%)** | _measured_ |
+| **Total Verified** | **203** | **203/203 (100.0%)** | **203/203 (100.0%)** | **203/203 (100.0%)** | **203/203 (100.0%)** | _measured_ |
 
 <!-- GENERATED TABLE END -->
 

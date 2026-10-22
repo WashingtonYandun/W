@@ -81,6 +81,8 @@ class TokenType(Enum):
     DOT = auto()               # .
     COLON = auto()             # :
     COMMA = auto()             # ,
+    SEMICOLON = auto()         # ;
+    NEWLINE = auto()           # Logical statement boundary inserted from a line break
     LPAREN = auto()            # (
     RPAREN = auto()            # )
     LBRACE = auto()            # {
@@ -90,28 +92,3 @@ class TokenType(Enum):
 
     # Stream End
     EOF = auto()
-
-    # Backward compatibility aliases for legacy parser (will be phased out)
-    INTEGERS = INT
-    FLOATS = FLOAT
-    STRINGS = STR
-    BOOLEANS = TRUE
-    FUNC = FN
-    CONST = LET
-    LEFT_PR = LPAREN
-    RIGHT_PR = RPAREN
-    LEFT_BR = LBRACKET
-    RIGHT_BR = RBRACKET
-    LEFT_CBR = LBRACE
-    RIGHT_CBR = RBRACE
-    BINARY_OPERATOR = PLUS
-    COMPARISON_OPERATOR = EQ
-    ASSIGNMENT_OPERATOR = ASSIGN
-    NEW_LINE = auto()
-    DATATYPE_INT = IDENTIFIER
-    DATATYPE_FLOAT = IDENTIFIER
-    DATATYPE_STR = IDENTIFIER
-    DATATYPE_BOOL = IDENTIFIER
-    DATATYPE_LIST = IDENTIFIER
-    DATATYPE_DICT = IDENTIFIER
-    IS = EQ
