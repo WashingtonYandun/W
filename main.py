@@ -2,7 +2,6 @@ import json
 import os
 import subprocess
 import sys
-import tempfile
 from typing import Optional
 from lexer.Lexer import Lexer
 from parser.Parser import Parser
@@ -10,9 +9,8 @@ from checker.TypeChecker import TypeChecker
 from runtime.Interpreter import Interpreter
 from runtime.Values import WysnaUnit
 from formatter.Formatter import Formatter
-from codegen.CCodeGen import CCodeGen
-from hir.HirBuilder import HirBuilder
-from hir.HirCCodeGen import HirCCodeGen
+from compiler.CompilerService import CompilerService
+from compiler.NativeToolchain import NativeCompilationError, NativeToolchain
 from error.Error import WysnaError
 
 from common.Version import WYSNA_VERSION
@@ -74,9 +72,9 @@ def _ensure_selfhost_compiler_binary_locked(repo_root: str) -> str:
     if needs_rebuild:
         with open(compiler_src_path, "r", encoding="utf-8") as wf:
             compiler_src = wf.read()
-        ast = Parser(file=compiler_src_path).parse(compiler_src)
-        TypeChecker(file=compiler_src_path).check(ast)
-        c0_code = CCodeGen(file=compiler_src_path).generate(ast)
+        service = CompilerService()
+        checked = service.check(compiler_src, compiler_src_path)
+        c0_code = service.emit_c(checked, backend="ast").source
 
         c0_path = os.path.join(cache_dir, "compiler0.c")
         c1_path = os.path.join(cache_dir, "compiler1.c")
@@ -144,7 +142,7 @@ def run_pipeline(
         t_start = time.perf_counter()
         lex_ms = parse_ms = check_ms = 0.0
         ast = None
-        checker = None
+        checked = None
         selfhost_direct = (
             backend == "selfhost"
             and (emit_c_path is not None or build_bin_path is not None)
@@ -155,27 +153,18 @@ def run_pipeline(
             and not check_only
         )
 
-        if selfhost_direct:
-            lexer = None
-            tokens = []
-        else:
-            # 1. Lexing
-            t_lex0 = time.perf_counter()
-            lexer = Lexer(source_code, file=file_name)
-            tokens = lexer.tokenize()
-            lex_ms = (time.perf_counter() - t_lex0) * 1000.0
         if show_tokens:
+            tokens = Lexer(source_code, file=file_name).tokenize()
             for t in tokens:
                 print(f"  {t}")
             if not show_ast and not check_only and emit_c_path is None and build_bin_path is None:
                 return 0
 
         if not selfhost_direct:
-            # 2. Parsing
-            t_parse0 = time.perf_counter()
-            parser = Parser(file=file_name)
-            ast = parser.parse(source_code, tokens=tokens, recover=check_only)
-            parse_ms = (time.perf_counter() - t_parse0) * 1000.0
+            service = CompilerService()
+            parsed = service.parse(source_code, file_name, recover=check_only)
+            ast = parsed.program if show_ast or fmt_only else None
+            lex_ms, parse_ms = parsed.timing_ms['lex'], parsed.timing_ms['parse']
         if show_ast:
             print(json.dumps(ast.to_dict(), indent=2))
             if not check_only and emit_c_path is None and build_bin_path is None:
@@ -193,15 +182,12 @@ def run_pipeline(
         if not selfhost_direct:
             # 3. Static Type Checking
             t_check0 = time.perf_counter()
-            checker = TypeChecker(file=file_name)
-            checker.check(ast)
+            checked = service.check_parsed(parsed)
             check_ms = (time.perf_counter() - t_check0) * 1000.0
 
         if show_mir:
-            from mir.Lowering import Lowering
             from mir.Nodes import dump
-            module = HirBuilder(checker.interner, file_path=file_name).lower(ast)
-            print(dump(Lowering(checker.interner, file_name).lower(module)), end="")
+            print(dump(service.lower_mir(checked)), end="")
             return 0
 
         if check_only:
@@ -210,7 +196,7 @@ def run_pipeline(
                     "status": "ok",
                     "file": file_name,
                     "telemetry": {
-                        "monomorphization": checker.telemetry.to_dict(),
+                        "monomorphization": dict(checked.telemetry),
                         "timing_ms": {
                             "lex": round(lex_ms, 2),
                             "parse": round(parse_ms, 2),
@@ -230,48 +216,21 @@ def run_pipeline(
         # 4. C99 Code Generation / Native Build
         if emit_c_path is not None or build_bin_path is not None:
             repo_root = get_repo_root()
-            codegen_inst = None
+            toolchain = NativeToolchain(repo_root)
+            codegen_telemetry = None
+            phase_ms = {}
             hir_ms = None
             if backend == "selfhost" and file_name != "<stdin>":
                 selfhost_bin = ensure_selfhost_compiler_binary(repo_root)
-                abs_input = os.path.abspath(file_name)
-                input_dir = os.path.dirname(abs_input) or os.getcwd()
-                with tempfile.NamedTemporaryFile(mode="w", suffix=".c", delete=False, encoding="utf-8") as tmp_selfhost_c:
-                    tmp_selfhost_c_path = tmp_selfhost_c.name
-                try:
-                    t_selfhost0 = time.perf_counter()
-                    selfhost_proc = subprocess.run(
-                        [selfhost_bin, abs_input, tmp_selfhost_c_path],
-                        capture_output=True,
-                        text=True,
-                        cwd=input_dir,
-                        timeout=120,
-                    )
-                    codegen_ms = (time.perf_counter() - t_selfhost0) * 1000.0
-                    if selfhost_proc.returncode != 0:
-                        print(f"[Wysna Compiler Error]\n{selfhost_proc.stderr}", file=sys.stderr)
-                        return 1
-                    with open(tmp_selfhost_c_path, "r", encoding="utf-8") as cf:
-                        c_code = cf.read()
-                finally:
-                    if os.path.exists(tmp_selfhost_c_path):
-                        os.remove(tmp_selfhost_c_path)
-            elif backend == "ast":
-                t_ast0 = time.perf_counter()
-                codegen_inst = CCodeGen(file=file_name)
-                c_code = codegen_inst.generate(ast)
-                codegen_ms = (time.perf_counter() - t_ast0) * 1000.0
+                emission = toolchain.emit_selfhost(selfhost_bin, file_name)
+                c_code, codegen_ms = emission.source, emission.codegen_ms
             else:
-                # Default C06 backend: Typed HIR -> HirCCodeGen -> C99
-                t_hir0 = time.perf_counter()
-                builder = HirBuilder(checker.interner, file_path=file_name)
-                hir_mod = builder.lower(ast)
-                hir_ms = (time.perf_counter() - t_hir0) * 1000.0
-
-                t_cg0 = time.perf_counter()
-                codegen_inst = HirCCodeGen(checker.interner, file_path=file_name)
-                c_code = codegen_inst.generate(hir_mod)
-                codegen_ms = (time.perf_counter() - t_cg0) * 1000.0
+                emission = service.emit_c(checked, backend="ast" if backend == "ast" else "hir")
+                c_code = emission.source
+                codegen_telemetry = dict(emission.telemetry)
+                phase_ms = emission.timing_ms if backend != "ast" else {}
+                hir_ms = phase_ms.get("hir")
+                codegen_ms = emission.timing_ms["codegen"]
 
             c_compile_ms = link_ms = 0.0
             def report_codegen_stats():
@@ -281,16 +240,16 @@ def run_pipeline(
                     "status": "ok",
                     "file": file_name,
                     "telemetry": {
-                        "monomorphization": checker.telemetry.to_dict() if checker is not None else None,
-                        "codegen": codegen_inst.telemetry.to_dict() if codegen_inst else None,
+                        "monomorphization": dict(checked.telemetry) if checked is not None else None,
+                        "codegen": codegen_telemetry,
                         "timing_ms": {
                             "lex": round(lex_ms, 2),
                             "parse": round(parse_ms, 2),
                             "check": round(check_ms, 2),
                             "hir": round(hir_ms, 2) if hir_ms is not None else None,
                             "codegen": round(codegen_ms, 2),
-                            "mir": round(getattr(codegen_inst, 'phase_ms', {}).get('mir', 0), 2),
-                            "c_emit": round(getattr(codegen_inst, 'phase_ms', {}).get('c_emit', 0), 2),
+                            "mir": round(phase_ms.get('mir', 0), 2),
+                            "c_emit": round(phase_ms.get('c_emit', 0), 2),
                             "c_compile": round(c_compile_ms, 2),
                             "link": round(link_ms, 2),
                             "total": round((time.perf_counter() - t_start) * 1000.0, 2),
@@ -308,43 +267,9 @@ def run_pipeline(
                     return 0
 
             if build_bin_path is not None:
-                with tempfile.NamedTemporaryFile(mode="w", suffix=".c", delete=False, encoding="utf-8") as tmp_c:
-                    tmp_c.write(c_code)
-                    tmp_c_path = tmp_c.name
-                try:
-                    san_flags = ["-fsanitize=address,undefined", "-fno-omit-frame-pointer"] if sanitize else []
-                    build_bin_path = executable_name(build_bin_path)
-                    object_path = tmp_c_path + ('.obj' if os.name == 'nt' else '.o')
-                    source_objects = {library: object_path + '.' + str(index) + ('.obj' if os.name == 'nt' else '.o')
-                                      for index, library in enumerate(link_libraries)
-                                      if library.lower().endswith('.c') and os.path.isfile(library)}
-                    base = compiler_command() + ["-std=c99", "-O2", f"-I{repo_root}"] + san_flags
-                    started = time.perf_counter()
-                    for c_source, c_object in [(tmp_c_path, object_path)] + list(source_objects.items()):
-                        proc = subprocess.run(base + ['-c', c_source, '-o', c_object],
-                                              capture_output=True, text=True, timeout=120)
-                        if proc.returncode != 0:
-                            print(f"[C Compiler Error]\n{proc.stderr}", file=sys.stderr)
-                            return 1
-                    c_compile_ms = (time.perf_counter() - started) * 1000
-                    libraries = [flag for library in link_libraries for flag in
-                                 [source_objects[library] if library in source_objects else
-                                  library if '/' in library or '\\' in library else '-l' + library]]
-                    started = time.perf_counter()
-                    proc = subprocess.run(base + [object_path, '-o', build_bin_path] + libraries,
-                                          capture_output=True, text=True, timeout=120)
-                    link_ms = (time.perf_counter() - started) * 1000
-                    if proc.returncode != 0:
-                        print(f"[C Linker Error]\n{proc.stderr}", file=sys.stderr)
-                        return 1
-                finally:
-                    if os.path.exists(tmp_c_path):
-                        os.remove(tmp_c_path)
-                    if 'object_path' in locals() and os.path.exists(object_path):
-                        os.remove(object_path)
-                    for c_object in locals().get('source_objects', {}).values():
-                        if os.path.exists(c_object):
-                            os.remove(c_object)
+                built = toolchain.build(c_code, build_bin_path, sanitize=sanitize,
+                                        link_libraries=link_libraries)
+                c_compile_ms, link_ms = built.c_compile_ms, built.link_ms
                 report_codegen_stats()
                 return 0
 
@@ -354,7 +279,7 @@ def run_pipeline(
                 "status": "ok",
                 "file": file_name,
                 "telemetry": {
-                    "monomorphization": checker.telemetry.to_dict(),
+                    "monomorphization": dict(checked.telemetry),
                     "timing_ms": {
                         "lex": round(lex_ms, 2),
                         "parse": round(parse_ms, 2),
@@ -364,15 +289,16 @@ def run_pipeline(
                     "peak_rss_kb": peak_rss_kb(),
                 }
             }, indent=2), file=sys.stderr)
-        interp = Interpreter(file=file_name)
-        interp.foreign_libraries = link_libraries
-        res = interp.interpret(ast)
+        res = service.interpret(checked, foreign_libraries=link_libraries)
 
         if not isinstance(res, WysnaUnit) and file_name == "<stdin>":
             print(res)
 
         return 0
 
+    except NativeCompilationError as err:
+        print(f"[{err.label}]\n{err.stderr}", file=sys.stderr)
+        return 1
     except WysnaError as err:
         if json_diagnostics:
             print(json.dumps(err.to_dict(), indent=2))

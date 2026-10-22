@@ -57,6 +57,7 @@ class CompilationSession:
         self.sources = SourceManager()
         self.interner = TypeInterner()
         self.modules = {}
+        self._linked_programs = {}
         self.declarations = {}
         self.active = []
         self.generation = 0
@@ -100,6 +101,7 @@ class CompilationSession:
             changed = changed or old_source != source
         if changed:
             self.modules.clear()
+            self._linked_programs.clear()
             self.declarations.clear()
             self.interner = TypeInterner()
             self.generation += 1
@@ -272,15 +274,19 @@ class CompilationSession:
                 self.declarations[node.decl_id] = node
                 self.decorate(node, unit.path, unit.module_id)
                 unit.program.body.append(node)
+                existing.add(id(node))
+                self._linked_programs.clear()
 
     def link(self, program):
+        from compiler.CheckedProgram import clone_syntax
         unit = program.checked_module
-        if unit.generation != self.generation or program.interner is not self.interner:
+        if (unit.generation != self.generation or program.interner is not self.interner
+                or self.modules.get(unit.path) is not unit):
             raise WysnaError('Checked module belongs to an invalidated compilation generation',
                          file=unit.path, code='W9999', stage='module-linking')
-        if hasattr(program, 'linked_program'):
-            return program.linked_program
-        body, visited = [], set()
+        if unit.path in self._linked_programs:
+            return self._linked_programs[unit.path]
+        body, visited, copies = [], set(), {}
         def rewrite(node):
             if isinstance(node, list):
                 return [rewrite(child) for child in node]
@@ -302,11 +308,12 @@ class CompilationSession:
             visited.add(current.module_id)
             for dependency in current.dependencies:
                 collect(dependency)
-            body.extend(rewrite(node) for node in current.program.body if not isinstance(node, A.ImportDecl))
+            body.extend(rewrite(clone_syntax(node, copies)) for node in current.program.body
+                        if not isinstance(node, A.ImportDecl))
         collect(unit)
         linked = A.Program(body)
         linked.interner = self.interner
         linked.call_entrypoint = not any(not isinstance(node, (A.FnDecl, A.StructDecl, A.EnumDecl, A.InterfaceDecl, A.ClassDecl, A.ImportDecl)) for node in program.body)
         linked.session_linked = True
-        program.linked_program = linked
+        self._linked_programs[unit.path] = linked
         return linked
