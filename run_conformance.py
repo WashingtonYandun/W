@@ -14,7 +14,7 @@ from hir.HirBuilder import HirBuilder
 from hir.HirNodes import HirModule
 from hir.HirCCodeGen import HirCCodeGen
 from tests.engine_harness import panic_expectation, unsupported_reason
-from tests.unit.test_w1_split_conformance import test_split_conformance
+from tests.unit.test_selfhost_split_conformance import test_split_conformance
 from tests.unit.test_generic_hardening import run_generic_hardening_tests
 from tests.unit.test_cow_telemetry import run_cow_telemetry_suite
 from tests.unit.test_compilation_session import run_session_tests
@@ -23,7 +23,7 @@ from tests.unit.test_c03_generic_specialization import run_all as run_c03_generi
 from tests.unit.test_c04_adt_layout import run_all as run_c04_adt_tests
 from tests.unit.test_c05_types_inference import run_all as run_c05_types_tests
 from tests.unit.test_c06_default_backend import run_all as run_c06_backend_tests
-from tests.unit.test_d01_w1_parity_matrix import run_all as run_d01_parity_tests
+from tests.unit.test_d01_parity_matrix import run_all as run_d01_parity_tests
 from error.Error import DIAGNOSTIC_CODES, LexerError, ParserError, TypeError, WError, WRuntimeError
 from wtokens.TokenType import TokenType
 from node.NodeType import Program
@@ -392,32 +392,32 @@ def _run_suite_in_repo(repo_root: str) -> None:
             except Exception as e:
                 print(f"  [C99 FAIL] {f}: {e}")
 
-        w1_targets = [f for f in c99_targets if not unsupported_reason("tests/runtime/" + f, "w1")]
-        print(f"W1 profile: {len(w1_targets)} supported, {len(c99_targets) - len(w1_targets)} unsupported (see tests/engine_profiles.json)")
-        w1_runtime_passed = 0
+        selfhost_targets = [f for f in c99_targets if not unsupported_reason("tests/runtime/" + f, "selfhost") and not unsupported_reason("tests/runtime/" + f, "w1")]
+        print(f"Wysna Compiler profile: {len(selfhost_targets)} supported, {len(c99_targets) - len(selfhost_targets)} unsupported (see tests/engine_profiles.json)")
+        selfhost_runtime_passed = 0
 
-        # 8. Self-Hosting Bootstrap Fixed-Point (W0 -> W1 Stage 1 -> W1 Stage 2)
-        w1_src_path = os.path.join(repo_root, "selfhost", "w1.wysna")
+        # 8. Self-Hosting Bootstrap Fixed-Point (Wysna Seed -> Wysna Compiler Stage 1 -> Wysna Compiler Stage 2)
+        compiler_src_path = os.path.join(repo_root, "selfhost", "compiler.wysna")
         try:
-            with open(w1_src_path, "r", encoding="utf-8") as wf:
-                w1_src = wf.read()
-            w1_ast = Parser(file=w1_src_path).parse(w1_src)
-            TypeChecker(file=w1_src_path).check(w1_ast)
-            c0_code = CCodeGen(file=w1_src_path).generate(w1_ast)
+            with open(compiler_src_path, "r", encoding="utf-8") as wf:
+                compiler_src = wf.read()
+            compiler_ast = Parser(file=compiler_src_path).parse(compiler_src)
+            TypeChecker(file=compiler_src_path).check(compiler_ast)
+            c0_code = CCodeGen(file=compiler_src_path).generate(compiler_ast)
 
             c0_path = os.path.join(tmpdir, "compiler0.c")
             c1_path = os.path.join(tmpdir, "compiler1.c")
             c2_path = os.path.join(tmpdir, "compiler2.c")
-            s1_bin = os.path.join(tmpdir, "w1_stage1")
-            s2_bin = os.path.join(tmpdir, "w1_stage2")
+            s1_bin = os.path.join(tmpdir, "stage1")
+            s2_bin = os.path.join(tmpdir, "stage2")
 
             with open(c0_path, "w", encoding="utf-8") as cf:
                 cf.write(c0_code)
 
             subprocess.run([os.environ.get("CC", "cc"), "-std=c99", "-O2", f"-I{repo_root}", c0_path, "-o", s1_bin], check=True, timeout=120, capture_output=True)
-            subprocess.run([s1_bin, w1_src_path, c1_path], check=True, timeout=120, capture_output=True)
+            subprocess.run([s1_bin, compiler_src_path, c1_path], check=True, timeout=120, capture_output=True)
             subprocess.run([os.environ.get("CC", "cc"), "-std=c99", "-O2", f"-I{repo_root}", c1_path, "-o", s2_bin], check=True, timeout=120, capture_output=True)
-            subprocess.run([s2_bin, w1_src_path, c2_path], check=True, timeout=120, capture_output=True)
+            subprocess.run([s2_bin, compiler_src_path, c2_path], check=True, timeout=120, capture_output=True)
 
             h0 = sha256_file(c0_path)
             h1 = sha256_file(c1_path)
@@ -425,22 +425,22 @@ def _run_suite_in_repo(repo_root: str) -> None:
             assert h0 == h1 == h2, f"Hash mismatch: {h0} vs {h1} vs {h2}"
             bootstrap_ok = True
 
-            # 9. Verify W1 Stage 2 Native Compiler on Core Runtime Conformance Programs
-            w1_targets = [f for f in c99_targets if not unsupported_reason("tests/runtime/" + f, "w1")]
-            for f in w1_targets:
+            # 9. Verify Wysna Compiler Stage 2 Native Compiler on Core Runtime Conformance Programs
+            selfhost_targets = [f for f in c99_targets if not unsupported_reason("tests/runtime/" + f, "selfhost") and not unsupported_reason("tests/runtime/" + f, "w1")]
+            for f in selfhost_targets:
                 path = os.path.join(runtime_dir, f)
                 expected_path = os.path.join(runtime_dir, f[:-6] + ".expected")
                 with open(expected_path, "r", encoding="utf-8") as exp_stream:
                     expected = exp_stream.read()
-                w1_c_path = os.path.join(tmpdir, "w1_" + f[:-6] + ".c")
-                w1_bin_path = os.path.join(tmpdir, "w1_" + f[:-6])
-                subprocess.run([s2_bin, path, w1_c_path], check=True, timeout=120, capture_output=True, cwd=repo_root)
-                subprocess.run([os.environ.get("CC", "cc"), "-std=c99", f"-I{repo_root}"] + extra_cc_flags + [w1_c_path, "-o", w1_bin_path], check=True, timeout=120, capture_output=True)
-                run_res = subprocess.run([w1_bin_path], timeout=30, capture_output=True, text=True, cwd=repo_root)
+                selfhost_c_path = os.path.join(tmpdir, "selfhost_" + f[:-6] + ".c")
+                selfhost_bin_path = os.path.join(tmpdir, "selfhost_" + f[:-6])
+                subprocess.run([s2_bin, path, selfhost_c_path], check=True, timeout=120, capture_output=True, cwd=repo_root)
+                subprocess.run([os.environ.get("CC", "cc"), "-std=c99", f"-I{repo_root}"] + extra_cc_flags + [selfhost_c_path, "-o", selfhost_bin_path], check=True, timeout=120, capture_output=True)
+                run_res = subprocess.run([selfhost_bin_path], timeout=30, capture_output=True, text=True, cwd=repo_root)
                 _assert_native_outcome(f, run_res, expected, panic_expectation(expected))
-                w1_runtime_passed += 1
+                selfhost_runtime_passed += 1
 
-            # 10. Verify Showcase Examples (examples/*.wysna) on W0 Interpreter, W0 C99, and W1 Stage-2 Native
+            # 10. Verify Showcase Examples (examples/*.wysna) on Wysna Seed Interpreter, Wysna Seed C99, and Wysna Compiler Stage-2 Native
             examples_dir = "examples"
             example_files = sorted([f for f in os.listdir(examples_dir) if f.endswith(".wysna")]) if os.path.exists(examples_dir) else []
             examples_passed = 0
@@ -465,10 +465,10 @@ def _run_suite_in_repo(repo_root: str) -> None:
                 subprocess.run([os.environ.get("CC", "cc"), "-std=c99", f"-I{repo_root}", ex_c_path, "-o", ex_bin_path], check=True, timeout=120, capture_output=True)
                 ex_res = subprocess.run([ex_bin_path], timeout=30, capture_output=True, text=True, cwd=repo_root)
                 assert ex_res.returncode == 0, ex_res.stderr
-                assert ex_res.stdout == ex_expected, f"W1 native mismatch on {f}"
+                assert ex_res.stdout == ex_expected, f"Wysna Compiler native mismatch on {f}"
                 examples_passed += 1
         except Exception as e:
-            print(f"  [BOOTSTRAP/W1 FAIL] {e}")
+            print(f"  [BOOTSTRAP/SELFHOST FAIL] {e}")
             example_files = []
             examples_passed = 0
 
@@ -549,10 +549,10 @@ def _run_suite_in_repo(repo_root: str) -> None:
         except OSError:
             pass
 
-    print(f"C99 Native Backend:  {c99_passed}/{len(c99_targets)}")
-    print(f"HIR C99 Backend:     {hir_c99_passed}/{len(c99_targets)}")
-    print(f"W1 Stage-2 Runtime:  {w1_runtime_passed}/{len(w1_targets)}")
-    print(f"W1 Modular Split:    {'1/1 (Loss-less verified)' if split_ok else '0/1'}")
+    print(f"Seed C99 Native:     {c99_passed}/{len(c99_targets)}")
+    print(f"Seed HIR C99:        {hir_c99_passed}/{len(c99_targets)}")
+    print(f"Compiler Stage-2:    {selfhost_runtime_passed}/{len(selfhost_targets)}")
+    print(f"Compiler Modular:    {'1/1 (Loss-less verified)' if split_ok else '0/1'}")
     print(f"Generic Hardening:   {'1/1 (Canonical cache verified)' if hardening_ok else '0/1'}")
     print(f"CoW Telemetry (B02): {'1/1 (Asymptotics verified)' if cow_telemetry_ok else '0/1'}")
     print(f"Compilation Session: {'1/1' if session_ok else '0/1'}")
@@ -582,7 +582,7 @@ def _run_suite_in_repo(repo_root: str) -> None:
         and runtime_passed == len(runtime_files)
         and c99_passed == len(c99_targets)
         and hir_c99_passed == len(c99_targets)
-        and w1_runtime_passed == len(w1_targets)
+        and selfhost_runtime_passed == len(selfhost_targets)
         and split_ok
         and hardening_ok
         and cow_telemetry_ok
@@ -610,7 +610,7 @@ def _run_suite_in_repo(repo_root: str) -> None:
         total = (
             v_lex_passed + i_lex_passed + v_parse_passed + i_parse_passed +
             v_type_passed + i_type_passed + err_passed + fmt_passed + hir_passed +
-            runtime_passed + c99_passed + hir_c99_passed + w1_runtime_passed +
+            runtime_passed + c99_passed + hir_c99_passed + selfhost_runtime_passed +
             examples_passed + 20
         )
         print(f"ALL {total}/{total} CONFORMANCE, EXAMPLES & SELF-HOSTING TESTS PASSED (100%).")

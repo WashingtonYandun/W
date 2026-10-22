@@ -138,7 +138,7 @@ int main(void) {
 
 def test_formatter_preserves_guards_and_production_sources():
     paths = formatter_paths()
-    required = ['selfhost/w1.wysna', 'selfhost/src/07_parser_decl.wysna',
+    required = ['selfhost/compiler.wysna', 'selfhost/src/07_parser_decl.wysna',
                 'examples/ffi/sqlite/import_csv.wysna', 'stdlib/text.wysna']
     assert all(ROOT / name in paths for name in required)
     for path in paths:

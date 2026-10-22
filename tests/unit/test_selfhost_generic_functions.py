@@ -9,9 +9,9 @@ ROOT = Path(__file__).resolve().parents[2]
 
 
 def test_generic_function_inference_and_explicit_arguments():
-    from main import ensure_selfhost_w1_binary
+    from main import ensure_selfhost_compiler_binary
 
-    compiler = ensure_selfhost_w1_binary(str(ROOT))
+    compiler = ensure_selfhost_compiler_binary(str(ROOT))
     with tempfile.TemporaryDirectory(prefix="w1-generic-function-") as directory:
         output_c = Path(directory) / "generic_function.c"
         built = subprocess.run(
@@ -39,9 +39,9 @@ def test_generic_function_inference_and_explicit_arguments():
 
 
 def test_generic_interface_constraints_reject_non_implementations():
-    from main import ensure_selfhost_w1_binary
+    from main import ensure_selfhost_compiler_binary
 
-    compiler = ensure_selfhost_w1_binary(str(ROOT))
+    compiler = ensure_selfhost_compiler_binary(str(ROOT))
     fixtures = (
         ROOT / "tests/types/invalid/generic_constraint_failure.wysna",
         ROOT / "tests/types/invalid/generic_nominal_constraint_violation.wysna",
@@ -62,9 +62,9 @@ def test_generic_interface_constraints_reject_non_implementations():
 
 
 def test_generic_runtime_and_checked_module_fixtures():
-    from main import ensure_selfhost_w1_binary
+    from main import ensure_selfhost_compiler_binary
 
-    compiler = ensure_selfhost_w1_binary(str(ROOT))
+    compiler = ensure_selfhost_compiler_binary(str(ROOT))
     fixtures = [
         *sorted((ROOT / "tests/runtime").glob("generic_*.wysna")),
         ROOT / "tests/runtime/recursive_tree_adt.wysna",
@@ -107,9 +107,9 @@ def test_generic_runtime_and_checked_module_fixtures():
 
 
 def test_generic_cycle_diagnostics():
-    from main import ensure_selfhost_w1_binary
+    from main import ensure_selfhost_compiler_binary
 
-    compiler = ensure_selfhost_w1_binary(str(ROOT))
+    compiler = ensure_selfhost_compiler_binary(str(ROOT))
     fixtures = (
         ROOT / "tests/types/invalid/generic_recursive_infinite_layout.wysna",
         ROOT / "tests/types/invalid/generic_struct_recursive_cycle.wysna",

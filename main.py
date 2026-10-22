@@ -23,11 +23,11 @@ def get_repo_root() -> str:
     return os.path.dirname(os.path.realpath(__file__))
 
 
-# Every input that can change the bytes of the stage-2 W1 binary. The hand-written
-# runtime header and the W1 sources are the obvious ones; the W0 frontend, checker
+# Every input that can change the bytes of the stage-2 compiler binary. The hand-written
+# runtime header and the selfhost sources are the obvious ones; the Seed frontend, checker
 # and C emitter are just as load-bearing because stage 1 is produced by them, and a
 # stale binary silently invalidates every `--backend=selfhost` comparison.
-SELFHOST_BOOTSTRAP_INPUTS = ("selfhost/w1.wysna", "runtime/wysna_runtime.h", "runtime/wysna_host.h", "main.py") + tuple(
+SELFHOST_BOOTSTRAP_INPUTS = ("selfhost/compiler.wysna", "runtime/wysna_runtime.h", "runtime/wysna_host.h", "main.py") + tuple(
     os.path.relpath(os.path.join(directory, name), get_repo_root())
     for package in ("lexer", "parser", "node", "checker", "compiler", "codegen", "common", "error", "hir", "mir", "wtokens")
     for directory, _, names in os.walk(os.path.join(get_repo_root(), package))
@@ -37,7 +37,7 @@ SELFHOST_BOOTSTRAP_INPUTS = ("selfhost/w1.wysna", "runtime/wysna_runtime.h", "ru
 
 
 def _bootstrap_source_mtime(repo_root: str) -> float:
-    """Newest modification time across every input to the W1 bootstrap."""
+    """Newest modification time across every input to the compiler bootstrap."""
     newest = 0.0
     for relative in SELFHOST_BOOTSTRAP_INPUTS:
         path = os.path.join(repo_root, relative)
@@ -46,41 +46,45 @@ def _bootstrap_source_mtime(repo_root: str) -> float:
     return newest
 
 
-def ensure_selfhost_w1_binary(repo_root: str) -> str:
+def ensure_selfhost_compiler_binary(repo_root: str) -> str:
     """Serialize cache rebuilds across independent compiler/test processes."""
-    w1_src_path = os.path.join(repo_root, "selfhost", "w1.wysna")
-    if not os.path.isfile(w1_src_path):
+    compiler_src_path = os.path.join(repo_root, "selfhost", "compiler.wysna")
+    if not os.path.isfile(compiler_src_path):
         from error.Error import TypeError
-        raise TypeError("W1 bootstrap requires a source checkout", file=w1_src_path, code="W2013")
+        raise TypeError("Wysna Compiler bootstrap requires a source checkout", file=compiler_src_path, code="W2013")
     cache_dir = os.path.join(repo_root, ".w_cache")
     os.makedirs(cache_dir, exist_ok=True)
     with cache_lock(os.path.join(cache_dir, 'bootstrap.lock')):
-        return _ensure_selfhost_w1_binary_locked(repo_root)
+        rebuild_fn = globals().get('_ensure_selfhost_compiler_binary_locked', _ensure_selfhost_compiler_binary_locked)
+        return rebuild_fn(repo_root)
 
 
-def _ensure_selfhost_w1_binary_locked(repo_root: str) -> str:
+ensure_selfhost_w1_binary = ensure_selfhost_compiler_binary
+
+
+def _ensure_selfhost_compiler_binary_locked(repo_root: str) -> str:
     cache_dir = os.path.join(repo_root, ".w_cache")
     os.makedirs(cache_dir, exist_ok=True)
-    w1_bin = os.path.join(cache_dir, executable_name("w1_stage2"))
-    w1_src_path = os.path.join(repo_root, "selfhost", "w1.wysna")
+    stage2_bin = os.path.join(cache_dir, executable_name("stage2"))
+    compiler_src_path = os.path.join(repo_root, "selfhost", "compiler.wysna")
 
-    needs_rebuild = not os.path.exists(w1_bin)
-    if not needs_rebuild and _bootstrap_source_mtime(repo_root) > os.path.getmtime(w1_bin):
+    needs_rebuild = not os.path.exists(stage2_bin)
+    if not needs_rebuild and _bootstrap_source_mtime(repo_root) > os.path.getmtime(stage2_bin):
         needs_rebuild = True
 
-    if not os.path.isfile(w1_src_path):
+    if not os.path.isfile(compiler_src_path):
         from error.Error import TypeError
-        raise TypeError("W1 bootstrap requires a source checkout", file=w1_src_path, code="W2013")
+        raise TypeError("Wysna Compiler bootstrap requires a source checkout", file=compiler_src_path, code="W2013")
     if needs_rebuild:
-        with open(w1_src_path, "r", encoding="utf-8") as wf:
-            w1_src = wf.read()
-        w1_ast = Parser(file=w1_src_path).parse(w1_src)
-        TypeChecker(file=w1_src_path).check(w1_ast)
-        c0_code = CCodeGen(file=w1_src_path).generate(w1_ast)
+        with open(compiler_src_path, "r", encoding="utf-8") as wf:
+            compiler_src = wf.read()
+        ast = Parser(file=compiler_src_path).parse(compiler_src)
+        TypeChecker(file=compiler_src_path).check(ast)
+        c0_code = CCodeGen(file=compiler_src_path).generate(ast)
 
         c0_path = os.path.join(cache_dir, "compiler0.c")
         c1_path = os.path.join(cache_dir, "compiler1.c")
-        s1_bin = os.path.join(cache_dir, executable_name("w1_stage1"))
+        s1_bin = os.path.join(cache_dir, executable_name("stage1"))
 
         with open(c0_path, "w", encoding="utf-8") as cf:
             cf.write(c0_code)
@@ -93,7 +97,7 @@ def _ensure_selfhost_w1_binary_locked(repo_root: str) -> str:
             text=True,
         )
         subprocess.run(
-            [s1_bin, w1_src_path, c1_path],
+            [s1_bin, compiler_src_path, c1_path],
             check=True,
             timeout=120,
             capture_output=True,
@@ -101,14 +105,17 @@ def _ensure_selfhost_w1_binary_locked(repo_root: str) -> str:
             cwd=repo_root,
         )
         subprocess.run(
-            compiler_command() + ["-std=c99", "-O2", f"-I{repo_root}", c1_path, "-o", w1_bin],
+            compiler_command() + ["-std=c99", "-O2", f"-I{repo_root}", c1_path, "-o", stage2_bin],
             check=True,
             timeout=120,
             capture_output=True,
             text=True,
         )
 
-    return w1_bin
+    return stage2_bin
+
+
+_ensure_selfhost_w1_binary_locked = _ensure_selfhost_compiler_binary_locked
 
 
 def run_pipeline(
@@ -249,7 +256,7 @@ def run_pipeline(
                     )
                     codegen_ms = (time.perf_counter() - t_w10) * 1000.0
                     if w1_proc.returncode != 0:
-                        print(f"[W1 Self-Hosted Compiler Error]\n{w1_proc.stderr}", file=sys.stderr)
+                        print(f"[Wysna Compiler Error]\n{w1_proc.stderr}", file=sys.stderr)
                         return 1
                     with open(tmp_w1_c_path, "r", encoding="utf-8") as cf:
                         c_code = cf.read()

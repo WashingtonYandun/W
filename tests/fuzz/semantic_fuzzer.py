@@ -387,7 +387,8 @@ def run_semantic_fuzz_suite(
     failures_dir.mkdir(parents=True, exist_ok=True)
 
     if w1_bin is None:
-        w1_bin = repo_root / ".w_cache/w1_stage2"
+        from main import ensure_selfhost_compiler_binary
+        w1_bin = Path(ensure_selfhost_compiler_binary(str(repo_root)))
 
     print("==================================================")
     print("W Language D04 Semantic Fuzzing & Determinism")

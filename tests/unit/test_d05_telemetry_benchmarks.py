@@ -85,9 +85,10 @@ def test_cli_stats_stdout_separation():
 def test_benchmark_harness_conformance():
     print("  [TEST] Benchmark harness equivalence and execution...")
     from bench.run_bench import run_benchmark_suite
-    w1_bin = str(ROOT / ".w_cache/w1_stage2")
+    from main import ensure_selfhost_compiler_binary
+    selfhost_bin = ensure_selfhost_compiler_binary(str(ROOT))
     # Run a subset of benchmarks or full suite
-    ok = run_benchmark_suite(str(ROOT), w1_bin, update_baseline=False)
+    ok = run_benchmark_suite(str(ROOT), selfhost_bin, update_baseline=False)
     assert ok, "Benchmark suite must pass with equivalence across engines"
 
 

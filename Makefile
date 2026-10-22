@@ -9,12 +9,12 @@ test:
 	./wysna test
 
 check:
-	./wysna check selfhost/w1.wysna
+	./wysna check selfhost/compiler.wysna
 
 selfhost:
 	@mkdir -p .w_cache
-	./wysna build --selfhost selfhost/w1.wysna -o .w_cache/w1
-	@echo "[OK] Native self-hosted W1 binary ready at .w_cache/w1"
+	./wysna build --selfhost selfhost/compiler.wysna -o .w_cache/wysna_selfhost
+	@echo "[OK] Native self-hosted compiler binary ready at .w_cache/wysna_selfhost"
 
 install:
 	./install.sh "$(BINDIR)"

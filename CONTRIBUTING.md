@@ -44,16 +44,16 @@ Source (.wysna)
    │
    ├──────────────────────────────┬──────────────────────────────┐
    ▼                              ▼                              ▼
-[ W0 Interpreter ]       [ HirCCodeGen ]                [ W1 Compiler ]
-runtime/Interpreter.py   hir/HirCCodeGen.py             selfhost/src/
+[ Wysna Seed Interpreter ]   [ Wysna Seed HirCCodeGen ]     [ Wysna Compiler ]
+runtime/Interpreter.py       hir/HirCCodeGen.py             selfhost/src/
    │                              │                              │
    ▼                              ▼                              ▼
-Value Evaluation           ANSI C99 Code                  Pure W Self-Host
+Value Evaluation           ANSI C99 Code                  Pure Wysna Self-Host
 ```
 
-- **W0 Compiler / Driver (`main.py`, `w`):** Reference implementation in Python 3. Contains the two-pass type checker, monomorphization engine, Typed HIR middle-end, and C99 native code generator.
-- **W1 Self-Hosting Compiler (`selfhost/src/`):** modular sources written in W, bundled into `selfhost/w1.wysna`. W1 is experimental; W0/HIR is the reference product.
-- **C99 Runtime (`runtime/w_runtime.h`):** Single-header runtime with single-threaded ARC, copy-on-write value graphs, length-aware UTF-8 strings, and explicit weak references.
+- **Wysna Seed (`main.py`, `wysna`):** Reference implementation in Python 3. Contains the two-pass type checker, monomorphization engine, Typed HIR middle-end, and C99 native code generator.
+- **Wysna Compiler (`selfhost/src/`):** modular sources written in Wysna, bundled into `selfhost/compiler.wysna`.
+- **C99 Runtime (`runtime/wysna_runtime.h`):** Single-header runtime with single-threaded ARC, copy-on-write value graphs, length-aware UTF-8 strings, and explicit weak references.
 
 ---
 
@@ -100,7 +100,7 @@ W_SANITIZE=1 ./wysna test
 ```
 
 ### 3. Four-Engine Differential Oracle
-Validates interpreter, AST C99, HIR C99 and standalone W1 outputs and diagnostics.
+Validates interpreter, AST C99, HIR C99 and standalone Wysna Compiler outputs and diagnostics.
 Feature support is declared in `tests/engine_profiles.json`; unsupported rows are reported separately:
 ```bash
 ./wysna test --differential 20
@@ -116,9 +116,9 @@ python3 tools/ci_conformance.py --profile=release
 The integration profile reports explicitly unsupported engine/fixture combinations; the release profile requires every fixture to pass on every engine. CI reports coverage by engine and feature and retains source, generated C, commands, diagnostics, signals, timeouts, and toolchain versions for failures. See the [engine parity matrix](docs/ENGINE_PARITY_MATRIX.md) for the current tested boundary.
 
 ### 4. Modular Split Verification
-Ensures the modular compiler files in `selfhost/src/` combine loss-lessly to exactly match `selfhost/w1.wysna`:
+Ensures the modular compiler files in `selfhost/src/` combine loss-lessly to exactly match `selfhost/compiler.wysna`:
 ```bash
-python3 -m tests.unit.test_w1_split_conformance
+python3 -m tests.unit.test_selfhost_split_conformance
 ```
 
 ### 5. Performance Benchmark
@@ -134,10 +134,10 @@ Runs the standard micro-benchmark harness:
 Wysna guarantees a 3-stage cryptographic bootstrap fixed-point:
 $$\text{SHA256}(\text{Stage}_1) == \text{SHA256}(\text{Stage}_2) == \text{SHA256}(\text{Stage}_3)$$
 
-When modifying compiler frontend, parser, or code generation logic that affects W1:
+When modifying compiler frontend, parser, or code generation logic that affects Wysna Compiler:
 1. Re-bundle the self-hosted compiler:
    ```bash
-   python3 tools/bundle_w1.py
+   python3 tools/bundle_selfhost.py
    ```
 2. Verify the bootstrap fixed-point:
    ```bash

@@ -25,7 +25,7 @@ def source_fingerprint(root=ROOT):
              if path.is_file() and path.suffix in suffixes
              and (path.suffix != '.txt' or 'data' in path.parts)
              and not {'__pycache__', 'failures'}.intersection(path.parts)}
-    paths.update(root / name for name in ('main.py', 'wysna', 'run_conformance.py', 'selfhost/w1.wysna',
+    paths.update(root / name for name in ('main.py', 'wysna', 'run_conformance.py', 'selfhost/compiler.wysna',
                                          'SPEC.md', 'README.md', 'docs/STDLIB.md', 'docs/OWNERSHIP_LIFETIME.md',
                                          'docs/KNOWN_LIMITS.md', 'docs/SERVICE_FOUNDATIONS.md',
                                          'pyproject.toml', '.github/workflows/ci.yml',
@@ -83,20 +83,20 @@ def generate_markdown_matrix(measured=None) -> str:
         by_feature.setdefault(feat, []).append(label)
 
     rows = []
-    rows.append("# W Language Engine Feature Parity Matrix")
+    rows.append("# Wysna Engine Feature Parity Matrix")
     rows.append("")
-    rows.append("| Feature Category | Fixtures | W0 Interpreter | W0 AST C99 | W0 Typed HIR (Default) | W1 Self-Hosted C99 | Status / Milestone |")
+    rows.append("| Feature Category | Fixtures | Wysna Seed (Interpreter) | Wysna Seed (AST C99) | Wysna Seed (HIR C99) | Wysna Compiler (Self-Hosted) | Status / Milestone |")
     rows.append("| :--- | :---: | :---: | :---: | :---: | :---: | :--- |")
 
     tot_fixtures = len(fixtures)
-    w0_interp_tot = 0
-    w0_ast_tot = 0
-    w0_hir_tot = 0
-    w1_tot = 0
+    seed_interp_tot = 0
+    seed_ast_tot = 0
+    seed_hir_tot = 0
+    selfhost_tot = 0
 
-    engine_columns = ('interpreter', 'ast', 'hir', 'w1')
-    labels = {'interpreter': 'W0 Interpreter', 'ast': 'W0 AST C99',
-              'hir': 'W0 Typed HIR (Default)', 'w1': 'W1 Self-Hosted C99'}
+    engine_columns = ('interpreter', 'ast', 'hir', 'selfhost')
+    labels = {'interpreter': 'Wysna Seed (Interpreter)', 'ast': 'Wysna Seed (AST C99)',
+              'hir': 'Wysna Seed (HIR C99)', 'selfhost': 'Wysna Compiler (Self-Hosted)'}
 
     def cell(engine, feature, count):
         if invalidation:
@@ -118,15 +118,15 @@ def generate_markdown_matrix(measured=None) -> str:
     for feat in feature_order:
         items = by_feature.get(feat, [])
         count = len(items)
-        unsupported_w1 = PROFILES.get('features', {}).get(feat, {}).get('w1', '')
-        note = f"Pending {unsupported_w1.split(':')[0].strip()}" if unsupported_w1 else "Declared supported"
+        unsupported_selfhost = PROFILES.get('features', {}).get(feat, {}).get('selfhost', PROFILES.get('features', {}).get(feat, {}).get('w1', ''))
+        note = f"Pending {unsupported_selfhost.split(':')[0].strip()}" if unsupported_selfhost else "Declared supported"
         cells = [cell(engine, feat, count) for engine in engine_columns]
         rows.append(f"| **`{feat}`** | {count} | " + " | ".join(cells) + f" | {note} |")
         for engine in engine_columns:
             stats = ((measured or {}).get('features') or {}).get(feat, {}).get(engine) or {}
             if stats.get('passed'):
-                if engine == 'w1':
-                    w1_tot += stats['passed']
+                if engine == 'selfhost':
+                    selfhost_tot += stats['passed']
                 else:
                     pass
 
@@ -165,10 +165,10 @@ def generate_markdown_matrix(measured=None) -> str:
                 "restatement of `tests/engine_profiles.json`.")
     rows.append("")
     rows.append("### Engine Definitions")
-    rows.append("- **W0 Interpreter (`runtime/Interpreter.py`):** Canonical reference AST tree-walking interpreter.")
-    rows.append("- **W0 AST C99 (`codegen/CCodeGen.py`):** Secondary C99 oracle for differential validation.")
-    rows.append("- **W0 Typed HIR (`hir/HirCCodeGen.py`):** Primary compiler entry; verified MIR drives C99 emission (ADR-018).")
-    rows.append("- **W1 Self-Hosted (`selfhost/w1.wysna`):** Native Stage-2 compiler binary compiled via 3-stage bootstrap fixed-point.")
+    rows.append("- **Wysna Seed Interpreter (`runtime/Interpreter.py`):** Canonical reference AST tree-walking interpreter.")
+    rows.append("- **Wysna Seed AST C99 (`codegen/CCodeGen.py`):** Secondary C99 oracle for differential validation.")
+    rows.append("- **Wysna Seed Typed HIR (`hir/HirCCodeGen.py`):** Primary compiler entry; verified MIR drives C99 emission (ADR-018).")
+    rows.append("- **Wysna Compiler Self-Hosted (`selfhost/compiler.wysna`):** Native Stage-2 compiler binary compiled via 3-stage bootstrap fixed-point.")
     return "\n".join(rows)
 
 
@@ -195,13 +195,13 @@ def main():
         'compile_timeout_seconds': 120, 'run_timeout_seconds': 30}, indent=2))
     # This subprocess is bounded separately because it builds the compiler itself.
     bootstrap = execute([sys.executable, '-c',
-        'from main import ensure_selfhost_w1_binary; '
-        'print(ensure_selfhost_w1_binary(' + repr(str(ROOT)) + '))'],
+        'from main import ensure_selfhost_compiler_binary; '
+        'print(ensure_selfhost_compiler_binary(' + repr(str(ROOT)) + '))'],
         artifacts, 'bootstrap', 600)
     if bootstrap['returncode']:
         print(bootstrap['stderr'])
         return 1
-    w1 = ROOT / '.w_cache' / executable_name('w1_stage2')
+    selfhost_bin = ROOT / '.w_cache' / executable_name('stage2')
     support_files = PROFILES['support_files']
     positives, negatives = corpus_paths()
     fixtures = positives + negatives
@@ -218,7 +218,7 @@ def main():
             expected = path.with_suffix('.expected').read_text() if path in positives else None
             if path in positives and expected is None:
                 raise RuntimeError(f'Missing expected output: {label}')
-            ok, detail, report = verify_case(path.read_text(), label, w1, directory, expected,
+            ok, detail, report = verify_case(path.read_text(), label, selfhost_bin, directory, expected,
                                 sanitize, profile == 'release', path in negatives)
             passed += int(ok)
             feature_rows = feature_coverage.setdefault(report['feature'], {

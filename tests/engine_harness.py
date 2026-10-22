@@ -12,7 +12,7 @@ from common.Platform import compiler_command, executable_name
 from error.Error import DIAGNOSTIC_CODES
 
 ROOT = Path(__file__).resolve().parents[1]
-ENGINES = ('interpreter', 'ast', 'hir', 'w1')
+ENGINES = ('interpreter', 'ast', 'hir', 'selfhost')
 PROFILES = json.loads((ROOT / 'tests/engine_profiles.json').read_text())
 EXPANSION_DIRS = {'regressions', 'functions', 'ffi', 'stdlib', 'generic_oop'}
 
@@ -117,8 +117,8 @@ def run_engine(engine, source, label, w1_bin, directory, sanitize=False, run_tim
     driver = [sys.executable, str(ROOT / 'main.py')]
     if engine == 'interpreter':
         command = driver + ['run', str(source_path)]
-    elif engine == 'w1':
-        # Direct invocation: no W0 parser/checker runs on the input first.
+    elif engine in ('selfhost', 'w1'):
+        # Direct invocation: no Seed parser/checker runs on the input first.
         command = [str(w1_bin), str(source_path), str(c_path)]
     elif engine == 'ast':
         command = driver + ['emit-c', '--backend=ast', str(source_path), '-o', str(c_path)]

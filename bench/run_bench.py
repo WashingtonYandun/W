@@ -221,6 +221,7 @@ def run_benchmark_suite(repo_root: str, w1_bin: str, update_baseline: bool = Fal
 
 
 if __name__ == "__main__":
-    w1_bin_path = os.path.join(str(ROOT), ".w_cache", "w1_stage2")
+    from main import ensure_selfhost_compiler_binary
+    selfhost_bin_path = ensure_selfhost_compiler_binary(str(ROOT))
     update_base = "--update-baseline" in sys.argv
-    run_benchmark_suite(str(ROOT), w1_bin_path, update_baseline=update_base)
+    run_benchmark_suite(str(ROOT), selfhost_bin_path, update_baseline=update_base)

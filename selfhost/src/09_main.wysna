@@ -1,6 +1,6 @@
 fn run_compiler() -> unit ! IoError {
     let cli = args()
-    let mut in_path = "selfhost/w1.wysna"
+    let mut in_path = "selfhost/compiler.wysna"
     let mut out_path = "build/compiler1.c"
     if len(cli) >= 3 {
         in_path = cli[1]

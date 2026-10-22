@@ -1,7 +1,7 @@
 # Ownership and Lifetime Model
 
 **Status:** Current runtime and compiler ownership contract  
-**Scope:** `Wysna0 Typed HIR` (default), `Wysna0 AST C99` (oracle), `Wysna1 C99` (`selfhost/w1.wysna`), and C99 Runtime (`runtime/wysna_runtime.h`)
+**Scope:** `Wysna Seed Typed HIR` (default), `Wysna Seed AST C99` (oracle), `Wysna Compiler C99` (`selfhost/compiler.wysna`), and C99 Runtime (`runtime/wysna_runtime.h`)
 
 ---
 
@@ -21,7 +21,7 @@ The compiler enforces deterministic lifetime management across **all control-flo
 
 ## 2. Internal `ValueOwnership` Classification
 
-Although W surface syntax has no ownership annotations, the C99 code generators (`W0` and `W1`) classify every C expression yielding a `WVal` into one of three internal ownership states:
+Although W surface syntax has no ownership annotations, the C99 code generators (Wysna Seed and Wysna Compiler) classify every C expression yielding a `WVal` into one of three internal ownership states:
 
 ```text
 enum ValueOwnership {
@@ -40,7 +40,7 @@ When a value is stored into a new variable (`let x = ...`), assigned (`x = ...`)
 
 ## 3. `CleanupScope` Stack & LIFO Destruction Invariant
 
-Both `Wysna0` (`CCodeGen.py`) and `Wysna1` (`selfhost/w1.wysna`) maintain an explicit lexical scope stack:
+Both Wysna Seed (`CCodeGen.py`) and Wysna Compiler (`selfhost/compiler.wysna`) maintain an explicit lexical scope stack:
 
 ```text
 struct CleanupScope {
@@ -111,14 +111,14 @@ memory diagnostics; `W_MEM_CHECK` is not a substitute for those tools.
 
 ## 6. Ownership across HIR and MIR
 
-HirCCodeGen is the default native emitter; the AST emitter and W1 are independent
+HirCCodeGen is the default native emitter; the AST emitter and Wysna Compiler are independent
 implementations. Each uses lexical cleanup scopes to release owned temporaries on normal
 exits. MIR makes retain, transfer, and release operations explicit, verifies them, and feeds
 the default C99 emitter.
 
 ## Managed strings and constructor contracts
 
-The runtime ownership contract for strings is: `w_str` borrows static storage; `w_owned_str` consumes a heap buffer and creates its RC owner; `w_copy_str` copies borrowed input such as argv. Dynamic strings participate in clone/release and allocation counters. `w_add` and `w_index_get_owned` results are registered owned temporaries in both native backends and W1. The borrowed `w_index_get` remains restricted to internal projection paths; dictionary value queries use the owned optional path.
+The runtime ownership contract for strings is: `w_str` borrows static storage; `w_owned_str` consumes a heap buffer and creates its RC owner; `w_copy_str` copies borrowed input such as argv. Dynamic strings participate in clone/release and allocation counters. `w_add` and `w_index_get_owned` results are registered owned temporaries in both native backends and Wysna Compiler. The borrowed `w_index_get` remains restricted to internal projection paths; dictionary value queries use the owned optional path.
 
 `w_ok`, `w_err` and `w_enum_payload` consume their payload. Generated constructor calls move registered temporaries or clone borrowed arguments. `w_unwrap_optional`, `w_unwrap_ok`, `w_unwrap_err` and `w_unwrap_success` return owned values; peek helpers borrow. Class fields and collection slots own their stored values. Leak counters include string owners; LSan remains necessary to find allocations outside the instrumented ownership model.
 
@@ -167,7 +167,7 @@ one release obligation, including when it happens to be an immediate scalar.
 - `w_peek_optional`, `w_peek_ok`, `w_peek_err`, `w_member_get` return borrowed
   payloads. Keep the owner alive and unchanged until cloning/consuming the borrow.
 - Legacy `w_index_get` borrows list/dict elements but owns a string-index result.
-  Generated value reads use `w_index_get_owned`; W1 retains the legacy expression
+  Generated value reads use `w_index_get_owned`; Wysna Compiler retains the legacy expression
   only as lvalue metadata, without executing a discarded value read.
 - `w_index_ref` and `w_member_ref` borrow the root slot, may detach value storage,
   and return a mutable slot pointer. Indices are evaluated once into stable values.
@@ -196,7 +196,7 @@ value immediately. Collection initialization evaluates key then value per entry.
 Already-owned temporaries are reused. These snapshots can increase RC/CoW traffic;
 This cost should be measured before changing temporary lifetimes.
 
-Assignments evaluate indices and class receivers exactly once, before the RHS. They then protect the RHS and resolve the mutable slot. A list may reallocate while evaluating the RHS, so the compiler must not keep a pointer to an element. Class receivers are retained before the RHS and preserve identity. The expression returns the assigned value, including in composed paths. AST, HIR, and W1 follow this contract.
+Assignments evaluate indices and class receivers exactly once, before the RHS. They then protect the RHS and resolve the mutable slot. A list may reallocate while evaluating the RHS, so the compiler must not keep a pointer to an element. Class receivers are retained before the RHS and preserve identity. The expression returns the assigned value, including in composed paths. AST, HIR, and Wysna Compiler follow this contract.
 
 Return and propagation protect the escaping value before LIFO cleanup. Break and
 continue clean through the nearest loop; the for iterable belongs to its outer
@@ -207,7 +207,7 @@ a fresh empty list stored directly into a global can transfer without a temporar
 ### Reproducible acceptance
 
 `python3 -m tests.unit.test_ownership_control_flow` compares the interpreter with AST C, HIR C
-and standalone W1 emission. All three native binaries run under ASan/UBSan and
+and standalone Wysna Compiler emission. All three native binaries run under ASan/UBSan and
 W_MEM_CHECK; Linux additionally enables LSan. The fixture covers retained fields
 across later mutation, argument/collection order, local field/index returns,
 temporary receivers, self-assignment, append of an existing element, nested loop
@@ -217,7 +217,7 @@ payloads, short-circuit effects, coalesce and discarded constructors.
 Strong reference cycles remain unsupported. Explicit process exit and runtime
 panics terminate the process rather than unwinding lexical scopes; they are not
 zero-leak acyclic success cases. Allocation failure and concurrent RC are outside
-this contract. W1 support remains limited to the fixtures documented in the [engine parity matrix](ENGINE_PARITY_MATRIX.md).
+this contract. Wysna Compiler support remains limited to the fixtures documented in the [engine parity matrix](ENGINE_PARITY_MATRIX.md).
 
 ## Weak references and class control blocks
 

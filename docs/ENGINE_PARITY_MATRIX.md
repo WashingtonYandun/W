@@ -1,8 +1,8 @@
 # Engine Support and Corpus Coverage
 
-W0 is the language authority. Its default native pipeline is checked AST → typed HIR →
+Wysna Seed (`seed`) is the reference implementation in Python. Its default native pipeline is checked AST → typed HIR →
 verified MIR → C99 → system compiler. The public backend name remains `hir`.
-The interpreter and AST C99 backend are execution oracles; W1 is an independent
+The interpreter and AST C99 backend are execution oracles; Wysna Compiler (`selfhost`) is an independent
 self-hosted compiler. MIR is an intermediate representation, not a fifth engine.
 
 ## Measured corpus
@@ -13,7 +13,7 @@ exclusions. It does not establish universal language parity or measure code cove
 
 <!-- GENERATED TABLE START -->
 
-| Feature Category | Fixtures | W0 Interpreter | W0 AST C99 | W0 Typed HIR (Default) | W1 Self-Hosted C99 | Status / Milestone |
+| Feature Category | Fixtures | Wysna Seed (Interpreter) | Wysna Seed (AST C99) | Wysna Seed (HIR C99) | Wysna Compiler (Self-Hosted) | Status / Milestone |
 | :--- | :---: | :---: | :---: | :---: | :---: | :--- |
 | **`core`** | 157 | ✅ 157/157 | ✅ 157/157 | ✅ 157/157 | ✅ 157/157 | Declared supported |
 | **`generics`** | 15 | ✅ 15/15 | ✅ 15/15 | ✅ 15/15 | ✅ 15/15 | Declared supported |
@@ -41,18 +41,18 @@ nominal error identity, exhaustive handlers and managed payload cleanup.
 
 Function values, captures, FFI, generic OOP, the standard library and LSP have separate
 contracts in `tests/unit/test_expansion_contracts.py`. A green core corpus does not
-imply W1 support for every expansion combination. Scoped resources have a separate
+imply Wysna Compiler support for every expansion combination. Scoped resources have a separate
 four-engine gate in `tests/unit/test_audit_readiness.py`. The SQLite adapter/application
 also has dedicated checks; see [C interoperability](FFI_VALIDATION.md).
 
-W0 shares a checked compilation session and canonical type arena across modules.
-W1 expands and qualifies imports before its own semantic pass. The checked-module
+Wysna Seed shares a checked compilation session and canonical type arena across modules.
+Wysna Compiler expands and qualifies imports before its own semantic pass. The checked-module
 fixture does not prove equivalence of the two module implementations.
 
 ## Bootstrap Fixed-Point vs. Core Corpus Parity
 
-The three-stage bootstrap requires identical C output hashes when W0 and successive
-native W1 stages compile W1 itself. This proves the recorded deterministic fixed point;
+The three-stage bootstrap requires identical C output hashes when Wysna Seed and successive
+native Wysna Compiler stages compile the compiler itself (`selfhost/compiler.wysna`). This proves the recorded deterministic fixed point;
 it cannot prove semantic correctness. Corpus parity separately checks accepted output,
 exit status and rejection diagnostics across four engines.
 
@@ -63,6 +63,6 @@ exit status and rejection diagnostics across four engines.
 every engine to pass every fixture. `--sanitize` instruments native programs with
 ASan/UBSan; Linux additionally enables LSan.
 
-`wysna build --backend=selfhost` invokes native W1 directly, with no W0 semantic pre-check.
-Unsupported syntax or semantics must be diagnosed by W1. See [known limits](KNOWN_LIMITS.md)
+`wysna build --backend=selfhost` invokes native Wysna Compiler directly, with no Wysna Seed semantic pre-check.
+Unsupported syntax or semantics must be diagnosed by Wysna Compiler. See [known limits](KNOWN_LIMITS.md)
 for runtime and platform boundaries.
