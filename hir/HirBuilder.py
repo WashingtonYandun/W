@@ -1,4 +1,4 @@
-from error.Error import WError
+from error.Error import WysnaError
 from typing import Any, Dict, List, Optional, Tuple, Set
 from node.NodeType import (
     ExternFnDecl, LambdaExpr, Program, Stmt, Expr, TypeNode, ResultType as AstResultType,
@@ -37,7 +37,6 @@ from hir.HirNodes import (
 BUILTIN_NAMES = {
     "weak", "upgrade", "print", "eprint", "len", "range", "ord", "chr", "slice", "str", "int", "float", "bool",
     "join_strings", "bytes", "args", "exit", "enumerate", "dict_items", "read_file", "write_file",
-    "w_read_file", "w_write_file"
 }
 
 
@@ -188,7 +187,7 @@ class HirBuilder:
     def lower(self, program: Program) -> HirModule:
         if hasattr(program, "session"):
             if self.interner is not program.session.interner:
-                raise WError("HIR builder must use the checked module arena", file=self.file_path,
+                raise WysnaError("HIR builder must use the checked module arena", file=self.file_path,
                              code="W9999", stage="hir-lowering")
             program = program.session.link(program)
         from codegen.VirtualDispatch import virtual_method_slots
@@ -252,7 +251,7 @@ class HirBuilder:
         return module
 
     def _handle_import(self, stmt: ImportDecl, fn_decls: List[HirFnDecl]) -> None:
-        raise WError("HIR imports require a checked compilation session", file=self.file_path,
+        raise WysnaError("HIR imports require a checked compilation session", file=self.file_path,
                      line=stmt.line, col=stmt.col, code="W9999", stage="hir-lowering")
 
     # -------------------------------------------------------------
@@ -485,7 +484,7 @@ class HirBuilder:
             return HirExprStmt(self._lower_expr(stmt.expr), span)
 
         # Fallback to expression statement
-        raise WError(f"Unsupported AST statement: {type(stmt).__name__}",
+        raise WysnaError(f"Unsupported AST statement: {type(stmt).__name__}",
                      line=span.line, col=span.col, file=self.file_path,
                      code="W9999", stage="hir")
 
@@ -723,7 +722,7 @@ class HirBuilder:
             e_hir = self._lower_expr(expr.end)
             return HirRange(s_hir, e_hir, expr.inclusive, tid, span)
 
-        raise WError(f"Unsupported AST expression: {type(expr).__name__}",
+        raise WysnaError(f"Unsupported AST expression: {type(expr).__name__}",
                      line=span.line, col=span.col, file=self.file_path,
                      code="W9999", stage="hir")
 
@@ -735,7 +734,7 @@ class HirBuilder:
         if hasattr(expr, "inferred_type_id") and expr.inferred_type_id is not None:
             return expr.inferred_type_id
         if hasattr(expr, "inferred_type") and expr.inferred_type is not None:
-            return self.interner.from_wtype(expr.inferred_type)
+            return self.interner.from_type(expr.inferred_type)
         return TYPE_ERROR
 
     def _get_type_id_from_node(self, node: Optional[TypeNode]) -> int:

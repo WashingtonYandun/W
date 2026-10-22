@@ -1,12 +1,12 @@
 """
-test_d01_w1_parity_matrix.py - Conformance suite for Milestone D01:
-Public Engine Feature Parity Matrix, Boundary Transparency, and Standalone W1 Validation.
+test_d01_parity_matrix.py - Conformance suite for Milestone D01:
+Public Engine Feature Parity Matrix, Boundary Transparency, and Standalone Wysna Compiler Validation.
 
 Invariants verified:
 1. Every fixture in the corpus is classified in tests/engine_profiles.json without stale entries.
 2. Every unsupported engine feature has an explicit, non-empty tracking reason with a milestone identifier.
-3. Standalone W1 binary executes directly on core fixtures without W0 pre-filtering.
-4. Standalone W1 binary accepts generic functions directly and emits C without W0 pre-filtering.
+3. Standalone Wysna Compiler binary executes directly on core fixtures without Seed pre-filtering.
+4. Standalone Wysna Compiler binary accepts generic functions directly and emits C without Seed pre-filtering.
 5. ci_conformance.py --matrix generates a valid Markdown parity matrix matching current counts.
 6. docs/ENGINE_PARITY_MATRIX.md matches the actual engine status reported by the harness.
 """
@@ -70,27 +70,27 @@ def test_unsupported_reasons_and_milestones():
             )
 
 
-def test_standalone_w1_execution_contracts():
-    """Verify standalone W1 core and generic compilation without W0 pre-filtering."""
-    print("  [TEST] Standalone W1 execution contracts (core and generic compilation)...")
-    from main import ensure_selfhost_w1_binary
-    w1_bin = ensure_selfhost_w1_binary(str(ROOT))
-    assert os.path.exists(w1_bin), f"W1 binary must exist at {w1_bin}"
+def test_standalone_selfhost_execution_contracts():
+    """Verify standalone Wysna Compiler core and generic compilation without Seed pre-filtering."""
+    print("  [TEST] Standalone Wysna Compiler execution contracts (core and generic compilation)...")
+    from main import ensure_selfhost_compiler_binary
+    selfhost_bin = ensure_selfhost_compiler_binary(str(ROOT))
+    assert os.path.exists(selfhost_bin), f"Wysna Compiler binary must exist at {selfhost_bin}"
 
     with tempfile.TemporaryDirectory() as td:
         # 1. Core fixture: must compile cleanly standalone
         core_c = os.path.join(td, "core_out.c")
         core_src = str(ROOT / "tests/runtime/arithmetic.wysna")
-        rc, out, err = _run_cmd([w1_bin, core_src, core_c], cwd=str(ROOT))
-        assert rc == 0, f"Standalone W1 failed on core fixture '{core_src}': {err}"
-        assert os.path.exists(core_c), "W1 must emit C file for core fixture"
+        rc, out, err = _run_cmd([selfhost_bin, core_src, core_c], cwd=str(ROOT))
+        assert rc == 0, f"Standalone Wysna Compiler failed on core fixture '{core_src}': {err}"
+        assert os.path.exists(core_c), "Wysna Compiler must emit C file for core fixture"
 
-        # 2. Generic fixture: must compile directly without passing through W0.
+        # 2. Generic fixture: must compile directly without passing through Seed.
         gen_c = os.path.join(td, "gen_out.c")
         gen_src = str(ROOT / "tests/runtime/generic_function.wysna")
-        rc_gen, out_gen, err_gen = _run_cmd([w1_bin, gen_src, gen_c], cwd=str(ROOT))
-        assert rc_gen == 0, f"Standalone W1 failed on generic fixture '{gen_src}': {err_gen or out_gen}"
-        assert os.path.exists(gen_c), "W1 must emit C for a valid generic fixture"
+        rc_gen, out_gen, err_gen = _run_cmd([selfhost_bin, gen_src, gen_c], cwd=str(ROOT))
+        assert rc_gen == 0, f"Standalone Wysna Compiler failed on generic fixture '{gen_src}': {err_gen or out_gen}"
+        assert os.path.exists(gen_c), "Wysna Compiler must emit C for a valid generic fixture"
 
 
 def test_ci_matrix_generation_tooling():
@@ -98,7 +98,7 @@ def test_ci_matrix_generation_tooling():
     print("  [TEST] ci_conformance.py --matrix generator...")
     rc, out, err = _run_cmd([sys.executable, str(ROOT / "tools/ci_conformance.py"), "--matrix"], cwd=str(ROOT))
     assert rc == 0, f"--matrix command failed: {err}"
-    assert "# W Language Engine Feature Parity Matrix" in out, "Output must contain matrix header"
+    assert "# Wysna Engine Feature Parity Matrix" in out, "Output must contain matrix header"
     assert "| **`core`** |" in out, "Output must contain core row"
     assert "| **`generics`** |" in out, "Output must contain generics row"
     profile = json.loads((ROOT / 'tests/engine_profiles.json').read_text())
@@ -117,7 +117,7 @@ def test_ci_matrix_generation_tooling():
     assert corpus == len(corpus_paths()[0]) + len(corpus_paths()[1]), \
         f"Matrix corpus size {corpus} does not match the real corpus"
     header = out.splitlines()[2]
-    for column in ("W0 Interpreter", "W0 AST C99", "W0 Typed HIR (Default)", "W1 Self-Hosted C99"):
+    for column in ("Wysna Seed (Interpreter)", "Wysna Seed (AST C99)", "Wysna Seed (HIR C99)", "Wysna Compiler (Self-Hosted)"):
         assert column in header, f"Matrix header is missing the '{column}' column"
     if "\u2014" in totals.group(2):
         # No verified run available in this workspace; that is reported, not faked.
@@ -181,22 +181,22 @@ def test_documentation_consistency():
 
     limits = (ROOT / "docs/KNOWN_LIMITS.md").read_text()
     assert "Lambda and callable syntax" not in limits, (
-        "W1 supports first-class calls and closures in the tested expansion cases"
+        "Wysna Compiler supports first-class calls and closures in the tested expansion cases"
     )
 
 
 def run_all() -> bool:
     print("==================================================")
-    print("W Language D01 W1 Parity Matrix Suite")
+    print("Wysna D01 Parity Matrix Suite")
     print("==================================================")
     try:
         test_fixture_accounting_and_staleness()
         test_unsupported_reasons_and_milestones()
-        test_standalone_w1_execution_contracts()
+        test_standalone_selfhost_execution_contracts()
         test_ci_matrix_generation_tooling()
         test_documentation_consistency()
         print("==================================================")
-        print("ALL D01 W1 PARITY MATRIX TESTS PASSED.")
+        print("ALL D01 PARITY MATRIX TESTS PASSED.")
         print("==================================================")
         return True
     except AssertionError as e:

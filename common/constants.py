@@ -1,4 +1,4 @@
-from wtokens.TokenType import TokenType
+from tokens.TokenType import TokenType
 
 KEYWORDS = {
     "pub": TokenType.PUB,

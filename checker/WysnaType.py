@@ -1,7 +1,7 @@
 from typing import Dict, List, Optional, Any
 
-class WType:
-    """Base class for semantic types in W Language v0.1."""
+class WysnaType:
+    """Base class for semantic types in Wysna."""
     def __eq__(self, other: Any) -> bool:
         raise NotImplementedError
 
@@ -15,7 +15,7 @@ class WType:
         return self.__str__()
 
 
-class PrimitiveType(WType):
+class PrimitiveType(WysnaType):
     def __init__(self, name: str):
         self.name = name
 
@@ -35,8 +35,8 @@ NoneType = PrimitiveType("none")
 OpaqueType = PrimitiveType("opaque")
 
 
-class OptionalType(WType):
-    def __init__(self, inner: WType):
+class OptionalType(WysnaType):
+    def __init__(self, inner: WysnaType):
         self.inner = inner
 
     def __eq__(self, other: Any) -> bool:
@@ -50,8 +50,8 @@ class OptionalType(WType):
         return f"{self.inner}?"
 
 
-class WeakType(WType):
-    def __init__(self, target: WType):
+class WeakType(WysnaType):
+    def __init__(self, target: WysnaType):
         self.target = target
 
     def __eq__(self, other: Any) -> bool:
@@ -61,8 +61,8 @@ class WeakType(WType):
         return f"Weak[{self.target}]"
 
 
-class ListType(WType):
-    def __init__(self, element: WType):
+class ListType(WysnaType):
+    def __init__(self, element: WysnaType):
         self.element = element
 
     def __eq__(self, other: Any) -> bool:
@@ -72,8 +72,8 @@ class ListType(WType):
         return f"list[{self.element}]"
 
 
-class DictType(WType):
-    def __init__(self, key: WType, value: WType):
+class DictType(WysnaType):
+    def __init__(self, key: WysnaType, value: WysnaType):
         self.key = key
         self.value = value
 
@@ -84,8 +84,8 @@ class DictType(WType):
         return f"dict[{self.key}, {self.value}]"
 
 
-class TupleType(WType):
-    def __init__(self, elements: List[WType]):
+class TupleType(WysnaType):
+    def __init__(self, elements: List[WysnaType]):
         self.elements = elements
 
     def __eq__(self, other: Any) -> bool:
@@ -96,8 +96,8 @@ class TupleType(WType):
         return f"tuple[{elems}]"
 
 
-class StructType(WType):
-    def __init__(self, name: str, fields: Dict[str, WType]):
+class StructType(WysnaType):
+    def __init__(self, name: str, fields: Dict[str, WysnaType]):
         self.name = name
         self.fields = fields
 
@@ -108,13 +108,13 @@ class StructType(WType):
         return self.name
 
 
-class EnumType(WType):
-    def __init__(self, name: str, variants: List[str], variant_payloads: Optional[Dict[str, List[WType]]] = None):
+class EnumType(WysnaType):
+    def __init__(self, name: str, variants: List[str], variant_payloads: Optional[Dict[str, List[WysnaType]]] = None):
         self.name = name
         self.variants = variants
-        self.variant_payloads: Dict[str, List[WType]] = variant_payloads if variant_payloads is not None else {v: [] for v in variants}
+        self.variant_payloads: Dict[str, List[WysnaType]] = variant_payloads if variant_payloads is not None else {v: [] for v in variants}
         self.template_name: Optional[str] = None
-        self.type_args: Optional[List[WType]] = None
+        self.type_args: Optional[List[WysnaType]] = None
 
     def __eq__(self, other: Any) -> bool:
         if isinstance(other, EnumType):
@@ -129,8 +129,8 @@ class EnumType(WType):
         return self.name
 
 
-class ResultType(WType):
-    def __init__(self, ok: WType, err: WType):
+class ResultType(WysnaType):
+    def __init__(self, ok: WysnaType, err: WysnaType):
         self.ok = ok
         self.err = err
 
@@ -145,10 +145,10 @@ class ResultType(WType):
         return f"{self.ok} ! {self.err}"
 
 
-class ErrorUnionType(WType):
+class ErrorUnionType(WysnaType):
     """A statically known, closed set of alternative error payload types."""
-    def __init__(self, alternatives: List[WType]):
-        unique: List[WType] = []
+    def __init__(self, alternatives: List[WysnaType]):
+        unique: List[WysnaType] = []
         for alternative in alternatives:
             if not any(alternative == existing for existing in unique):
                 unique.append(alternative)
@@ -161,7 +161,7 @@ class ErrorUnionType(WType):
         return " | ".join(str(alternative) for alternative in self.alternatives)
 
 
-def is_error_channel_assignable(source: WType, target: WType) -> bool:
+def is_error_channel_assignable(source: WysnaType, target: WysnaType) -> bool:
     """Check closed error-set inclusion without applying value constructors.
 
     In particular, a scalar error must not become compatible with a Result error
@@ -173,8 +173,8 @@ def is_error_channel_assignable(source: WType, target: WType) -> bool:
                for source_member in source_alternatives)
 
 
-class FunctionType(WType):
-    def __init__(self, params: List[WType], ret: WType, is_mutating: bool = False):
+class FunctionType(WysnaType):
+    def __init__(self, params: List[WysnaType], ret: WysnaType, is_mutating: bool = False):
         self.params = params
         self.ret = ret
         self.is_mutating = is_mutating
@@ -187,7 +187,7 @@ class FunctionType(WType):
         return f"fn({params_str}) -> {self.ret}"
 
 
-class InterfaceType(WType):
+class InterfaceType(WysnaType):
     def __init__(self, name: str, methods: Optional[Dict[str, FunctionType]] = None):
         self.name = name
         self.methods: Dict[str, FunctionType] = methods if methods is not None else {}
@@ -200,7 +200,7 @@ class InterfaceType(WType):
 
 
 class ClassFieldInfo:
-    def __init__(self, type: WType, is_public: bool, owner_class: str):
+    def __init__(self, type: WysnaType, is_public: bool, owner_class: str):
         self.type = type
         self.is_public = is_public
         self.owner_class = owner_class
@@ -213,7 +213,7 @@ class ClassMethodInfo:
         self.owner_class = owner_class
 
 
-class ClassType(WType):
+class ClassType(WysnaType):
     def __init__(
         self,
         name: str,
@@ -254,7 +254,7 @@ class ClassType(WType):
         return self.name
 
 
-class ModuleType(WType):
+class ModuleType(WysnaType):
     def __init__(self, name: str, scope: Any):
         self.name = name
         self.scope = scope
@@ -266,7 +266,7 @@ class ModuleType(WType):
         return f"module {self.name}"
 
 
-class AnyType(WType):
+class AnyType(WysnaType):
     """Wildcard type for variadic builtins like print()."""
     def __eq__(self, other: Any) -> bool:
         return isinstance(other, AnyType)
@@ -278,9 +278,9 @@ class AnyType(WType):
         return "any"
 
 
-class TypeParamType(WType):
+class TypeParamType(WysnaType):
     """Represents a type parameter in generic declarations: T, U, A, B."""
-    def __init__(self, name: str, constraint: Optional[WType] = None):
+    def __init__(self, name: str, constraint: Optional[WysnaType] = None):
         self.name = name
         self.constraint = constraint
 
@@ -291,7 +291,7 @@ class TypeParamType(WType):
         return self.name
 
 
-class GenericStructTemplate(WType):
+class GenericStructTemplate(WysnaType):
     """Represents an uninstantiated generic struct template: struct Box[T] { val: T }"""
     def __init__(self, name: str, type_params: List[Any], ast_decl: Any):
         self.name = name
@@ -306,7 +306,7 @@ class GenericStructTemplate(WType):
         return f"{self.name}[{params_str}]"
 
 
-class GenericFnTemplate(WType):
+class GenericFnTemplate(WysnaType):
     """Represents an uninstantiated generic function template: fn id[T](x: T) -> T"""
     def __init__(self, name: str, type_params: List[Any], ast_decl: Any):
         self.name = name
@@ -321,7 +321,7 @@ class GenericFnTemplate(WType):
         return f"{self.name}[{params_str}]"
 
 
-class GenericEnumTemplate(WType):
+class GenericEnumTemplate(WysnaType):
     """Represents an uninstantiated generic enum template: enum Option[T] { Some(T), None }"""
     def __init__(self, name: str, type_params: List[Any], ast_decl: Any):
         self.name = name
@@ -336,7 +336,7 @@ class GenericEnumTemplate(WType):
         return f"{self.name}[{params_str}]"
 
 
-def is_assignable(source: WType, target: WType) -> bool:
+def is_assignable(source: WysnaType, target: WysnaType) -> bool:
     """
     Check if a value of type `source` can be assigned to a variable/param of type `target`.
     Strict rules:

@@ -9,13 +9,13 @@ import tempfile
 
 from parser.Parser import Parser
 from checker.TypeChecker import TypeChecker
-from error.Error import WError
+from error.Error import WysnaError
 from runtime.Interpreter import Interpreter
 from runtime.Values import cow_telemetry
 from codegen.CCodeGen import CCodeGen
 from hir.HirBuilder import HirBuilder
 from hir.HirCCodeGen import HirCCodeGen
-from main import ensure_selfhost_w1_binary
+from main import ensure_selfhost_compiler_binary
 from tests.unit.test_cow_telemetry import parse_checkpoints
 
 
@@ -88,36 +88,36 @@ def run_scaling_tests():
                     'let mut pair = (1, 2)\npair[0] = 3']:
         try:
             TypeChecker().check(Parser().parse(invalid))
-        except WError:
+        except WysnaError:
             pass
         else:
             raise AssertionError('Immutable/tuple mutation was accepted')
     output, errors = io.StringIO(), io.StringIO()
     cow_telemetry.reset()
-    previous = os.environ.get('W_COW_METRICS')
-    os.environ['W_COW_METRICS'] = '1'
+    previous = os.environ.get('WYSNA_COW_METRICS')
+    os.environ['WYSNA_COW_METRICS'] = '1'
     try:
         with contextlib.redirect_stderr(errors):
             Interpreter(stdout=output).interpret(ast)
     finally:
         if previous is None:
-            os.environ.pop('W_COW_METRICS', None)
+            os.environ.pop('WYSNA_COW_METRICS', None)
         else:
-            os.environ['W_COW_METRICS'] = previous
+            os.environ['WYSNA_COW_METRICS'] = previous
     assert output.getvalue() == expected
     reference = parse_checkpoints(errors.getvalue())
     validate_scaling(reference, dimensions)
     assert reference['retention/after'] == reference['retention/before']
     hir = HirBuilder(checker.interner).lower(ast)
     with tempfile.TemporaryDirectory(prefix='w-cow-scaling-') as directory:
-        w_path = Path(directory) / 'scaling.wysna'
-        w_path.write_text(source)
+        wysna_path = Path(directory) / 'scaling.wysna'
+        wysna_path.write_text(source)
         native_reference = None
-        for backend in ['ast', 'hir', 'w1']:
+        for backend in ['ast', 'hir', 'selfhost']:
             c_path, binary = Path(directory) / (backend + '.c'), Path(directory) / backend
-            if backend == 'w1':
-                w1 = ensure_selfhost_w1_binary(str(root))
-                subprocess.run([w1, str(w_path), str(c_path)], cwd=root,
+            if backend == 'selfhost':
+                selfhost_bin = ensure_selfhost_compiler_binary(str(root))
+                subprocess.run([selfhost_bin, str(wysna_path), str(c_path)], cwd=root,
                                check=True, capture_output=True, text=True, timeout=60)
             else:
                 code = (CCodeGen().generate(ast) if backend == 'ast'
@@ -126,7 +126,7 @@ def run_scaling_tests():
             subprocess.run([os.environ.get('CC', 'cc'), '-std=c99', '-fsanitize=address,undefined',
                             '-fno-omit-frame-pointer', '-I' + str(root), str(c_path), '-o', str(binary)],
                            check=True, capture_output=True, text=True, timeout=60)
-            env = dict(os.environ, W_MEM_CHECK='1', W_COW_METRICS='1')
+            env = dict(os.environ, WYSNA_MEM_CHECK='1', WYSNA_COW_METRICS='1')
             env['ASAN_OPTIONS'] = 'detect_leaks=1' if sys.platform.startswith('linux') else 'detect_leaks=0'
             result = subprocess.run([str(binary)], env=env, capture_output=True, text=True, timeout=30)
             assert result.returncode == 0, (backend, result.stderr)

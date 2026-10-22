@@ -7,7 +7,7 @@ import subprocess
 import sys
 import tempfile
 from checker.TypeChecker import TypeChecker
-from error.Error import WError
+from error.Error import WysnaError
 from formatter.Formatter import Formatter
 from lexer.Lexer import Lexer
 from parser.Parser import Parser
@@ -18,8 +18,8 @@ ROOT = Path(__file__).resolve().parents[2]
 
 
 def run_expansion_tests():
-    from main import ensure_selfhost_w1_binary
-    w1 = ensure_selfhost_w1_binary(str(ROOT))
+    from main import ensure_selfhost_compiler_binary
+    selfhost_bin = ensure_selfhost_compiler_binary(str(ROOT))
     positive = {
         'tests/functions/closures.wysna': '10\n2 3\n',
         'tests/functions/nested_closures.wysna': '60\n7\n',
@@ -43,9 +43,9 @@ def run_expansion_tests():
             source = (ROOT / label).read_text()
             if label.endswith('generic_oop/modules/main.wysna'):
                 source = source.replace('"library.wysna"', json.dumps(str(ROOT / 'tests/generic_oop/modules/library.wysna')))
-            engines = ('interpreter', 'ast', 'hir') if '/generic_oop/' in label or '/stdlib/' in label else ('interpreter', 'ast', 'hir', 'w1')
-            results = [run_engine(engine, source, label, w1, directory / label.replace('/', '_'),
-                                  sanitize=bool(os.environ.get('W_SANITIZE'))) for engine in engines]
+            engines = ('interpreter', 'ast', 'hir') if '/generic_oop/' in label or '/stdlib/' in label else ('interpreter', 'ast', 'hir', 'selfhost')
+            results = [run_engine(engine, source, label, selfhost_bin, directory / label.replace('/', '_'),
+                                  sanitize=bool(os.environ.get('WYSNA_SANITIZE'))) for engine in engines]
             ok, error = compare(results, expected)
             assert ok, (label, error, [vars(result) for result in results])
         for name, code in [('inherited_field_type', 'W3003'), ('override_visibility', 'W3002'),
@@ -53,20 +53,20 @@ def run_expansion_tests():
                            ('super_after_let', 'W3004')]:
             # These permanent cases must not depend on private audit files.
             source = (ROOT / 'tests/regressions/invalid' / (name + '.wysna')).read_text()
-            for engine in ('interpreter', 'ast', 'hir', 'w1'):
-                result = run_engine(engine, source, name, w1, directory / ('invalid_' + name))
+            for engine in ('interpreter', 'ast', 'hir', 'selfhost'):
+                result = run_engine(engine, source, name, selfhost_bin, directory / ('invalid_' + name))
                 assert not result.compile_ok and result.diag_code == code, (name, vars(result))
-        for engine in ('interpreter', 'ast', 'hir', 'w1'):
+        for engine in ('interpreter', 'ast', 'hir', 'selfhost'):
             for value in ('float("nan")', 'float("inf")', '"9223372036854775808"'):
                 source = 'print(int(' + value + '))\n'
-                result = run_engine(engine, source, 'conversion', w1, directory / ('conversion_' + str(len(value))))
+                result = run_engine(engine, source, 'conversion', selfhost_bin, directory / ('conversion_' + str(len(value))))
                 assert result.diag_code == 'W4003' and result.exit_code != 0, vars(result)
         for backend in ('ast', 'hir'):
             binary = directory / ('ffi_' + backend)
             built = subprocess.run([sys.executable, str(ROOT / 'main.py'), 'build', str(ROOT / 'tests/ffi/scalars.wysna'),
                                     '--backend=' + backend, '--link-lib', 'm', '-o', str(binary)], capture_output=True, text=True)
             assert built.returncode == 0, built.stderr
-            result = subprocess.run([str(binary)], capture_output=True, text=True, env=dict(os.environ, W_MEM_CHECK='1'))
+            result = subprocess.run([str(binary)], capture_output=True, text=True, env=dict(os.environ, WYSNA_MEM_CHECK='1'))
             assert (result.returncode, result.stdout) == (0, '9.0\n7\n'), result.stderr
         cfg = directory / 'read_cfg.wysna'
         cfg.write_text('fn read_cfg() -> int { return 7 }\nprint(read_cfg())\n')

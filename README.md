@@ -23,7 +23,7 @@ Wysna implements a multi-stage compiler pipeline designed for verifiable transfo
 | **Mid-Level IR** | Control-Flow Graph & MIR | Basic blocks, place projections, borrow checking, and CoW detach injection | Verified Mid-Level IR (`MIR`) |
 | **Backend** | C99 Code Generator | Translation of MIR to clean C99 code, ARC reference counting, and literal pooling | C99 Translation Unit (`.c`) |
 | **Native Compilation** | C Toolchain (`clang` / `gcc`) | Native compilation and linking against `wysna_runtime.h` and `wysna_host.h` | Standalone Executable (`.exe` / ELF / Mach-O) |
-| **Self-Hosting (W1)** | Self-Hosted Compiler | Bootstrap pipeline verifying fixed-point identity (`compiler0.c == compiler1.c`) | Self-Hosted Native Binary (`wysna1`) |
+| **Self-Hosting** | Wysna Compiler | Bootstrap pipeline verifying fixed-point identity (`compiler0.c == compiler1.c`) | Self-Hosted Native Binary (`stage2`) |
 
 ---
 
@@ -33,10 +33,10 @@ Every core language feature and standard library capability is continuously veri
 
 | Engine | Role | Implementation | Status |
 | :--- | :--- | :--- | :--- |
-| **`interpreter`** | Reference behavior | Direct AST tree-walk evaluation in Python | 200/200 (100.0%) |
-| **`ast`** | Secondary baseline | Direct AST to C99 code generation | 200/200 (100.0%) |
-| **`hir`** | Primary production pipeline | Typed HIR &rarr; Verified MIR &rarr; C99 backend | 200/200 (100.0%) |
-| **`w1`** | Self-hosted compiler | Native self-hosted W1 executable | 200/200 (100.0%) |
+| **`interpreter`** | Reference behavior | Direct AST tree-walk evaluation in Python (Wysna Seed) | 201/201 (100.0%) |
+| **`ast`** | Secondary baseline | Direct AST to C99 code generation (Wysna Seed) | 201/201 (100.0%) |
+| **`hir`** | Primary production pipeline | Typed HIR &rarr; Verified MIR &rarr; C99 backend (Wysna Seed) | 201/201 (100.0%) |
+| **`selfhost`** | Self-hosted compiler | Wysna Compiler native executable (`stage2`) | 201/201 (100.0%) |
 
 See [docs/ENGINE_PARITY_MATRIX.md](docs/ENGINE_PARITY_MATRIX.md) for full breakdown and feature classifications.
 
@@ -223,7 +223,7 @@ wysna bench                            # Run self-hosted performance benchmarks
 ├── node/          # AST node definitions
 ├── parser/        # Pratt parser and grammar rules
 ├── runtime/       # C99 runtime headers (wysna_runtime.h, wysna_host.h)
-├── selfhost/      # Self-hosted compiler source code (w1.wysna)
+├── selfhost/      # Self-hosted compiler source code (compiler.wysna)
 ├── stdlib/        # Standard library implementations
 ├── tests/         # Differential testing harness and conformance suites
 ├── tooling/       # Language server (LSP) and developer utilities

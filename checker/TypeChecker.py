@@ -21,8 +21,8 @@ from node.NodeType import (
     StructInitExpr, FieldInit, ListExpr, DictExpr, TupleExpr,
     IfExpr, ElifBranch, MatchExpr, MatchArm, VariantDecl
 )
-from checker.WType import (
-    WType, IntType, FloatType, BoolType, StrType, UnitType, NoneType,
+from checker.WysnaType import (
+    WysnaType, IntType, FloatType, BoolType, StrType, UnitType, NoneType,
     OptionalType, WeakType, ListType, DictType, TupleType, StructType, EnumType,
     InterfaceType, ClassFieldInfo, ClassMethodInfo, ClassType,
     ResultType, ErrorUnionType, FunctionType, ModuleType, AnyType,
@@ -55,7 +55,7 @@ class SpecializationEntry:
         self,
         key: GenericInstanceKey,
         state: SpecializationState = SpecializationState.PENDING,
-        specialized_type: Optional[WType] = None,
+        specialized_type: Optional[WysnaType] = None,
         specialized_symbol: Optional[Symbol] = None,
         ast_decl: Optional[Any] = None
     ):
@@ -72,7 +72,7 @@ class SpecializationEntry:
 # does not catch because every level is a distinct, cached specialization.
 MAX_SPECIALIZATION_COMPLEXITY = 256
 
-def _mangle_type_static(t: WType) -> str:
+def _mangle_type_static(t: WysnaType) -> str:
     if isinstance(t, AnyType):
         return "any"
     if t == IntType:
@@ -111,7 +111,7 @@ def _mangle_type_static(t: WType) -> str:
 
 def mangle_generic_name(
     template_name: str,
-    concrete_args: Sequence[WType],
+    concrete_args: Sequence[WysnaType],
     module_name: Optional[str] = None
 ) -> str:
     args_part = "__".join(_mangle_type_static(a) for a in concrete_args)
@@ -121,14 +121,14 @@ def mangle_generic_name(
     return f"_W_G_{mod_prefix}{len(template_name)}_{template_name}__{args_part}"
 
 
-def type_strictly_contains(sub: WType, container: WType) -> bool:
+def type_strictly_contains(sub: WysnaType, container: WysnaType) -> bool:
     """Returns True if sub is a strict structural sub-component of container."""
     if sub == container:
         return False
     return _type_contains(sub, container)
 
 
-def _type_contains(sub: WType, container: WType) -> bool:
+def _type_contains(sub: WysnaType, container: WysnaType) -> bool:
     if sub == container:
         return True
     if isinstance(container, ListType):
@@ -176,7 +176,7 @@ class MonomorphizationTelemetry:
 
 class TypeChecker:
     """
-    Two-pass Semantic Analyzer and Type Checker for W Language v0.2.
+    Two-pass Semantic Analyzer and Type Checker for Wysna v0.2.
     Pass 1: Collect & register all top-level declarations (Enums, Structs, Interfaces, Classes, Functions, Imports).
     Pass 2: Check function/method bodies, local bindings, assignments, and expressions.
     """
@@ -188,8 +188,8 @@ class TypeChecker:
         self.file = file
         self.global_scope = create_global_scope()
         self.current_scope = self.global_scope
-        self.current_fn_ret_type: Optional[WType] = None
-        self.expected_type: Optional[WType] = None
+        self.current_fn_ret_type: Optional[WysnaType] = None
+        self.expected_type: Optional[WysnaType] = None
         self.current_class: Optional[ClassType] = None
         self.scope_spans = []
         self.closure_counter = 0
@@ -209,11 +209,11 @@ class TypeChecker:
         self.monomorphized_fn_decls: List[FnDecl] = []
         self.monomorphized_enum_decls: List[EnumDecl] = []
         self._monomorphize_depth: int = 0
-        self._instantiation_stack: List[Tuple[str, Tuple[int, ...], int, Tuple[WType, ...], int, int]] = []
+        self._instantiation_stack: List[Tuple[str, Tuple[int, ...], int, Tuple[WysnaType, ...], int, int]] = []
         # Type-parameter substitution in effect while a specialization is being
         # resolved. Unbound parameters keep their own name, so the resolver has to
         # consult this binding before treating a name as a declared type.
-        self._active_type_subst: Optional[Dict[str, WType]] = None
+        self._active_type_subst: Optional[Dict[str, WysnaType]] = None
         self.telemetry: MonomorphizationTelemetry = MonomorphizationTelemetry()
 
         # Canonical built-in Option[T] template
@@ -338,7 +338,7 @@ class TypeChecker:
     # Pass 1: Collect Top-Level Declarations
     # ==========================================
 
-    def _resolve_import(self, stmt: ImportDecl) -> WType:
+    def _resolve_import(self, stmt: ImportDecl) -> WysnaType:
         return self.session.import_module(stmt, self.file)
 
     def _pass1_collect_declarations(self, program: Program) -> None:
@@ -434,14 +434,14 @@ class TypeChecker:
                     continue
                 enum_type = self.global_scope.lookup_type(stmt.name)
                 assert isinstance(enum_type, EnumType)
-                variant_payloads: Dict[str, List[WType]] = {}
+                variant_payloads: Dict[str, List[WysnaType]] = {}
                 for v in stmt.variants:
                     v_name = v.name if hasattr(v, "name") else str(v)
-                    payload_wtypes: List[WType] = []
+                    payload_types: List[WysnaType] = []
                     if hasattr(v, "payload_types") and v.payload_types:
                         for pt in v.payload_types:
-                            payload_wtypes.append(self._resolve_type_node(pt))
-                    variant_payloads[v_name] = payload_wtypes
+                            payload_types.append(self._resolve_type_node(pt))
+                    variant_payloads[v_name] = payload_types
                 enum_type.variant_payloads = variant_payloads
 
             elif isinstance(stmt, StructDecl):
@@ -449,12 +449,12 @@ class TypeChecker:
                     continue
                 struct_type = self.global_scope.lookup_type(stmt.name)
                 assert isinstance(struct_type, StructType)
-                fields_dict: Dict[str, WType] = {}
+                fields_dict: Dict[str, WysnaType] = {}
                 for f in stmt.fields:
                     f_type = self._resolve_type_node(f.type_ann)
                     fields_dict[f.name] = f_type
                 struct_type.fields = fields_dict
-                self.interner.from_wtype(struct_type)
+                self.interner.from_type(struct_type)
 
             elif isinstance(stmt, InterfaceDecl):
                 if stmt.type_params:
@@ -560,7 +560,7 @@ class TypeChecker:
                         file=self.file
                     )
                 else:
-                    param_types: List[WType] = [self._resolve_type_node(p.type_ann) for p in stmt.params]
+                    param_types: List[WysnaType] = [self._resolve_type_node(p.type_ann) for p in stmt.params]
                     ret_type = self._resolve_type_node(stmt.return_type)
                     fn_type = FunctionType(params=param_types, ret=ret_type)
                     self.global_scope.define_symbol(
@@ -876,7 +876,7 @@ class TypeChecker:
     # The synthetic parameter name introduced by closure conversion. Captured
     # variables are immutable snapshots today, so a mutation attempt is rejected -- but
     # the diagnostic has to name the captured variable, not a compiler internal.
-    CLOSURE_ENVIRONMENT_PARAMETER = '__w_environment'
+    CLOSURE_ENVIRONMENT_PARAMETER = '__wysna_environment'
 
     def _binding_error_name(self, symbol) -> str:
         if symbol is not None and getattr(symbol, 'name', None) == self.CLOSURE_ENVIRONMENT_PARAMETER:
@@ -946,7 +946,7 @@ class TypeChecker:
         return class_t
 
 
-    def _check_block(self, block: Block, is_statement_context: bool = False, initial_bindings: Optional[Dict[str, WType]] = None) -> Optional[WType]:
+    def _check_block(self, block: Block, is_statement_context: bool = False, initial_bindings: Optional[Dict[str, WysnaType]] = None) -> Optional[WysnaType]:
         block_scope = Scope(parent=self.current_scope)
         if initial_bindings:
             for b_name, b_type in initial_bindings.items():
@@ -1006,7 +1006,7 @@ class TypeChecker:
             )
 
 
-        expected_type: Optional[WType] = None
+        expected_type: Optional[WysnaType] = None
         if stmt.type_ann is not None:
             expected_type = self._resolve_type_node(stmt.type_ann)
 
@@ -1040,7 +1040,7 @@ class TypeChecker:
         iter_t = self._check_expr(stmt.iterable)
 
         # Iterable must be a list
-        elem_t: WType
+        elem_t: WysnaType
         if isinstance(iter_t, ListType):
             elem_t = iter_t.element
         else:
@@ -1092,7 +1092,7 @@ class TypeChecker:
     # Expression Type Checking
     # ==========================================
 
-    def _mark_tail_result_lift(self, expr: Optional[Expr], target: WType) -> None:
+    def _mark_tail_result_lift(self, expr: Optional[Expr], target: WysnaType) -> None:
         if expr is None:
             return
         if isinstance(target, ResultType) and target.ok == UnitType:
@@ -1113,7 +1113,7 @@ class TypeChecker:
             return
         self._mark_result_lift(expr, target)
 
-    def _mark_result_lift(self, expr: Optional[Expr], target: WType, force: bool = False) -> None:
+    def _mark_result_lift(self, expr: Optional[Expr], target: WysnaType, force: bool = False) -> None:
         if expr is None:
             return
         target_id = self.interner.intern(target)
@@ -1130,7 +1130,7 @@ class TypeChecker:
             if force or source_entry.tag == "result" or isinstance(target, EnumType):
                 expr.force_result_wrap_id = target_id
 
-    def _check_payload(self, expr: Expr, expected: Optional[WType]) -> WType:
+    def _check_payload(self, expr: Expr, expected: Optional[WysnaType]) -> WysnaType:
         previous = self.expected_type
         self.expected_type = expected
         try:
@@ -1142,7 +1142,7 @@ class TypeChecker:
             return expected
         return actual
 
-    def _builtin_arguments(self, type_: Optional[WType], name: str) -> List[WType]:
+    def _builtin_arguments(self, type_: Optional[WysnaType], name: str) -> List[WysnaType]:
         if name == "Option" and isinstance(type_, OptionalType):
             return [type_.inner]
         if name == "Result" and isinstance(type_, ResultType):
@@ -1161,18 +1161,18 @@ class TypeChecker:
             return None
         return symbol.type if symbol and isinstance(symbol.type, ModuleType) else None
 
-    def _check_expr(self, expr: Expr, is_statement_context: bool = False, allow_module: bool = False) -> WType:
-        wtype = self._check_expr_impl(expr, is_statement_context)
-        if isinstance(wtype, ModuleType) and not allow_module:
+    def _check_expr(self, expr: Expr, is_statement_context: bool = False, allow_module: bool = False) -> WysnaType:
+        inferred_type = self._check_expr_impl(expr, is_statement_context)
+        if isinstance(inferred_type, ModuleType) and not allow_module:
             raise TypeError("Module namespaces cannot be used as runtime values", file=self.file,
                             line=expr.line, col=expr.col, code="W2003")
-        if isinstance(expr, MemberExpr) and isinstance(wtype, FunctionType) and not getattr(expr, 'is_callee', False) and not hasattr(expr, 'function_reference') and not isinstance(getattr(expr.object, 'inferred_type', None), StructType) and not (isinstance(getattr(expr.object, 'inferred_type', None), ClassType) and expr.property in expr.object.inferred_type.fields):
+        if isinstance(expr, MemberExpr) and isinstance(inferred_type, FunctionType) and not getattr(expr, 'is_callee', False) and not hasattr(expr, 'function_reference') and not isinstance(getattr(expr.object, 'inferred_type', None), StructType) and not (isinstance(getattr(expr.object, 'inferred_type', None), ClassType) and expr.property in expr.object.inferred_type.fields):
             raise TypeError("Bound method values require an explicit lambda adapter", file=self.file, line=expr.line, col=expr.col, code="W2013")
-        expr.inferred_type = wtype
-        expr.inferred_type_id = self.interner.from_wtype(wtype)
-        return wtype
+        expr.inferred_type = inferred_type
+        expr.inferred_type_id = self.interner.from_type(inferred_type)
+        return inferred_type
 
-    def _check_expr_impl(self, expr: Expr, is_statement_context: bool = False) -> WType:
+    def _check_expr_impl(self, expr: Expr, is_statement_context: bool = False) -> WysnaType:
         if isinstance(expr, LambdaExpr):
             from checker.ClosureConversion import convert_lambda
             return convert_lambda(self, expr)
@@ -1303,8 +1303,8 @@ class TypeChecker:
                 )
 
             if op in ("==", "!="):
-                left_id = self.interner.from_wtype(lhs_t)
-                right_id = self.interner.from_wtype(rhs_t)
+                left_id = self.interner.from_type(lhs_t)
+                right_id = self.interner.from_type(rhs_t)
                 if not self.interner.equality_compatible(left_id, right_id):
                     raise TypeError(
                         message=f"Cannot compare equality of different types '{lhs_t}' and '{rhs_t}'",
@@ -1432,8 +1432,8 @@ class TypeChecker:
 
         if isinstance(expr, ElseErrExpr):
             operand_t = self._check_expr(expr.operand)
-            unwrapped_t: WType
-            bound_err_t: Optional[WType] = None
+            unwrapped_t: WysnaType
+            bound_err_t: Optional[WysnaType] = None
 
             if isinstance(operand_t, ResultType) or (isinstance(operand_t, EnumType) and getattr(operand_t, "template_name", None) == "Result" and getattr(operand_t, "type_args", None) and len(operand_t.type_args) == 2):
                 unwrapped_t = operand_t.ok if isinstance(operand_t, ResultType) else operand_t.type_args[0]
@@ -1568,7 +1568,7 @@ class TypeChecker:
                     )
                 self._mark_result_lift(expr.value, sym.type, force=True)
                 expr.target.inferred_type = sym.type
-                expr.target.inferred_type_id = self.interner.from_wtype(sym.type)
+                expr.target.inferred_type_id = self.interner.from_type(sym.type)
                 return sym.type
 
             if isinstance(expr.target, IndexExpr):
@@ -1603,7 +1603,7 @@ class TypeChecker:
                         )
                     self._mark_result_lift(expr.value, obj_t.element, force=True)
                     expr.target.inferred_type = obj_t.element
-                    expr.target.inferred_type_id = self.interner.from_wtype(obj_t.element)
+                    expr.target.inferred_type_id = self.interner.from_type(obj_t.element)
                     return obj_t.element
 
                 if isinstance(obj_t, DictType):
@@ -1625,7 +1625,7 @@ class TypeChecker:
                         )
                     self._mark_result_lift(expr.value, obj_t.value, force=True)
                     expr.target.inferred_type = obj_t.value
-                    expr.target.inferred_type_id = self.interner.from_wtype(obj_t.value)
+                    expr.target.inferred_type_id = self.interner.from_type(obj_t.value)
                     return obj_t.value
 
                 raise TypeError(
@@ -1667,7 +1667,7 @@ class TypeChecker:
                         )
                     self._mark_result_lift(expr.value, f_info.type, force=True)
                     expr.target.inferred_type = f_info.type
-                    expr.target.inferred_type_id = self.interner.from_wtype(f_info.type)
+                    expr.target.inferred_type_id = self.interner.from_type(f_info.type)
                     return f_info.type
 
                 sym = self._find_value_root_symbol(expr.target.object)
@@ -1706,7 +1706,7 @@ class TypeChecker:
                     )
                 self._mark_result_lift(expr.value, field_t, force=True)
                 expr.target.inferred_type = field_t
-                expr.target.inferred_type_id = self.interner.from_wtype(field_t)
+                expr.target.inferred_type_id = self.interner.from_type(field_t)
                 return field_t
 
             raise TypeError(
@@ -1937,7 +1937,7 @@ class TypeChecker:
                     expr.callee = MemberExpr(IdentExpr(variants[0].name, expr.line, expr.col),
                                              expr.callee.name, expr.line, expr.col)
             # Support generic function calls and generic struct constructors
-            callee_t: Optional[WType] = None
+            callee_t: Optional[WysnaType] = None
             if isinstance(expr.callee, MemberExpr):
                 module_type = self._module_receiver(expr.callee.object)
                 if isinstance(module_type, ModuleType):
@@ -2014,7 +2014,7 @@ class TypeChecker:
                                 code="W2005"
                             )
                         type_params_set = {p.name if hasattr(p, "name") else str(p) for p in template.type_params}
-                        bindings: Dict[str, WType] = {}
+                        bindings: Dict[str, WysnaType] = {}
                         for p_decl, a_expr in zip(template.ast_decl.params, expr.args):
                             a_type = self._check_expr(a_expr)
                             if not self._unify_type(p_decl.type_ann, a_type, type_params_set, bindings):
@@ -2488,7 +2488,7 @@ class TypeChecker:
                     concrete_args = [self._resolve_type_node(a) for a in expr.type_args]
                 else:
                     type_params_set = {p.name if hasattr(p, "name") else str(p) for p in template.type_params}
-                    bindings: Dict[str, WType] = {}
+                    bindings: Dict[str, WysnaType] = {}
                     template_fields = {f.name: f.type_ann for f in template.ast_decl.fields}
                     for f in expr.fields:
                         if f.name in template_fields:
@@ -2592,7 +2592,7 @@ class TypeChecker:
                 if is_assignable(common_t, t):
                     common_t = t
                     continue
-                found_super: Optional[WType] = None
+                found_super: Optional[WysnaType] = None
                 if isinstance(common_t, ClassType) and isinstance(t, ClassType):
                     curr = common_t.superclass
                     while curr is not None:
@@ -2713,11 +2713,11 @@ class TypeChecker:
             subject_t = self._check_expr(expr.subject)
             covered_variants: Set[str] = set()
             has_wildcard = False
-            arm_types: List[WType] = []
+            arm_types: List[WysnaType] = []
 
             # Determine expected variants and variant payload types for subject_t
             expected_variants: Optional[Set[str]] = None
-            payload_types_map: Dict[str, List[WType]] = {}
+            payload_types_map: Dict[str, List[WysnaType]] = {}
 
             if isinstance(subject_t, OptionalType):
                 expected_variants = {"Some", "None"}
@@ -2759,7 +2759,7 @@ class TypeChecker:
                         col=arm.pattern.col
                     )
                 arm.pattern.inferred_type_id = self.interner.intern(subject_t)
-                arm_bindings: Dict[str, WType] = {}
+                arm_bindings: Dict[str, WysnaType] = {}
 
                 if isinstance(arm.pattern, WildcardPattern):
                     has_wildcard = True
@@ -2891,7 +2891,7 @@ class TypeChecker:
 
         return UnitType
 
-    def _pattern_matrix_exhaustive(self, types: List[WType], rows: List[List[Any]]) -> bool:
+    def _pattern_matrix_exhaustive(self, types: List[WysnaType], rows: List[List[Any]]) -> bool:
         from checker.PatternCoverage import pattern_matrix_exhaustive
         return pattern_matrix_exhaustive(types, rows, self.interner)
 
@@ -2927,14 +2927,14 @@ class TypeChecker:
         return ErrorTypePattern(type_name, bindings[0], matched, pattern.line, pattern.col)
 
     @staticmethod
-    def _error_pattern_name(error_type: WType) -> str:
+    def _error_pattern_name(error_type: WysnaType) -> str:
         if error_type in (IntType, FloatType, BoolType, StrType):
             return str(error_type)
         if isinstance(error_type, (StructType, EnumType)):
             return error_type.name
         return str(error_type)
 
-    def _validate_pattern_owner(self, pattern: EnumPattern, expected_type: WType) -> None:
+    def _validate_pattern_owner(self, pattern: EnumPattern, expected_type: WysnaType) -> None:
         if not pattern.enum_name:
             return
         owners = set()
@@ -2950,7 +2950,7 @@ class TypeChecker:
                 message=f"Pattern '{pattern.enum_name}.{pattern.variant}' is incompatible with match subject '{expected_type}'",
                 line=pattern.line, col=pattern.col, file=self.file, code="W2001")
 
-    def _bind_pattern_type(self, pattern: Pattern, expected_type: WType, bindings: Dict[str, WType], line: int, col: int) -> None:
+    def _bind_pattern_type(self, pattern: Pattern, expected_type: WysnaType, bindings: Dict[str, WysnaType], line: int, col: int) -> None:
         pattern.inferred_type_id = self.interner.intern(expected_type)
         if isinstance(pattern, IdentifierPattern):
             if pattern.name in bindings:
@@ -3003,7 +3003,7 @@ class TypeChecker:
     # Generics and Monomorphization Helpers
     # ==========================================
 
-    def _concrete_type_args(self, template, bindings: Dict[str, WType]) -> List[WType]:
+    def _concrete_type_args(self, template, bindings: Dict[str, WysnaType]) -> List[WysnaType]:
         """Builds the specialization arguments for a generic template.
 
         A type parameter with no binding keeps its own identity instead of collapsing
@@ -3011,7 +3011,7 @@ class TypeChecker:
         would specialize to `Result__int__any` and `Result__any__int`, two distinct
         types that then fail to compare even though both are `Result[int, str]`.
         """
-        arguments: List[WType] = []
+        arguments: List[WysnaType] = []
         for parameter in template.type_params:
             name = parameter.name if hasattr(parameter, "name") else str(parameter)
             bound = bindings.get(name)
@@ -3021,17 +3021,17 @@ class TypeChecker:
                 arguments.append(bound)
         return arguments
 
-    def _mangle_type_name(self, t: WType) -> str:
+    def _mangle_type_name(self, t: WysnaType) -> str:
         return _mangle_type_static(t)
 
-    def _wtype_to_type_node(self, t: WType) -> TypeNode:
-        node = self._wtype_to_type_node_impl(t)
+    def _type_to_type_node(self, t: WysnaType) -> TypeNode:
+        node = self._type_to_type_node_impl(t)
         if isinstance(t, (StructType, EnumType, ClassType, InterfaceType)) and self.current_scope.lookup_type(t.name) is not t:
             node.session_resolved_type = t
             node.session_arena_id = self.interner.arena_id
         return node
 
-    def _wtype_to_type_node_impl(self, t: WType) -> TypeNode:
+    def _type_to_type_node_impl(self, t: WysnaType) -> TypeNode:
         if isinstance(t, AnyType):
             # Synthesized, never written by the user: this is the placeholder that
             # monomorphization binds to an uninferred type parameter. Mark it so the
@@ -3060,32 +3060,32 @@ class TypeChecker:
         if isinstance(t, InterfaceType):
             return NamedType(t.name)
         if isinstance(t, WeakType):
-            return GenericType("Weak", [self._wtype_to_type_node(t.target)])
+            return GenericType("Weak", [self._type_to_type_node(t.target)])
         if isinstance(t, OptionalType):
-            return AstOptionalType(self._wtype_to_type_node(t.inner))
+            return AstOptionalType(self._type_to_type_node(t.inner))
         if isinstance(t, ListType):
-            return AstListType(self._wtype_to_type_node(t.element))
+            return AstListType(self._type_to_type_node(t.element))
         if isinstance(t, DictType):
-            return AstDictType(self._wtype_to_type_node(t.key), self._wtype_to_type_node(t.value))
+            return AstDictType(self._type_to_type_node(t.key), self._type_to_type_node(t.value))
         if isinstance(t, TupleType):
-            return AstTupleType([self._wtype_to_type_node(e) for e in t.elements])
+            return AstTupleType([self._type_to_type_node(e) for e in t.elements])
         if isinstance(t, ResultType):
-            return AstResultType(self._wtype_to_type_node(t.ok), self._wtype_to_type_node(t.err))
+            return AstResultType(self._type_to_type_node(t.ok), self._type_to_type_node(t.err))
         if isinstance(t, ErrorUnionType):
-            return AstErrorUnionType([self._wtype_to_type_node(member) for member in t.alternatives])
+            return AstErrorUnionType([self._type_to_type_node(member) for member in t.alternatives])
         if isinstance(t, FunctionType):
-            return AstFunctionType([self._wtype_to_type_node(p) for p in t.params], self._wtype_to_type_node(t.ret))
+            return AstFunctionType([self._type_to_type_node(p) for p in t.params], self._type_to_type_node(t.ret))
         if isinstance(t, TypeParamType):
             return NamedType(t.name)
         return NamedType(str(t))
 
-    def _substitute_type_node(self, node: TypeNode, subst: Dict[str, WType]) -> TypeNode:
+    def _substitute_type_node(self, node: TypeNode, subst: Dict[str, WysnaType]) -> TypeNode:
         if isinstance(node, AstFunctionType):
             return AstFunctionType([self._substitute_type_node(p, subst) for p in node.params],
                                    self._substitute_type_node(node.return_type, subst), node.line, node.col)
         if isinstance(node, NamedType):
             if node.name in subst:
-                return self._wtype_to_type_node(subst[node.name])
+                return self._type_to_type_node(subst[node.name])
             return NamedType(node.name, line=node.line, col=node.col)
         if isinstance(node, GenericType):
             new_args = [self._substitute_type_node(a, subst) for a in node.type_args]
@@ -3118,7 +3118,7 @@ class TypeChecker:
             )
         return node
 
-    def _substitute_ast_types(self, node: Any, subst: Dict[str, WType]) -> None:
+    def _substitute_ast_types(self, node: Any, subst: Dict[str, WysnaType]) -> None:
         if node is None:
             return
         if isinstance(node, LambdaExpr):
@@ -3222,53 +3222,53 @@ class TypeChecker:
     def _unify_type(
         self,
         param_type_node: TypeNode,
-        arg_wtype: WType,
+        arg_type: WysnaType,
         type_params: Set[str],
-        bindings: Dict[str, WType]
+        bindings: Dict[str, WysnaType]
     ) -> bool:
         if isinstance(param_type_node, NamedType) and param_type_node.name in type_params:
             p_name = param_type_node.name
             if p_name in bindings:
-                return bindings[p_name] == arg_wtype
-            bindings[p_name] = arg_wtype
+                return bindings[p_name] == arg_type
+            bindings[p_name] = arg_type
             return True
 
-        if isinstance(param_type_node, AstFunctionType) and isinstance(arg_wtype, FunctionType):
-            return (len(param_type_node.params) == len(arg_wtype.params) and
+        if isinstance(param_type_node, AstFunctionType) and isinstance(arg_type, FunctionType):
+            return (len(param_type_node.params) == len(arg_type.params) and
                     all(self._unify_type(p, a, type_params, bindings)
-                        for p, a in zip(param_type_node.params, arg_wtype.params)) and
-                    self._unify_type(param_type_node.return_type, arg_wtype.ret, type_params, bindings))
+                        for p, a in zip(param_type_node.params, arg_type.params)) and
+                    self._unify_type(param_type_node.return_type, arg_type.ret, type_params, bindings))
 
-        if isinstance(param_type_node, AstOptionalType) and isinstance(arg_wtype, OptionalType):
-            return self._unify_type(param_type_node.inner, arg_wtype.inner, type_params, bindings)
+        if isinstance(param_type_node, AstOptionalType) and isinstance(arg_type, OptionalType):
+            return self._unify_type(param_type_node.inner, arg_type.inner, type_params, bindings)
 
-        if isinstance(param_type_node, AstListType) and isinstance(arg_wtype, ListType):
-            return self._unify_type(param_type_node.element_type, arg_wtype.element, type_params, bindings)
+        if isinstance(param_type_node, AstListType) and isinstance(arg_type, ListType):
+            return self._unify_type(param_type_node.element_type, arg_type.element, type_params, bindings)
 
-        if isinstance(param_type_node, AstDictType) and isinstance(arg_wtype, DictType):
-            return (self._unify_type(param_type_node.key_type, arg_wtype.key, type_params, bindings) and
-                    self._unify_type(param_type_node.value_type, arg_wtype.value, type_params, bindings))
+        if isinstance(param_type_node, AstDictType) and isinstance(arg_type, DictType):
+            return (self._unify_type(param_type_node.key_type, arg_type.key, type_params, bindings) and
+                    self._unify_type(param_type_node.value_type, arg_type.value, type_params, bindings))
 
-        if isinstance(param_type_node, AstTupleType) and isinstance(arg_wtype, TupleType):
-            if len(param_type_node.element_types) != len(arg_wtype.elements):
+        if isinstance(param_type_node, AstTupleType) and isinstance(arg_type, TupleType):
+            if len(param_type_node.element_types) != len(arg_type.elements):
                 return False
             return all(self._unify_type(pt, at, type_params, bindings)
-                       for pt, at in zip(param_type_node.element_types, arg_wtype.elements))
+                       for pt, at in zip(param_type_node.element_types, arg_type.elements))
 
-        if isinstance(param_type_node, AstResultType) and isinstance(arg_wtype, ResultType):
-            return (self._unify_type(param_type_node.ok_type, arg_wtype.ok, type_params, bindings) and
-                    self._unify_type(param_type_node.err_type, arg_wtype.err, type_params, bindings))
+        if isinstance(param_type_node, AstResultType) and isinstance(arg_type, ResultType):
+            return (self._unify_type(param_type_node.ok_type, arg_type.ok, type_params, bindings) and
+                    self._unify_type(param_type_node.err_type, arg_type.err, type_params, bindings))
 
-        if isinstance(param_type_node, AstErrorUnionType) and isinstance(arg_wtype, ErrorUnionType):
+        if isinstance(param_type_node, AstErrorUnionType) and isinstance(arg_type, ErrorUnionType):
             try:
                 declared = ErrorUnionType([self._resolve_type_node(member) for member in param_type_node.error_types])
             except Exception:
                 return False
-            return declared == arg_wtype
+            return declared == arg_type
 
-        if isinstance(param_type_node, GenericType) and isinstance(arg_wtype, (StructType, EnumType, ClassType, InterfaceType)):
-            tmpl_name = getattr(arg_wtype, "template_name", None)
-            tmpl_args = getattr(arg_wtype, "type_args", None)
+        if isinstance(param_type_node, GenericType) and isinstance(arg_type, (StructType, EnumType, ClassType, InterfaceType)):
+            tmpl_name = getattr(arg_type, "template_name", None)
+            tmpl_args = getattr(arg_type, "type_args", None)
             if tmpl_name == param_type_node.name and tmpl_args and len(tmpl_args) == len(param_type_node.type_args):
                 return all(self._unify_type(pt, at, type_params, bindings)
                            for pt, at in zip(param_type_node.type_args, tmpl_args))
@@ -3285,7 +3285,7 @@ class TypeChecker:
             return True
         if isinstance(declared, (GenericStructTemplate, GenericEnumTemplate, GenericFnTemplate)):
             return True
-        return is_assignable(arg_wtype, declared)
+        return is_assignable(arg_type, declared)
     def _resolve_constraint_interface(self, constraint: TypeNode, line: int, col: int) -> InterfaceType:
         if not isinstance(constraint, NamedType):
             raise TypeError("Generic constraints must name an interface", line=line,
@@ -3296,7 +3296,7 @@ class TypeChecker:
                             line=line, col=col, file=self.file, code="W2012")
         return resolved
 
-    def _check_type_constraint(self, type_arg: WType, constraint: Optional[TypeNode], line: int, col: int) -> None:
+    def _check_type_constraint(self, type_arg: WysnaType, constraint: Optional[TypeNode], line: int, col: int) -> None:
         if constraint is None:
             return
         c_name = constraint.name if isinstance(constraint, NamedType) else str(constraint)
@@ -3320,7 +3320,7 @@ class TypeChecker:
                     code="W2001"
                 )
 
-    def _type_complexity(self, t: WType) -> int:
+    def _type_complexity(self, t: WysnaType) -> int:
         """Structural size of a type: 1 for a scalar, plus the size of every component.
 
         Used to bound generic specializations by *size* rather than only by recursion
@@ -3349,7 +3349,7 @@ class TypeChecker:
     def _check_specialization_size(
         self,
         template_name: str,
-        concrete_args: Sequence[WType],
+        concrete_args: Sequence[WysnaType],
         line: int,
         col: int
     ) -> None:
@@ -3368,7 +3368,7 @@ class TypeChecker:
     def _check_specialization_cycle(
         self,
         template_name: str,
-        concrete_args: Sequence[WType],
+        concrete_args: Sequence[WysnaType],
         type_ids: Tuple[int, ...],
         line: int,
         col: int
@@ -3408,7 +3408,7 @@ class TypeChecker:
     def _monomorphize_struct(
         self,
         template: GenericStructTemplate,
-        concrete_args: List[WType],
+        concrete_args: List[WysnaType],
         line: int,
         col: int
     ) -> StructType:
@@ -3463,7 +3463,7 @@ class TypeChecker:
                     code="W2011"
                 )
 
-        subst: Dict[str, WType] = {}
+        subst: Dict[str, WysnaType] = {}
         for p, arg in zip(template.type_params, concrete_args):
             p_name = p.name if hasattr(p, "name") else str(p)
             p_constraint = getattr(p, "constraint", None)
@@ -3488,7 +3488,7 @@ class TypeChecker:
         self._active_type_subst = subst
         try:
             new_fields: List[StructField] = []
-            fields_dict: Dict[str, WType] = {}
+            fields_dict: Dict[str, WysnaType] = {}
             for f in template.ast_decl.fields:
                 subst_ann = self._substitute_type_node(f.type_ann, subst)
                 f_type = self._resolve_type_node(subst_ann)
@@ -3535,7 +3535,7 @@ class TypeChecker:
     def _monomorphize_fn(
         self,
         template: GenericFnTemplate,
-        concrete_args: List[WType],
+        concrete_args: List[WysnaType],
         line: int,
         col: int
     ) -> Symbol:
@@ -3579,7 +3579,7 @@ class TypeChecker:
         curr_complexity = sum(self._type_complexity(a) for a in concrete_args)
         self._check_specialization_size(template.name, concrete_args, line, col)
 
-        subst: Dict[str, WType] = {}
+        subst: Dict[str, WysnaType] = {}
         for p, arg in zip(template.type_params, concrete_args):
             p_name = p.name if hasattr(p, "name") else str(p)
             p_constraint = getattr(p, "constraint", None)
@@ -3632,7 +3632,7 @@ class TypeChecker:
     def _monomorphize_enum(
         self,
         template: GenericEnumTemplate,
-        concrete_args: List[WType],
+        concrete_args: List[WysnaType],
         line: int,
         col: int
     ) -> EnumType:
@@ -3676,7 +3676,7 @@ class TypeChecker:
         curr_complexity = sum(self._type_complexity(a) for a in concrete_args)
         self._check_specialization_size(template.name, concrete_args, line, col)
 
-        subst: Dict[str, WType] = {}
+        subst: Dict[str, WysnaType] = {}
         for p, arg in zip(template.type_params, concrete_args):
             p_name = p.name if hasattr(p, "name") else str(p)
             p_constraint = getattr(p, "constraint", None)
@@ -3701,27 +3701,27 @@ class TypeChecker:
         self._active_type_subst = subst
         try:
             variant_names: List[str] = []
-            variant_payloads: Dict[str, List[WType]] = {}
+            variant_payloads: Dict[str, List[WysnaType]] = {}
             new_variants: List[VariantDecl] = []
 
             for v in template.ast_decl.variants:
                 v_name = v.name if hasattr(v, "name") else str(v)
                 variant_names.append(v_name)
-                payload_wtypes: List[WType] = []
+                payload_types: List[WysnaType] = []
                 new_payload_types: List[TypeNode] = []
                 if hasattr(v, "payload_types") and v.payload_types:
                     for pt in v.payload_types:
                         subst_pt = self._substitute_type_node(pt, subst)
                         resolved_pt = self._resolve_type_node(subst_pt)
-                        payload_wtypes.append(resolved_pt)
+                        payload_types.append(resolved_pt)
                         new_payload_types.append(subst_pt)
-                variant_payloads[v_name] = payload_wtypes
+                variant_payloads[v_name] = payload_types
                 new_variants.append(VariantDecl(name=v_name, payload_types=new_payload_types, line=v.line if hasattr(v, "line") else line, col=v.col if hasattr(v, "col") else col))
 
             enum_t.variants = variant_names
             enum_t.variant_payloads = variant_payloads
             self.interner.mk_enum(mangled, variant_names,
-                {name: [self.interner.from_wtype(payload) for payload in payloads]
+                {name: [self.interner.from_type(payload) for payload in payloads]
                  for name, payloads in variant_payloads.items()},
                 type_args=type_ids, template_name=template.name)
 
@@ -3744,7 +3744,7 @@ class TypeChecker:
     # Type Node Resolution
     # ==========================================
 
-    def _is_valid_dict_key_type(self, t: WType) -> bool:
+    def _is_valid_dict_key_type(self, t: WysnaType) -> bool:
         if isinstance(t, AnyType):
             return True
         if t in (IntType, StrType, BoolType):
@@ -3754,7 +3754,7 @@ class TypeChecker:
                        for payloads in t.variant_payloads.values() for payload in payloads)
         return False
 
-    def _resolve_type_node(self, node: TypeNode) -> WType:
+    def _resolve_type_node(self, node: TypeNode) -> WysnaType:
         if hasattr(node, 'session_resolved_type'):
             if node.session_arena_id != self.interner.arena_id:
                 raise TypeError("Synthesized type belongs to another arena", file=self.file,
@@ -3771,7 +3771,7 @@ class TypeChecker:
             else:
                 resolved = self._resolve_type_node_impl(node)
         if node is not None:
-            node.resolved_type_id = self.interner.from_wtype(resolved)
+            node.resolved_type_id = self.interner.from_type(resolved)
         return resolved
 
     def _lookup_type_name(self, name):
@@ -3785,7 +3785,7 @@ class TypeChecker:
             module = symbol.type if symbol else None
         return module.scope.lookup_type(parts[-1]) if isinstance(module, ModuleType) else None
 
-    def _resolve_type_node_impl(self, node: TypeNode) -> WType:
+    def _resolve_type_node_impl(self, node: TypeNode) -> WysnaType:
         if isinstance(node, AstFunctionType):
             return FunctionType([self._resolve_type_node(p) for p in node.params],
                                 self._resolve_type_node(node.return_type))
@@ -3794,7 +3794,7 @@ class TypeChecker:
                 if getattr(node, "is_internal_any", False):
                     return AnyType()
                 # `any` is reserved for internal variadic builtin signatures and is
-                # deliberately unreachable from source. See checker/WType.py:AnyType.
+                # deliberately unreachable from source. See checker/WysnaType.py:AnyType.
                 raise TypeError(
                     message="Unknown type 'any' (reserved for compiler builtins)",
                     line=node.line,

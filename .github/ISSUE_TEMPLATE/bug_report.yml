@@ -57,10 +57,10 @@ body:
       options:
         - "Lexer / Tokenizer"
         - "Parser (AST)"
-        - "Type Checker (WType, TypeInterner)"
+        - "Type Checker (WysnaType, TypeInterner)"
         - "Typed HIR (HirBuilder, HirCCodeGen)"
-        - "C99 Runtime (w_runtime.h, ARC, CoW)"
-        - "W1 Self-Hosted Compiler"
+        - "C99 Runtime (wysna_runtime.h, ARC, CoW)"
+        - "Wysna Compiler (Self-Hosted)"
         - "CLI / Formatter (w fmt)"
         - "Other / Unknown"
     validations:

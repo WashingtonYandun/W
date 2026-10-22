@@ -1,5 +1,5 @@
-from wtokens.Token import Token
-from wtokens.TokenType import TokenType
+from tokens.Token import Token
+from tokens.TokenType import TokenType
 from common.constants import KEYWORDS
 from error.Error import LexerError
 from typing import List, Optional
@@ -15,7 +15,7 @@ _VALUE_END_TOKENS = frozenset({
 
 class Lexer:
     """
-    Lexical analyzer for W Language conforming to SPEC.md v0.1.
+    Lexical analyzer for Wysna conforming to SPEC.md v0.1.
     
     Transforms UTF-8 source text into a stream of typed tokens with 1-based line/col positions.
     Never calls exit(); raises LexerError with structured location diagnostics.

@@ -68,21 +68,21 @@ fn compile_source(src: str) -> str {
             if is_entry_call {
                 has_main_call = true
                 emit_line("WVal _t_main = " + own_expr(expr_r.val) + ";")
-                emit_line("if (_t_main.tag == W_ERR) { w_report_entrypoint_error(_t_main.as.box->val); w_release(_t_main); w_runtime_cleanup(); return 1; }")
-                emit_line("w_release(_t_main);")
+                emit_line("if (_t_main.tag == W_ERR) { wysna_report_entrypoint_error(_t_main.as.box->val); wysna_release(_t_main); wysna_runtime_cleanup(); return 1; }")
+                emit_line("wysna_release(_t_main);")
             } else {
                 emit_line("(void)" + expr_r.val + ";")
             }
         }
     }
     if has_main_fn and not has_main_call {
-        emit_line("WVal _t_main = w_fn_main();")
-        emit_line("if (_t_main.tag == W_ERR) { w_report_entrypoint_error(_t_main.as.box->val); w_release(_t_main); w_runtime_cleanup(); return 1; }")
-        emit_line("w_release(_t_main);")
+        emit_line("WVal _t_main = wysna_fn_main();")
+        emit_line("if (_t_main.tag == W_ERR) { wysna_report_entrypoint_error(_t_main.as.box->val); wysna_release(_t_main); wysna_runtime_cleanup(); return 1; }")
+        emit_line("wysna_release(_t_main);")
     }
     pop_scope()
     emit_oop_dispatchers()
-    let mut out = "#include \"runtime/w_runtime.h\"\n\n"
+    let mut out = "#include \"runtime/wysna_runtime.h\"\n\n"
     if len(g_globals) > 0 {
         for gv in g_globals {
             out = out + "static WVal " + gv + ";\n"
@@ -101,18 +101,18 @@ fn compile_source(src: str) -> str {
         }
     }
     out = out + "int main(int argc, char** argv) {\n"
-    out = out + "    w_init_args(argc, argv);\n"
+    out = out + "    wysna_init_args(argc, argv);\n"
     for ms in g_cur_stmts {
         out = out + "    " + ms + "\n"
     }
     if len(g_globals) > 0 {
         let mut gi = len(g_globals) - 1
         while gi >= 0 {
-            out = out + "    w_release(" + g_globals[gi] + ");\n"
+            out = out + "    wysna_release(" + g_globals[gi] + ");\n"
             gi = gi - 1
         }
     }
-    out = out + "    w_runtime_cleanup();\n"
+    out = out + "    wysna_runtime_cleanup();\n"
     out = out + "    return 0;\n"
     out = out + "}\n"
     return out

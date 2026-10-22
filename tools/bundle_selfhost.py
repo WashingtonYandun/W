@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-tools/bundle_w1.py - Deterministic Bundler for Self-Hosted W1 Compiler.
+tools/bundle_selfhost.py - Deterministic Bundler for Wysna Self-Hosted Compiler.
 
 Concatenates the modular compiler source files from selfhost/src/ into
-the unified compilation unit selfhost/w1.wysna for 3-stage bootstrap fixed-point verification.
+the unified compilation unit selfhost/compiler.wysna for 3-stage bootstrap fixed-point verification.
 """
 
 import os
@@ -38,7 +38,7 @@ def bundle(src_dir: str = "selfhost/src") -> str:
 def main() -> int:
     repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     src_dir = os.path.join(repo_root, "selfhost", "src")
-    target_path = os.path.join(repo_root, "selfhost", "w1.wysna")
+    target_path = os.path.join(repo_root, "selfhost", "compiler.wysna")
 
     bundled_code = bundle(src_dir)
 
@@ -49,9 +49,9 @@ def main() -> int:
         with open(target_path, "r", encoding="utf-8") as f:
             current_code = f.read()
         if bundled_code != current_code:
-            print("[FAIL] selfhost/w1.wysna is out of sync with selfhost/src/!", file=sys.stderr)
+            print("[FAIL] selfhost/compiler.wysna is out of sync with selfhost/src/!", file=sys.stderr)
             return 1
-        print("[PASS] selfhost/w1.wysna is exactly in sync with selfhost/src/.")
+        print("[PASS] selfhost/compiler.wysna is exactly in sync with selfhost/src/.")
         return 0
 
     with open(target_path, "w", encoding="utf-8") as f:

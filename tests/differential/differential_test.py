@@ -12,14 +12,14 @@ from formatter.Formatter import Formatter
 from codegen.CCodeGen import CCodeGen
 from hir.HirBuilder import HirBuilder
 from hir.HirCCodeGen import HirCCodeGen
-from error.Error import WError
+from error.Error import WysnaError
 
 
 from tests.engine_harness import ENGINES, unsupported_reason, verify
 
 
-def verify_four_way_equivalence(source_code, label, w1_bin, repo_root, work_dir):
-    return verify(source_code, label, w1_bin, work_dir, sanitize=os.environ.get('W_SANITIZE') == '1')
+def verify_four_way_equivalence(source_code, label, selfhost_bin, repo_root, work_dir):
+    return verify(source_code, label, selfhost_bin, work_dir, sanitize=os.environ.get('WYSNA_SANITIZE') == '1')
 
 
 def generate_valid_program(seed: int) -> str:
@@ -149,7 +149,7 @@ def generate_valid_program(seed: int) -> str:
     return "\n".join(lines) + "\n"
 
 
-def run_differential_suite(repo_root: str, w1_bin: str, generated_count: int = 25, base_seed: int = 1000) -> bool:
+def run_differential_suite(repo_root: str, selfhost_bin: str, generated_count: int = 25, base_seed: int = 1000) -> bool:
     cases_dir = os.path.join(repo_root, "tests", "differential", "cases")
     failures_dir = os.path.join(repo_root, "tests", "differential", "failures")
     os.makedirs(failures_dir, exist_ok=True)
@@ -196,14 +196,14 @@ def run_differential_suite(repo_root: str, w1_bin: str, generated_count: int = 2
             label = os.path.relpath(path, repo_root)
             with open(path, "r", encoding="utf-8") as f:
                 code = f.read()
-            ok, detail = verify_four_way_equivalence(code, label, w1_bin, repo_root, work_dir)
+            ok, detail = verify_four_way_equivalence(code, label, selfhost_bin, repo_root, work_dir)
             if ok:
                 passed_cases += 1
             else:
                 print(f"  [DIFF FAIL] {label}: {detail}")
 
         for label, code in runtime_panic_cases:
-            ok, detail = verify_four_way_equivalence(code, label, w1_bin, repo_root, work_dir)
+            ok, detail = verify_four_way_equivalence(code, label, selfhost_bin, repo_root, work_dir)
             if ok:
                 passed_cases += 1
             else:
@@ -213,7 +213,7 @@ def run_differential_suite(repo_root: str, w1_bin: str, generated_count: int = 2
             rel_label = os.path.relpath(path, repo_root)
             with open(path, "r", encoding="utf-8") as f:
                 code = f.read()
-            ok, detail = verify_four_way_equivalence(code, rel_label, w1_bin, repo_root, work_dir)
+            ok, detail = verify_four_way_equivalence(code, rel_label, selfhost_bin, repo_root, work_dir)
             if ok:
                 passed_cases += 1
             else:
@@ -223,7 +223,7 @@ def run_differential_suite(repo_root: str, w1_bin: str, generated_count: int = 2
             seed = base_seed + offset
             code = generate_valid_program(seed)
             label = f"seed_{seed}.wysna"
-            ok, detail = verify_four_way_equivalence(code, label, w1_bin, repo_root, work_dir)
+            ok, detail = verify_four_way_equivalence(code, label, selfhost_bin, repo_root, work_dir)
             if ok:
                 passed_cases += 1
             else:
@@ -338,7 +338,7 @@ def run_fuzz_suite(
                 hir_mod = HirBuilder(tc.interner, file_path=label).lower(ast)
                 HirCCodeGen(tc.interner, file_path=label).generate(hir_mod)
                 CCodeGen(file=label).generate(ast)
-        except WError:
+        except WysnaError:
             # Expected structured diagnostic rejection on invalid fuzz inputs
             pass
         except Exception as exc:

@@ -14,9 +14,9 @@ class HirBindings:
         self.enums = {}
 
     def compatible(self, source, target):
-        from checker.WType import is_assignable
+        from checker.WysnaType import is_assignable
         return self.interner.is_assignable(source, target) or is_assignable(
-            self.interner.to_wtype(source), self.interner.to_wtype(target))
+            self.interner.to_type(source), self.interner.to_type(target))
 
     def check(self, module):
         from codegen.VirtualDispatch import hir_virtual_method_slots
@@ -56,7 +56,7 @@ class HirBindings:
 
     def match_is_exhaustive(self, node):
         from checker.PatternCoverage import pattern_matrix_exhaustive
-        subject = self.interner.to_wtype(node.subject.type_id)
+        subject = self.interner.to_type(node.subject.type_id)
         rows = [[arm.pattern] for arm in node.arms if arm.guard is None]
         return pattern_matrix_exhaustive([subject], rows, self.interner)
 

@@ -56,10 +56,10 @@ CASES = [
 ]
 
 
-def _emit_c(root: Path, source: Path, c_file: Path, backend: str, w1_compiler: str) -> None:
-    if backend == "w1":
+def _emit_c(root: Path, source: Path, c_file: Path, backend: str, selfhost_compiler: str) -> None:
+    if backend == "selfhost":
         result = subprocess.run(
-            [w1_compiler, str(source), str(c_file)],
+            [selfhost_compiler, str(source), str(c_file)],
             cwd=root,
             capture_output=True,
             text=True,
@@ -84,23 +84,23 @@ def _emit_c(root: Path, source: Path, c_file: Path, backend: str, w1_compiler: s
     assert result.returncode == 0, (backend, result.stdout, result.stderr)
 
 
-def test_native_runtime_panics_report_exact_w_source_location():
+def test_native_runtime_panics_report_exact_wysna_source_location():
     root = Path(__file__).resolve().parents[2]
     compiler = os.environ.get("CC", "cc")
-    from main import ensure_selfhost_w1_binary
+    from main import ensure_selfhost_compiler_binary
 
-    w1_compiler = ensure_selfhost_w1_binary(str(root))
+    selfhost_compiler = ensure_selfhost_compiler_binary(str(root))
 
     with tempfile.TemporaryDirectory(prefix="w-f02-locations-") as directory:
         temp = Path(directory)
-        for backend in ("ast", "hir", "w1"):
+        for backend in ("ast", "hir", "selfhost"):
             for name, source_text, line, marker, message in CASES:
                 source = temp / f"{name}.wysna"
                 c_file = temp / f"{name}-{backend}.c"
                 binary = temp / f"{name}-{backend}"
                 source.write_text(source_text, encoding="utf-8")
 
-                _emit_c(root, source, c_file, backend, w1_compiler)
+                _emit_c(root, source, c_file, backend, selfhost_compiler)
                 built = subprocess.run(
                     [compiler, "-std=c99", f"-I{root}", str(c_file), "-o", str(binary)],
                     cwd=root,
@@ -111,11 +111,11 @@ def test_native_runtime_panics_report_exact_w_source_location():
                 assert built.returncode == 0, (backend, built.stderr)
 
                 column = source_text.splitlines()[line - 1].index(marker) + 1
-                source_name = source if backend == "w1" else source.resolve()
+                source_name = source if backend == "selfhost" else source.resolve()
                 error_code = "W4001" if "zero" in message.lower() else "W4002"
                 expected = f"[{error_code}] {source_name}:{line}:{column} - {message}\n"
                 env = os.environ.copy()
-                env.pop("W_MEM_CHECK", None)
+                env.pop("WYSNA_MEM_CHECK", None)
                 result = subprocess.run(
                     [str(binary)],
                     cwd=root,

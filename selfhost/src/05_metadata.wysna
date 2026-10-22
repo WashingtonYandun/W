@@ -18,9 +18,9 @@ fn is_module_name(name: str) -> bool {
 
 fn c_fn_name(name: str) -> str {
     if g_ns != "" {
-        return "w_fn_" + g_ns + "__" + name
+        return "wysna_fn_" + g_ns + "__" + name
     }
-    return "w_fn_" + name
+    return "wysna_fn_" + name
 }
 
 fn escape_c_str(s: str) -> str {
@@ -115,23 +115,23 @@ fn parse_type_ann() -> bool {
 }
 
 fn parse_field_default() -> str {
-    if check_kind("FN") { parse_type_ann() return "w_none()" }
+    if check_kind("FN") { parse_type_ann() return "wysna_none()" }
     let tname = at_tok().val
-    let mut def_c = "w_none()"
+    let mut def_c = "wysna_none()"
     if tname == "Weak" {
-        def_c = "w_empty_weak()"
+        def_c = "wysna_empty_weak()"
     } elif tname == "int" {
-        def_c = "w_int(0LL)"
+        def_c = "wysna_int(0LL)"
     } elif tname == "float" {
-        def_c = "w_float(0.0)"
+        def_c = "wysna_float(0.0)"
     } elif tname == "bool" {
-        def_c = "w_bool(false)"
+        def_c = "wysna_bool(false)"
     } elif tname == "str" {
-        def_c = "w_str(\"\")"
+        def_c = "wysna_str(\"\")"
     } elif tname == "list" {
-        def_c = "w_make_list(0, NULL)"
+        def_c = "wysna_make_list(0, NULL)"
     } elif tname == "dict" {
-        def_c = "w_make_dict(0, NULL, NULL)"
+        def_c = "wysna_make_dict(0, NULL, NULL)"
     }
     advance_tok()
     if match_kind("LBRACKET") {
@@ -142,7 +142,7 @@ fn parse_field_default() -> str {
         expect_kind("RBRACKET")
     }
     if match_kind("QUESTION") {
-        def_c = "w_none()"
+        def_c = "wysna_none()"
     }
     return def_c
 }
@@ -204,7 +204,7 @@ fn register_dispatch(m_name: str, arity: int) -> unit {
     for ai in 0..arity {
         sig = sig + ", WVal _a" + str(ai)
     }
-    g_protos.append("static WVal w_dispatch__" + m_name + "__" + str(arity) + "(" + sig + ");")
+    g_protos.append("static WVal wysna_dispatch__" + m_name + "__" + str(arity) + "(" + sig + ");")
 }
 
 fn op_precedence(k: str) -> int {

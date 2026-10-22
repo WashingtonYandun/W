@@ -10,7 +10,7 @@ from unittest.mock import patch
 
 import main
 from common.Platform import compiler_command, executable_name
-from error.Error import ToolchainError, WError
+from error.Error import ToolchainError, WysnaError
 
 
 def test_compiler_configuration_and_unavailable_command():
@@ -49,12 +49,12 @@ def test_missing_selfhost_sources_fail_before_any_cache_write():
     with tempfile.TemporaryDirectory() as temporary:
         directory = Path(temporary)
         try:
-            main.ensure_selfhost_w1_binary(str(directory))
-        except WError as error:
+            main.ensure_selfhost_compiler_binary(str(directory))
+        except WysnaError as error:
             assert error.code == 'W2013'
         else:
-            raise AssertionError('Missing W1 sources accepted')
-        assert not (directory / '.w_cache').exists()
+            raise AssertionError('Missing selfhost sources accepted')
+        assert not (directory / '.wysna_cache').exists()
 
 
 def test_benchmark_checkout_requirement_precedes_bootstrap():
@@ -63,7 +63,7 @@ def test_benchmark_checkout_requirement_precedes_bootstrap():
             raise AssertionError('Benchmark capability must be checked before bootstrap')
         output = io.StringIO()
         with patch.object(sys, 'argv', ['wysna', 'bench']), patch.object(main, 'get_repo_root', return_value=temporary):
-            with patch.object(main, 'ensure_selfhost_w1_binary', forbidden_bootstrap), redirect_stderr(output):
+            with patch.object(main, 'ensure_selfhost_compiler_binary', forbidden_bootstrap), redirect_stderr(output):
                 try:
                     main.main()
                 except SystemExit as error:

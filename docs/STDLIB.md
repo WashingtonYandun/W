@@ -80,7 +80,7 @@ return recoverable errors. File.write checks both short writes and fflush failur
 flush does not guarantee durable storage. Rename replaces a destination according
 to host rules and rejects cross-volume copy fallback; it is not a durability promise.
 
-The internal diagnostic ABI exposes `w_host_active_handles()` and
-`w_host_active_bytes()` for persistent workload tests. Handles include buffers,
+The internal diagnostic ABI exposes `wysna_host_active_handles()` and
+`wysna_host_active_bytes()` for persistent workload tests. Handles include buffers,
 files and raw resource claims. Bytes measure reserved buffer capacity in C and
 payload bytes in the reference engine; neither metric is process RSS.

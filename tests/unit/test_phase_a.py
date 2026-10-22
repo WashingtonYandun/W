@@ -6,10 +6,10 @@ import tempfile
 from pathlib import Path
 from checker.TypeChecker import TypeChecker
 from checker.TypeInterner import TypeInterner
-from checker.WType import IntType, StrType, OptionalType, ResultType, EnumType
+from checker.WysnaType import IntType, StrType, OptionalType, ResultType, EnumType
 from parser.Parser import Parser
 from formatter.Formatter import Formatter
-from error.Error import WError
+from error.Error import WysnaError
 
 
 def run_phase_a_tests():
@@ -50,7 +50,7 @@ def run_phase_a_tests():
     for source in invalid:
         try:
             TypeChecker().check(parser.parse(source))
-        except WError as error:
+        except WysnaError as error:
             assert error.code in ('W2006', 'W1002', 'W2003', 'W2001'), str(error)
         else:
             raise AssertionError('Invalid propagation/reserved builtin identity was accepted')
@@ -72,7 +72,7 @@ def run_phase_a_tests():
                 compiled = subprocess.run(command + [str(source), '-o', str(binary)],
                                           capture_output=True, text=True, timeout=60)
                 assert compiled.returncode == 0, compiled.stderr
-                env = dict(os.environ, W_MEM_CHECK='1')
+                env = dict(os.environ, WYSNA_MEM_CHECK='1')
                 env['ASAN_OPTIONS'] = 'detect_leaks=1' if sys.platform.startswith('linux') else 'detect_leaks=0'
                 result = subprocess.run([str(binary)], env=env, capture_output=True, text=True, timeout=30)
                 assert result.returncode == 0, (name, result.stderr)

@@ -12,9 +12,9 @@ A valid import persists its rows and an `imports(row_count, input_bytes, importe
 
 ## Ownership and adapter costs
 
-The FFI carries scalars and `opaque` handles, not W strings or buffers. The database path comes from `W_SQLITE_DB`. `adapter.c` owns fixed SQL statements, the connection, and prepared statements; this adapter is product code that must be maintained. `pilot_close` closes statements and the connection, and `pilot_dispose` frees the control block. Repeated close is valid; use after close returns `SQLITE_MISUSE`. Using a handle after destruction or destroying it twice remains an unsafe error that W does not prevent.
+The FFI carries scalars and `opaque` handles, not W strings or buffers. The database path comes from `WYSNA_SQLITE_DB`. `adapter.c` owns fixed SQL statements, the connection, and prepared statements; this adapter is product code that must be maintained. `pilot_close` closes statements and the connection, and `pilot_dispose` frees the control block. Repeated close is valid; use after close returns `SQLITE_MISUSE`. Using a handle after destruction or destroying it twice remains an unsafe error that W does not prevent.
 
-The W helper that acquires the resource routes every later exit through one cleanup point. Errors returned by `populate` are handled before leaving. This pilot does not require a new `defer/with` construct. External counters check that connections, control blocks, and statements are no longer live. `W_MEM_CHECK` checks only W allocations on normal exit; `exit()` bypasses that check. Sanitizers and external counters are needed for this CLI, which returns process exit codes.
+The W helper that acquires the resource routes every later exit through one cleanup point. Errors returned by `populate` are handled before leaving. This pilot does not require a new `defer/with` construct. External counters check that connections, control blocks, and statements are no longer live. `WYSNA_MEM_CHECK` checks only W allocations on normal exit; `exit()` bypasses that check. Sanitizers and external counters are needed for this CLI, which returns process exit codes.
 
 ## Reproducing the checks
 
@@ -23,17 +23,17 @@ A C99 compiler, SQLite headers, and `libsqlite3` are required. Linux CI installs
 ```sh
 python3 tools/validate_sqlite_ffi.py --sanitize
 python3 tools/validate_sqlite_import.py --sanitize --rows 1000 --samples 1
-python3 tools/validate_sqlite_import.py --rows 10000 --samples 3 --report .w_cache/sqlite-import/optimized.json
+python3 tools/validate_sqlite_import.py --rows 10000 --samples 3 --report .wysna_cache/sqlite-import/optimized.json
 python3 tools/measure_tokenizer.py
 ```
 
 To run the importer from the repository root:
 
 ```sh
-mkdir -p .w_cache/sqlite-import
-cc -std=c99 -O2 -c examples/ffi/sqlite/adapter.c -o .w_cache/sqlite-import/adapter.o
-./wysna build examples/ffi/sqlite/import_csv.wysna --link-lib .w_cache/sqlite-import/adapter.o --link-lib sqlite3 -o .w_cache/sqlite-import/import_csv
-W_SQLITE_DB=.w_cache/sqlite-import/measurements.sqlite .w_cache/sqlite-import/import_csv measurements.csv
+mkdir -p .wysna_cache/sqlite-import
+cc -std=c99 -O2 -c examples/ffi/sqlite/adapter.c -o .wysna_cache/sqlite-import/adapter.o
+./wysna build examples/ffi/sqlite/import_csv.wysna --link-lib .wysna_cache/sqlite-import/adapter.o --link-lib sqlite3 -o .wysna_cache/sqlite-import/import_csv
+WYSNA_SQLITE_DB=.wysna_cache/sqlite-import/measurements.sqlite .wysna_cache/sqlite-import/import_csv measurements.csv
 ```
 
 The runner tests C, AST, and HIR, then invokes W1 directly without running the W0 checker over the input. An independent Python connection compares persisted rows rather than checking output alone. The test appends data in a second run and exercises 14 failures, including an error after an earlier valid row has been inserted. It requires rollback, the expected exit status, no live external resources, and no sanitizer output. Linux enables LSan; macOS does not support it. The system SQLite library is not rebuilt with sanitizers. The earlier `measurements.wysna` pilot retains C/AST/HIR checks for repeated close and use after close.
@@ -65,7 +65,7 @@ silently deduplicating. `--json` returns structured command output, and
 `--backend=hir|ast|selfhost` selects the compiler path. Exported binaries have a build
 manifest; the build cache includes sources, backend and C toolchain identity.
 
-Native use: `W_SQLITE_DB=measurements.sqlite build/measurement-ingest [--check] file.csv`
+Native use: `WYSNA_SQLITE_DB=measurements.sqlite build/measurement-ingest [--check] file.csv`
 or `--status`. On Windows use the shell's environment syntax and the `.exe` filename;
 the SQLite pilot also requires C headers and a linkable library on that host.
 

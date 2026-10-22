@@ -16,7 +16,7 @@ def test_wysna_cli_help_and_version():
     res = subprocess.run([sys.executable, str(wysna_bin), "version"],
                          capture_output=True, text=True, check=True)
     assert "Wysna Language Compiler" in res.stdout
-    assert "W0 + W1" in res.stdout
+    assert "Wysna Seed + Wysna Compiler" in res.stdout
 
     # wysna --help
     res = subprocess.run([sys.executable, str(wysna_bin), "--help"],

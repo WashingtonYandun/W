@@ -375,7 +375,7 @@ def run_semantic_fuzz_suite(
     count: int = 25,
     base_seed: int = 8000,
     repo_root: Optional[Path] = None,
-    w1_bin: Optional[Path] = None,
+    selfhost_bin: Optional[Path] = None,
 ) -> bool:
     """
     Execute full D04 semantic fuzz suite across positive programs, negative mutations,
@@ -386,11 +386,12 @@ def run_semantic_fuzz_suite(
     failures_dir = repo_root / "tests/fuzz/failures"
     failures_dir.mkdir(parents=True, exist_ok=True)
 
-    if w1_bin is None:
-        w1_bin = repo_root / ".w_cache/w1_stage2"
+    if selfhost_bin is None:
+        from main import ensure_selfhost_compiler_binary
+        selfhost_bin = Path(ensure_selfhost_compiler_binary(str(repo_root)))
 
     print("==================================================")
-    print("W Language D04 Semantic Fuzzing & Determinism")
+    print("Wysna D04 Semantic Fuzzing & Determinism")
     print("==================================================")
     print(f"  [CONFIG] Base seed: {base_seed}, Iterations: {count}")
 
@@ -417,10 +418,10 @@ def run_semantic_fuzz_suite(
             # Run engines
             results = []
             diverged = False
-            for eng in ["interpreter", "ast", "hir", "w1"]:
+            for eng in ["interpreter", "ast", "hir", "selfhost"]:
                 if unsupported_reason(label, eng):
                     continue
-                res = run_engine(eng, source, label, w1_bin, work_dir, sanitize=False)
+                res = run_engine(eng, source, label, selfhost_bin, work_dir, sanitize=False)
                 results.append(res)
 
             equivalent, _ = compare(results)
@@ -442,10 +443,10 @@ def run_semantic_fuzz_suite(
                 def oracle_diverges(candidate: str) -> bool:
                     try:
                         if failing_engine:
-                            result = run_engine(failing_engine, candidate, label, w1_bin, work_dir, sanitize=False)
+                            result = run_engine(failing_engine, candidate, label, selfhost_bin, work_dir, sanitize=False)
                             return result.compile_ok and bool(result.infrastructure_error)
-                        left = run_engine(reference.engine, candidate, label, w1_bin, work_dir, sanitize=False)
-                        right = run_engine(other.engine, candidate, label, w1_bin, work_dir, sanitize=False)
+                        left = run_engine(reference.engine, candidate, label, selfhost_bin, work_dir, sanitize=False)
+                        right = run_engine(other.engine, candidate, label, selfhost_bin, work_dir, sanitize=False)
                         return ((left.compile_ok, right.compile_ok) == expected_acceptance
                                 and not left.infrastructure_error and not right.infrastructure_error
                                 and any(getattr(left, field) != getattr(right, field) for field in mismatch_fields))
@@ -476,10 +477,10 @@ def run_semantic_fuzz_suite(
 
             # All engines must reject with expected_code
             all_rejected = True
-            for eng in ["interpreter", "ast", "hir", "w1"]:
+            for eng in ["interpreter", "ast", "hir", "selfhost"]:
                 if unsupported_reason(label, eng):
                     continue
-                res = run_engine(eng, source, label, w1_bin, work_dir, sanitize=False)
+                res = run_engine(eng, source, label, selfhost_bin, work_dir, sanitize=False)
                 if res.compile_ok or res.exit_code != 1 or expected_code not in res.stderr:
                     all_rejected = False
                     break

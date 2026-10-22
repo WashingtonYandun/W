@@ -210,7 +210,7 @@ def test_coercion_and_native_execution():
 
 def run_all() -> bool:
     print("==================================================")
-    print("W Language C02 Fully Resolved HIR Invariant Tests")
+    print("Wysna C02 Fully Resolved HIR Invariant Tests")
     print("==================================================")
     test_symbol_shadowing_and_resolution()
     test_native_hir_patterns()

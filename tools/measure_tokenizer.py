@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Measure the actual W1 lexer with owned UTF-8 source at geometric input sizes."""
+"""Measure the actual Wysna Compiler lexer with owned UTF-8 source at geometric input sizes."""
 import argparse
 import json
 import os
@@ -18,7 +18,7 @@ def measure(samples=5):
     source = prefix + (ROOT / 'selfhost/src/02_lexer.wysna').read_text()
     source += '\nfn measure() -> unit ! IoError { let text = read_file(args()[1])?\nprint(len(tokenize(text))) }\nmeasure() else err { print(err.message) }\n'
     report = {'samples': samples, 'platform': sys.platform, 'compiler': os.environ.get('CC', 'cc'),
-              'workload': 'unmodified W1 tokenizer; alpha + beta newline; owned source read_file', 'rows': []}
+              'workload': 'unmodified Wysna Compiler tokenizer; alpha + beta newline; owned source read_file', 'rows': []}
     with tempfile.TemporaryDirectory(prefix='w-tokenizer-scaling-') as temporary:
         directory = Path(temporary)
         path, binary = directory / 'lexer.wysna', directory / 'lexer'
@@ -32,7 +32,7 @@ def measure(samples=5):
             for sample in range(samples + 1):
                 started = time.perf_counter()
                 result = subprocess.run([str(binary), str(corpus)], capture_output=True, text=True,
-                                        env=dict(os.environ, W_MEM_CHECK='1'), check=True, timeout=30)
+                                        env=dict(os.environ, WYSNA_MEM_CHECK='1'), check=True, timeout=30)
                 elapsed = (time.perf_counter() - started) * 1000
                 assert not result.stderr, result.stderr
                 assert int(result.stdout) == repetitions * 3 + 1, result.stdout
@@ -46,7 +46,7 @@ def measure(samples=5):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--samples', type=int, default=5)
-    parser.add_argument('--report', type=Path, default=ROOT / '.w_cache/tokenizer-scaling.json')
+    parser.add_argument('--report', type=Path, default=ROOT / '.wysna_cache/tokenizer-scaling.json')
     arguments = parser.parse_args()
     if not 1 <= arguments.samples <= 100:
         parser.error('samples must be 1..100')

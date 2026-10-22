@@ -14,9 +14,9 @@ Verifies:
      - Class instance in CoW list (field mutation retains shared reference semantics, slot mutation detaches list).
   3. Strict parity across all four execution engines:
      - W0 Python Interpreter
-     - W0 AST C99 (under ASan, UBSan, and W_MEM_CHECK=1)
-     - W0 HIR C99 (under ASan, UBSan, and W_MEM_CHECK=1)
-     - W1 Self-Hosted Stage 2 (under ASan, UBSan, and W_MEM_CHECK=1)
+     - W0 AST C99 (under ASan, UBSan, and WYSNA_MEM_CHECK=1)
+     - W0 HIR C99 (under ASan, UBSan, and WYSNA_MEM_CHECK=1)
+     - W1 Self-Hosted Stage 2 (under ASan, UBSan, and WYSNA_MEM_CHECK=1)
 """
 
 import os
@@ -32,12 +32,12 @@ from checker.TypeChecker import TypeChecker
 from codegen.CCodeGen import CCodeGen
 from hir.HirBuilder import HirBuilder
 from hir.HirCCodeGen import HirCCodeGen
-from main import ensure_selfhost_w1_binary, get_repo_root
+from main import ensure_selfhost_compiler_binary, get_repo_root
 
 
 def parse_checkpoints(stderr_text: str) -> Dict[str, Dict[str, int]]:
     checkpoints = {}
-    pattern = re.compile(r"\[W_COW_CHECKPOINT:([^\]]+)\]\s+(.*)")
+    pattern = re.compile(r"\[WYSNA_COW_CHECKPOINT:([^\]]+)\]\s+(.*)")
     for line in stderr_text.splitlines():
         match = pattern.fullmatch(line)
         if match:
@@ -53,7 +53,7 @@ def run_cow_telemetry_suite() -> bool:
     exp_file = os.path.join(repo_root, "tests", "runtime", "cow_telemetry.expected")
 
     print("==================================================")
-    print("W Language B02 CoW Telemetry & Asymptotics Suite")
+    print("Wysna B02 CoW Telemetry & Asymptotics Suite")
     print("==================================================")
 
     with open(test_file, "r", encoding="utf-8") as f:
@@ -66,7 +66,7 @@ def run_cow_telemetry_suite() -> bool:
     checker.check(ast)
 
     # 1. Python Interpreter
-    print("[1/4] Testing W0 Python Interpreter...")
+    print("[1/4] Testing Wysna Seed Python Interpreter...")
     import io
     from runtime.Interpreter import Interpreter
 
@@ -74,8 +74,8 @@ def run_cow_telemetry_suite() -> bool:
     interp_err = io.StringIO()
     from runtime.Values import cow_telemetry
     cow_telemetry.reset()
-    old_metrics = os.environ.get("W_COW_METRICS")
-    os.environ["W_COW_METRICS"] = "1"
+    old_metrics = os.environ.get("WYSNA_COW_METRICS")
+    os.environ["WYSNA_COW_METRICS"] = "1"
     old_stderr = sys.stderr
     sys.stderr = interp_err
     try:
@@ -84,9 +84,9 @@ def run_cow_telemetry_suite() -> bool:
     finally:
         sys.stderr = old_stderr
         if old_metrics is None:
-            os.environ.pop("W_COW_METRICS", None)
+            os.environ.pop("WYSNA_COW_METRICS", None)
         else:
-            os.environ["W_COW_METRICS"] = old_metrics
+            os.environ["WYSNA_COW_METRICS"] = old_metrics
 
     assert interp_out.getvalue() == expected_stdout, "Interpreter stdout mismatch"
     py_checkpoints = parse_checkpoints(interp_err.getvalue())
@@ -96,21 +96,21 @@ def run_cow_telemetry_suite() -> bool:
 
     # Validate mathematical properties on interpreter checkpoints
     c_init = py_checkpoints["matrix_aliased"]
-    c_w1 = py_checkpoints["first_write"]
-    c_w2 = py_checkpoints["second_write_same_row"]
-    c_w3 = py_checkpoints["third_write_other_row"]
+    c_write1 = py_checkpoints["first_write"]
+    c_write2 = py_checkpoints["second_write_same_row"]
+    c_write3 = py_checkpoints["third_write_other_row"]
 
     # First write: N=4 outer list slots + M=10 row 0 slots = 14 slots
-    assert c_w1["detach_list"] == c_init["detach_list"] + 2, "First write must detach outer list and row 0"
-    assert c_w1["copied_slots"] == c_init["copied_slots"] + 14, "First write must copy exactly N + M = 14 slots"
+    assert c_write1["detach_list"] == c_init["detach_list"] + 2, "First write must detach outer list and row 0"
+    assert c_write1["copied_slots"] == c_init["copied_slots"] + 14, "First write must copy exactly N + M = 14 slots"
 
     # Second write to same row: O(1) in-place
-    assert c_w2["detach_list"] == c_w1["detach_list"], "Second write to same row must not detach any list"
-    assert c_w2["copied_slots"] == c_w1["copied_slots"], "Second write to same row must copy 0 additional slots"
+    assert c_write2["detach_list"] == c_write1["detach_list"], "Second write to same row must not detach any list"
+    assert c_write2["copied_slots"] == c_write1["copied_slots"], "Second write to same row must copy 0 additional slots"
 
     # Third write to other row: 0 outer list detach, 1 row detach of M=10 slots
-    assert c_w3["detach_list"] == c_w2["detach_list"] + 1, "Third write to other row must detach exactly 1 row list"
-    assert c_w3["copied_slots"] == c_w2["copied_slots"] + 10, "Third write to other row must copy exactly M = 10 slots"
+    assert c_write3["detach_list"] == c_write2["detach_list"] + 1, "Third write to other row must detach exactly 1 row list"
+    assert c_write3["copied_slots"] == c_write2["copied_slots"] + 10, "Third write to other row must copy exactly M = 10 slots"
 
     # Struct with list:
     c_st = py_checkpoints["struct_list_write"]
@@ -143,12 +143,12 @@ def run_cow_telemetry_suite() -> bool:
     assert py_checkpoints["list_struct_repeat"] == nested_after
     with tempfile.TemporaryDirectory() as tmpdir:
         env = os.environ.copy()
-        env["W_MEM_CHECK"] = "1"
-        env["W_COW_METRICS"] = "1"
+        env["WYSNA_MEM_CHECK"] = "1"
+        env["WYSNA_COW_METRICS"] = "1"
         env["ASAN_OPTIONS"] = "detect_leaks=1" if sys.platform.startswith("linux") else "detect_leaks=0"
 
-        # 2. W0 AST C99
-        print("[2/4] Testing W0 AST C99 (Clang ASan + UBSan + W_MEM_CHECK)...")
+        # 2. Wysna Seed AST C99
+        print("[2/4] Testing Wysna Seed AST C99 (Clang ASan + UBSan + WYSNA_MEM_CHECK)...")
         c_code = CCodeGen(file=test_file).generate(ast)
         c_path = os.path.join(tmpdir, "ast.c")
         bin_path = os.path.join(tmpdir, "ast_bin")
@@ -162,8 +162,8 @@ def run_cow_telemetry_suite() -> bool:
         assert logical(ast_checkpoints) == py_checkpoints, f"AST C checkpoints mismatch:\n{ast_checkpoints}\nvs\n{py_checkpoints}"
         print("  -> AST C99 passed output & checkpoints validated.")
 
-        # 3. W0 HIR C99
-        print("[3/4] Testing W0 HIR C99 (Clang ASan + UBSan + W_MEM_CHECK)...")
+        # 3. Wysna Seed HIR C99
+        print("[3/4] Testing Wysna Seed HIR C99 (Clang ASan + UBSan + WYSNA_MEM_CHECK)...")
         builder = HirBuilder(checker.interner, file_path=test_file)
         hir_mod = builder.lower(ast)
         hir_codegen = HirCCodeGen(checker.interner, file_path=test_file)
@@ -180,20 +180,20 @@ def run_cow_telemetry_suite() -> bool:
         assert logical(hir_checkpoints) == py_checkpoints, f"HIR C checkpoints mismatch:\n{hir_checkpoints}\nvs\n{py_checkpoints}"
         print("  -> HIR C99 passed output & checkpoints validated.")
 
-        # 4. W1 Self-Hosted Stage 2
-        print("[4/4] Testing W1 Self-Hosted Stage 2 (Clang ASan + UBSan + W_MEM_CHECK)...")
-        w1_bin = ensure_selfhost_w1_binary(repo_root)
-        w1_c_path = os.path.join(tmpdir, "w1.c")
-        w1_bin_path = os.path.join(tmpdir, "w1_bin")
-        subprocess.run([w1_bin, test_file, w1_c_path], check=True, cwd=repo_root, timeout=60)
-        subprocess.run([os.environ.get("CC", "cc"), "-std=c99", "-fsanitize=address,undefined", "-fno-omit-frame-pointer", f"-I{repo_root}", w1_c_path, "-o", w1_bin_path], check=True, timeout=60)
-        res_w1 = subprocess.run([w1_bin_path], capture_output=True, text=True, env=env, timeout=30)
-        assert res_w1.returncode == 0, f"W1 exited with error:\n{res_w1.stderr}"
-        assert res_w1.stdout == expected_stdout, "W1 stdout mismatch"
-        w1_checkpoints = parse_checkpoints(res_w1.stderr)
-        assert logical(w1_checkpoints) == py_checkpoints, f"W1 checkpoints mismatch:\n{w1_checkpoints}\nvs\n{py_checkpoints}"
-        assert ast_checkpoints == hir_checkpoints == w1_checkpoints, "Native physical metrics disagree"
-        print("  -> W1 Stage 2 passed output & checkpoints validated.")
+        # 4. Wysna Compiler Self-Hosted Stage 2
+        print("[4/4] Testing Wysna Compiler Stage 2 (Clang ASan + UBSan + WYSNA_MEM_CHECK)...")
+        selfhost_bin = ensure_selfhost_compiler_binary(repo_root)
+        selfhost_c_path = os.path.join(tmpdir, "selfhost.c")
+        selfhost_bin_path = os.path.join(tmpdir, "selfhost_bin")
+        subprocess.run([selfhost_bin, test_file, selfhost_c_path], check=True, cwd=repo_root, timeout=60)
+        subprocess.run([os.environ.get("CC", "cc"), "-std=c99", "-fsanitize=address,undefined", "-fno-omit-frame-pointer", f"-I{repo_root}", selfhost_c_path, "-o", selfhost_bin_path], check=True, timeout=60)
+        res_selfhost = subprocess.run([selfhost_bin_path], capture_output=True, text=True, env=env, timeout=30)
+        assert res_selfhost.returncode == 0, f"Wysna Compiler exited with error:\n{res_selfhost.stderr}"
+        assert res_selfhost.stdout == expected_stdout, "Wysna Compiler stdout mismatch"
+        selfhost_checkpoints = parse_checkpoints(res_selfhost.stderr)
+        assert logical(selfhost_checkpoints) == py_checkpoints, f"Wysna Compiler checkpoints mismatch:\n{selfhost_checkpoints}\nvs\n{py_checkpoints}"
+        assert ast_checkpoints == hir_checkpoints == selfhost_checkpoints, "Native physical metrics disagree"
+        print("  -> Wysna Compiler Stage 2 passed output & checkpoints validated.")
 
     from tests.unit.test_cow_scaling import run_scaling_tests
     run_scaling_tests()

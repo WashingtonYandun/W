@@ -1,7 +1,7 @@
 """Pure exhaustiveness rules shared by checked AST and HIR consumers."""
 from node.NodeType import (WildcardPattern, IdentifierPattern, ErrorTypePattern,
                            EnumPattern, TuplePattern, LiteralPattern, NoneLiteral, BoolLiteral)
-from checker.WType import (OptionalType, ResultType, EnumType, ErrorUnionType,
+from checker.WysnaType import (OptionalType, ResultType, EnumType, ErrorUnionType,
                            TupleType, BoolType)
 
 
@@ -73,7 +73,7 @@ def pattern_matrix_exhaustive(types, rows, interner=None):
             elif (
                 isinstance(first, ErrorUnionType)
                 and isinstance(pattern, HirErrorTypePattern)
-                and error_pattern_name(interner.to_wtype(pattern.error_type_id)) == name
+                and error_pattern_name(interner.to_type(pattern.error_type_id)) == name
             ):
                 specialized.append([pattern.binding] + row[1:])
             elif isinstance(pattern, EnumPattern) and pattern.variant == name:

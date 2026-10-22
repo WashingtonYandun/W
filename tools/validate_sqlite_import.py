@@ -17,7 +17,7 @@ import time
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
-from main import ensure_selfhost_w1_binary
+from main import ensure_selfhost_compiler_binary
 from tools.validate_sqlite_ffi import execute
 
 PILOT = ROOT / 'examples/ffi/sqlite'
@@ -34,10 +34,10 @@ def journal(path):
 
 
 def measured(binary, source, database, sanitize, allocation_profile=False):
-    environment = dict(os.environ, W_SQLITE_DB=str(database), W_MEM_CHECK='1')
-    environment.pop('W_MEM_STATS', None)
+    environment = dict(os.environ, WYSNA_SQLITE_DB=str(database), WYSNA_MEM_CHECK='1')
+    environment.pop('WYSNA_MEM_STATS', None)
     if allocation_profile:
-        environment['W_MEM_STATS'] = '1'
+        environment['WYSNA_MEM_STATS'] = '1'
     if sanitize:
         environment['ASAN_OPTIONS'] = 'detect_leaks=' + ('1' if sys.platform.startswith('linux') else '0')
         environment['UBSAN_OPTIONS'] = 'halt_on_error=1:print_stacktrace=1'
@@ -46,7 +46,7 @@ def measured(binary, source, database, sanitize, allocation_profile=False):
                       str(binary)] + arguments, environment)
     record = json.loads(result.stdout)
     if allocation_profile:
-        match = re.fullmatch(r'\[W_MEM_STATS\] alloc=(\d+) free=(\d+) retain=(\d+) release=(\d+) live=(\d+)\n',
+        match = re.fullmatch(r'\[WYSNA_MEM_STATS\] alloc=(\d+) free=(\d+) retain=(\d+) release=(\d+) live=(\d+)\n',
                              record['stderr'])
         assert match, record
         record['runtime_memory'] = dict(zip(('alloc', 'free', 'retain', 'release', 'live'),
@@ -65,7 +65,7 @@ def validate(rows=10000, samples=3, sanitize=False):
     if sanitize:
         flags += ['-fsanitize=address,undefined', '-fno-omit-frame-pointer']
     bootstrap_started = time.perf_counter()
-    w1 = ensure_selfhost_w1_binary(str(ROOT))
+    selfhost_bin = ensure_selfhost_compiler_binary(str(ROOT))
     bootstrap_seconds = time.perf_counter() - bootstrap_started
     report = {'rows': rows, 'samples': samples, 'sanitize': sanitize,
               'platform': sys.platform, 'compiler': execute(compiler + ['--version']).stdout,
@@ -80,15 +80,15 @@ def validate(rows=10000, samples=3, sanitize=False):
         values = [(index, 4294967296 + index * 10) for index in range(rows)]
         csv.write_bytes(('id,value\r\n' + ''.join(f'{key},{value}\r\n' for key, value in values)).encode())
         total = sum(value for _, value in values)
-        for backend in ('c', 'ast', 'hir', 'w1'):
+        for backend in ('c', 'ast', 'hir', 'selfhost'):
             binary = directory / backend
             started = time.perf_counter()
             if backend == 'c':
                 source = PILOT / 'import_reference.c'
             else:
                 source = directory / (backend + '.c')
-                if backend == 'w1':
-                    execute([w1, str(PILOT / 'import_csv.wysna'), str(source)])
+                if backend == 'selfhost':
+                    execute([selfhost_bin, str(PILOT / 'import_csv.wysna'), str(source)])
                 else:
                     execute([sys.executable, str(ROOT / 'main.py'), 'emit-c', '--backend=' + backend,
                              str(PILOT / 'import_csv.wysna'), '-o', str(source)])
@@ -179,14 +179,14 @@ def main():
     parser.add_argument('--rows', type=int, default=10000)
     parser.add_argument('--samples', type=int, default=3)
     parser.add_argument('--sanitize', action='store_true')
-    parser.add_argument('--report', type=Path, default=ROOT / '.w_cache/sqlite-import/report.json')
+    parser.add_argument('--report', type=Path, default=ROOT / '.wysna_cache/sqlite-import/report.json')
     arguments = parser.parse_args()
     if not 1 <= arguments.rows <= 100000 or not 1 <= arguments.samples <= 100:
         parser.error('rows must be 1..100000 and samples must be 1..100')
     report = validate(arguments.rows, arguments.samples, arguments.sanitize)
     arguments.report.parent.mkdir(parents=True, exist_ok=True)
     arguments.report.write_text(json.dumps(report, indent=2))
-    print(f'SQLite CSV: C/AST/HIR/direct W1 passed; {arguments.rows} rows, atomic rollback, persistence, zero live handles')
+    print(f'SQLite CSV: C/AST/HIR/direct selfhost passed; {arguments.rows} rows, atomic rollback, persistence, zero live handles')
     print(f'Report: {arguments.report}')
 
 

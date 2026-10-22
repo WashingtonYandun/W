@@ -4,11 +4,11 @@ import math
 import re
 import sys
 from typing import Any, Dict, List, Optional, Set, TextIO
-from error.Error import WRuntimeError
+from error.Error import WysnaRuntimeError
 from runtime.Values import (
-    WValue, WInt, WFloat, WBool, WStr, WUnit, WNone,
-    WList, WDict, WTuple, WStructInstance, WEnumValue, WEnumNamespace,
-    WOk, WErr, WWeak, WObjectInstance, WFunction, WNativeFunction, cow_telemetry
+    WysnaValue, WysnaInt, WysnaFloat, WysnaBool, WysnaStr, WysnaUnit, WysnaNone,
+    WysnaList, WysnaDict, WysnaTuple, WysnaStructInstance, WysnaEnumValue, WysnaEnumNamespace,
+    WysnaOk, WysnaErr, WysnaWeak, WysnaObjectInstance, WysnaFunction, WysnaNativeFunction, cow_telemetry
 )
 
 # ==========================================
@@ -16,7 +16,7 @@ from runtime.Values import (
 # ==========================================
 
 class ReturnSignal(Exception):
-    def __init__(self, value: WValue):
+    def __init__(self, value: WysnaValue):
         self.value = value
 
 
@@ -30,7 +30,7 @@ class ContinueSignal(Exception):
 
 class PropagationSignal(Exception):
     """Signal used by postfix ? unwrapping for early return/propagation."""
-    def __init__(self, value: WValue, is_error: bool = False):
+    def __init__(self, value: WysnaValue, is_error: bool = False):
         self.value = value
         self.is_error = is_error
 
@@ -43,31 +43,31 @@ class Environment:
     def __init__(self, parent: Optional['Environment'] = None, is_function_boundary: bool = False):
         self.parent = parent
         self.is_function_boundary = is_function_boundary
-        self.bindings: Dict[str, WValue] = {}
+        self.bindings: Dict[str, WysnaValue] = {}
         self.mutables: Set[str] = set()
 
-    def declare(self, name: str, value: WValue, is_mut: bool = False) -> None:
+    def declare(self, name: str, value: WysnaValue, is_mut: bool = False) -> None:
         self.bindings[name] = value.clone_value()
         if is_mut:
             self.mutables.add(name)
 
-    def assign(self, name: str, value: WValue) -> None:
+    def assign(self, name: str, value: WysnaValue) -> None:
         if name in self.bindings:
             if name not in self.mutables:
-                raise WRuntimeError(f"Cannot assign to immutable binding '{name}'")
+                raise WysnaRuntimeError(f"Cannot assign to immutable binding '{name}'")
             self.bindings[name] = value.clone_value()
             return
         if self.parent is not None:
             self.parent.assign(name, value)
             return
-        raise WRuntimeError(f"Undefined variable '{name}'")
+        raise WysnaRuntimeError(f"Undefined variable '{name}'")
 
-    def lookup(self, name: str) -> WValue:
+    def lookup(self, name: str) -> WysnaValue:
         if name in self.bindings:
             return self.bindings[name]
         if self.parent is not None:
             return self.parent.lookup(name)
-        raise WRuntimeError(f"Undefined variable '{name}'")
+        raise WysnaRuntimeError(f"Undefined variable '{name}'")
 
     def exists(self, name: str) -> bool:
         if name in self.bindings:
@@ -77,15 +77,15 @@ class Environment:
         return False
 
     # Backward compatibility aliases
-    def declare_var(self, name: str, value: WValue) -> WValue:
+    def declare_var(self, name: str, value: WysnaValue) -> WysnaValue:
         self.declare(name, value, is_mut=True)
         return value
 
-    def assign_var(self, name: str, value: WValue) -> WValue:
+    def assign_var(self, name: str, value: WysnaValue) -> WysnaValue:
         self.assign(name, value)
         return value
 
-    def lookup_var(self, name: str) -> WValue:
+    def lookup_var(self, name: str) -> WysnaValue:
         return self.lookup(name)
 
 
@@ -95,121 +95,121 @@ def create_global_environment(stdout: Optional[TextIO] = None) -> Environment:
     out = stdout if stdout is not None else sys.stdout
 
     # 1. I/O: print
-    def print_fn(args: List[WValue]) -> WValue:
+    def print_fn(args: List[WysnaValue]) -> WysnaValue:
         rendered: List[str] = []
         for arg in args:
-            if isinstance(arg, WStr):
+            if isinstance(arg, WysnaStr):
                 rendered.append(arg.value)
             else:
                 rendered.append(str(arg))
         out.write(" ".join(rendered) + "\n")
         out.flush()
-        return WUnit()
+        return WysnaUnit()
 
-    def eprint_fn(args: List[WValue]) -> WValue:
+    def eprint_fn(args: List[WysnaValue]) -> WysnaValue:
         rendered: List[str] = []
         for arg in args:
-            if isinstance(arg, WStr):
+            if isinstance(arg, WysnaStr):
                 rendered.append(arg.value)
             else:
                 rendered.append(str(arg))
         msg = " ".join(rendered)
-        if (os.environ.get("W_COW_METRICS") == "1" and len(args) == 1
-                and isinstance(args[0], WStr) and msg.startswith("__COW_CHECKPOINT__:")):
+        if (os.environ.get("WYSNA_COW_METRICS") == "1" and len(args) == 1
+                and isinstance(args[0], WysnaStr) and msg.startswith("__COW_CHECKPOINT__:")):
             label = msg[19:]
             sys.stderr.write(
-                f"[W_COW_CHECKPOINT:{label}] detach_list={cow_telemetry.detach_list} "
+                f"[WYSNA_COW_CHECKPOINT:{label}] detach_list={cow_telemetry.detach_list} "
                 f"detach_dict={cow_telemetry.detach_dict} detach_struct={cow_telemetry.detach_struct} "
                 f"copied_slots={cow_telemetry.copied_slots}\n"
             )
         else:
             sys.stderr.write(msg + "\n")
         sys.stderr.flush()
-        return WUnit()
+        return WysnaUnit()
 
-    def exit_fn(args: List[WValue]) -> WValue:
-        code = int(args[0].value) if args and isinstance(args[0], WInt) else 0
+    def exit_fn(args: List[WysnaValue]) -> WysnaValue:
+        code = int(args[0].value) if args and isinstance(args[0], WysnaInt) else 0
         sys.exit(code)
 
-    env.declare("print", WNativeFunction("print", print_fn))
-    env.declare("eprint", WNativeFunction("eprint", eprint_fn))
-    env.declare("exit", WNativeFunction("exit", exit_fn))
+    env.declare("print", WysnaNativeFunction("print", print_fn))
+    env.declare("eprint", WysnaNativeFunction("eprint", eprint_fn))
+    env.declare("exit", WysnaNativeFunction("exit", exit_fn))
 
     # 2. Collections: len
-    def len_fn(args: List[WValue]) -> WValue:
+    def len_fn(args: List[WysnaValue]) -> WysnaValue:
         if len(args) != 1:
-            raise WRuntimeError("len() takes exactly 1 argument")
+            raise WysnaRuntimeError("len() takes exactly 1 argument")
         arg = args[0]
-        if isinstance(arg, WList):
-            return WInt(len(arg))
-        if isinstance(arg, WDict):
-            return WInt(len(arg))
-        if isinstance(arg, WTuple):
-            return WInt(len(arg.elements))
-        if isinstance(arg, WStr):
-            return WInt(len(arg.value))
-        raise WRuntimeError(f"len() not supported for '{type(arg).__name__}'")
+        if isinstance(arg, WysnaList):
+            return WysnaInt(len(arg))
+        if isinstance(arg, WysnaDict):
+            return WysnaInt(len(arg))
+        if isinstance(arg, WysnaTuple):
+            return WysnaInt(len(arg.elements))
+        if isinstance(arg, WysnaStr):
+            return WysnaInt(len(arg.value))
+        raise WysnaRuntimeError(f"len() not supported for '{type(arg).__name__}'")
 
     # 3. enumerate: list -> list of (int, T)
-    def enumerate_fn(args: List[WValue]) -> WValue:
+    def enumerate_fn(args: List[WysnaValue]) -> WysnaValue:
         if len(args) != 1:
-            raise WRuntimeError("enumerate() takes exactly 1 argument")
+            raise WysnaRuntimeError("enumerate() takes exactly 1 argument")
         arg = args[0]
-        if not isinstance(arg, WList):
-            raise WRuntimeError("enumerate() expects list argument")
-        tuples = [WTuple([WInt(i), elem]) for i, elem in enumerate(arg.storage.data)]
-        return WList(elements=tuples)
+        if not isinstance(arg, WysnaList):
+            raise WysnaRuntimeError("enumerate() expects list argument")
+        tuples = [WysnaTuple([WysnaInt(i), elem]) for i, elem in enumerate(arg.storage.data)]
+        return WysnaList(elements=tuples)
 
     # 4. dict_items: dict -> list of (K, V)
-    def dict_items_fn(args: List[WValue]) -> WValue:
+    def dict_items_fn(args: List[WysnaValue]) -> WysnaValue:
         if len(args) != 1:
-            raise WRuntimeError("dict_items() takes exactly 1 argument")
+            raise WysnaRuntimeError("dict_items() takes exactly 1 argument")
         arg = args[0]
-        if not isinstance(arg, WDict):
-            raise WRuntimeError("dict_items() expects dict argument")
+        if not isinstance(arg, WysnaDict):
+            raise WysnaRuntimeError("dict_items() expects dict argument")
         tuples = []
         for k, v in arg.storage.data.items():
             k_val = k.clone_value()
-            tuples.append(WTuple([k_val, v]))
-        return WList(elements=tuples)
+            tuples.append(WysnaTuple([k_val, v]))
+        return WysnaList(elements=tuples)
 
     # 5. Type conversions
-    def int_fn(args: List[WValue]) -> WValue:
+    def int_fn(args: List[WysnaValue]) -> WysnaValue:
         if len(args) != 1:
-            raise WRuntimeError("int() takes exactly 1 argument")
+            raise WysnaRuntimeError("int() takes exactly 1 argument")
         arg = args[0]
-        if isinstance(arg, WBool):
-            return WInt(1 if arg.value else 0)
-        if isinstance(arg, WInt):
+        if isinstance(arg, WysnaBool):
+            return WysnaInt(1 if arg.value else 0)
+        if isinstance(arg, WysnaInt):
             return arg
-        if isinstance(arg, WFloat):
+        if isinstance(arg, WysnaFloat):
             if not math.isfinite(arg.value) or not -9223372036854775808 <= arg.value < 9223372036854775808:
-                raise WRuntimeError("Invalid int conversion", code="W4003")
-            return WInt(int(arg.value))
-        if isinstance(arg, WStr):
+                raise WysnaRuntimeError("Invalid int conversion", code="W4003")
+            return WysnaInt(int(arg.value))
+        if isinstance(arg, WysnaStr):
             text = arg.value.strip(" \t\n\r\v\f")
             if re.fullmatch(r"[+-]?[0-9]+", text) is None:
-                raise WRuntimeError("Invalid int conversion", code="W4003")
+                raise WysnaRuntimeError("Invalid int conversion", code="W4003")
             significant = text.lstrip('+-').lstrip('0') or '0'
             if len(significant) > 19:
-                raise WRuntimeError("Invalid int conversion", code="W4003")
+                raise WysnaRuntimeError("Invalid int conversion", code="W4003")
             value = int(significant) * (-1 if text.startswith('-') else 1)
             if not -9223372036854775808 <= value <= 9223372036854775807:
-                raise WRuntimeError("Invalid int conversion", code="W4003")
-            return WInt(value)
-        raise WRuntimeError(f"Cannot convert '{type(arg).__name__}' to int")
+                raise WysnaRuntimeError("Invalid int conversion", code="W4003")
+            return WysnaInt(value)
+        raise WysnaRuntimeError(f"Cannot convert '{type(arg).__name__}' to int")
 
-    def float_fn(args: List[WValue]) -> WValue:
+    def float_fn(args: List[WysnaValue]) -> WysnaValue:
         if len(args) != 1:
-            raise WRuntimeError("float() takes exactly 1 argument")
+            raise WysnaRuntimeError("float() takes exactly 1 argument")
         arg = args[0]
-        if isinstance(arg, WBool):
-            return WFloat(1.0 if arg.value else 0.0)
-        if isinstance(arg, WFloat):
+        if isinstance(arg, WysnaBool):
+            return WysnaFloat(1.0 if arg.value else 0.0)
+        if isinstance(arg, WysnaFloat):
             return arg
-        if isinstance(arg, WInt):
-            return WFloat(float(arg.value))
-        if isinstance(arg, WStr):
+        if isinstance(arg, WysnaInt):
+            return WysnaFloat(float(arg.value))
+        if isinstance(arg, WysnaStr):
             try:
                 if "\0" in arg.value or "_" in arg.value:
                     raise ValueError()
@@ -217,156 +217,156 @@ def create_global_environment(stdout: Optional[TextIO] = None) -> Environment:
                 grammar = r"[+-]?(?:(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)(?:[eE][+-]?[0-9]+)?|inf(?:inity)?|nan)"
                 if re.fullmatch(grammar, text, re.IGNORECASE | re.ASCII) is None:
                     raise ValueError()
-                return WFloat(float(text))
+                return WysnaFloat(float(text))
             except ValueError:
-                raise WRuntimeError("Invalid float conversion", code="W4003")
-        raise WRuntimeError(f"Cannot convert '{type(arg).__name__}' to float")
+                raise WysnaRuntimeError("Invalid float conversion", code="W4003")
+        raise WysnaRuntimeError(f"Cannot convert '{type(arg).__name__}' to float")
 
-    def str_fn(args: List[WValue]) -> WValue:
+    def str_fn(args: List[WysnaValue]) -> WysnaValue:
         if len(args) != 1:
-            raise WRuntimeError("str() takes exactly 1 argument")
+            raise WysnaRuntimeError("str() takes exactly 1 argument")
         arg = args[0]
-        if isinstance(arg, WStr):
+        if isinstance(arg, WysnaStr):
             return arg
-        return WStr(str(arg))
+        return WysnaStr(str(arg))
 
-    def ord_fn(args: List[WValue]) -> WValue:
+    def ord_fn(args: List[WysnaValue]) -> WysnaValue:
         if len(args) != 1:
-            raise WRuntimeError("ord() takes exactly 1 argument")
+            raise WysnaRuntimeError("ord() takes exactly 1 argument")
         arg = args[0]
-        if not isinstance(arg, WStr) or len(arg.value) == 0:
-            raise WRuntimeError("ord() expects non-empty str argument")
-        return WInt(ord(arg.value[0]))
+        if not isinstance(arg, WysnaStr) or len(arg.value) == 0:
+            raise WysnaRuntimeError("ord() expects non-empty str argument")
+        return WysnaInt(ord(arg.value[0]))
 
-    def chr_fn(args: List[WValue]) -> WValue:
+    def chr_fn(args: List[WysnaValue]) -> WysnaValue:
         if len(args) != 1:
-            raise WRuntimeError("chr() takes exactly 1 argument")
+            raise WysnaRuntimeError("chr() takes exactly 1 argument")
         arg = args[0]
-        if not isinstance(arg, WInt):
-            raise WRuntimeError("chr() expects int argument")
+        if not isinstance(arg, WysnaInt):
+            raise WysnaRuntimeError("chr() expects int argument")
         if arg.value < 0 or arg.value > 0x10ffff or 0xd800 <= arg.value <= 0xdfff:
-            raise WRuntimeError("chr() expects a Unicode scalar", code="W4003")
-        return WStr(chr(arg.value))
+            raise WysnaRuntimeError("chr() expects a Unicode scalar", code="W4003")
+        return WysnaStr(chr(arg.value))
 
-    def slice_fn(args: List[WValue]) -> WValue:
+    def slice_fn(args: List[WysnaValue]) -> WysnaValue:
         if len(args) != 3:
-            raise WRuntimeError("slice() takes exactly 3 arguments (value, start, end)")
+            raise WysnaRuntimeError("slice() takes exactly 3 arguments (value, start, end)")
         s_arg, start_arg, end_arg = args[0], args[1], args[2]
-        if not isinstance(start_arg, WInt) or not isinstance(end_arg, WInt):
-            raise WRuntimeError("slice() expects (str | list, int, int)")
-        if isinstance(s_arg, WList):
+        if not isinstance(start_arg, WysnaInt) or not isinstance(end_arg, WysnaInt):
+            raise WysnaRuntimeError("slice() expects (str | list, int, int)")
+        if isinstance(s_arg, WysnaList):
             start = max(0, start_arg.value)
             end = min(len(s_arg.storage.data), end_arg.value)
-            return WList(elements=list(s_arg.storage.data[start:end]) if end > start else [])
-        if isinstance(s_arg, WStr):
+            return WysnaList(elements=list(s_arg.storage.data[start:end]) if end > start else [])
+        if isinstance(s_arg, WysnaStr):
             start = max(0, start_arg.value)
             end = min(len(s_arg.value), end_arg.value)
-            return WStr(s_arg.value[start:end] if end > start else "")
-        raise WRuntimeError("slice() expects str or list")
+            return WysnaStr(s_arg.value[start:end] if end > start else "")
+        raise WysnaRuntimeError("slice() expects str or list")
 
-    def bytes_fn(args: List[WValue]) -> WValue:
+    def bytes_fn(args: List[WysnaValue]) -> WysnaValue:
         if len(args) != 1:
-            raise WRuntimeError("bytes() takes exactly 1 argument")
+            raise WysnaRuntimeError("bytes() takes exactly 1 argument")
         arg = args[0]
-        if not isinstance(arg, WStr):
-            raise WRuntimeError("bytes() expects str argument")
-        return WList(elements=[WInt(b) for b in arg.value.encode('utf-8')])
+        if not isinstance(arg, WysnaStr):
+            raise WysnaRuntimeError("bytes() expects str argument")
+        return WysnaList(elements=[WysnaInt(b) for b in arg.value.encode('utf-8')])
 
-    def join_strings_fn(args: List[WValue]) -> WValue:
+    def join_strings_fn(args: List[WysnaValue]) -> WysnaValue:
         parts, separator = args
         strings = [part.value for part in parts.storage.data]
-        return WStr(separator.value.join(strings))
+        return WysnaStr(separator.value.join(strings))
 
-    env.declare("join_strings", WNativeFunction("join_strings", join_strings_fn))
+    env.declare("join_strings", WysnaNativeFunction("join_strings", join_strings_fn))
 
     # 6. File I/O
-    def read_file_fn(args: List[WValue]) -> WValue:
+    def read_file_fn(args: List[WysnaValue]) -> WysnaValue:
         if len(args) != 1:
-            raise WRuntimeError("read_file() takes exactly 1 argument")
+            raise WysnaRuntimeError("read_file() takes exactly 1 argument")
         arg = args[0]
-        if not isinstance(arg, WStr):
-            raise WRuntimeError("read_file() expects str path")
+        if not isinstance(arg, WysnaStr):
+            raise WysnaRuntimeError("read_file() expects str path")
         try:
             with open(arg.value, 'r', encoding='utf-8', newline='') as f:
                 content = f.read()
-            return WOk(WStr(content))
+            return WysnaOk(WysnaStr(content))
         except Exception as e:
-            return WErr(WStructInstance("IoError", fields={"message": WStr(str(e))}))
+            return WysnaErr(WysnaStructInstance("IoError", fields={"message": WysnaStr(str(e))}))
 
-    def write_file_fn(args: List[WValue]) -> WValue:
+    def write_file_fn(args: List[WysnaValue]) -> WysnaValue:
         if len(args) != 2:
-            raise WRuntimeError("write_file() takes exactly 2 arguments (path, content)")
+            raise WysnaRuntimeError("write_file() takes exactly 2 arguments (path, content)")
         p_arg, c_arg = args[0], args[1]
-        if not isinstance(p_arg, WStr) or not isinstance(c_arg, WStr):
-            raise WRuntimeError("write_file() expects str path and str content")
+        if not isinstance(p_arg, WysnaStr) or not isinstance(c_arg, WysnaStr):
+            raise WysnaRuntimeError("write_file() expects str path and str content")
         try:
             with open(p_arg.value, 'w', encoding='utf-8') as f:
                 f.write(c_arg.value)
-            return WOk(WUnit())
+            return WysnaOk(WysnaUnit())
         except Exception as e:
-            return WErr(WStructInstance("IoError", fields={"message": WStr(str(e))}))
+            return WysnaErr(WysnaStructInstance("IoError", fields={"message": WysnaStr(str(e))}))
 
-    def args_fn(args_list: List[WValue]) -> WValue:
-        return WList(elements=[WStr(a) for a in sys.argv])
+    def args_fn(args_list: List[WysnaValue]) -> WysnaValue:
+        return WysnaList(elements=[WysnaStr(a) for a in sys.argv])
 
-    def some_fn(args: List[WValue]) -> WValue:
+    def some_fn(args: List[WysnaValue]) -> WysnaValue:
         if len(args) != 1:
-            raise WRuntimeError("Some() takes exactly 1 argument")
-        return WEnumValue("Option", "Some", [args[0]])
+            raise WysnaRuntimeError("Some() takes exactly 1 argument")
+        return WysnaEnumValue("Option", "Some", [args[0]])
 
-    def ok_fn(args: List[WValue]) -> WValue:
+    def ok_fn(args: List[WysnaValue]) -> WysnaValue:
         if len(args) != 1:
-            raise WRuntimeError("Ok() takes exactly 1 argument")
-        return WOk(args[0])
+            raise WysnaRuntimeError("Ok() takes exactly 1 argument")
+        return WysnaOk(args[0])
 
-    def err_fn(args: List[WValue]) -> WValue:
+    def err_fn(args: List[WysnaValue]) -> WysnaValue:
         if len(args) != 1:
-            raise WRuntimeError("Err() takes exactly 1 argument")
-        return WErr(args[0])
+            raise WysnaRuntimeError("Err() takes exactly 1 argument")
+        return WysnaErr(args[0])
 
-    def weak_fn(args: List[WValue]) -> WValue:
-        if len(args) != 1 or not isinstance(args[0], WObjectInstance):
-            raise WRuntimeError("weak expects one class object")
-        return WWeak(args[0])
+    def weak_fn(args: List[WysnaValue]) -> WysnaValue:
+        if len(args) != 1 or not isinstance(args[0], WysnaObjectInstance):
+            raise WysnaRuntimeError("weak expects one class object")
+        return WysnaWeak(args[0])
 
-    def upgrade_fn(args: List[WValue]) -> WValue:
-        if len(args) != 1 or not isinstance(args[0], WWeak):
-            raise WRuntimeError("upgrade expects one weak reference")
+    def upgrade_fn(args: List[WysnaValue]) -> WysnaValue:
+        if len(args) != 1 or not isinstance(args[0], WysnaWeak):
+            raise WysnaRuntimeError("upgrade expects one weak reference")
         value = args[0].reference()
-        return value if value is not None else WNone()
+        return value if value is not None else WysnaNone()
 
     # Register builtins
-    env.declare("print", WNativeFunction("print", print_fn), is_mut=False)
-    env.declare("len", WNativeFunction("len", len_fn), is_mut=False)
-    env.declare("enumerate", WNativeFunction("enumerate", enumerate_fn), is_mut=False)
-    env.declare("dict_items", WNativeFunction("dict_items", dict_items_fn), is_mut=False)
-    env.declare("int", WNativeFunction("int", int_fn), is_mut=False)
-    env.declare("float", WNativeFunction("float", float_fn), is_mut=False)
-    env.declare("str", WNativeFunction("str", str_fn), is_mut=False)
-    env.declare("ord", WNativeFunction("ord", ord_fn), is_mut=False)
-    env.declare("chr", WNativeFunction("chr", chr_fn), is_mut=False)
-    env.declare("slice", WNativeFunction("slice", slice_fn), is_mut=False)
-    env.declare("bytes", WNativeFunction("bytes", bytes_fn), is_mut=False)
-    env.declare("read_file", WNativeFunction("read_file", read_file_fn), is_mut=False)
-    env.declare("write_file", WNativeFunction("write_file", write_file_fn), is_mut=False)
-    env.declare("args", WNativeFunction("args", args_fn), is_mut=False)
+    env.declare("print", WysnaNativeFunction("print", print_fn), is_mut=False)
+    env.declare("len", WysnaNativeFunction("len", len_fn), is_mut=False)
+    env.declare("enumerate", WysnaNativeFunction("enumerate", enumerate_fn), is_mut=False)
+    env.declare("dict_items", WysnaNativeFunction("dict_items", dict_items_fn), is_mut=False)
+    env.declare("int", WysnaNativeFunction("int", int_fn), is_mut=False)
+    env.declare("float", WysnaNativeFunction("float", float_fn), is_mut=False)
+    env.declare("str", WysnaNativeFunction("str", str_fn), is_mut=False)
+    env.declare("ord", WysnaNativeFunction("ord", ord_fn), is_mut=False)
+    env.declare("chr", WysnaNativeFunction("chr", chr_fn), is_mut=False)
+    env.declare("slice", WysnaNativeFunction("slice", slice_fn), is_mut=False)
+    env.declare("bytes", WysnaNativeFunction("bytes", bytes_fn), is_mut=False)
+    env.declare("read_file", WysnaNativeFunction("read_file", read_file_fn), is_mut=False)
+    env.declare("write_file", WysnaNativeFunction("write_file", write_file_fn), is_mut=False)
+    env.declare("args", WysnaNativeFunction("args", args_fn), is_mut=False)
 
-    env.declare("weak", WNativeFunction("weak", weak_fn), is_mut=False)
-    env.declare("upgrade", WNativeFunction("upgrade", upgrade_fn), is_mut=False)
-    env.declare("Some", WNativeFunction("Some", some_fn), is_mut=False)
-    env.declare("Ok", WNativeFunction("Ok", ok_fn), is_mut=False)
-    env.declare("Err", WNativeFunction("Err", err_fn), is_mut=False)
-    env.declare("None", WEnumValue("Option", "None"), is_mut=False)
-    env.declare("Option", WEnumNamespace("Option", ["Some", "None"]), is_mut=False)
-    env.declare("Result", WEnumNamespace("Result", ["Ok", "Err"]), is_mut=False)
+    env.declare("weak", WysnaNativeFunction("weak", weak_fn), is_mut=False)
+    env.declare("upgrade", WysnaNativeFunction("upgrade", upgrade_fn), is_mut=False)
+    env.declare("Some", WysnaNativeFunction("Some", some_fn), is_mut=False)
+    env.declare("Ok", WysnaNativeFunction("Ok", ok_fn), is_mut=False)
+    env.declare("Err", WysnaNativeFunction("Err", err_fn), is_mut=False)
+    env.declare("None", WysnaEnumValue("Option", "None"), is_mut=False)
+    env.declare("Option", WysnaEnumNamespace("Option", ["Some", "None"]), is_mut=False)
+    env.declare("Result", WysnaEnumNamespace("Result", ["Ok", "Err"]), is_mut=False)
 
     return env
 
 
 def _dump_cow_metrics():
-    if os.environ.get("W_COW_METRICS") == "1":
+    if os.environ.get("WYSNA_COW_METRICS") == "1":
         sys.stderr.write(
-            f"[W_COW_METRICS] detach_list={cow_telemetry.detach_list} "
+            f"[WYSNA_COW_METRICS] detach_list={cow_telemetry.detach_list} "
             f"detach_dict={cow_telemetry.detach_dict} detach_struct={cow_telemetry.detach_struct} "
             f"copied_slots={cow_telemetry.copied_slots}\n"
         )

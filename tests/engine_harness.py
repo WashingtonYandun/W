@@ -12,7 +12,7 @@ from common.Platform import compiler_command, executable_name
 from error.Error import DIAGNOSTIC_CODES
 
 ROOT = Path(__file__).resolve().parents[1]
-ENGINES = ('interpreter', 'ast', 'hir', 'w1')
+ENGINES = ('interpreter', 'ast', 'hir', 'selfhost')
 PROFILES = json.loads((ROOT / 'tests/engine_profiles.json').read_text())
 EXPANSION_DIRS = {'regressions', 'functions', 'ffi', 'stdlib', 'generic_oop'}
 
@@ -52,7 +52,8 @@ def feature_for(label):
 
 
 def unsupported_reason(label, engine):
-    return PROFILES['features'][feature_for(label)].get(engine, '')
+    feature = feature_for(label)
+    return PROFILES.get('features', {}).get(feature, {}).get(engine, '')
 
 
 class EngineResult:
@@ -108,7 +109,7 @@ def execute(command, directory, phase, timeout, env=None):
     return record
 
 
-def run_engine(engine, source, label, w1_bin, directory, sanitize=False, run_timeout=30):
+def run_engine(engine, source, label, selfhost_bin, directory, sanitize=False, run_timeout=30):
     directory = Path(directory) / engine
     directory.mkdir(parents=True, exist_ok=True)
     source_path = directory / 'source.wysna'
@@ -117,9 +118,9 @@ def run_engine(engine, source, label, w1_bin, directory, sanitize=False, run_tim
     driver = [sys.executable, str(ROOT / 'main.py')]
     if engine == 'interpreter':
         command = driver + ['run', str(source_path)]
-    elif engine == 'w1':
-        # Direct invocation: no W0 parser/checker runs on the input first.
-        command = [str(w1_bin), str(source_path), str(c_path)]
+    elif engine == 'selfhost':
+        # Direct invocation: no Seed parser/checker runs on the input first.
+        command = [str(selfhost_bin), str(source_path), str(c_path)]
     elif engine == 'ast':
         command = driver + ['emit-c', '--backend=ast', str(source_path), '-o', str(c_path)]
     elif engine == 'hir':
@@ -143,7 +144,7 @@ def run_engine(engine, source, label, w1_bin, directory, sanitize=False, run_tim
     if compiled['returncode'] != 0:
         return EngineResult(engine, stderr=compiled['stderr'], exit_code=compiled['returncode'],
                             compile_ok=False, runtime_ok=False, infrastructure_error='C compilation failed')
-    env = dict(os.environ, W_MEM_CHECK='1')
+    env = dict(os.environ, WYSNA_MEM_CHECK='1')
     if sanitize:
         env['ASAN_OPTIONS'] = 'detect_leaks=' + ('1' if sys.platform.startswith('linux') else '0')
         env['UBSAN_OPTIONS'] = 'halt_on_error=1:print_stacktrace=1'
@@ -192,7 +193,7 @@ def compare(results, expected=None):
     return True, 'OK'
 
 
-def verify_case(source, label, w1_bin, work_dir, expected=None, sanitize=False, strict=False, expect_rejection=False, run_timeout=30):
+def verify_case(source, label, selfhost_bin, work_dir, expected=None, sanitize=False, strict=False, expect_rejection=False, run_timeout=30):
     original = ROOT / label
     if original.is_file():
         def qualify_import(match):
@@ -204,7 +205,7 @@ def verify_case(source, label, w1_bin, work_dir, expected=None, sanitize=False, 
                 candidate = ROOT / requested
             return 'import ' + json.dumps(str(candidate.resolve()), ensure_ascii=False)
         source = re.sub(r'import\s+"([^"\n]+)"', qualify_import, source)
-    artifacts = Path(os.environ.get('W_CI_ARTIFACTS', ROOT / '.w_cache/ci-artifacts'))
+    artifacts = Path(os.environ.get('WYSNA_CI_ARTIFACTS', ROOT / '.wysna_cache/ci-artifacts'))
     case_id = hashlib.sha256(label.encode()).hexdigest()[:12]
     directory = Path(work_dir) / case_id
     directory.mkdir(parents=True, exist_ok=True)
@@ -214,7 +215,7 @@ def verify_case(source, label, w1_bin, work_dir, expected=None, sanitize=False, 
         if reason:
             unsupported[engine] = reason
         else:
-            results.append(run_engine(engine, source, label, w1_bin, directory, sanitize, run_timeout))
+            results.append(run_engine(engine, source, label, selfhost_bin, directory, sanitize, run_timeout))
     ok, detail = compare(results, expected)
     if expect_rejection and panic_expectation(expected) is None:
         for result in results:

@@ -1,8 +1,8 @@
 import os
 from lexer.Lexer import Lexer
 from error.Error import LexerError
-from wtokens.Token import Token
-from wtokens.TokenType import TokenType
+from tokens.Token import Token
+from tokens.TokenType import TokenType
 
 def test_token_equality_includes_source_position():
     first = Token("item", TokenType.IDENTIFIER, line=1, col=1)
@@ -24,7 +24,7 @@ def test_lexer_suite():
     failures = []
 
     print("==================================================")
-    print("W Language Lexer Conformance Suite (SPEC v0.1)")
+    print("Wysna Lexer Conformance Suite (SPEC v0.1)")
     print("==================================================")
 
     print(f"\n--- Lexer Valid ({len(valid_files)} tests) ---")

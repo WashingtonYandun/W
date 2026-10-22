@@ -131,7 +131,7 @@ def test_cli_stats_output():
 
 
 def test_hardening_regressions():
-    from checker.WType import IntType, TupleType, ResultType, OptionalType, ListType, FunctionType
+    from checker.WysnaType import IntType, TupleType, ResultType, OptionalType, ListType, FunctionType
     from codegen.CCodeGen import CCodeGen
     from hir.HirBuilder import HirBuilder
     from hir.HirCCodeGen import HirCCodeGen

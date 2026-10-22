@@ -1,1 +1,2 @@
-W_VERSION = "0.4.0a1"
+WYSNA_VERSION = "0.4.0a1"
+

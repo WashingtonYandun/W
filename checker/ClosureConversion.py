@@ -1,7 +1,7 @@
 """Convert lexical lambdas into explicit snapshot environments and free functions."""
 from node import NodeType as A
 from node.NodeType import clone_ast
-from checker.WType import FunctionType, StructType, ResultType, UnitType
+from checker.WysnaType import FunctionType, StructType, ResultType, UnitType
 from checker.SymbolTable import Scope, Symbol
 from error.Error import TypeError
 
@@ -20,7 +20,7 @@ def convert_lambda(checker, expression):
             type_ = checker._resolve_type_node(parameter.type_ann)
         elif expected:
             type_ = expected.params[index]
-            parameter.type_ann = checker._wtype_to_type_node(type_)
+            parameter.type_ann = checker._type_to_type_node(type_)
         else:
             raise TypeError('Lambda parameters require annotations or a function type context', file=checker.file,
                             line=parameter.line, col=parameter.col, code='W2001')
@@ -72,7 +72,7 @@ def convert_lambda(checker, expression):
         serial = checker.closure_counter
     name = '_W_Closure_' + str(serial)
     environment_name = name + '_Env'
-    environment_parameter = '__w_environment'
+    environment_parameter = '__wysna_environment'
 
     def rewrite(node, bound):
         if isinstance(node, A.LambdaExpr) and hasattr(node, 'environment'):
@@ -132,16 +132,16 @@ def convert_lambda(checker, expression):
     body = rewrite(body, {p.name for p in expression.params})
     environment_type = StructType(environment_name, captures)
     checker.global_scope.define_type(environment_name, environment_type, file=checker.file)
-    checker.interner.from_wtype(environment_type)
-    fields = [A.StructField(key, checker._wtype_to_type_node(type_)) for key, type_ in captures.items()]
+    checker.interner.from_type(environment_type)
+    fields = [A.StructField(key, checker._type_to_type_node(type_)) for key, type_ in captures.items()]
     environment_decl = A.StructDecl(environment_name, fields)
     # Resolve field syntax metadata before lowering synthetic declarations.
     for field in fields:
         checker._resolve_type_node(field.type_ann)
     checker.monomorphized_struct_decls.append(environment_decl)
-    environment_annotation = checker._wtype_to_type_node(environment_type)
+    environment_annotation = checker._type_to_type_node(environment_type)
     parameters = [A.Param(environment_parameter, environment_annotation)] + expression.params
-    return_annotation = checker._wtype_to_type_node(returned)
+    return_annotation = checker._type_to_type_node(returned)
     checker._resolve_type_node(return_annotation)
     declaration = A.FnDecl(name, parameters, return_annotation, body)
     checker.global_scope.define_symbol(Symbol(name, FunctionType([environment_type] + parameter_types, returned), kind='fn'), file=checker.file)

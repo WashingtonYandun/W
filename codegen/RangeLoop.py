@@ -10,10 +10,10 @@ def emit_range_loop(generator, start, end, inclusive, body, bind, out):
     count = generator.new_aux('_count')
     index = generator.new_aux('_idx')
     item = generator.new_aux('_item')
-    outer.append(f'int32_t {count} = w_range_count({first}, {last}, {str(inclusive).lower()});')
+    outer.append(f'int32_t {count} = wysna_range_count({first}, {last}, {str(inclusive).lower()});')
     outer.append(f'for (int32_t {index} = 0; {index} < {count}; {index}++) {{')
     generator._push_scope('loop')
-    inner = [f'WVal {item} = w_int(({first}).as.i + (int64_t){index});']
+    inner = [f'WVal {item} = wysna_int(({first}).as.i + (int64_t){index});']
     bind(item, inner)
     value = generator.emit_block_value(body, inner)
     inner.append(f'(void){value};')

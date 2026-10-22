@@ -26,7 +26,7 @@ def build(output=None, backend='hir'):
         digest.update(relative.encode())
         digest.update((ROOT / relative).read_bytes())
     identity = digest.hexdigest()
-    binary = Path(executable_name(str(output))) if output else ROOT / '.w_cache/measurement-app' / identity[:16] / executable_name('measurement-ingest')
+    binary = Path(executable_name(str(output))) if output else ROOT / '.wysna_cache/measurement-app' / identity[:16] / executable_name('measurement-ingest')
     binary = binary.resolve()
     binary.parent.mkdir(parents=True, exist_ok=True)
     with cache_lock(binary.parent / 'build.lock'):
@@ -71,7 +71,7 @@ def main():
         if arguments.action == 'check':
             native.append('--check')
         native.append(str(arguments.csv.resolve()))
-    environment = dict(os.environ, W_SQLITE_DB=str(arguments.database.resolve()), W_MEM_CHECK='1')
+    environment = dict(os.environ, WYSNA_SQLITE_DB=str(arguments.database.resolve()), WYSNA_MEM_CHECK='1')
     result = subprocess.run(native, capture_output=True, text=True, env=environment, timeout=120)
     lines = [line for line in result.stdout.splitlines() if not line.startswith('resources ')]
     if arguments.json:

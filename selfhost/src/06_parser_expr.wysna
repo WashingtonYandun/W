@@ -55,23 +55,23 @@ fn emit_call(callee: ExprRes, args_c: list[str], collection: bool, line: int, co
         let variant = slice(marker, separator + 2, len(marker))
         if owner == "Option" and variant == "Some" {
             if len(args_c) != 1 { report_error("W2005", at_tok().line, at_tok().col, "Option.Some arity") }
-            return bind_call("w_enum_payload(\"Option\", \"Some\", " + own_expr(args_c[0]) + ")")
+            return bind_call("wysna_enum_payload(\"Option\", \"Some\", " + own_expr(args_c[0]) + ")")
         }
         if owner == "Result" and variant == "Ok" {
             if len(args_c) != 1 { report_error("W2005", at_tok().line, at_tok().col, "Result.Ok arity") }
-            return bind_call("w_ok(" + own_expr(args_c[0]) + ")")
+            return bind_call("wysna_ok(" + own_expr(args_c[0]) + ")")
         }
         if owner == "Result" and variant == "Err" {
             if len(args_c) != 1 { report_error("W2005", at_tok().line, at_tok().col, "Result.Err arity") }
-            return bind_call("w_err(" + own_expr(args_c[0]) + ")")
+            return bind_call("wysna_err(" + own_expr(args_c[0]) + ")")
         }
         let mut arity = -1
         for i in 0..len(g_enum_variant_names) {
             if g_enum_variant_names[i] == variant and g_enum_variant_owners[i] == owner { arity = g_enum_variant_arities[i] }
         }
         if arity != len(args_c) { report_error("W2005", at_tok().line, at_tok().col, "enum constructor arity: " + owner + "." + variant) }
-        if arity == 0 { return bind_call("w_enum(\"" + owner + "\", \"" + variant + "\")") }
-        if arity == 1 { return bind_call("w_enum_payload(\"" + owner + "\", \"" + variant + "\", " + own_expr(args_c[0]) + ")") }
+        if arity == 0 { return bind_call("wysna_enum(\"" + owner + "\", \"" + variant + "\")") }
+        if arity == 1 { return bind_call("wysna_enum_payload(\"" + owner + "\", \"" + variant + "\", " + own_expr(args_c[0]) + ")") }
         let payload_values = new_aux("_enum_values")
         let mut values = ""
         for i in 0..len(args_c) {
@@ -79,8 +79,8 @@ fn emit_call(callee: ExprRes, args_c: list[str], collection: bool, line: int, co
             values = values + args_c[i]
         }
         emit_line("WVal " + payload_values + "[" + str(len(args_c)) + "] = { " + values + " };")
-        let payload = "w_make_tuple(" + str(len(args_c)) + ", " + payload_values + ")"
-        return bind_call("w_enum_payload(\"" + owner + "\", \"" + variant + "\", " + payload + ")")
+        let payload = "wysna_make_tuple(" + str(len(args_c)) + ", " + payload_values + ")"
+        return bind_call("wysna_enum_payload(\"" + owner + "\", \"" + variant + "\", " + payload + ")")
     }
     if is_bound_variable(callee.val) or (callee.lref == "" and not (len(callee.val) >= 2 and slice(callee.val, 0, 2) == "v_")) {
         return emit_indirect_call(callee.val, args_c)
@@ -117,9 +117,9 @@ fn emit_call(callee: ExprRes, args_c: list[str], collection: bool, line: int, co
                 for idx in 0..len(args_c) {
                     joined = joined + ", " + args_c[idx]
                 }
-                return bind_call("w_method_" + def_cls + "__" + method + "(" + joined + ")")
+                return bind_call("wysna_method_" + def_cls + "__" + method + "(" + joined + ")")
             }
-            return ExprRes { val: "w_unit()", lref: "" }
+            return ExprRes { val: "wysna_unit()", lref: "" }
         }
         if len(recv_val) >= 2 and slice(recv_val, 0, 2) == "v_" {
             let obj_name = slice(recv_val, 2, len(recv_val))
@@ -131,54 +131,54 @@ fn emit_call(callee: ExprRes, args_c: list[str], collection: bool, line: int, co
                     }
                     joined = joined + args_c[idx]
                 }
-                return bind_call("w_fn_" + obj_name + "__" + method + "(" + joined + ")")
+                return bind_call("wysna_fn_" + obj_name + "__" + method + "(" + joined + ")")
             }
         }
         if collection and method == "append" {
-            return bind_call("w_list_append(" + recv_lref + ", " + args_c[0] + ")")
+            return bind_call("wysna_list_append(" + recv_lref + ", " + args_c[0] + ")")
         }
         if collection and method == "pop" {
-            return bind_call("w_list_pop_at(" + recv_lref + ", " + escape_c_str(g_in_path) + ", " + str(line) + ", " + str(col) + ")")
+            return bind_call("wysna_list_pop_at(" + recv_lref + ", " + escape_c_str(g_in_path) + ", " + str(line) + ", " + str(col) + ")")
         }
         if collection and method == "clear" {
-            return bind_call("w_list_clear(" + recv_lref + ")")
+            return bind_call("wysna_list_clear(" + recv_lref + ")")
         }
         if collection and method == "get" {
-            return bind_call("w_dict_get(" + recv_val + ", " + args_c[0] + ")")
+            return bind_call("wysna_dict_get(" + recv_val + ", " + args_c[0] + ")")
         }
         if collection and method == "keys" {
-            return bind_call("w_dict_keys(" + recv_val + ")")
+            return bind_call("wysna_dict_keys(" + recv_val + ")")
         }
         if collection and method == "values" {
-            return bind_call("w_dict_values(" + recv_val + ")")
+            return bind_call("wysna_dict_values(" + recv_val + ")")
         }
         let mut d_args = recv_val
         for idx in 0..len(args_c) {
             d_args = d_args + ", " + args_c[idx]
         }
-        return bind_call("w_dispatch__" + method + "__" + str(len(args_c)) + "(" + d_args + ")")
+        return bind_call("wysna_dispatch__" + method + "__" + str(len(args_c)) + "(" + d_args + ")")
     }
     if len(callee.val) >= 2 and slice(callee.val, 0, 2) == "v_" {
         let fn_name = slice(callee.val, 2, len(callee.val))
         if fn_name == "weak" or fn_name == "upgrade" {
             if len(args_c) != 1 { report_error("W2005", at_tok().line, at_tok().col, "weak/upgrade expects one argument") }
             if fn_name == "weak" {
-                return bind_call("w_builtin_weak_owned(" + own_expr(args_c[0]) + ")")
+                return bind_call("wysna_builtin_weak_owned(" + own_expr(args_c[0]) + ")")
             }
-            return bind_call("w_builtin_" + fn_name + "(" + args_c[0] + ")")
+            return bind_call("wysna_builtin_" + fn_name + "(" + args_c[0] + ")")
         }
         if fn_name == "Ok" and len(args_c) == 1 {
-            return bind_call("w_ok(" + own_expr(args_c[0]) + ")")
+            return bind_call("wysna_ok(" + own_expr(args_c[0]) + ")")
         }
         if fn_name == "Err" and len(args_c) == 1 {
-            return bind_call("w_err(" + own_expr(args_c[0]) + ")")
+            return bind_call("wysna_err(" + own_expr(args_c[0]) + ")")
         }
         if fn_name == "Some" and len(args_c) == 1 {
-            return bind_call("w_enum_payload(\"Option\", \"Some\", " + own_expr(args_c[0]) + ")")
+            return bind_call("wysna_enum_payload(\"Option\", \"Some\", " + own_expr(args_c[0]) + ")")
         }
         if fn_name == "print" {
             if len(args_c) == 0 {
-                return bind_call("w_builtin_print(0, NULL)")
+                return bind_call("wysna_builtin_print(0, NULL)")
             }
             let arr_tmp = new_aux("_arr")
             let mut joined = ""
@@ -190,11 +190,11 @@ fn emit_call(callee: ExprRes, args_c: list[str], collection: bool, line: int, co
             }
             let cnt = str(len(args_c))
             emit_line("WVal " + arr_tmp + "[" + cnt + "] = { " + joined + " };")
-            return bind_call("w_builtin_print(" + cnt + ", " + arr_tmp + ")")
+            return bind_call("wysna_builtin_print(" + cnt + ", " + arr_tmp + ")")
         }
         if fn_name == "eprint" {
             if len(args_c) == 0 {
-                return bind_call("w_builtin_eprint(0, NULL)")
+                return bind_call("wysna_builtin_eprint(0, NULL)")
             }
             let arr_tmp = new_aux("_arr")
             let mut joined = ""
@@ -206,50 +206,50 @@ fn emit_call(callee: ExprRes, args_c: list[str], collection: bool, line: int, co
             }
             let cnt = str(len(args_c))
             emit_line("WVal " + arr_tmp + "[" + cnt + "] = { " + joined + " };")
-            return bind_call("w_builtin_eprint(" + cnt + ", " + arr_tmp + ")")
+            return bind_call("wysna_builtin_eprint(" + cnt + ", " + arr_tmp + ")")
         }
         if fn_name == "exit" and len(args_c) == 1 {
-            return bind_call("w_builtin_exit(" + args_c[0] + ")")
+            return bind_call("wysna_builtin_exit(" + args_c[0] + ")")
         }
-        if fn_name == "join_strings" { return bind_call("w_builtin_join_strings(" + args_c[0] + ", " + args_c[1] + ")") }
+        if fn_name == "join_strings" { return bind_call("wysna_builtin_join_strings(" + args_c[0] + ", " + args_c[1] + ")") }
         if fn_name == "len" {
-            return bind_call("w_builtin_len(" + args_c[0] + ")")
+            return bind_call("wysna_builtin_len(" + args_c[0] + ")")
         }
         if fn_name == "str" {
-            return bind_call("w_builtin_str(" + args_c[0] + ")")
+            return bind_call("wysna_builtin_str(" + args_c[0] + ")")
         }
         if fn_name == "int" {
-            return bind_call("w_builtin_int(" + args_c[0] + ")")
+            return bind_call("wysna_builtin_int(" + args_c[0] + ")")
         }
         if fn_name == "float" {
-            return bind_call("w_builtin_float(" + args_c[0] + ")")
+            return bind_call("wysna_builtin_float(" + args_c[0] + ")")
         }
         if fn_name == "ord" {
-            return bind_call("w_builtin_ord(" + args_c[0] + ")")
+            return bind_call("wysna_builtin_ord(" + args_c[0] + ")")
         }
         if fn_name == "chr" {
-            return bind_call("w_builtin_chr(" + args_c[0] + ")")
+            return bind_call("wysna_builtin_chr(" + args_c[0] + ")")
         }
         if fn_name == "bytes" {
-            return bind_call("w_builtin_bytes(" + args_c[0] + ")")
+            return bind_call("wysna_builtin_bytes(" + args_c[0] + ")")
         }
         if fn_name == "enumerate" {
-            return bind_call("w_builtin_enumerate(" + args_c[0] + ")")
+            return bind_call("wysna_builtin_enumerate(" + args_c[0] + ")")
         }
         if fn_name == "dict_items" {
-            return bind_call("w_builtin_dict_items(" + args_c[0] + ")")
+            return bind_call("wysna_builtin_dict_items(" + args_c[0] + ")")
         }
         if fn_name == "read_file" {
-            return bind_call("w_builtin_read_file(" + args_c[0] + ")")
+            return bind_call("wysna_builtin_read_file(" + args_c[0] + ")")
         }
         if fn_name == "write_file" {
-            return bind_call("w_builtin_write_file(" + args_c[0] + ", " + args_c[1] + ")")
+            return bind_call("wysna_builtin_write_file(" + args_c[0] + ", " + args_c[1] + ")")
         }
         if fn_name == "slice" {
-            return bind_call("w_builtin_slice(" + args_c[0] + ", " + args_c[1] + ", " + args_c[2] + ")")
+            return bind_call("wysna_builtin_slice(" + args_c[0] + ", " + args_c[1] + ", " + args_c[2] + ")")
         }
         if fn_name == "args" {
-            return bind_call("w_builtin_args()")
+            return bind_call("wysna_builtin_args()")
         }
         let mut joined = ""
         for idx in 0..len(args_c) {
@@ -259,61 +259,61 @@ fn emit_call(callee: ExprRes, args_c: list[str], collection: bool, line: int, co
             joined = joined + args_c[idx]
         }
         if find_class_meta_idx(fn_name) != -1 {
-            return bind_call("w_new_" + fn_name + "(" + joined + ")")
+            return bind_call("wysna_new_" + fn_name + "(" + joined + ")")
         }
         let generic_type = sem_generic_type(fn_name)
         if generic_type >= 0 and sem_generic_types[generic_type].kind == "struct" { return emit_struct_constructor(fn_name, args_c) }
         return bind_call(c_fn_name(fn_name) + "(" + joined + ")")
     }
-    return ExprRes { val: "w_unit()", lref: "" }
+    return ExprRes { val: "wysna_unit()", lref: "" }
 }
 
 fn parse_block_expr() -> str {
     expect_kind("LBRACE")
     let res = new_temp()
-    declare_owned_var(res, "w_unit()")
+    declare_owned_var(res, "wysna_unit()")
     emit_line("{")
     let saved = g_cur_stmts
     let empty: list[str] = []
     g_cur_stmts = empty
     push_scope("block")
-    let mut tail_val = "w_unit()"
+    let mut tail_val = "wysna_unit()"
     while not check_kind("RBRACE") and not is_eof() {
         if check_kind("LET") {
             parse_let_stmt(false)
-            tail_val = "w_unit()"
+            tail_val = "wysna_unit()"
         } elif check_kind("WHILE") {
             parse_while_stmt()
-            tail_val = "w_unit()"
+            tail_val = "wysna_unit()"
         } elif check_kind("FOR") {
             parse_for_stmt()
-            tail_val = "w_unit()"
+            tail_val = "wysna_unit()"
         } elif check_kind("RETURN") {
             parse_return_stmt()
-            tail_val = "w_unit()"
+            tail_val = "wysna_unit()"
         } elif check_kind("BREAK") {
             advance_tok()
             emit_cleanup_until_loop()
             emit_line("break;")
-            tail_val = "w_unit()"
+            tail_val = "wysna_unit()"
         } elif check_kind("CONTINUE") {
             advance_tok()
             emit_cleanup_until_loop()
             emit_line("continue;")
-            tail_val = "w_unit()"
+            tail_val = "wysna_unit()"
         } else {
             let expr_r = parse_expr(0, true)
             if check_kind("RBRACE") {
                 tail_val = expr_r.val
             } else {
                 emit_line("(void)" + expr_r.val + ";")
-                tail_val = "w_unit()"
+                tail_val = "wysna_unit()"
             }
         }
     }
     expect_kind("RBRACE")
-    if tail_val != "w_unit()" {
-        emit_line("w_assign(&" + res + ", " + own_expr(tail_val) + ");")
+    if tail_val != "wysna_unit()" {
+        emit_line("wysna_assign(&" + res + ", " + own_expr(tail_val) + ");")
     }
     pop_scope()
     let inner = g_cur_stmts
@@ -328,7 +328,7 @@ fn parse_block_expr() -> str {
 fn parse_if_expr() -> ExprRes {
     expect_kind("IF")
     let res = new_temp()
-    declare_owned_var(res, "w_unit()")
+    declare_owned_var(res, "wysna_unit()")
     let cond_r = parse_expr(0, false)
     emit_line("if ((" + cond_r.val + ").as.b) {")
     push_scope("block")
@@ -336,7 +336,7 @@ fn parse_if_expr() -> ExprRes {
     let empty: list[str] = []
     g_cur_stmts = empty
     let then_v = parse_block_expr()
-    emit_line("w_assign(&" + res + ", " + own_expr(then_v) + ");")
+    emit_line("wysna_assign(&" + res + ", " + own_expr(then_v) + ");")
     pop_scope()
     let then_lines = g_cur_stmts
     g_cur_stmts = saved
@@ -362,7 +362,7 @@ fn parse_elif_chain(res: str) -> unit {
         let empty2: list[str] = []
         g_cur_stmts = empty2
         let eb_v = parse_block_expr()
-        emit_line("w_assign(&" + res + ", " + own_expr(eb_v) + ");")
+        emit_line("wysna_assign(&" + res + ", " + own_expr(eb_v) + ");")
         pop_scope()
         let eb_lines = g_cur_stmts
         g_cur_stmts = saved_inner
@@ -385,7 +385,7 @@ fn parse_elif_chain(res: str) -> unit {
         let empty: list[str] = []
         g_cur_stmts = empty
         let else_v = parse_block_expr()
-        emit_line("w_assign(&" + res + ", " + own_expr(else_v) + ");")
+        emit_line("wysna_assign(&" + res + ", " + own_expr(else_v) + ");")
         pop_scope()
         let else_lines = g_cur_stmts
         g_cur_stmts = saved
@@ -402,7 +402,7 @@ fn parse_match_expr() -> ExprRes {
     let subj_tmp = new_temp()
     declare_owned_var(subj_tmp, own_expr(subj_r.val))
     let res = new_temp()
-    declare_owned_var(res, "w_unit()")
+    declare_owned_var(res, "wysna_unit()")
     expect_kind("LBRACE")
     if not check_kind("RBRACE") {
         parse_match_arms(subj_tmp, res)
@@ -439,7 +439,7 @@ fn parse_pattern_condition(subject: str) -> str {
     if error_pattern_kind != "" {
         expect_kind("IDENT")
         expect_kind("LPAREN")
-        let mut condition = "w_value_is_error_type(" + subject + ", " + escape_c_str(error_pattern_kind) + ", " + escape_c_str(error_pattern_name) + ")"
+        let mut condition = "wysna_value_is_error_type(" + subject + ", " + escape_c_str(error_pattern_kind) + ", " + escape_c_str(error_pattern_name) + ")"
         if not check_kind("RPAREN") {
             let child = parse_pattern_condition(subject)
             condition = "(" + condition + ") && (" + child + ")"
@@ -448,14 +448,14 @@ fn parse_pattern_condition(subject: str) -> str {
         return condition
     }
     if match_kind("ELSE") { return "true" }
-    if match_kind("NONE") { return "w_is_none(" + subject + ")" }
+    if match_kind("NONE") { return "wysna_is_none(" + subject + ")" }
     if check_kind("MINUS") {
         let literal = parse_prefix_expr(false)
-        return "w_eq(" + subject + ", " + literal.val + ")"
+        return "wysna_eq(" + subject + ", " + literal.val + ")"
     }
     if check_kind("INT") or check_kind("FLOAT") or check_kind("STR") or check_kind("TRUE") or check_kind("FALSE") {
         let literal = parse_prefix_expr(false)
-        return "w_eq(" + subject + ", " + literal.val + ")"
+        return "wysna_eq(" + subject + ", " + literal.val + ")"
     }
     let name = expect_kind("IDENT").val
     if name == "_" { return "true" }
@@ -467,7 +467,7 @@ fn parse_pattern_condition(subject: str) -> str {
     }
     let mut enum_owner = owner
     let mut arity = -1
-    if owner == "Option" and variant == "None" { return "w_is_none(" + subject + ")" }
+    if owner == "Option" and variant == "None" { return "wysna_is_none(" + subject + ")" }
     if (owner == "Option" or owner == "") and variant == "Some" { arity = 1 enum_owner = "Option" }
     if (owner == "Result" or owner == "") and (variant == "Ok" or variant == "Err") { arity = 1 enum_owner = "Result" }
     if arity < 0 {
@@ -480,17 +480,17 @@ fn parse_pattern_condition(subject: str) -> str {
     }
     if arity >= 0 {
         let mut condition = "true"
-        if enum_owner == "Option" and variant == "Some" { condition = "!w_is_none(" + subject + ")" }
+        if enum_owner == "Option" and variant == "Some" { condition = "!wysna_is_none(" + subject + ")" }
         elif enum_owner == "Result" and variant == "Ok" { condition = "(" + subject + ").tag == W_OK" }
         elif enum_owner == "Result" and variant == "Err" { condition = "(" + subject + ").tag == W_ERR" }
-        else { condition = "w_is_enum_variant(" + subject + ", \"" + enum_owner + "\", \"" + variant + "\")" }
+        else { condition = "wysna_is_enum_variant(" + subject + ", \"" + enum_owner + "\", \"" + variant + "\")" }
         if match_kind("LPAREN") {
             let mut index = 0
             if not check_kind("RPAREN") {
-                let mut payload = "w_peek_enum_payload(" + subject + ")"
-                if enum_owner == "Option" { payload = "w_peek_optional(" + subject + ")" }
-                elif enum_owner == "Result" and variant == "Ok" { payload = "w_peek_ok(" + subject + ")" }
-                elif enum_owner == "Result" and variant == "Err" { payload = "w_peek_err(" + subject + ")" }
+                let mut payload = "wysna_peek_enum_payload(" + subject + ")"
+                if enum_owner == "Option" { payload = "wysna_peek_optional(" + subject + ")" }
+                elif enum_owner == "Result" and variant == "Ok" { payload = "wysna_peek_ok(" + subject + ")" }
+                elif enum_owner == "Result" and variant == "Err" { payload = "wysna_peek_err(" + subject + ")" }
                 if arity > 1 { payload = "(" + payload + ").as.tuple->items[0]" }
                 let child = parse_pattern_condition(payload)
                 condition = "(" + condition + ") && (" + child + ")"
@@ -498,10 +498,10 @@ fn parse_pattern_condition(subject: str) -> str {
                 while match_kind("COMMA") {
                     if check_kind("RPAREN") { break }
                     if index >= arity { report_error("W2001", at_tok().line, at_tok().col, "too many enum pattern elements") }
-                    let mut next_payload = "w_peek_enum_payload(" + subject + ")"
-                    if enum_owner == "Option" { next_payload = "w_peek_optional(" + subject + ")" }
-                    elif enum_owner == "Result" and variant == "Ok" { next_payload = "w_peek_ok(" + subject + ")" }
-                    elif enum_owner == "Result" and variant == "Err" { next_payload = "w_peek_err(" + subject + ")" }
+                    let mut next_payload = "wysna_peek_enum_payload(" + subject + ")"
+                    if enum_owner == "Option" { next_payload = "wysna_peek_optional(" + subject + ")" }
+                    elif enum_owner == "Result" and variant == "Ok" { next_payload = "wysna_peek_ok(" + subject + ")" }
+                    elif enum_owner == "Result" and variant == "Err" { next_payload = "wysna_peek_err(" + subject + ")" }
                     next_payload = "(" + next_payload + ").as.tuple->items[" + str(index) + "]"
                     let next_condition = parse_pattern_condition(next_payload)
                     condition = "(" + condition + ") && (" + next_condition + ")"
@@ -515,8 +515,8 @@ fn parse_pattern_condition(subject: str) -> str {
         }
         return condition
     }
-    if owner != "" { return "w_is_enum_variant(" + subject + ", \"" + owner + "\", \"" + variant + "\")" }
-    g_pattern_bind_lines.append("WVal v_" + name + " = w_clone(" + subject + ");")
+    if owner != "" { return "wysna_is_enum_variant(" + subject + ", \"" + owner + "\", \"" + variant + "\")" }
+    g_pattern_bind_lines.append("WVal v_" + name + " = wysna_clone(" + subject + ");")
     g_pattern_bind_names.append("v_" + name)
     return "true"
 }
@@ -542,10 +542,10 @@ fn parse_match_arms(subj_tmp: str, res: str) -> unit {
         expect_kind("FAT_ARROW")
         if check_kind("LBRACE") {
             let arm_value = parse_block_expr()
-            emit_line("w_assign(&" + res + ", " + own_expr(arm_value) + ");")
+            emit_line("wysna_assign(&" + res + ", " + own_expr(arm_value) + ");")
         } else {
             let arm_value = parse_expr(0, true)
-            emit_line("w_assign(&" + res + ", " + own_expr(arm_value.val) + ");")
+            emit_line("wysna_assign(&" + res + ", " + own_expr(arm_value.val) + ");")
         }
         emit_line(matched + " = true;")
         if has_guard { pop_scope() emit_line("}") }
@@ -559,27 +559,27 @@ fn parse_prefix_expr(allow_struct: bool) -> ExprRes {
     let tok = at_tok()
     if check_kind("PIPE") { return parse_lambda() }
     if match_kind("INT") {
-        return ExprRes { val: "w_int(" + tok.val + "LL)", lref: "" }
+        return ExprRes { val: "wysna_int(" + tok.val + "LL)", lref: "" }
     }
     if match_kind("FLOAT") {
-        return ExprRes { val: "w_float(" + tok.val + ")", lref: "" }
+        return ExprRes { val: "wysna_float(" + tok.val + ")", lref: "" }
     }
     if match_kind("STR") {
         if len(tok.val) <= 1 {
-            return ExprRes { val: "w_str_n(" + escape_c_str(tok.val) + ", " + str(len(bytes(tok.val))) + ")", lref: "" }
+            return ExprRes { val: "wysna_str_n(" + escape_c_str(tok.val) + ", " + str(len(bytes(tok.val))) + ")", lref: "" }
         }
         let literal = new_aux("_literal")
         emit_line("static WStringLiteral " + literal + " = {0};")
-        return ExprRes { val: "w_literal_str_n(&" + literal + ", " + escape_c_str(tok.val) + ", " + str(len(bytes(tok.val))) + ")", lref: "" }
+        return ExprRes { val: "wysna_literal_str_n(&" + literal + ", " + escape_c_str(tok.val) + ", " + str(len(bytes(tok.val))) + ")", lref: "" }
     }
     if match_kind("TRUE") {
-        return ExprRes { val: "w_bool(true)", lref: "" }
+        return ExprRes { val: "wysna_bool(true)", lref: "" }
     }
     if match_kind("FALSE") {
-        return ExprRes { val: "w_bool(false)", lref: "" }
+        return ExprRes { val: "wysna_bool(false)", lref: "" }
     }
     if match_kind("NONE") {
-        return ExprRes { val: "w_none()", lref: "" }
+        return ExprRes { val: "wysna_none()", lref: "" }
     }
     if match_kind("THIS") {
         return ExprRes { val: "v_self", lref: "&v_self" }
@@ -610,11 +610,11 @@ fn parse_prefix_expr(allow_struct: bool) -> ExprRes {
             }
             joined = joined + args_c[idx]
         }
-        return bind_call("w_new_" + cname_tok.val + "(" + joined + ")")
+        return bind_call("wysna_new_" + cname_tok.val + "(" + joined + ")")
     }
     if match_kind("IDENT") {
         let name = tok.val
-        if name == "None" and not is_bound_variable("v_" + name) { return ExprRes { val: "w_none()", lref: "" } }
+        if name == "None" and not is_bound_variable("v_" + name) { return ExprRes { val: "wysna_none()", lref: "" } }
         let function_index = sem_function(name)
         if function_index >= 0 and not is_bound_variable("v_" + name) and len(sem_functions[function_index].type_params) > 0 and match_kind("LBRACKET") {
             while not check_kind("RBRACKET") and not is_eof() {
@@ -648,7 +648,7 @@ fn parse_prefix_expr(allow_struct: bool) -> ExprRes {
                 }
                 expect_kind("RBRACE")
                 if len(f_names) == 0 {
-                    return bind_call("w_make_struct(\"" + name + "\", 0, NULL, NULL)")
+                    return bind_call("wysna_make_struct(\"" + name + "\", 0, NULL, NULL)")
                 }
                 let mut ordered_names: list[str] = []
                 let mut ordered_values: list[str] = []
@@ -680,7 +680,7 @@ fn parse_prefix_expr(allow_struct: bool) -> ExprRes {
                 let cnt = str(len(f_names))
                 emit_line("const char* " + k_tmp + "[" + cnt + "] = { " + k_joined + " };")
                 emit_line("WVal " + v_tmp + "[" + cnt + "] = { " + v_joined + " };")
-                return bind_call("w_make_struct(\"" + name + "\", " + cnt + ", " + k_tmp + ", " + v_tmp + ")")
+                return bind_call("wysna_make_struct(\"" + name + "\", " + cnt + ", " + k_tmp + ", " + v_tmp + ")")
             }
         }
         if not check_kind("LPAREN") and not is_bound_variable("v_" + name) and sem_function(name) >= 0 {
@@ -695,7 +695,7 @@ fn parse_prefix_expr(allow_struct: bool) -> ExprRes {
                     variant_arity = g_enum_variant_arities[variant_index]
                 }
             }
-            if variant_arity == 0 { return ExprRes { val: "w_enum(\"" + variant_owner + "\", \"" + name + "\")", lref: "" } }
+            if variant_arity == 0 { return ExprRes { val: "wysna_enum(\"" + variant_owner + "\", \"" + name + "\")", lref: "" } }
             if variant_arity > 0 { return ExprRes { val: "enum::" + variant_owner + "::" + name, lref: "" } }
         }
         return ExprRes { val: "v_" + name, lref: "&v_" + name }
@@ -709,20 +709,20 @@ fn parse_prefix_expr(allow_struct: bool) -> ExprRes {
             let mut lit = advance_tok().val
             let digits = slice(lit, 0, len(lit))
             if digits == "9223372036854775808" {
-                return ExprRes { val: "w_int((-9223372036854775807LL - 1LL))", lref: "" }
+                return ExprRes { val: "wysna_int((-9223372036854775807LL - 1LL))", lref: "" }
             }
-            return ExprRes { val: "w_int(-" + digits + "LL)", lref: "" }
+            return ExprRes { val: "wysna_int(-" + digits + "LL)", lref: "" }
         }
         let op_r = parse_expr(9, allow_struct)
-        return ExprRes { val: "w_neg(" + op_r.val + ")", lref: "" }
+        return ExprRes { val: "wysna_neg(" + op_r.val + ")", lref: "" }
     }
     if match_kind("NOT") {
         let op_r = parse_expr(9, allow_struct)
-        return ExprRes { val: "w_bool(!(" + op_r.val + ").as.b)", lref: "" }
+        return ExprRes { val: "wysna_bool(!(" + op_r.val + ").as.b)", lref: "" }
     }
     if match_kind("LPAREN") {
         if match_kind("RPAREN") {
-            return bind_call("w_make_tuple(0, NULL)")
+            return bind_call("wysna_make_tuple(0, NULL)")
         }
         let first = parse_expr(0, true)
         if match_kind("COMMA") {
@@ -749,7 +749,7 @@ fn parse_prefix_expr(allow_struct: bool) -> ExprRes {
             }
             let cnt = str(len(t_elems))
             emit_line("WVal " + arr_tmp + "[" + cnt + "] = { " + joined + " };")
-            return bind_call("w_make_tuple(" + cnt + ", " + arr_tmp + ")")
+            return bind_call("wysna_make_tuple(" + cnt + ", " + arr_tmp + ")")
         }
         expect_kind("RPAREN")
         return first
@@ -769,7 +769,7 @@ fn parse_prefix_expr(allow_struct: bool) -> ExprRes {
         }
         expect_kind("RBRACKET")
         if len(elems) == 0 {
-            return bind_call("w_make_list(0, NULL)")
+            return bind_call("wysna_make_list(0, NULL)")
         }
         let arr_tmp = new_aux("_arr")
         let mut joined = ""
@@ -781,14 +781,14 @@ fn parse_prefix_expr(allow_struct: bool) -> ExprRes {
         }
         let cnt = str(len(elems))
         emit_line("WVal " + arr_tmp + "[" + cnt + "] = { " + joined + " };")
-        return bind_call("w_make_list(" + cnt + ", " + arr_tmp + ")")
+        return bind_call("wysna_make_list(" + cnt + ", " + arr_tmp + ")")
     }
     if match_kind("LBRACE") {
         let mut d_keys: list[str] = []
         let mut d_vals: list[str] = []
         if not check_kind("RBRACE") {
             let k0 = parse_expr(0, true)
-            if len(k0.val) >= 7 and slice(k0.val, 0, 7) == "w_float" {
+            if len(k0.val) >= 11 and slice(k0.val, 0, 11) == "wysna_float" {
                 report_error("W2010", at_tok().line, at_tok().col, "invalid dictionary key type: float is not allowed as dictionary key")
             }
             expect_kind("COLON")
@@ -801,7 +801,7 @@ fn parse_prefix_expr(allow_struct: bool) -> ExprRes {
                     break
                 }
                 let kn = parse_expr(0, true)
-                if len(kn.val) >= 7 and slice(kn.val, 0, 7) == "w_float" {
+                if len(kn.val) >= 11 and slice(kn.val, 0, 11) == "wysna_float" {
                     report_error("W2010", at_tok().line, at_tok().col, "invalid dictionary key type: float is not allowed as dictionary key")
                 }
                 expect_kind("COLON")
@@ -813,7 +813,7 @@ fn parse_prefix_expr(allow_struct: bool) -> ExprRes {
         }
         expect_kind("RBRACE")
         if len(d_keys) == 0 {
-            return bind_call("w_make_dict(0, NULL, NULL)")
+            return bind_call("wysna_make_dict(0, NULL, NULL)")
         }
         let k_tmp = new_temp()
         let v_tmp = new_temp()
@@ -830,7 +830,7 @@ fn parse_prefix_expr(allow_struct: bool) -> ExprRes {
         let cnt = str(len(d_keys))
         emit_line("WVal " + k_tmp + "[" + cnt + "] = { " + kj + " };")
         emit_line("WVal " + v_tmp + "[" + cnt + "] = { " + vj + " };")
-        return bind_call("w_make_dict(" + cnt + ", " + k_tmp + ", " + v_tmp + ")")
+        return bind_call("wysna_make_dict(" + cnt + ", " + k_tmp + ", " + v_tmp + ")")
     }
     if check_kind("IF") {
         return parse_if_expr()
@@ -839,7 +839,7 @@ fn parse_prefix_expr(allow_struct: bool) -> ExprRes {
         return parse_match_expr()
     }
     advance_tok()
-    return ExprRes { val: "w_unit()", lref: "" }
+    return ExprRes { val: "wysna_unit()", lref: "" }
 }
 
 fn parse_expr(min_prec: int, allow_struct: bool) -> ExprRes {
@@ -890,7 +890,7 @@ fn parse_expr(min_prec: int, allow_struct: bool) -> ExprRes {
                 if len(left.val) >= 2 and slice(left.val, 0, 2) == "v_" {
                     let raw_obj = slice(left.val, 2, len(left.val))
                     if (is_enum_name(raw_obj) or raw_obj == "Option" or raw_obj == "Result") and not is_bound_variable(left.val) {
-                        if raw_obj == "Option" and prop == "None" { left = ExprRes { val: "w_none()", lref: "" } }
+                        if raw_obj == "Option" and prop == "None" { left = ExprRes { val: "wysna_none()", lref: "" } }
                         elif (raw_obj == "Option" and prop == "Some") or (raw_obj == "Result" and (prop == "Ok" or prop == "Err")) { left = ExprRes { val: "enum::" + raw_obj + "::" + prop, lref: "" } }
                         else {
                             let mut variant_arity = 0
@@ -898,16 +898,16 @@ fn parse_expr(min_prec: int, allow_struct: bool) -> ExprRes {
                                 if g_enum_variant_names[variant_index] == prop and g_enum_variant_owners[variant_index] == raw_obj { variant_arity = g_enum_variant_arities[variant_index] }
                             }
                             if variant_arity > 0 { left = ExprRes { val: "enum::" + raw_obj + "::" + prop, lref: "" } }
-                            else { left = ExprRes { val: "w_enum(\"" + raw_obj + "\", \"" + prop + "\")", lref: "" } }
+                            else { left = ExprRes { val: "wysna_enum(\"" + raw_obj + "\", \"" + prop + "\")", lref: "" } }
                         }
                     } else {
-                        left = ExprRes { val: "w_member_get(" + left.val + ", \"" + prop + "\")", lref: "w_member_ref(" + clean_lref(left.lref) + ", \"" + prop + "\")::" + prop + "::" + clean_lref(left.lref) + "::" + left.val }
+                        left = ExprRes { val: "wysna_member_get(" + left.val + ", \"" + prop + "\")", lref: "wysna_member_ref(" + clean_lref(left.lref) + ", \"" + prop + "\")::" + prop + "::" + clean_lref(left.lref) + "::" + left.val }
                     }
                 } else {
-                    left = ExprRes { val: "w_member_get(" + left.val + ", \"" + prop + "\")", lref: "w_member_ref(" + clean_lref(left.lref) + ", \"" + prop + "\")::" + prop + "::" + clean_lref(left.lref) + "::" + left.val }
+                    left = ExprRes { val: "wysna_member_get(" + left.val + ", \"" + prop + "\")", lref: "wysna_member_ref(" + clean_lref(left.lref) + ", \"" + prop + "\")::" + prop + "::" + clean_lref(left.lref) + "::" + left.val }
                 }
                 if not projection_is_mutated() and not check_kind("LPAREN") and left.lref != "" {
-                    left = ExprRes { val: bind_call("w_clone(" + left.val + ")").val, lref: left.lref }
+                    left = ExprRes { val: bind_call("wysna_clone(" + left.val + ")").val, lref: left.lref }
                 }
             } elif check_kind("LBRACKET") {
                 let bracket_tok = at_tok()
@@ -923,11 +923,11 @@ fn parse_expr(min_prec: int, allow_struct: bool) -> ExprRes {
                     idx_r = ExprRes { val: snapshot_value(idx_r.val), lref: idx_r.lref }
                 }
                 let source_args = escape_c_str(g_in_path) + ", " + str(bracket_tok.line) + ", " + str(bracket_tok.col)
-                let index_lref = "w_index_ref_at(" + clean_lref(left.lref) + ", " + idx_r.val + ", " + source_args + ")"
+                let index_lref = "wysna_index_ref_at(" + clean_lref(left.lref) + ", " + idx_r.val + ", " + source_args + ")"
                 if mutated {
-                    left = ExprRes { val: "w_index_get_at(" + left.val + ", " + idx_r.val + ", " + source_args + ")", lref: index_lref }
+                    left = ExprRes { val: "wysna_index_get_at(" + left.val + ", " + idx_r.val + ", " + source_args + ")", lref: index_lref }
                 } else {
-                    left = ExprRes { val: bind_call("w_index_get_owned_at(" + object_value + ", " + idx_r.val + ", " + source_args + ")").val, lref: index_lref }
+                    left = ExprRes { val: bind_call("wysna_index_get_owned_at(" + object_value + ", " + idx_r.val + ", " + source_args + ")").val, lref: index_lref }
                 }
             } elif check_kind("QUESTION") {
                 advance_tok()
@@ -935,17 +935,17 @@ fn parse_expr(min_prec: int, allow_struct: bool) -> ExprRes {
                 declare_owned_var(tmp, own_expr(left.val))
                 emit_line("if (" + str(not g_fn_fallible) + " && (" + tmp + ".tag == W_NONE)) {")
                 emit_cleanup_until_fn_indented()
-                emit_line("    return w_none();")
+                emit_line("    return wysna_none();")
                 emit_line("}")
                 let err_hold = new_aux("_err")
                 emit_line("if (" + str(g_fn_fallible) + " && (" + tmp + ".tag == W_ERR)) {")
-                emit_line("    WVal " + err_hold + " = w_clone(" + tmp + ");")
+                emit_line("    WVal " + err_hold + " = wysna_clone(" + tmp + ");")
                 emit_cleanup_until_fn_indented()
                 emit_line("    return " + err_hold + ";")
                 emit_line("}")
                 let unw = new_temp()
-                let mut unwrap_helper = "w_unwrap_optional"
-                if g_fn_fallible { unwrap_helper = "w_unwrap_ok" }
+                let mut unwrap_helper = "wysna_unwrap_optional"
+                if g_fn_fallible { unwrap_helper = "wysna_unwrap_ok" }
                 declare_owned_var(unw, unwrap_helper + "(" + tmp + ")")
                 left = ExprRes { val: unw, lref: "" }
             } elif check_kind("ELSE") {
@@ -958,17 +958,17 @@ fn parse_expr(min_prec: int, allow_struct: bool) -> ExprRes {
                 let tmp = new_temp()
                 declare_owned_var(tmp, own_expr(left.val))
                 let res = new_temp()
-                declare_owned_var(res, "w_unit()")
+                declare_owned_var(res, "wysna_unit()")
                 emit_line("if (" + tmp + ".tag == W_ERR || " + tmp + ".tag == W_NONE) {")
                 push_scope("block")
                 let saved = g_cur_stmts
                 let empty: list[str] = []
                 g_cur_stmts = empty
                 if err_name != "" {
-                    declare_owned_var("v_" + err_name, "w_unwrap_err(" + tmp + ")")
+                    declare_owned_var("v_" + err_name, "wysna_unwrap_err(" + tmp + ")")
                 }
                 let hv = parse_block_expr()
-                emit_line("w_assign(&" + res + ", " + own_expr(hv) + ");")
+                emit_line("wysna_assign(&" + res + ", " + own_expr(hv) + ");")
                 pop_scope()
                 let h_lines = g_cur_stmts
                 g_cur_stmts = saved
@@ -976,7 +976,7 @@ fn parse_expr(min_prec: int, allow_struct: bool) -> ExprRes {
                     emit_line("    " + l)
                 }
                 emit_line("} else {")
-                emit_line("    w_assign(&" + res + ", w_unwrap_success(" + tmp + "));")
+                emit_line("    wysna_assign(&" + res + ", wysna_unwrap_success(" + tmp + "));")
                 emit_line("}")
                 left = ExprRes { val: res, lref: "" }
             } else {
@@ -995,14 +995,14 @@ fn parse_expr(min_prec: int, allow_struct: bool) -> ExprRes {
         }
         if op_tok.kind == "AND" {
             let res = new_temp()
-            declare_owned_var(res, "w_bool(false)")
+            declare_owned_var(res, "wysna_bool(false)")
             emit_line("if ((" + left.val + ").as.b) {")
             push_scope("block")
             let saved = g_cur_stmts
             let empty: list[str] = []
             g_cur_stmts = empty
             let rhs = parse_expr(next_min, allow_struct)
-            emit_line(res + " = w_bool((" + rhs.val + ").as.b);")
+            emit_line(res + " = wysna_bool((" + rhs.val + ").as.b);")
             pop_scope()
             let r_lines = g_cur_stmts
             g_cur_stmts = saved
@@ -1013,14 +1013,14 @@ fn parse_expr(min_prec: int, allow_struct: bool) -> ExprRes {
             left = ExprRes { val: res, lref: "" }
         } elif op_tok.kind == "OR" {
             let res = new_temp()
-            declare_owned_var(res, "w_bool(true)")
+            declare_owned_var(res, "wysna_bool(true)")
             emit_line("if (!(" + left.val + ").as.b) {")
             push_scope("block")
             let saved = g_cur_stmts
             let empty: list[str] = []
             g_cur_stmts = empty
             let rhs = parse_expr(next_min, allow_struct)
-            emit_line(res + " = w_bool((" + rhs.val + ").as.b);")
+            emit_line(res + " = wysna_bool((" + rhs.val + ").as.b);")
             pop_scope()
             let r_lines = g_cur_stmts
             g_cur_stmts = saved
@@ -1038,7 +1038,7 @@ fn parse_expr(min_prec: int, allow_struct: bool) -> ExprRes {
             let empty: list[str] = []
             g_cur_stmts = empty
             let rhs = parse_expr(next_min, allow_struct)
-            emit_line("w_assign(&" + res + ", " + own_expr(rhs.val) + ");")
+            emit_line("wysna_assign(&" + res + ", " + own_expr(rhs.val) + ");")
             pop_scope()
             let r_lines = g_cur_stmts
             g_cur_stmts = saved
@@ -1046,7 +1046,7 @@ fn parse_expr(min_prec: int, allow_struct: bool) -> ExprRes {
                 emit_line("    " + l)
             }
             emit_line("} else {")
-            emit_line("    w_assign(&" + res + ", w_unwrap_optional(" + res + "));")
+            emit_line("    wysna_assign(&" + res + ", wysna_unwrap_optional(" + res + "));")
             emit_line("}")
             left = ExprRes { val: res, lref: "" }
         } else {
@@ -1061,44 +1061,44 @@ fn parse_expr(min_prec: int, allow_struct: bool) -> ExprRes {
                 let rhs_hold = new_aux("_rhs")
                 declare_owned_var(rhs_hold, own_expr(right.val))
                 if len(left.val) >= 2 and slice(left.val, 0, 2) == "v_" {
-                    emit_line("w_assign(&" + left.val + ", " + "w_move(&" + rhs_hold + "));")
+                    emit_line("wysna_assign(&" + left.val + ", " + "wysna_move(&" + rhs_hold + "));")
                     left = ExprRes { val: left.val, lref: left.lref }
                 } else {
                     let target_ref = clean_lref(left.lref)
-                    left = bind_call("w_clone(w_assign(" + target_ref + ", w_move(&" + rhs_hold + ")))")
+                    left = bind_call("wysna_clone(wysna_assign(" + target_ref + ", wysna_move(&" + rhs_hold + ")))")
                 }
             } elif op_tok.kind == "DOT_DOT" {
-                left = bind_call("w_make_range(" + left.val + ", " + right.val + ", false)")
+                left = bind_call("wysna_make_range(" + left.val + ", " + right.val + ", false)")
             } elif op_tok.kind == "DOT_DOT_EQ" {
-                left = bind_call("w_make_range(" + left.val + ", " + right.val + ", true)")
+                left = bind_call("wysna_make_range(" + left.val + ", " + right.val + ", true)")
             } elif op_tok.kind == "PLUS" {
-                left = ExprRes { val: bind_call("w_add(" + left.val + ", " + right.val + ")").val, lref: "" }
+                left = ExprRes { val: bind_call("wysna_add(" + left.val + ", " + right.val + ")").val, lref: "" }
             } elif op_tok.kind == "MINUS" {
-                left = ExprRes { val: "w_sub(" + left.val + ", " + right.val + ")", lref: "" }
+                left = ExprRes { val: "wysna_sub(" + left.val + ", " + right.val + ")", lref: "" }
             } elif op_tok.kind == "STAR" {
-                left = ExprRes { val: "w_mul(" + left.val + ", " + right.val + ")", lref: "" }
+                left = ExprRes { val: "wysna_mul(" + left.val + ", " + right.val + ")", lref: "" }
             } elif op_tok.kind == "SLASH" {
-                left = ExprRes { val: "w_div_at(" + left.val + ", " + right.val + ", " + escape_c_str(g_in_path) + ", " + str(op_tok.line) + ", " + str(op_tok.col) + ")", lref: "" }
+                left = ExprRes { val: "wysna_div_at(" + left.val + ", " + right.val + ", " + escape_c_str(g_in_path) + ", " + str(op_tok.line) + ", " + str(op_tok.col) + ")", lref: "" }
             } elif op_tok.kind == "PERCENT" {
-                left = ExprRes { val: "w_mod_at(" + left.val + ", " + right.val + ", " + escape_c_str(g_in_path) + ", " + str(op_tok.line) + ", " + str(op_tok.col) + ")", lref: "" }
+                left = ExprRes { val: "wysna_mod_at(" + left.val + ", " + right.val + ", " + escape_c_str(g_in_path) + ", " + str(op_tok.line) + ", " + str(op_tok.col) + ")", lref: "" }
             } elif op_tok.kind == "LT" {
-                left = ExprRes { val: "w_lt(" + left.val + ", " + right.val + ")", lref: "" }
+                left = ExprRes { val: "wysna_lt(" + left.val + ", " + right.val + ")", lref: "" }
             } elif op_tok.kind == "LTE" {
-                left = ExprRes { val: "w_le(" + left.val + ", " + right.val + ")", lref: "" }
+                left = ExprRes { val: "wysna_le(" + left.val + ", " + right.val + ")", lref: "" }
             } elif op_tok.kind == "GT" {
-                left = ExprRes { val: "w_gt(" + left.val + ", " + right.val + ")", lref: "" }
+                left = ExprRes { val: "wysna_gt(" + left.val + ", " + right.val + ")", lref: "" }
             } elif op_tok.kind == "GTE" {
-                left = ExprRes { val: "w_ge(" + left.val + ", " + right.val + ")", lref: "" }
+                left = ExprRes { val: "wysna_ge(" + left.val + ", " + right.val + ")", lref: "" }
             } elif op_tok.kind == "EQ" {
-                left = ExprRes { val: "w_bool(w_eq(" + left.val + ", " + right.val + "))", lref: "" }
+                left = ExprRes { val: "wysna_bool(wysna_eq(" + left.val + ", " + right.val + "))", lref: "" }
             } elif op_tok.kind == "NEQ" {
-                left = ExprRes { val: "w_bool(!w_eq(" + left.val + ", " + right.val + "))", lref: "" }
+                left = ExprRes { val: "wysna_bool(!wysna_eq(" + left.val + ", " + right.val + "))", lref: "" }
             }
         }
     }
     let mut needs_result_lift = false
     for position in sem_result_lift_positions { if position == expression_start + 1 { needs_result_lift = true } }
-    if needs_result_lift { left = bind_call("w_ok(" + own_expr(left.val) + ")") }
+    if needs_result_lift { left = bind_call("wysna_ok(" + own_expr(left.val) + ")") }
     return left
 }
 
@@ -1135,22 +1135,22 @@ fn parse_lambda() -> ExprRes {
     }
     for i in 0..len(lambda.captures) {
         let variable = "v_" + lambda.captures[i]
-        declare_owned_var(variable, "w_clone(environment.as.tuple->items[" + str(i) + "])")
+        declare_owned_var(variable, "wysna_clone(environment.as.tuple->items[" + str(i) + "])")
     }
     g_borrowed_vars = borrowed
-    let mut result = "w_unit()"
+    let mut result = "wysna_unit()"
     if match_kind("FAT_ARROW") { result = parse_expr(0, true).val }
     else { result = parse_block_expr() }
     let signature_types = sem_types[lambda.type_id].args
     let return_type = signature_types[len(signature_types) - 1]
-    if return_type == sem_unit { result = "w_unit()" }
-    elif sem_unit_return(return_type) { result = bind_call("w_discard_result_value(" + own_expr(result) + ")").val }
-    elif sem_kind(return_type) == "result" { result = bind_call("w_wrap_result(" + own_expr(result) + ", \"\")").val }
+    if return_type == sem_unit { result = "wysna_unit()" }
+    elif sem_unit_return(return_type) { result = bind_call("wysna_discard_result_value(" + own_expr(result) + ")").val }
+    elif sem_kind(return_type) == "result" { result = bind_call("wysna_wrap_result(" + own_expr(result) + ", \"\")").val }
     let returned = new_aux("_ret")
     emit_line("WVal " + returned + " = " + own_expr(result) + ";")
     pop_scope()
     emit_line("return " + returned + ";")
-    let name = "w_lambda_" + str(index)
+    let name = "wysna_lambda_" + str(index)
     let signature = "static WVal " + name + "(WVal environment, int32_t argc, const WVal* argv)"
     let mut definition = signature + " {\n"
     definition = definition + "    if (argc != " + str(len(lambda.params)) + ") { fprintf(stderr, \"[W4003] RuntimeError: Call arity mismatch\\n\"); exit(1); }\n"
@@ -1168,11 +1168,11 @@ fn parse_lambda() -> ExprRes {
         if i > 0 { captures = captures + ", " }
         captures = captures + "v_" + lambda.captures[i]
     }
-    let mut environment = "w_make_tuple(0, NULL)"
+    let mut environment = "wysna_make_tuple(0, NULL)"
     if len(lambda.captures) > 0 {
         let array = new_aux("_captures")
         emit_line("WVal " + array + "[" + str(len(lambda.captures)) + "] = { " + captures + " };")
-        environment = "w_make_tuple(" + str(len(lambda.captures)) + ", " + array + ")"
+        environment = "wysna_make_tuple(" + str(len(lambda.captures)) + ", " + array + ")"
     }
-    return bind_call("w_function_new(" + name + ", " + environment + ")")
+    return bind_call("wysna_function_new(" + name + ", " + environment + ")")
 }

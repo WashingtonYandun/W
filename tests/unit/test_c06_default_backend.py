@@ -50,8 +50,8 @@ def test_default_backend_is_hir():
         
         # Verify HIR hallmarks in generated C code
         # HirCCodeGen emits HirDirectCall targets with resolved signatures
-        assert "w_fn_add" in c_content, "Generated code must include function w_fn_add"
-        assert "w_main(" in c_content or "main(" in c_content, "Generated code must include main entrypoint"
+        assert "wysna_fn_add" in c_content, "Generated code must include function wysna_fn_add"
+        assert "wysna_main(" in c_content or "main(" in c_content, "Generated code must include main entrypoint"
 
 
 def test_explicit_backend_flags():
@@ -63,7 +63,7 @@ def test_explicit_backend_flags():
     print(p.x + p.y)
     """
     repo_root = get_repo_root()
-    w_bin = os.path.join(repo_root, "wysna")
+    wysna_cli = os.path.join(repo_root, "wysna")
 
     with tempfile.TemporaryDirectory() as td:
         src_path = os.path.join(td, "point.wysna")
@@ -72,17 +72,17 @@ def test_explicit_backend_flags():
 
         # 1. Default (should be HIR)
         c_default = os.path.join(td, "default.c")
-        rc, out, err = _run_cmd([sys.executable, w_bin, "emit-c", src_path, "-o", c_default], cwd=repo_root)
+        rc, out, err = _run_cmd([sys.executable, wysna_cli, "emit-c", src_path, "-o", c_default], cwd=repo_root)
         assert rc == 0, f"Default emit-c failed: {err}"
 
         # 2. Explicit --backend=hir
         c_hir = os.path.join(td, "hir.c")
-        rc, out, err = _run_cmd([sys.executable, w_bin, "emit-c", "--backend=hir", src_path, "-o", c_hir], cwd=repo_root)
+        rc, out, err = _run_cmd([sys.executable, wysna_cli, "emit-c", "--backend=hir", src_path, "-o", c_hir], cwd=repo_root)
         assert rc == 0, f"--backend=hir failed: {err}"
 
         # 3. Explicit --backend=ast
         c_ast = os.path.join(td, "ast.c")
-        rc, out, err = _run_cmd([sys.executable, w_bin, "emit-c", "--backend=ast", src_path, "-o", c_ast], cwd=repo_root)
+        rc, out, err = _run_cmd([sys.executable, wysna_cli, "emit-c", "--backend=ast", src_path, "-o", c_ast], cwd=repo_root)
         assert rc == 0, f"--backend=ast failed: {err}"
 
         # 4. Compare default vs hir: they must be identical
@@ -93,7 +93,7 @@ def test_explicit_backend_flags():
         assert content_default == content_hir, "Default emit-c must match --backend=hir output exactly"
 
         # 5. Invalid backend flag should cleanly fail
-        rc, out, err = _run_cmd([sys.executable, w_bin, "emit-c", "--backend=invalid_backend", src_path], cwd=repo_root)
+        rc, out, err = _run_cmd([sys.executable, wysna_cli, "emit-c", "--backend=invalid_backend", src_path], cwd=repo_root)
         assert rc != 0, "Invalid backend must exit with non-zero code"
         assert "Unknown backend" in err or "Unknown backend" in out, "Must produce error message on invalid backend"
 
@@ -155,7 +155,7 @@ def test_native_c99_execution_under_sanitizers():
     print("LEAVES:", run_test())
     """
     repo_root = get_repo_root()
-    w_bin = os.path.join(repo_root, "wysna")
+    wysna_cli = os.path.join(repo_root, "wysna")
 
     with tempfile.TemporaryDirectory() as td:
         src_path = os.path.join(td, "tree.wysna")
@@ -165,13 +165,13 @@ def test_native_c99_execution_under_sanitizers():
 
         # Build natively using default backend with sanitizers enabled
         rc, out, err = _run_cmd([
-            sys.executable, w_bin, "build", "--sanitize", src_path, "-o", bin_path
+            sys.executable, wysna_cli, "build", "--sanitize", src_path, "-o", bin_path
         ], cwd=repo_root)
         assert rc == 0, f"Native build via default HIR backend failed: {err}"
         assert os.path.exists(bin_path), "Target binary must exist"
 
         # Execute binary
-        env = dict(os.environ, W_MEM_CHECK="1")
+        env = dict(os.environ, WYSNA_MEM_CHECK="1")
         res = subprocess.run([bin_path], capture_output=True, text=True, env=env)
         assert res.returncode == 0, f"Execution failed with code {res.returncode}: {res.stderr}"
         assert "LEAVES: 3" in res.stdout, f"Unexpected stdout: {res.stdout}"
@@ -179,7 +179,7 @@ def test_native_c99_execution_under_sanitizers():
 
 def run_all() -> bool:
     print("==================================================")
-    print("W Language C06 Default HIR Backend Suite")
+    print("Wysna C06 Default HIR Backend Suite")
     print("==================================================")
     try:
         test_default_backend_is_hir()

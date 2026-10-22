@@ -43,7 +43,7 @@ def execute(command, **kwargs):
 
 
 def sqlite_archive(path=None):
-    cache = ROOT / '.w_cache/pilot-package'
+    cache = ROOT / '.wysna_cache/pilot-package'
     cache.mkdir(parents=True, exist_ok=True)
     target = Path(path) if path else cache / (SQLITE_ARCHIVE + '.zip')
     with cache_lock(cache / 'sqlite.lock'):
@@ -70,7 +70,7 @@ def verify_package(directory):
         shutil.copytree(directory, copied)
         binary = copied / executable_name('measurement-ingest')
         database = sandbox / 'trial database.sqlite'
-        environment = dict(os.environ, W_SQLITE_DB=str(database), W_MEM_CHECK='1')
+        environment = dict(os.environ, WYSNA_SQLITE_DB=str(database), WYSNA_MEM_CHECK='1')
         def run(arguments, code, output=None):
             result = subprocess.run([str(binary)] + arguments, env=environment,
                                     capture_output=True, text=True, timeout=60)
@@ -174,7 +174,7 @@ El ejecutable incluye SQLite y el runtime C; no necesita Python ni un compilador
 Es un binario experimental sin firma. No requiere privilegios de administrador.
 Usa una base nueva para esta prueba; no apunta a ninguna base existente.
 
-$env:W_SQLITE_DB = Join-Path $PWD ("trial-" + [guid]::NewGuid() + ".sqlite")
+$env:WYSNA_SQLITE_DB = Join-Path $PWD ("trial-" + [guid]::NewGuid() + ".sqlite")
 .\\measurement-ingest.exe --version
 .\\measurement-ingest.exe --check measurements.csv
 .\\measurement-ingest.exe --status

@@ -8,14 +8,14 @@ import sys
 import tempfile
 from checker.TypeChecker import TypeChecker
 from checker.TypeInterner import TYPE_BOOL, TYPE_INT
-from error.Error import WError
+from error.Error import WysnaError
 from hir.HirBuilder import HirBuilder
 from hir.HirCCodeGen import HirCCodeGen
 from mir.Lowering import Lowering
 from mir.Nodes import Operation, Terminator
 from mir.Verifier import Verifier
 from parser.Parser import Parser
-from main import ensure_selfhost_w1_binary
+from main import ensure_selfhost_compiler_binary
 from tests.engine_harness import verify
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -36,7 +36,7 @@ def operations(module):
 def rejects(module, interner):
     try:
         Verifier(interner).verify(module)
-    except WError as error:
+    except WysnaError as error:
         assert error.code == 'W9999' and error.stage == 'mir-verification', error
     else:
         raise AssertionError('Malformed MIR was accepted')
@@ -68,7 +68,7 @@ def test_cfg_and_ownership_rejections():
     rejects(broken, interner)
     broken = deepcopy(original)
     call = next(operation for operation in operations(broken) if operation.opcode == 'call')
-    call.data['name'] = 'w_missing'
+    call.data['name'] = 'wysna_missing'
     rejects(broken, interner)
     broken = deepcopy(original)
     function = broken.functions[0]
@@ -122,13 +122,13 @@ print(fail() else error { match error { A(detail) => detail.value, B(_) => 0 } }
 
 
 def test_range_iteration_and_limits_across_engines():
-    w1 = ensure_selfhost_w1_binary(str(ROOT))
+    selfhost_bin = ensure_selfhost_compiler_binary(str(ROOT))
     with tempfile.TemporaryDirectory(prefix='w-mir-contracts-') as directory:
         for name in ('mir_range_iteration', 'mir_range_limit', 'mir_range_overflow'):
             path = ROOT / 'tests/runtime' / (name + '.wysna')
-            ok, detail = verify(path.read_text(), str(path.relative_to(ROOT)), w1, directory,
+            ok, detail = verify(path.read_text(), str(path.relative_to(ROOT)), selfhost_bin, directory,
                                 expected=path.with_suffix('.expected').read_text(), strict=True,
-                                sanitize=os.environ.get('W_SANITIZE') == '1')
+                                sanitize=os.environ.get('WYSNA_SANITIZE') == '1')
             assert ok, detail
 
 
@@ -155,7 +155,7 @@ def test_mir_inspection_and_default_backend():
 def test_bootstrap_cache_serializes_processes():
     with tempfile.TemporaryDirectory(prefix='w-bootstrap-lock-') as directory:
         (Path(directory) / 'selfhost').mkdir()
-        (Path(directory) / 'selfhost' / 'w1.wysna').write_text('print(0)\n')
+        (Path(directory) / 'selfhost' / 'compiler.wysna').write_text('print(0)\n')
         script = """import sys, time
 from pathlib import Path
 import main
@@ -167,8 +167,8 @@ def rebuild(path):
     time.sleep(0.15)
     marker.unlink()
     return 'ok'
-main._ensure_selfhost_w1_binary_locked = rebuild
-print(main.ensure_selfhost_w1_binary(root))
+main._ensure_selfhost_compiler_binary_locked = rebuild
+print(main.ensure_selfhost_compiler_binary(root))
 """
         children = [subprocess.Popen([sys.executable, '-c', script, directory], cwd=ROOT,
                                      stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)

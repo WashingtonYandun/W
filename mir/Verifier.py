@@ -2,39 +2,39 @@
 from collections import deque
 import re
 from checker.TypeInterner import TYPE_BOOL, TYPE_INT, TYPE_UNIT, TYPE_NONE, TYPE_FLOAT, TYPE_STR
-from error.Error import WError
+from error.Error import WysnaError
 from mir.Nodes import EFFECTS, Place
 
 RUNTIME = {
-    'w_neg', 'w_not', 'w_add', 'w_sub', 'w_mul', 'w_div_at', 'w_mod_at', 'w_lt', 'w_le', 'w_gt', 'w_ge',
-    'w_equal', 'w_not_equal', 'w_ok', 'w_err', 'w_enum', 'w_enum_payload', 'w_wrap_result',
-    'w_make_range', 'w_empty_weak', 'w_index_get_owned_at', 'w_unwrap_optional', 'w_unwrap_ok',
-    'w_unwrap_err', 'w_unwrap_success', 'w_enum_payload_owned', 'w_dict_get', 'w_dict_keys', 'w_dict_values',
-    'w_builtin_print', 'w_builtin_eprint', 'w_builtin_len', 'w_builtin_str', 'w_builtin_int',
-    'w_builtin_float', 'w_builtin_ord', 'w_builtin_chr', 'w_builtin_slice', 'w_builtin_bytes',
-    'w_builtin_args', 'w_builtin_exit', 'w_builtin_enumerate', 'w_builtin_dict_items',
-    'w_builtin_read_file', 'w_builtin_write_file', 'w_builtin_join_strings', 'w_builtin_weak_owned',
-    'w_builtin_upgrade',
+    'wysna_neg', 'wysna_not', 'wysna_add', 'wysna_sub', 'wysna_mul', 'wysna_div_at', 'wysna_mod_at', 'wysna_lt', 'wysna_le', 'wysna_gt', 'wysna_ge',
+    'wysna_equal', 'wysna_not_equal', 'wysna_ok', 'wysna_err', 'wysna_enum', 'wysna_enum_payload', 'wysna_wrap_result',
+    'wysna_make_range', 'wysna_empty_weak', 'wysna_index_get_owned_at', 'wysna_unwrap_optional', 'wysna_unwrap_ok',
+    'wysna_unwrap_err', 'wysna_unwrap_success', 'wysna_enum_payload_owned', 'wysna_dict_get', 'wysna_dict_keys', 'wysna_dict_values',
+    'wysna_builtin_print', 'wysna_builtin_eprint', 'wysna_builtin_len', 'wysna_builtin_str', 'wysna_builtin_int',
+    'wysna_builtin_float', 'wysna_builtin_ord', 'wysna_builtin_chr', 'wysna_builtin_slice', 'wysna_builtin_bytes',
+    'wysna_builtin_args', 'wysna_builtin_exit', 'wysna_builtin_enumerate', 'wysna_builtin_dict_items',
+    'wysna_builtin_read_file', 'wysna_builtin_write_file', 'wysna_builtin_join_strings', 'wysna_builtin_weak_owned',
+    'wysna_builtin_upgrade',
 }
 RUNTIME_ARITIES = {
-    **dict.fromkeys(('w_neg', 'w_not', 'w_ok', 'w_err', 'w_enum_payload', 'w_wrap_result',
-                     'w_unwrap_optional', 'w_unwrap_ok', 'w_unwrap_err', 'w_unwrap_success',
-                     'w_enum_payload_owned', 'w_dict_keys', 'w_dict_values', 'w_builtin_len',
-                     'w_builtin_str', 'w_builtin_int', 'w_builtin_float', 'w_builtin_ord',
-                     'w_builtin_chr', 'w_builtin_bytes', 'w_builtin_exit', 'w_builtin_enumerate',
-                     'w_builtin_dict_items', 'w_builtin_read_file', 'w_builtin_weak_owned',
-                     'w_builtin_upgrade'), 1),
-    **dict.fromkeys(('w_add', 'w_sub', 'w_mul', 'w_div_at', 'w_mod_at', 'w_lt', 'w_le',
-                     'w_gt', 'w_ge', 'w_equal', 'w_not_equal', 'w_make_range',
-                     'w_index_get_owned_at', 'w_dict_get', 'w_builtin_write_file',
-                     'w_builtin_join_strings'), 2),
-    'w_builtin_slice': 3, 'w_builtin_args': 0, 'w_enum': 0, 'w_empty_weak': 0,
-    'w_builtin_print': None, 'w_builtin_eprint': None,
+    **dict.fromkeys(('wysna_neg', 'wysna_not', 'wysna_ok', 'wysna_err', 'wysna_enum_payload', 'wysna_wrap_result',
+                     'wysna_unwrap_optional', 'wysna_unwrap_ok', 'wysna_unwrap_err', 'wysna_unwrap_success',
+                     'wysna_enum_payload_owned', 'wysna_dict_keys', 'wysna_dict_values', 'wysna_builtin_len',
+                     'wysna_builtin_str', 'wysna_builtin_int', 'wysna_builtin_float', 'wysna_builtin_ord',
+                     'wysna_builtin_chr', 'wysna_builtin_bytes', 'wysna_builtin_exit', 'wysna_builtin_enumerate',
+                     'wysna_builtin_dict_items', 'wysna_builtin_read_file', 'wysna_builtin_weak_owned',
+                     'wysna_builtin_upgrade'), 1),
+    **dict.fromkeys(('wysna_add', 'wysna_sub', 'wysna_mul', 'wysna_div_at', 'wysna_mod_at', 'wysna_lt', 'wysna_le',
+                     'wysna_gt', 'wysna_ge', 'wysna_equal', 'wysna_not_equal', 'wysna_make_range',
+                     'wysna_index_get_owned_at', 'wysna_dict_get', 'wysna_builtin_write_file',
+                     'wysna_builtin_join_strings'), 2),
+    'wysna_builtin_slice': 3, 'wysna_builtin_args': 0, 'wysna_enum': 0, 'wysna_empty_weak': 0,
+    'wysna_builtin_print': None, 'wysna_builtin_eprint': None,
 }
 assert set(RUNTIME_ARITIES) == RUNTIME, 'Every MIR runtime helper requires a signature'
 
-CONSUMING = {'w_ok': (0,), 'w_err': (0,), 'w_enum_payload': (0,),
-             'w_wrap_result': (0,), 'w_builtin_weak_owned': (0,)}
+CONSUMING = {'wysna_ok': (0,), 'wysna_err': (0,), 'wysna_enum_payload': (0,),
+             'wysna_wrap_result': (0,), 'wysna_builtin_weak_owned': (0,)}
 
 
 class Verifier:
@@ -42,7 +42,7 @@ class Verifier:
         self.interner = interner
 
     def fail(self, message, source=None):
-        raise WError(message, file=getattr(source, 'file', '<mir>'), line=getattr(source, 'line', 1),
+        raise WysnaError(message, file=getattr(source, 'file', '<mir>'), line=getattr(source, 'line', 1),
                      col=getattr(source, 'col', 1), code='W9999', stage='mir-verification')
 
     def compatible(self, source, target):
@@ -63,7 +63,7 @@ class Verifier:
                 any(slot.id >= 0 or slot.ownership != 'global' or slot.storage != 'value'
                     or slot.parameter for slot in module.globals)):
             self.fail('Invalid MIR global identities/ownership')
-        if 'w_program' not in self.functions:
+        if 'wysna_program' not in self.functions:
             self.fail('MIR module requires a program entry function')
         for function in module.functions:
             self.function(function)
@@ -127,107 +127,107 @@ class Verifier:
 
         arity = RUNTIME_ARITIES[name]
         require(arity is None or len(args) == arity)
-        if name in ('w_neg', 'w_not'):
+        if name in ('wysna_neg', 'wysna_not'):
             require(types[0] == result.type_id and types[0] in
-                    ((TYPE_BOOL,) if name == 'w_not' else (TYPE_INT, TYPE_FLOAT)))
-        elif name in ('w_add', 'w_sub', 'w_mul', 'w_div_at', 'w_mod_at', 'w_lt', 'w_le', 'w_gt', 'w_ge'):
-            allowed = (TYPE_INT, TYPE_FLOAT, TYPE_STR) if name == 'w_add' else (TYPE_INT,) if name == 'w_mod_at' else (TYPE_INT, TYPE_FLOAT)
-            comparison = name in ('w_lt', 'w_le', 'w_gt', 'w_ge')
+                    ((TYPE_BOOL,) if name == 'wysna_not' else (TYPE_INT, TYPE_FLOAT)))
+        elif name in ('wysna_add', 'wysna_sub', 'wysna_mul', 'wysna_div_at', 'wysna_mod_at', 'wysna_lt', 'wysna_le', 'wysna_gt', 'wysna_ge'):
+            allowed = (TYPE_INT, TYPE_FLOAT, TYPE_STR) if name == 'wysna_add' else (TYPE_INT,) if name == 'wysna_mod_at' else (TYPE_INT, TYPE_FLOAT)
+            comparison = name in ('wysna_lt', 'wysna_le', 'wysna_gt', 'wysna_ge')
             require(types[0] == types[1] and types[0] in allowed and
                     result.type_id == (TYPE_BOOL if comparison else types[0]))
-        elif name in ('w_equal', 'w_not_equal'):
+        elif name in ('wysna_equal', 'wysna_not_equal'):
             require(result.type_id == TYPE_BOOL and
                     self.interner.equality_compatible(types[0], types[1]))
-        elif name == 'w_make_range':
+        elif name == 'wysna_make_range':
             require(types == [TYPE_INT, TYPE_INT] and list_of(TYPE_INT) and
                     isinstance(operation.data.get('inclusive'), bool))
-        elif name == 'w_builtin_len':
+        elif name == 'wysna_builtin_len':
             require(result.type_id == TYPE_INT and (types[0] == TYPE_STR or entry(0).tag in ('list', 'dict', 'tuple')))
-        elif name in ('w_builtin_int', 'w_builtin_float'):
+        elif name in ('wysna_builtin_int', 'wysna_builtin_float'):
             require(types[0] in (TYPE_INT, TYPE_FLOAT, TYPE_BOOL, TYPE_STR) and
-                    result.type_id == (TYPE_INT if name == 'w_builtin_int' else TYPE_FLOAT))
-        elif name == 'w_builtin_ord':
+                    result.type_id == (TYPE_INT if name == 'wysna_builtin_int' else TYPE_FLOAT))
+        elif name == 'wysna_builtin_ord':
             require(types == [TYPE_STR] and result.type_id == TYPE_INT)
-        elif name == 'w_builtin_chr':
+        elif name == 'wysna_builtin_chr':
             require(types == [TYPE_INT] and result.type_id == TYPE_STR)
-        elif name == 'w_builtin_str':
+        elif name == 'wysna_builtin_str':
             require(result.type_id == TYPE_STR)
-        elif name == 'w_builtin_bytes':
+        elif name == 'wysna_builtin_bytes':
             require(types == [TYPE_STR] and list_of(TYPE_INT))
-        elif name == 'w_builtin_args':
+        elif name == 'wysna_builtin_args':
             require(list_of(TYPE_STR))
-        elif name == 'w_builtin_exit':
+        elif name == 'wysna_builtin_exit':
             require(types == [TYPE_INT] and result.type_id == TYPE_UNIT)
-        elif name == 'w_builtin_slice':
+        elif name == 'wysna_builtin_slice':
             require(types[1:] == [TYPE_INT, TYPE_INT] and types[0] == result.type_id and
                     (types[0] == TYPE_STR or entry(0).tag == 'list'))
-        elif name == 'w_builtin_join_strings':
+        elif name == 'wysna_builtin_join_strings':
             require(entry(0).tag == 'list' and entry(0).data == TYPE_STR and
                     types[1] == TYPE_STR and result.type_id == TYPE_STR)
-        elif name in ('w_builtin_print', 'w_builtin_eprint'):
+        elif name in ('wysna_builtin_print', 'wysna_builtin_eprint'):
             require(result.type_id == TYPE_UNIT)
-        elif name in ('w_dict_get', 'w_dict_keys', 'w_dict_values', 'w_builtin_dict_items'):
+        elif name in ('wysna_dict_get', 'wysna_dict_keys', 'wysna_dict_values', 'wysna_builtin_dict_items'):
             dictionary = entry(0)
             require(dictionary.tag == 'dict')
-            if name == 'w_dict_get':
+            if name == 'wysna_dict_get':
                 require(self.compatible(types[1], dictionary.data[0]) and returned.tag == 'optional' and returned.data == dictionary.data[1])
-            elif name == 'w_builtin_dict_items':
+            elif name == 'wysna_builtin_dict_items':
                 require(returned.tag == 'list')
                 pair = self.interner.get_entry(returned.data)
                 require(pair.tag == 'tuple' and tuple(pair.data) == tuple(dictionary.data))
             else:
-                require(list_of(dictionary.data[0 if name == 'w_dict_keys' else 1]))
-        elif name == 'w_builtin_enumerate':
+                require(list_of(dictionary.data[0 if name == 'wysna_dict_keys' else 1]))
+        elif name == 'wysna_builtin_enumerate':
             require(entry(0).tag == 'list' and returned.tag == 'list')
             pair = self.interner.get_entry(returned.data)
             require(pair.tag == 'tuple' and tuple(pair.data) == (TYPE_INT, entry(0).data))
-        elif name == 'w_index_get_owned_at':
+        elif name == 'wysna_index_get_owned_at':
             container = entry(0)
             require(container.tag in ('list', 'dict') or types[0] == TYPE_STR)
             expected = container.data[0] if container.tag == 'dict' else TYPE_INT
             value = container.data[1] if container.tag == 'dict' else container.data if container.tag == 'list' else TYPE_STR
             require(self.compatible(types[1], expected) and result.type_id == value)
-        elif name in ('w_builtin_read_file', 'w_builtin_write_file'):
-            require(types == ([TYPE_STR] if name == 'w_builtin_read_file' else [TYPE_STR, TYPE_STR]))
+        elif name in ('wysna_builtin_read_file', 'wysna_builtin_write_file'):
+            require(types == ([TYPE_STR] if name == 'wysna_builtin_read_file' else [TYPE_STR, TYPE_STR]))
             require(returned.tag == 'result' and returned.data[0] ==
-                    (TYPE_STR if name == 'w_builtin_read_file' else TYPE_UNIT))
+                    (TYPE_STR if name == 'wysna_builtin_read_file' else TYPE_UNIT))
             error = self.interner.get_entry(returned.data[1])
             require(error.tag == 'struct' and error.data == 'IoError')
-        elif name == 'w_builtin_weak_owned':
+        elif name == 'wysna_builtin_weak_owned':
             require(entry(0).tag == 'class' and returned.tag == 'weak' and returned.data == types[0])
-        elif name == 'w_empty_weak':
+        elif name == 'wysna_empty_weak':
             require(returned.tag == 'weak' and self.interner.get_entry(returned.data).tag == 'class')
-        elif name == 'w_builtin_upgrade':
+        elif name == 'wysna_builtin_upgrade':
             require(entry(0).tag == 'weak' and returned.tag == 'optional' and returned.data == entry(0).data)
-        elif name in ('w_ok', 'w_err'):
-            require(returned.tag == 'result' and self.compatible(types[0], returned.data[0 if name == 'w_ok' else 1]))
-        elif name == 'w_wrap_result':
+        elif name in ('wysna_ok', 'wysna_err'):
+            require(returned.tag == 'result' and self.compatible(types[0], returned.data[0 if name == 'wysna_ok' else 1]))
+        elif name == 'wysna_wrap_result':
             require(returned.tag == 'result' and self.compatible(types[0], result.type_id) and
                     isinstance(operation.data.get('error_type'), str))
-        elif name in ('w_unwrap_optional', 'w_unwrap_ok', 'w_unwrap_err', 'w_unwrap_success'):
+        elif name in ('wysna_unwrap_optional', 'wysna_unwrap_ok', 'wysna_unwrap_err', 'wysna_unwrap_success'):
             source = entry(0)
-            allowed = ('optional',) if name == 'w_unwrap_optional' else ('result',) if name in ('w_unwrap_ok', 'w_unwrap_err') else ('optional', 'result')
+            allowed = ('optional',) if name == 'wysna_unwrap_optional' else ('result',) if name in ('wysna_unwrap_ok', 'wysna_unwrap_err') else ('optional', 'result')
             require(source.tag in allowed)
-            expected = source.data if source.tag == 'optional' else source.data[1 if name == 'w_unwrap_err' else 0]
+            expected = source.data if source.tag == 'optional' else source.data[1 if name == 'wysna_unwrap_err' else 0]
             require(result.type_id == expected)
-        elif name in ('w_enum', 'w_enum_payload', 'w_enum_payload_owned'):
-            source = entry(0) if name == 'w_enum_payload_owned' else returned
+        elif name in ('wysna_enum', 'wysna_enum_payload', 'wysna_enum_payload_owned'):
+            source = entry(0) if name == 'wysna_enum_payload_owned' else returned
             variant = operation.data.get('variant')
             if source.tag == 'optional':
-                require(name == 'w_enum_payload' and operation.data.get('enum', '').split('__', 1)[0] == 'Option' and variant == 'Some' and self.compatible(types[0], source.data))
+                require(name == 'wysna_enum_payload' and operation.data.get('enum', '').split('__', 1)[0] == 'Option' and variant == 'Some' and self.compatible(types[0], source.data))
             else:
                 require(source.tag == 'enum')
                 definition = self.interner.enum_defs.get(source.data)
                 require(definition is not None and variant in definition.variants)
                 payload = definition.variant_payloads.get(variant, [])
-                if name == 'w_enum':
+                if name == 'wysna_enum':
                     require(not payload and operation.data.get('enum') == source.data)
                 else:
                     expected = payload[0] if len(payload) == 1 else self.interner.mk_tuple(tuple(payload))
                     require(bool(payload))
-                    actual = result.type_id if name == 'w_enum_payload_owned' else types[0]
+                    actual = result.type_id if name == 'wysna_enum_payload_owned' else types[0]
                     require(self.compatible(actual, expected))
-                    if name == 'w_enum_payload':
+                    if name == 'wysna_enum_payload':
                         require(operation.data.get('enum') == source.data)
         else:
             self.fail('Missing MIR runtime signature: ' + name, operation.source)
