@@ -45,10 +45,10 @@ Every core language feature and standard library capability is continuously veri
 
 | Engine | Role | Implementation | Status |
 | :--- | :--- | :--- | :--- |
-| **`interpreter`** | Reference behavior | Direct AST tree-walk evaluation in Python (Wysna Seed) | 201/201 (100.0%) |
-| **`ast`** | Secondary baseline | Direct AST to C99 code generation (Wysna Seed) | 201/201 (100.0%) |
-| **`hir`** | Primary production pipeline | Typed HIR &rarr; Verified MIR &rarr; C99 backend (Wysna Seed) | 201/201 (100.0%) |
-| **`selfhost`** | Self-hosted compiler | Wysna Compiler native executable (`stage2`) | 201/201 (100.0%) |
+| **`interpreter`** | Reference behavior | Direct AST tree-walk evaluation in Python (Wysna Seed) | 202/202 (100.0%) |
+| **`ast`** | Secondary baseline | Direct AST to C99 code generation (Wysna Seed) | 202/202 (100.0%) |
+| **`hir`** | Primary production pipeline | Typed HIR &rarr; Verified MIR &rarr; C99 backend (Wysna Seed) | 202/202 (100.0%) |
+| **`selfhost`** | Self-hosted compiler | Wysna Compiler native executable (`stage2`) | 202/202 (100.0%) |
 
 See [docs/ENGINE_PARITY_MATRIX.md](docs/ENGINE_PARITY_MATRIX.md) for full breakdown and feature classifications.
 
@@ -181,6 +181,7 @@ Wysna provides a focused, high-performance standard library:
 | **`std/files`** | Streaming file I/O | `File`, `open()`, `read()`, `write()`, `is_open()`, `close()` |
 | **`std/fs`** | Portable filesystem operations | `exists()`, `size()`, `mkdir()`, `remove()`, `rename()` |
 | **`std/parse`** | Strict string parsing | `parse_int()`, `parse_float()` |
+| **`std/json`** | JSON parsing and deterministic serialization | `parse()`, `stringify()`, typed `Value` constructors and accessors |
 | **`std/text`** | String transformation utilities | `split()`, `join()`, `replace()`, `trim()`, `find()` |
 | **`std/path`** | Cross-platform path handling | `join()`, `dirname()`, `basename()` |
 | **`std/resources`** | Deterministic resource scopes | `Resource`, `acquire()`, `scope()`, `borrow()`, `close()` |

@@ -1,0 +1,53 @@
+import "std/json"
+
+fn report_invalid(source: str, label: str) -> unit {
+    let value = json.parse(source) else error {
+        print(label, error.offset, error.message)
+        return
+    }
+    print("unexpected success", label, json.stringify(value) else error {
+        return
+    })
+}
+
+fn main() -> unit {
+    let decoded = json.parse("{\"name\":\"Wysna\",\"items\":[true,false,null],\"number\":-12.5e+2,\"unicode\":\"\\uD83D\\uDE00\",\"text\":\"line\\nnext\\t\\\"\"}") else error {
+        print("parse error", error.offset, error.message)
+        return
+    }
+    let encoded = json.stringify(decoded) else error {
+        print("stringify error", error.offset, error.message)
+        return
+    }
+    print(encoded)
+    let name_value = json.get(decoded, "name") ?? json.null()
+    print("name", json.as_string(name_value) ?? "missing")
+    let items = json.get(decoded, "items") ?? json.null()
+    let first = json.at(items, 0) ?? json.null()
+    let third = json.at(items, 2) ?? json.null()
+    print("items", json.as_bool(first) ?? false, json.is_null(third))
+    let number_value = json.number("1e3") else error {
+        print("number error", error.offset, error.message)
+        return
+    }
+    let fields: dict[str, json.Value] = {"z": number_value, "a": json.string("line\nnext\t\""), "control": json.string(chr(1))}
+    let constructed = json.stringify(json.object(fields)) else error {
+        print("stringify error", error.offset, error.message)
+        return
+    }
+    print(constructed)
+    report_invalid("[1,]", "invalid")
+    report_invalid("\"\\uD800\"", "surrogate")
+    report_invalid("01", "leading zero")
+    report_invalid("1e", "exponent")
+    let mut too_deep = ""
+    for depth in 0..33 {
+        too_deep = too_deep + "["
+    }
+    for depth in 0..33 {
+        too_deep = too_deep + "]"
+    }
+    report_invalid(too_deep, "deep")
+}
+
+main()

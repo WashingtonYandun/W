@@ -7,9 +7,10 @@ self-hosted compiler. MIR is an intermediate representation, not a fifth engine.
 
 ## Measured corpus
 
-The table comes from an actual `tools/ci_conformance.py --profile=release --sanitize`
-run. It covers the public runtime examples and negative fixtures, with no unsupported
-exclusions. It does not establish universal language parity or measure code coverage.
+The table comes from an actual `tools/ci_conformance.py --profile=release` run. It covers
+the public runtime examples and negative fixtures, with no unsupported exclusions. The
+separate sanitizer gate checks memory safety; neither gate establishes universal language
+parity or measures code coverage.
 
 <!-- GENERATED TABLE START -->
 
@@ -20,9 +21,9 @@ exclusions. It does not establish universal language parity or measure code cove
 | **`checked_modules`** | 1 | ✅ 1/1 | ✅ 1/1 | ✅ 1/1 | ✅ 1/1 | Declared supported |
 | **`error_unions`** | 8 | ✅ 8/8 | ✅ 8/8 | ✅ 8/8 | ✅ 8/8 | Declared supported |
 | **`functions`** | 5 | ✅ 5/5 | ✅ 5/5 | ✅ 5/5 | ✅ 5/5 | Declared supported |
-| **`stdlib`** | 2 | ✅ 2/2 | ✅ 2/2 | ✅ 2/2 | ✅ 2/2 | Declared supported |
+| **`stdlib`** | 3 | ✅ 3/3 | ✅ 3/3 | ✅ 3/3 | ✅ 3/3 | Declared supported |
 | **`regressions`** | 13 | ✅ 13/13 | ✅ 13/13 | ✅ 13/13 | ✅ 13/13 | Declared supported |
-| **Total Verified** | **201** | **201/201 (100.0%)** | **201/201 (100.0%)** | **201/201 (100.0%)** | **201/201 (100.0%)** | _measured_ |
+| **Total Verified** | **202** | **202/202 (100.0%)** | **202/202 (100.0%)** | **202/202 (100.0%)** | **202/202 (100.0%)** | _measured_ |
 
 <!-- GENERATED TABLE END -->
 

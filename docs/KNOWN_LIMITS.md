@@ -181,7 +181,7 @@ a proposed memory model; do not treat this as an implicit promise that ARC is th
 | LSP | `initialize`, `didOpen/didChange/didClose`, `definition`, `hover`, `completion`, document formatting and `publishDiagnostics`. No references, rename, signature help, semantic tokens or incremental sync. |
 | Dictionary keys | `int`, `str`, `bool`, `enum` only; `float` and composites containing it are rejected with `W2010`. |
 | `NetError` | Declared in the prelude (`checker/SymbolTable.py`) and referenced by a parser fixture, but nothing produces one. Either implement a network module or remove the type. |
-| Standard library size | `text` (3 functions), `algorithms` (3), `io` (2), `bytes` (2). `join` takes O(output bytes + parts) using a two-pass builder. No Unicode normalization. |
+| Standard library scope | Includes text, path, filesystem, file/buffer I/O, resources, algorithms, UTF-8 and JSON. Networking, cryptography, process management and Unicode normalization are not provided. |
 
 The CLI has POSIX and Windows adapters for cache locks, compiler processes, executable
 names and RSS telemetry. The Windows smoke job must pass on that host before support

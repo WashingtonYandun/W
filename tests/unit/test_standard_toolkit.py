@@ -25,6 +25,18 @@ def test_toolkit_semantics_across_four_engines():
         assert ok, detail
 
 
+def test_json_parser_and_serializer_across_four_engines():
+    selfhost_bin = ensure_selfhost_compiler_binary(str(ROOT))
+    source = (ROOT / 'tests/stdlib/json.wysna').read_text(encoding='utf-8')
+    expected = (ROOT / 'tests/stdlib/json.expected').read_text(encoding='utf-8')
+    with tempfile.TemporaryDirectory() as directory:
+        results = [run_engine(engine, source, 'stdlib-json', selfhost_bin, directory,
+                   sanitize=os.environ.get('WYSNA_SANITIZE') == '1')
+                   for engine in ('interpreter', 'ast', 'hir', 'selfhost')]
+        ok, detail = compare(results, expected)
+        assert ok, detail
+
+
 def test_streaming_files_and_filesystem_across_four_engines():
     selfhost_bin = ensure_selfhost_compiler_binary(str(ROOT))
     with tempfile.TemporaryDirectory(prefix='w toolkit é ') as temporary:
@@ -161,6 +173,7 @@ int main(int argc, char** argv) {
 
 def run_toolkit_tests():
     test_toolkit_semantics_across_four_engines()
+    test_json_parser_and_serializer_across_four_engines()
     test_streaming_files_and_filesystem_across_four_engines()
     test_host_handles_reject_stale_wrong_kind_and_oversized_requests()
     test_large_file_processing_keeps_buffer_bounded()

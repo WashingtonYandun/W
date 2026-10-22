@@ -69,7 +69,7 @@ def lsp_messages(output):
 def validate(wheel, forbidden, report):
     with zipfile.ZipFile(wheel) as archive:
         inventory = archive.namelist()
-        assert {'main.py', 'runtime/wysna_runtime.h', 'stdlib/text.wysna'} <= set(inventory)
+        assert {'main.py', 'runtime/wysna_runtime.h', 'stdlib/text.wysna', 'stdlib/json.wysna'} <= set(inventory)
         assert not any(Path(name).is_absolute() or '..' in Path(name).parts for name in inventory)
     report['inventory'] = inventory
     with tempfile.TemporaryDirectory(prefix='w installed client ') as temporary:
@@ -91,7 +91,15 @@ def validate(wheel, forbidden, report):
         work = directory / 'project with spaces and á'
         work.mkdir()
         (work / 'hello.wysna').write_text('print("hello installed")\n', encoding='utf-8')
-        (work / 'library.wysna').write_text('import "std/text" as text\nprint(text.join(["hello", "stdlib"], " "))\n', encoding='utf-8')
+        (work / 'library.wysna').write_text(
+            'import "std/text" as text\nimport "std/json" as json\n'
+            'fn exercise() {\n'
+            '    print(text.join(["hello", "stdlib"], " "))\n'
+            '    let value = json.parse("{\\"ready\\":true}") else error { return }\n'
+            '    let encoded = json.stringify(value) else error { return }\n'
+            '    print(encoded)\n'
+            '}\n'
+            'exercise()\n', encoding='utf-8')
         (work / 'invalid.wysna').write_text('let value: int = "wrong"\n', encoding='utf-8')
         denied = directory / 'denied-access.jsonl'
         install_guard(site_packages, forbidden, denied)
@@ -124,7 +132,7 @@ def validate(wheel, forbidden, report):
         rejected = run('invalid', ['check', '--json', 'invalid.wysna'], code=1)
         assert json.loads(rejected.stdout)['code'] == 'W2001'
         run('run', ['run', 'hello.wysna'], expected='hello installed\n')
-        run('stdlib', ['run', 'library.wysna'], expected='hello stdlib\n')
+        run('stdlib', ['run', 'library.wysna'], expected='hello stdlib\n{"ready":true}\n')
         formatted = run('fmt', ['fmt', 'library.wysna'])
         (work / 'formatted.wysna').write_text(formatted.stdout, encoding='utf-8')
         run('fmt-idempotence', ['fmt', 'formatted.wysna'], expected=formatted.stdout)
@@ -135,7 +143,7 @@ def validate(wheel, forbidden, report):
         binary = work / ('program.exe' if os.name == 'nt' else 'program')
         run('build', ['build', 'library.wysna', '-o', str(binary)])
         native = subprocess.run([str(binary)], cwd=work, env=environment, capture_output=True, text=True, timeout=30)
-        assert native.returncode == 0 and native.stdout == 'hello stdlib\n' and not native.stderr, native
+        assert native.returncode == 0 and native.stdout == 'hello stdlib\n{"ready":true}\n' and not native.stderr, native
         checks.append({'name': 'native-execution', 'exit_code': native.returncode, 'stdout': native.stdout})
         repl = run('repl', ['repl'], input_text='print(7)\nexit\n')
         assert '7' in repl.stdout

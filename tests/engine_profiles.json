@@ -40,6 +40,7 @@
     "tests/functions/captured_function.wysna": "functions",
     "tests/stdlib/basic.wysna": "stdlib",
     "tests/stdlib/toolkit.wysna": "stdlib",
+    "tests/stdlib/json.wysna": "stdlib",
     "tests/regressions/ctor_branch.wysna": "regressions",
     "tests/regressions/negative_slice.wysna": "regressions",
     "tests/regressions/nul_string.wysna": "regressions",
