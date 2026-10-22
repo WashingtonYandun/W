@@ -79,7 +79,7 @@ int main(int argc, char **argv) {
         return 0;
     }
     if (argc != 2 && !checking) {
-        puts("usage: import_csv [--check] measurements.csv | --status (W_SQLITE_DB selects database)"); return 2;
+        puts("usage: import_csv [--check] measurements.csv | --status (WYSNA_SQLITE_DB selects database)"); return 2;
     }
     FILE *input = fopen(argv[checking ? 2 : 1], "rb");
     if (!input) { puts("io error"); return 2; }

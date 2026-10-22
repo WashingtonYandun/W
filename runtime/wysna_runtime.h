@@ -242,7 +242,7 @@ static inline void wysna_cow_reset_stats(void) {
 
 /*
  * Logical container allocation tracking for W runtime.
- * NOTE on W_MEM_CHECK vs ASan/LSan:
+ * NOTE on WYSNA_MEM_CHECK vs ASan/LSan:
  * wysna_mem_on_alloc() and wysna_mem_on_free() track high-level container lifecycle
  * (lists, dicts, objects, structs, tuples, strings) as a fast runtime invariant.
  * Comprehensive byte-level leak detection and memory safety are enforced by
@@ -316,17 +316,17 @@ static inline void wysna_runtime_cleanup(void) {
         memset(&literal->buffer, 0, sizeof(literal->buffer));
         literal->next = NULL;
     }
-    const char* stats_env = getenv("W_MEM_STATS");
+    const char* stats_env = getenv("WYSNA_MEM_STATS");
     if (stats_env && strcmp(stats_env, "1") == 0) {
-        fprintf(stderr, "[W_MEM_STATS] alloc=%" PRId64 " free=%" PRId64 " retain=%" PRId64 " release=%" PRId64 " live=%" PRId64 "\n",
+        fprintf(stderr, "[WYSNA_MEM_STATS] alloc=%" PRId64 " free=%" PRId64 " retain=%" PRId64 " release=%" PRId64 " live=%" PRId64 "\n",
                 wysna_g_alloc_count, wysna_g_free_count, wysna_g_retain_count, wysna_g_release_count, wysna_g_live_objects);
     }
-    const char* cow_env = getenv("W_COW_METRICS");
+    const char* cow_env = getenv("WYSNA_COW_METRICS");
     if (cow_env && strcmp(cow_env, "1") == 0) {
-        fprintf(stderr, "[W_COW_METRICS] detach_list=%" PRId64 " detach_dict=%" PRId64 " detach_struct=%" PRId64 " copied_slots=%" PRId64 " copied_bytes=%" PRId64 " allocated_bytes=%" PRId64 " allocs=%" PRId64 "\n",
+        fprintf(stderr, "[WYSNA_COW_METRICS] detach_list=%" PRId64 " detach_dict=%" PRId64 " detach_struct=%" PRId64 " copied_slots=%" PRId64 " copied_bytes=%" PRId64 " allocated_bytes=%" PRId64 " allocs=%" PRId64 "\n",
                 wysna_g_cow_detach_list, wysna_g_cow_detach_dict, wysna_g_cow_detach_struct, wysna_g_cow_copied_slots, wysna_g_cow_copied_bytes, wysna_g_cow_allocated_bytes, wysna_g_cow_alloc_count);
     }
-    const char* check_env = getenv("W_MEM_CHECK");
+    const char* check_env = getenv("WYSNA_MEM_CHECK");
     if (check_env && strcmp(check_env, "1") == 0) {
         if (wysna_g_live_objects != 0 || wysna_g_alloc_count != wysna_g_free_count) {
             fprintf(stderr, "[W4003] RuntimeError: Memory leak detected at exit (alloc=%" PRId64 ", free=%" PRId64 ", retain=%" PRId64 ", release=%" PRId64 ", live=%" PRId64 ")\n",
@@ -2436,11 +2436,11 @@ static inline WVal wysna_builtin_eprint(int32_t argc, const WVal* argv) {
     for (int32_t i = 0; i < argc; i++) {
         if (i > 0) fputc(' ', stderr);
         char* s = wysna_to_cstr(argv[i], false);
-        const char* metrics = getenv("W_COW_METRICS");
+        const char* metrics = getenv("WYSNA_COW_METRICS");
         if (metrics && strcmp(metrics, "1") == 0 && argc == 1 && argv[i].tag == W_STR &&
             strncmp(s, "__COW_CHECKPOINT__:", 19) == 0) {
             const char* label = s + 19;
-            fprintf(stderr, "[W_COW_CHECKPOINT:%s] detach_list=%" PRId64 " detach_dict=%" PRId64 " detach_struct=%" PRId64 " copied_slots=%" PRId64 " copied_bytes=%" PRId64 " allocated_bytes=%" PRId64 " allocs=%" PRId64,
+            fprintf(stderr, "[WYSNA_COW_CHECKPOINT:%s] detach_list=%" PRId64 " detach_dict=%" PRId64 " detach_struct=%" PRId64 " copied_slots=%" PRId64 " copied_bytes=%" PRId64 " allocated_bytes=%" PRId64 " allocs=%" PRId64,
                     label, wysna_g_cow_detach_list, wysna_g_cow_detach_dict, wysna_g_cow_detach_struct, wysna_g_cow_copied_slots, wysna_g_cow_copied_bytes, wysna_g_cow_allocated_bytes, wysna_g_cow_alloc_count);
         } else {
             if (argv[i].tag == W_STR) fwrite(argv[i].as.string.data, 1, argv[i].as.string.length, stderr);

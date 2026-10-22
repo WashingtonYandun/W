@@ -1,7 +1,7 @@
 from itertools import count
 from typing import Any, Dict, List, Optional, Set, Tuple, Union
-from checker.WType import (
-    OpaqueType, WType, PrimitiveType, IntType, FloatType, BoolType, StrType, UnitType, NoneType,
+from checker.WysnaType import (
+    OpaqueType, WysnaType, PrimitiveType, IntType, FloatType, BoolType, StrType, UnitType, NoneType,
     OptionalType, WeakType, ListType, DictType, TupleType, StructType, EnumType,
     InterfaceType, ClassFieldInfo, ClassMethodInfo, ClassType,
     ResultType, ErrorUnionType, FunctionType, ModuleType, AnyType, TypeParamType
@@ -123,20 +123,20 @@ class ClassDef:
 
 class TypeInterner:
     """
-    Central Type Interner for W Language.
+    Central Type Interner for Wysna.
     Guarantees:
     - O(1) comparison between canonical TypeIds (id1 == id2).
     - Hash-consing of all structural and nominal type representations.
     - Pre-computed TypeCapabilities for ARC lifetime and CoW lowering.
-    - Bidirectional mapping with legacy WType hierarchy.
+    - Bidirectional mapping with legacy WysnaType hierarchy.
     """
     def __init__(self) -> None:
         self.arena_id = next(_ARENA_IDS)
         self._entries: List[TypeEntry] = []
         self._capabilities: List[TypeCapabilities] = []
         self._key_to_id: Dict[Tuple[Any, ...], int] = {}
-        self._wtype_to_id: Dict[Any, int] = {}
-        self._id_to_wtype: Dict[int, WType] = {}
+        self._type_to_id: Dict[Any, int] = {}
+        self._id_to_type: Dict[int, WysnaType] = {}
 
         self.struct_defs: Dict[str, StructDef] = {}
         self.enum_defs: Dict[str, EnumDef] = {}
@@ -209,14 +209,14 @@ class TypeInterner:
         key: Tuple[Any, ...],
         entry: TypeEntry,
         caps: TypeCapabilities,
-        wtype: WType
+        type_: WysnaType
     ) -> None:
         assigned_id = len(self._entries)
         assert assigned_id == expected_id, f"Primitive ID mismatch: expected {expected_id}, got {assigned_id}"
         self._entries.append(entry)
         self._capabilities.append(caps)
         self._key_to_id[key] = assigned_id
-        self._id_to_wtype[assigned_id] = wtype
+        self._id_to_type[assigned_id] = type_
 
     def _intern(self, key: Tuple[Any, ...], entry: TypeEntry, caps: TypeCapabilities) -> int:
         if key in self._key_to_id:
@@ -238,8 +238,8 @@ class TypeInterner:
                            TypeCapabilities(needs_retain=True, needs_release=True,
                                             is_value=True, has_identity=True,
                                             is_comparable=True, is_valid_dict_key=False))
-        if tid not in self._id_to_wtype:
-            self._id_to_wtype[tid] = WeakType(self.to_wtype(target_id))
+        if tid not in self._id_to_type:
+            self._id_to_type[tid] = WeakType(self.to_type(target_id))
         return tid
 
     def mk_optional(self, inner_id: int) -> int:
@@ -256,8 +256,8 @@ class TypeInterner:
             is_valid_dict_key=False,
         )
         tid = self._intern(key, TypeEntry("optional", inner_id), caps)
-        if tid not in self._id_to_wtype:
-            self._id_to_wtype[tid] = OptionalType(self.to_wtype(inner_id))
+        if tid not in self._id_to_type:
+            self._id_to_type[tid] = OptionalType(self.to_type(inner_id))
         return tid
 
     def mk_result(self, ok_id: int, err_id: int) -> int:
@@ -273,8 +273,8 @@ class TypeInterner:
             is_valid_dict_key=False,
         )
         tid = self._intern(key, TypeEntry("result", (ok_id, err_id)), caps)
-        if tid not in self._id_to_wtype:
-            self._id_to_wtype[tid] = ResultType(self.to_wtype(ok_id), self.to_wtype(err_id))
+        if tid not in self._id_to_type:
+            self._id_to_type[tid] = ResultType(self.to_type(ok_id), self.to_type(err_id))
         return tid
 
     def mk_error_union(self, alternatives: Tuple[int, ...]) -> int:
@@ -291,8 +291,8 @@ class TypeInterner:
                                 is_reference=False, is_copyable=True,
                                 is_comparable=False, is_valid_dict_key=False)
         type_id = self._intern(key, TypeEntry("error_union", canonical), caps)
-        if type_id not in self._id_to_wtype:
-            self._id_to_wtype[type_id] = ErrorUnionType([self.to_wtype(item) for item in canonical])
+        if type_id not in self._id_to_type:
+            self._id_to_type[type_id] = ErrorUnionType([self.to_type(item) for item in canonical])
         return type_id
 
     def mk_list(self, elem_id: int) -> int:
@@ -308,8 +308,8 @@ class TypeInterner:
             is_valid_dict_key=False,
         )
         tid = self._intern(key, TypeEntry("list", elem_id), caps)
-        if tid not in self._id_to_wtype:
-            self._id_to_wtype[tid] = ListType(self.to_wtype(elem_id))
+        if tid not in self._id_to_type:
+            self._id_to_type[tid] = ListType(self.to_type(elem_id))
         return tid
 
     def mk_dict(self, key_id: int, val_id: int) -> int:
@@ -325,8 +325,8 @@ class TypeInterner:
             is_valid_dict_key=False,
         )
         tid = self._intern(key, TypeEntry("dict", (key_id, val_id)), caps)
-        if tid not in self._id_to_wtype:
-            self._id_to_wtype[tid] = DictType(self.to_wtype(key_id), self.to_wtype(val_id))
+        if tid not in self._id_to_type:
+            self._id_to_type[tid] = DictType(self.to_type(key_id), self.to_type(val_id))
         return tid
 
     def mk_tuple(self, elem_ids: Tuple[int, ...]) -> int:
@@ -343,8 +343,8 @@ class TypeInterner:
             is_valid_dict_key=False,
         )
         tid = self._intern(key, TypeEntry("tuple", elem_ids), caps)
-        if tid not in self._id_to_wtype:
-            self._id_to_wtype[tid] = TupleType([self.to_wtype(eid) for eid in elem_ids])
+        if tid not in self._id_to_type:
+            self._id_to_type[tid] = TupleType([self.to_type(eid) for eid in elem_ids])
         return tid
 
     def mk_function(self, params: Tuple[int, ...], ret: int, is_mutating: bool = False) -> int:
@@ -358,8 +358,8 @@ class TypeInterner:
             is_valid_dict_key=False,
         )
         tid = self._intern(key, TypeEntry("function", (params, ret, is_mutating)), caps)
-        if tid not in self._id_to_wtype:
-            self._id_to_wtype[tid] = FunctionType([self.to_wtype(p) for p in params], self.to_wtype(ret), is_mutating)
+        if tid not in self._id_to_type:
+            self._id_to_type[tid] = FunctionType([self.to_type(p) for p in params], self.to_type(ret), is_mutating)
         return tid
 
     # -------------------------------------------------------------
@@ -406,14 +406,14 @@ class TypeInterner:
                     self.enum_defs[name].type_args = type_args
                 if template_name:
                     self.enum_defs[name].template_name = template_name
-                cached = self._id_to_wtype.get(tid)
+                cached = self._id_to_type.get(tid)
                 if isinstance(cached, EnumType):
                     definition = self.enum_defs[name]
                     cached.variants = list(definition.variants)
-                    cached.variant_payloads = {variant: [self.to_wtype(item) for item in payload]
+                    cached.variant_payloads = {variant: [self.to_type(item) for item in payload]
                                                for variant, payload in definition.variant_payloads.items()}
                     cached.template_name = definition.template_name
-                    cached.type_args = [self.to_wtype(item) for item in definition.type_args] or None
+                    cached.type_args = [self.to_type(item) for item in definition.type_args] or None
             return tid
         caps = TypeCapabilities(
             needs_retain=False,
@@ -585,7 +585,7 @@ class TypeInterner:
         - O(1) identity check.
         - `any` is assignable *to* anything (builtin wildcard params, inference
           placeholders) but nothing is assignable *to* `any`; see
-          checker/WType.py:is_assignable for the rationale.
+          checker/WysnaType.py:is_assignable for the rationale.
         - Optional T? accepts T, none, and S? if S <: T.
         - Result T ! E accepts T.
         - Invariant list/dict subtyping (list[S] -> list[T] iff S == T).
@@ -741,121 +741,121 @@ class TypeInterner:
         return f"<unknown:{type_id}>"
 
     # -------------------------------------------------------------
-    # Bidirectional Mapping: WType <-> TypeId
+    # Bidirectional Mapping: WysnaType <-> TypeId
     # -------------------------------------------------------------
 
-    def intern(self, wtype: WType) -> int:
-        """Alias for from_wtype(wtype) to intern a WType to TypeId."""
-        return self.from_wtype(wtype)
+    def intern(self, type_: WysnaType) -> int:
+        """Alias for from_type(type_) to intern a WysnaType to TypeId."""
+        return self.from_type(type_)
 
-    def from_wtype(self, wtype: WType) -> int:
-        """Converts an existing WType instance to its canonical TypeId."""
-        if wtype is None:
+    def from_type(self, type_: WysnaType) -> int:
+        """Converts an existing WysnaType instance to its canonical TypeId."""
+        if type_ is None:
             return TYPE_NONE
-        if isinstance(wtype, PrimitiveType):
-            if wtype.name == "int":
+        if isinstance(type_, PrimitiveType):
+            if type_.name == "int":
                 return TYPE_INT
-            elif wtype.name == "float":
+            elif type_.name == "float":
                 return TYPE_FLOAT
-            elif wtype.name == "bool":
+            elif type_.name == "bool":
                 return TYPE_BOOL
-            elif wtype.name == "str":
+            elif type_.name == "str":
                 return TYPE_STR
-            elif wtype.name == "unit":
+            elif type_.name == "unit":
                 return TYPE_UNIT
-            elif wtype.name == "none":
+            elif type_.name == "none":
                 return TYPE_NONE
-            if wtype.name == "opaque":
+            if type_.name == "opaque":
                 type_id = self._intern(("primitive", "opaque"), TypeEntry("primitive", "opaque"), TypeCapabilities())
-                self._id_to_wtype[type_id] = OpaqueType
+                self._id_to_type[type_id] = OpaqueType
                 return type_id
             return TYPE_ERROR
-        elif isinstance(wtype, WeakType):
-            return self.mk_weak(self.from_wtype(wtype.target))
-        elif isinstance(wtype, OptionalType):
-            return self.mk_optional(self.from_wtype(wtype.inner))
-        elif isinstance(wtype, ResultType):
-            return self.mk_result(self.from_wtype(wtype.ok), self.from_wtype(wtype.err))
-        elif isinstance(wtype, ErrorUnionType):
-            return self.mk_error_union(tuple(self.from_wtype(item) for item in wtype.alternatives))
-        elif isinstance(wtype, ListType):
-            return self.mk_list(self.from_wtype(wtype.element))
-        elif isinstance(wtype, DictType):
-            return self.mk_dict(self.from_wtype(wtype.key), self.from_wtype(wtype.value))
-        elif isinstance(wtype, TupleType):
-            return self.mk_tuple(tuple(self.from_wtype(e) for e in wtype.elements))
-        elif isinstance(wtype, FunctionType):
+        elif isinstance(type_, WeakType):
+            return self.mk_weak(self.from_type(type_.target))
+        elif isinstance(type_, OptionalType):
+            return self.mk_optional(self.from_type(type_.inner))
+        elif isinstance(type_, ResultType):
+            return self.mk_result(self.from_type(type_.ok), self.from_type(type_.err))
+        elif isinstance(type_, ErrorUnionType):
+            return self.mk_error_union(tuple(self.from_type(item) for item in type_.alternatives))
+        elif isinstance(type_, ListType):
+            return self.mk_list(self.from_type(type_.element))
+        elif isinstance(type_, DictType):
+            return self.mk_dict(self.from_type(type_.key), self.from_type(type_.value))
+        elif isinstance(type_, TupleType):
+            return self.mk_tuple(tuple(self.from_type(e) for e in type_.elements))
+        elif isinstance(type_, FunctionType):
             return self.mk_function(
-                tuple(self.from_wtype(p) for p in wtype.params),
-                self.from_wtype(wtype.ret),
-                wtype.is_mutating
+                tuple(self.from_type(p) for p in type_.params),
+                self.from_type(type_.ret),
+                type_.is_mutating
             )
-        elif isinstance(wtype, StructType):
-            key = ("struct", wtype.name)
+        elif isinstance(type_, StructType):
+            key = ("struct", type_.name)
             if key in self._key_to_id:
                 return self._key_to_id[key]
-            tid = self.mk_struct(wtype.name)
-            fields = {fname: self.from_wtype(ftype) for fname, ftype in wtype.fields.items()} if hasattr(wtype, "fields") and wtype.fields else {}
-            return self.mk_struct(wtype.name, fields)
-        elif isinstance(wtype, EnumType):
-            args = getattr(wtype, "type_args", None)
-            template = getattr(wtype, "template_name", None)
+            tid = self.mk_struct(type_.name)
+            fields = {fname: self.from_type(ftype) for fname, ftype in type_.fields.items()} if hasattr(type_, "fields") and type_.fields else {}
+            return self.mk_struct(type_.name, fields)
+        elif isinstance(type_, EnumType):
+            args = getattr(type_, "type_args", None)
+            template = getattr(type_, "template_name", None)
             if template == "Option" and args and len(args) == 1:
-                tid = self.mk_optional(self.from_wtype(args[0]))
-                self._key_to_id[("enum", wtype.name)] = tid
+                tid = self.mk_optional(self.from_type(args[0]))
+                self._key_to_id[("enum", type_.name)] = tid
                 return tid
             if template == "Result" and args and len(args) == 2:
-                tid = self.mk_result(self.from_wtype(args[0]), self.from_wtype(args[1]))
-                self._key_to_id[("enum", wtype.name)] = tid
+                tid = self.mk_result(self.from_type(args[0]), self.from_type(args[1]))
+                self._key_to_id[("enum", type_.name)] = tid
                 return tid
-            key = ("enum", wtype.name)
+            key = ("enum", type_.name)
             if key in self._key_to_id:
                 return self._key_to_id[key]
-            variants = wtype.variants if hasattr(wtype, "variants") else []
-            type_arg_ids = tuple(self.from_wtype(arg) for arg in args) if args else ()
-            tid = self.mk_enum(wtype.name, variants, type_args=type_arg_ids, template_name=template)
+            variants = type_.variants if hasattr(type_, "variants") else []
+            type_arg_ids = tuple(self.from_type(arg) for arg in args) if args else ()
+            tid = self.mk_enum(type_.name, variants, type_args=type_arg_ids, template_name=template)
             payloads: Dict[str, List[int]] = {}
-            if hasattr(wtype, "variant_payloads") and wtype.variant_payloads:
-                for vname, vtypes in wtype.variant_payloads.items():
-                    payloads[vname] = [self.from_wtype(vt) for vt in vtypes]
-            if wtype.name in self.enum_defs:
-                self.enum_defs[wtype.name].variant_payloads = payloads
+            if hasattr(type_, "variant_payloads") and type_.variant_payloads:
+                for vname, vtypes in type_.variant_payloads.items():
+                    payloads[vname] = [self.from_type(vt) for vt in vtypes]
+            if type_.name in self.enum_defs:
+                self.enum_defs[type_.name].variant_payloads = payloads
             return tid
 
-        elif isinstance(wtype, InterfaceType):
-            key = ("interface", wtype.name)
+        elif isinstance(type_, InterfaceType):
+            key = ("interface", type_.name)
             if key in self._key_to_id:
                 return self._key_to_id[key]
-            tid = self.mk_interface(wtype.name)
-            methods = {mname: self.from_wtype(mfn) for mname, mfn in wtype.methods.items()} if hasattr(wtype, "methods") and wtype.methods else {}
-            return self.mk_interface(wtype.name, methods)
-        elif isinstance(wtype, ClassType):
-            key = ("class", wtype.name)
+            tid = self.mk_interface(type_.name)
+            methods = {mname: self.from_type(mfn) for mname, mfn in type_.methods.items()} if hasattr(type_, "methods") and type_.methods else {}
+            return self.mk_interface(type_.name, methods)
+        elif isinstance(type_, ClassType):
+            key = ("class", type_.name)
             if key in self._key_to_id:
                 return self._key_to_id[key]
-            tid = self.mk_class(wtype.name)
-            sup_id = self.from_wtype(wtype.superclass) if wtype.superclass else None
-            intf_ids = [self.from_wtype(i) for i in wtype.interfaces] if wtype.interfaces else []
-            fields = {fname: (self.from_wtype(finfo.type), finfo.is_public) for fname, finfo in wtype.fields.items()} if wtype.fields else {}
-            methods = {mname: (self.from_wtype(minfo.fn_type), minfo.is_public) for mname, minfo in wtype.methods.items()} if wtype.methods else {}
-            init_sig = self.from_wtype(wtype.init_type) if wtype.init_type else None
-            return self.mk_class(wtype.name, superclass=sup_id, interfaces=intf_ids, fields=fields, methods=methods, init_sig=init_sig)
-        elif isinstance(wtype, ModuleType):
-            return self.mk_module(wtype.name)
-        elif isinstance(wtype, (AnyType, TypeParamType)):
+            tid = self.mk_class(type_.name)
+            sup_id = self.from_type(type_.superclass) if type_.superclass else None
+            intf_ids = [self.from_type(i) for i in type_.interfaces] if type_.interfaces else []
+            fields = {fname: (self.from_type(finfo.type), finfo.is_public) for fname, finfo in type_.fields.items()} if type_.fields else {}
+            methods = {mname: (self.from_type(minfo.fn_type), minfo.is_public) for mname, minfo in type_.methods.items()} if type_.methods else {}
+            init_sig = self.from_type(type_.init_type) if type_.init_type else None
+            return self.mk_class(type_.name, superclass=sup_id, interfaces=intf_ids, fields=fields, methods=methods, init_sig=init_sig)
+        elif isinstance(type_, ModuleType):
+            return self.mk_module(type_.name)
+        elif isinstance(type_, (AnyType, TypeParamType)):
             # `any` is the wildcard type identity; an unbound type parameter has no
             # concrete identity yet, so it shares that representation instead of
             # tripping the TYPE_ERROR fallthrough. See _concrete_type_args.
             return self.mk_any()
         return TYPE_ERROR
 
-    def to_wtype(self, type_id: int) -> WType:
-        """Converts a TypeId back to a WType object."""
-        if type_id in self._id_to_wtype:
-            return self._id_to_wtype[type_id]
+    def to_type(self, type_id: int) -> WysnaType:
+        """Converts a TypeId back to a WysnaType object."""
+        if type_id in self._id_to_type:
+            return self._id_to_type[type_id]
 
         entry = self.get_entry(type_id)
-        res: WType = AnyType()
+        res: WysnaType = AnyType()
 
         if entry.tag == "error":
             res = AnyType()
@@ -874,52 +874,52 @@ class TypeInterner:
             elif pname == "none":
                 res = OpaqueType if entry.data == "opaque" else NoneType
         elif entry.tag == "weak":
-            res = WeakType(self.to_wtype(entry.data))
+            res = WeakType(self.to_type(entry.data))
         elif entry.tag == "optional":
-            res = OptionalType(self.to_wtype(entry.data))
+            res = OptionalType(self.to_type(entry.data))
         elif entry.tag == "result":
             ok_id, err_id = entry.data
-            res = ResultType(self.to_wtype(ok_id), self.to_wtype(err_id))
+            res = ResultType(self.to_type(ok_id), self.to_type(err_id))
         elif entry.tag == "error_union":
-            res = ErrorUnionType([self.to_wtype(member) for member in entry.data])
+            res = ErrorUnionType([self.to_type(member) for member in entry.data])
         elif entry.tag == "list":
-            res = ListType(self.to_wtype(entry.data))
+            res = ListType(self.to_type(entry.data))
         elif entry.tag == "dict":
             k_id, v_id = entry.data
-            res = DictType(self.to_wtype(k_id), self.to_wtype(v_id))
+            res = DictType(self.to_type(k_id), self.to_type(v_id))
         elif entry.tag == "tuple":
-            res = TupleType([self.to_wtype(eid) for eid in entry.data])
+            res = TupleType([self.to_type(eid) for eid in entry.data])
         elif entry.tag == "function":
             params, ret, is_mut = entry.data
-            res = FunctionType([self.to_wtype(p) for p in params], self.to_wtype(ret), is_mut)
+            res = FunctionType([self.to_type(p) for p in params], self.to_type(ret), is_mut)
         elif entry.tag == "struct":
             sdef = self.struct_defs.get(entry.data)
             res = StructType(entry.data, {})
-            self._id_to_wtype[type_id] = res
-            res.fields = {fname: self.to_wtype(fid) for fname, fid in sdef.fields.items()} if sdef else {}
+            self._id_to_type[type_id] = res
+            res.fields = {fname: self.to_type(fid) for fname, fid in sdef.fields.items()} if sdef else {}
         elif entry.tag == "enum":
             edef = self.enum_defs.get(entry.data)
             v_list = edef.variants if edef else []
             res = EnumType(entry.data, v_list)
-            self._id_to_wtype[type_id] = res
+            self._id_to_type[type_id] = res
             if edef:
-                res.variant_payloads = {variant: [self.to_wtype(item) for item in payload]
+                res.variant_payloads = {variant: [self.to_type(item) for item in payload]
                                         for variant, payload in edef.variant_payloads.items()}
                 res.template_name = edef.template_name
-                res.type_args = [self.to_wtype(item) for item in edef.type_args] or None
+                res.type_args = [self.to_type(item) for item in edef.type_args] or None
         elif entry.tag == "interface":
             idef = self.interface_defs.get(entry.data)
-            m_wtypes = {mname: self.to_wtype(mid) for mname, mid in idef.methods.items()} if idef else {}
-            res = InterfaceType(entry.data, m_wtypes)
+            m_types = {mname: self.to_type(mid) for mname, mid in idef.methods.items()} if idef else {}
+            res = InterfaceType(entry.data, m_types)
         elif entry.tag == "class":
             cdef = self.class_defs.get(entry.data)
             if cdef:
-                sup_wtype = self.to_wtype(cdef.superclass) if cdef.superclass is not None else None
-                intf_wtypes = [self.to_wtype(iid) for iid in cdef.interfaces]
-                f_infos = {fname: ClassFieldInfo(self.to_wtype(fid), is_pub, entry.data) for fname, (fid, is_pub) in cdef.fields.items()}
-                m_infos = {mname: ClassMethodInfo(self.to_wtype(mid), is_pub, entry.data) for mname, (mid, is_pub) in cdef.methods.items()}
-                init_wtype = self.to_wtype(cdef.init_sig) if cdef.init_sig is not None else None
-                res = ClassType(entry.data, superclass=sup_wtype, interfaces=intf_wtypes, fields=f_infos, methods=m_infos, init_type=init_wtype)
+                sup_type = self.to_type(cdef.superclass) if cdef.superclass is not None else None
+                intf_types = [self.to_type(iid) for iid in cdef.interfaces]
+                f_infos = {fname: ClassFieldInfo(self.to_type(fid), is_pub, entry.data) for fname, (fid, is_pub) in cdef.fields.items()}
+                m_infos = {mname: ClassMethodInfo(self.to_type(mid), is_pub, entry.data) for mname, (mid, is_pub) in cdef.methods.items()}
+                init_type = self.to_type(cdef.init_sig) if cdef.init_sig is not None else None
+                res = ClassType(entry.data, superclass=sup_type, interfaces=intf_types, fields=f_infos, methods=m_infos, init_type=init_type)
             else:
                 res = ClassType(entry.data)
         elif entry.tag == "module":
@@ -927,5 +927,5 @@ class TypeInterner:
         elif entry.tag == "any":
             res = AnyType()
 
-        self._id_to_wtype[type_id] = res
+        self._id_to_type[type_id] = res
         return res

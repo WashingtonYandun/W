@@ -84,7 +84,7 @@ def test_smoke_frontend_fuzzer_preserved():
 
 def run_all() -> bool:
     print("==================================================")
-    print("W Language D04 Semantic Fuzzing & Determinism Suite")
+    print("Wysna D04 Semantic Fuzzing & Determinism Suite")
     print("==================================================")
     try:
         test_typed_program_generation_and_c_determinism()

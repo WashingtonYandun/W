@@ -3,8 +3,8 @@ import ctypes
 import ctypes.util
 import os
 import sys
-from error.Error import WRuntimeError
-from runtime.Values import WInt, WFloat, WBool, WUnit, WPointer
+from error.Error import WysnaRuntimeError
+from runtime.Values import WysnaInt, WysnaFloat, WysnaBool, WysnaUnit, WysnaPointer
 
 C_TYPES = {'int': ctypes.c_int64, 'int64': ctypes.c_int64, 'int32': ctypes.c_int32,
            'float': ctypes.c_double, 'double': ctypes.c_double, 'bool': ctypes.c_bool,
@@ -33,7 +33,7 @@ def bind_foreign(declaration, libraries=()):
                     pass
     function = internal or next((getattr(handle, name) for handle in handles if hasattr(handle, name)), None)
     if function is None:
-        raise WRuntimeError("Unresolved C symbol: " + name, code='W4003')
+        raise WysnaRuntimeError("Unresolved C symbol: " + name, code='W4003')
     if not internal:
         function.argtypes = [C_TYPES[t] for t in signature]
         function.restype = C_TYPES[returned]
@@ -43,15 +43,15 @@ def bind_foreign(declaration, libraries=()):
         for argument, type_ in zip(arguments, signature):
             value = argument.address if type_ == 'opaque' else argument.value
             if type_ == 'int32' and not -2147483648 <= value <= 2147483647:
-                raise WRuntimeError('int32 FFI argument out of range', code='W4003')
+                raise WysnaRuntimeError('int32 FFI argument out of range', code='W4003')
             raw.append(value)
         result = function(*raw)
         if returned == 'unit':
-            return WUnit()
-        constructor = {'int': WInt, 'int32': WInt, 'int64': WInt, 'float': WFloat,
-                       'double': WFloat, 'bool': WBool, 'opaque': WPointer}[returned]
+            return WysnaUnit()
+        constructor = {'int': WysnaInt, 'int32': WysnaInt, 'int64': WysnaInt, 'float': WysnaFloat,
+                       'double': WysnaFloat, 'bool': WysnaBool, 'opaque': WysnaPointer}[returned]
         if name in ('wysna_host_buffer_new', 'wysna_host_file_open'):
             from runtime.HostAbi import close
-            return WPointer(result, close=close)
+            return WysnaPointer(result, close=close)
         return constructor(result)
     return invoke

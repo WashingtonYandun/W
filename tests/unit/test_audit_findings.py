@@ -70,11 +70,11 @@ def test_literal_indexing_scales_linearly_by_work_not_wall_clock():
                     '    fprintf(stderr, "scan=%" PRIu64 "\\n", wysna_g_string_scan_steps);\n    wysna_runtime_cleanup();')
                 emitted.write_text(code, encoding='utf-8')
                 binary = directory / executable_name(engine)
-                flags = ['-fsanitize=address,undefined', '-fno-omit-frame-pointer'] if (os.environ.get('W_SANITIZE') == '1' and os.name != 'nt') else []
+                flags = ['-fsanitize=address,undefined', '-fno-omit-frame-pointer'] if (os.environ.get('WYSNA_SANITIZE') == '1' and os.name != 'nt') else []
                 subprocess.run(compiler_command() + ['-std=c99', '-O2', '-DW_STRING_METRICS', '-I' + str(ROOT),
                                str(emitted), '-o', str(binary)] + flags, check=True, capture_output=True, timeout=120)
                 ran = subprocess.run([str(binary)], capture_output=True, text=True, timeout=30,
-                    env=dict(os.environ, W_MEM_CHECK='1', ASAN_OPTIONS='detect_leaks=' + ('1' if sys.platform.startswith('linux') else '0'), UBSAN_OPTIONS='halt_on_error=1'))
+                    env=dict(os.environ, WYSNA_MEM_CHECK='1', ASAN_OPTIONS='detect_leaks=' + ('1' if sys.platform.startswith('linux') else '0'), UBSAN_OPTIONS='halt_on_error=1'))
                 assert ran.returncode == 0 and ran.stdout == expected, (engine, ran)
                 match = re.search(r'scan=(\d+)', ran.stderr)
                 assert match, ran.stderr

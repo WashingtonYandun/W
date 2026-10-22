@@ -115,7 +115,7 @@ def test_native_runtime_panics_report_exact_wysna_source_location():
                 error_code = "W4001" if "zero" in message.lower() else "W4002"
                 expected = f"[{error_code}] {source_name}:{line}:{column} - {message}\n"
                 env = os.environ.copy()
-                env.pop("W_MEM_CHECK", None)
+                env.pop("WYSNA_MEM_CHECK", None)
                 result = subprocess.run(
                     [str(binary)],
                     cwd=root,

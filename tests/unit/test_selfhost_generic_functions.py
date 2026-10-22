@@ -70,7 +70,7 @@ def test_generic_runtime_and_checked_module_fixtures():
         ROOT / "tests/runtime/recursive_tree_adt.wysna",
         ROOT / "tests/modules/checked_session/main.wysna",
     ]
-    environment = dict(os.environ, W_MEM_CHECK="1")
+    environment = dict(os.environ, WYSNA_MEM_CHECK="1")
     with tempfile.TemporaryDirectory(prefix="selfhost-generic-runtime-") as directory:
         for index, fixture in enumerate(fixtures):
             output_c = Path(directory) / f"fixture_{index}.c"

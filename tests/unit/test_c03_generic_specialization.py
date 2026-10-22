@@ -22,7 +22,7 @@ from checker.TypeInterner import TypeInterner, IntType, StrType, BoolType
 from codegen.CCodeGen import CCodeGen
 from hir.HirBuilder import HirBuilder
 from hir.HirCCodeGen import HirCCodeGen
-from error.Error import TypeError, WError
+from error.Error import TypeError, WysnaError
 
 
 def test_collision_freedom():
@@ -96,7 +96,7 @@ def test_reserved_compiler_prefix():
         try:
             ast = Parser().parse(code)
             TypeChecker().check(ast)
-        except WError as err:
+        except WysnaError as err:
             assert err.code == "W1002", f"Expected W1002 for reserved prefix, got {err.code}: {err}"
         else:
             raise AssertionError(f"Expected compiler prefix rejection for: {code}")
@@ -319,7 +319,7 @@ def test_native_c99_execution():
 
 def run_all() -> bool:
     print("==================================================")
-    print("W Language C03 Generic Specialization & Mangling")
+    print("Wysna C03 Generic Specialization & Mangling")
     print("==================================================")
     try:
         test_collision_freedom()

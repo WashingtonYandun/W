@@ -130,7 +130,7 @@ int main(void) {
         subprocess.run([os.environ.get('CC', 'cc'), '-std=c99', '-fsanitize=address,undefined',
                         '-fno-omit-frame-pointer', '-I' + str(ROOT), str(path), '-o', str(binary)],
                        check=True, capture_output=True, text=True, timeout=60)
-        environment = dict(os.environ, W_MEM_CHECK='1', UBSAN_OPTIONS='halt_on_error=1')
+        environment = dict(os.environ, WYSNA_MEM_CHECK='1', UBSAN_OPTIONS='halt_on_error=1')
         environment['ASAN_OPTIONS'] = 'detect_leaks=' + ('1' if sys.platform.startswith('linux') else '0')
         result = subprocess.run([str(binary)], env=environment, capture_output=True, text=True, timeout=30)
         assert result.returncode == 0 and result.stdout == '' and result.stderr == '', result
@@ -177,7 +177,7 @@ def test_typed_composition_across_engines():
             for variant, code in [('source', source), ('formatted', formatted)]:
                 ok, detail = verify(code, f'typed_properties_{seed}_{variant}.wysna', selfhost_bin, temporary,
                                     expected=expected, strict=True,
-                                    sanitize=os.environ.get('W_SANITIZE') == '1')
+                                    sanitize=os.environ.get('WYSNA_SANITIZE') == '1')
                 assert ok, f'seed {seed}, {variant}: {detail}\n{code}'
 
 

@@ -314,7 +314,7 @@ def test_native_c99_recursive_adts():
 
 def run_all() -> bool:
     print("==================================================")
-    print("W Language C04 Recursive ADTs & Layout Graph Suite")
+    print("Wysna C04 Recursive ADTs & Layout Graph Suite")
     print("==================================================")
     try:
         test_layout_graph_scc_inline_vs_indirect()

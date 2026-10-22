@@ -391,7 +391,7 @@ def run_semantic_fuzz_suite(
         selfhost_bin = Path(ensure_selfhost_compiler_binary(str(repo_root)))
 
     print("==================================================")
-    print("W Language D04 Semantic Fuzzing & Determinism")
+    print("Wysna D04 Semantic Fuzzing & Determinism")
     print("==================================================")
     print(f"  [CONFIG] Base seed: {base_seed}, Iterations: {count}")
 

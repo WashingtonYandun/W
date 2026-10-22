@@ -51,14 +51,14 @@ def validate(rows=1000, samples=3, sanitize=False):
             command = compiler + flags + [str(source), str(adapter), '-lsqlite3', '-o', str(binary)]
             execute(command)
             build_seconds = time.perf_counter() - started
-            environment = dict(os.environ, W_MEM_CHECK='1', W_SQLITE_ROWS=str(rows))
+            environment = dict(os.environ, WYSNA_MEM_CHECK='1', WYSNA_SQLITE_ROWS=str(rows))
             if sanitize:
                 environment['ASAN_OPTIONS'] = 'detect_leaks=' + ('1' if sys.platform.startswith('linux') else '0')
                 environment['UBSAN_OPTIONS'] = 'halt_on_error=1:print_stacktrace=1'
             elapsed = []
             for sample in range(samples + 1):
                 database = directory / f'{backend}-{sample}.sqlite'
-                environment['W_SQLITE_DB'] = str(database)
+                environment['WYSNA_SQLITE_DB'] = str(database)
                 started = time.perf_counter()
                 result = execute([str(binary)], environment)
                 duration = time.perf_counter() - started
@@ -79,7 +79,7 @@ def validate(rows=1000, samples=3, sanitize=False):
                 ('input', directory / f'{backend}-invalid.sqlite', 0,
                  'open or input failure 0 -1\n0 0\n'),
             ]:
-                environment.update(W_SQLITE_DB=str(path), W_SQLITE_ROWS=str(requested_rows))
+                environment.update(WYSNA_SQLITE_DB=str(path), WYSNA_SQLITE_ROWS=str(requested_rows))
                 result = execute([str(binary)], environment)
                 assert result.stdout == expected and not result.stderr, (backend, failure, result.stdout, result.stderr)
             report['engines'][backend] = {
@@ -100,7 +100,7 @@ def main():
     parser.add_argument('--rows', type=int, default=1000)
     parser.add_argument('--samples', type=int, default=3)
     parser.add_argument('--sanitize', action='store_true')
-    parser.add_argument('--report', type=Path, default=ROOT / '.w_cache/sqlite-ffi/report.json')
+    parser.add_argument('--report', type=Path, default=ROOT / '.wysna_cache/sqlite-ffi/report.json')
     args = parser.parse_args()
     if not 1 <= args.rows <= 100000 or not 1 <= args.samples <= 100:
         parser.error('rows must be 1..100000 and samples must be 1..100')

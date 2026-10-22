@@ -69,7 +69,7 @@ def run_control_block_tests():
                                 '-I' + str(root), str(source), '-o', str(binary)],
                                capture_output=True, text=True, timeout=60)
         assert built.returncode == 0, built.stderr
-        env = dict(os.environ, W_MEM_CHECK='1')
+        env = dict(os.environ, WYSNA_MEM_CHECK='1')
         env['ASAN_OPTIONS'] = 'detect_leaks=1' if sys.platform.startswith('linux') else 'detect_leaks=0'
         result = subprocess.run([str(binary)], env=env, capture_output=True, text=True, timeout=30)
         assert result.returncode == 0, result.stderr

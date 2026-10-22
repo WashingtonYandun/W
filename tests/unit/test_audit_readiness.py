@@ -24,7 +24,7 @@ def test_principal_regressions_across_engines():
         for path in sorted((ROOT / 'tests/runtime').glob('readiness_*.wysna')):
             ok, detail = verify(path.read_text(), str(path.relative_to(ROOT)), selfhost_bin, directory,
                                 expected=path.with_suffix('.expected').read_text(), strict=True,
-                                sanitize=os.environ.get('W_SANITIZE') == '1')
+                                sanitize=os.environ.get('WYSNA_SANITIZE') == '1')
             assert ok, detail
         for path in sorted((ROOT / 'tests/types/invalid').glob('readiness_*.wysna')):
             ok, detail = verify(path.read_text(), str(path.relative_to(ROOT)), selfhost_bin, directory,
@@ -125,7 +125,7 @@ def test_compositional_patterns_and_closures():
             for variant, text in (('original', source), ('formatted', formatted)):
                 ok, detail = verify(text, f'readiness_{seed}_{variant}.wysna', selfhost_bin, directory,
                                     expected=expected, strict=True,
-                                    sanitize=os.environ.get('W_SANITIZE') == '1')
+                                    sanitize=os.environ.get('WYSNA_SANITIZE') == '1')
                 assert ok, detail
 
 
@@ -185,14 +185,14 @@ def test_scoped_foreign_resources():
         assert (interpreted.returncode, interpreted.stdout, interpreted.stderr) == (0, expected, ''), interpreted
         for backend in ('ast', 'hir', 'selfhost'):
             binary = Path(directory) / executable_name(backend)
-            flags = ['--sanitize'] if os.environ.get('W_SANITIZE') == '1' else []
+            flags = ['--sanitize'] if os.environ.get('WYSNA_SANITIZE') == '1' else []
             built = subprocess.run([sys.executable, str(ROOT / 'main.py'), 'build',
                 str(ROOT / 'tests/ffi/resources.wysna'), '--backend=' + backend,
                 '--link-lib', str(ROOT / 'tests/ffi/resource_adapter.c'), '-o', str(binary)] + flags,
                 capture_output=True, text=True, timeout=120)
             assert built.returncode == 0, built.stderr
             result = subprocess.run([str(binary)], capture_output=True, text=True, timeout=30,
-                env=dict(os.environ, W_MEM_CHECK='1', ASAN_OPTIONS='detect_leaks=' + ('1' if sys.platform.startswith('linux') else '0'), UBSAN_OPTIONS='halt_on_error=1'))
+                env=dict(os.environ, WYSNA_MEM_CHECK='1', ASAN_OPTIONS='detect_leaks=' + ('1' if sys.platform.startswith('linux') else '0'), UBSAN_OPTIONS='halt_on_error=1'))
             assert (result.returncode, result.stdout, result.stderr) == (0, expected, ''), result
 
 
@@ -204,7 +204,7 @@ def test_canonical_enum_payload_metadata_survives_roundtrip():
     ast = Parser().parse('enum Event { Data(tuple[bool, int]), Empty }\nfn f(x: tuple[Event, bool]) {}')
     checker.check(ast)
     event = checker.global_scope.lookup_type('Event')
-    restored = checker.interner.to_wtype(checker.interner.intern(event))
+    restored = checker.interner.to_type(checker.interner.intern(event))
     assert restored.variant_payloads['Data'][0].elements == event.variant_payloads['Data'][0].elements
 
 

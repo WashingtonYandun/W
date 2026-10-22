@@ -18,7 +18,7 @@ def test_readme_examples_execute_in_all_engines():
     with tempfile.TemporaryDirectory(prefix='w-doc-contract-') as temporary:
         for index, source in enumerate(blocks):
             ok, detail = verify(source, f'readme_{index}.wysna', selfhost_bin, temporary, strict=True,
-                                sanitize=os.environ.get('W_SANITIZE') == '1')
+                                sanitize=os.environ.get('WYSNA_SANITIZE') == '1')
             assert ok, detail
 
 
@@ -85,7 +85,7 @@ print(wysna_host_active_handles() - baseline)
     with tempfile.TemporaryDirectory(prefix='w-persistent-resource-') as temporary:
         ok, detail = verify(source, 'persistent_resources.wysna', selfhost_bin, temporary, strict=True,
                             expected='10000 0 0\n100000 0 0\n0\n', run_timeout=300,
-                            sanitize=os.environ.get('W_SANITIZE') == '1')
+                            sanitize=os.environ.get('WYSNA_SANITIZE') == '1')
         assert ok, detail
 
 
@@ -95,7 +95,7 @@ def test_fallible_unit_tail_parity():
     with tempfile.TemporaryDirectory(prefix='w-unit-result-') as temporary:
         ok, detail = verify(source.read_text(), str(source), selfhost_bin, temporary, strict=True,
                             expected=source.with_suffix('.expected').read_text(),
-                            sanitize=os.environ.get('W_SANITIZE') == '1')
+                            sanitize=os.environ.get('WYSNA_SANITIZE') == '1')
         assert ok, detail
 
 
@@ -128,7 +128,7 @@ write_failure() else error { print(error.operation == "write", error.code > 0, e
     selfhost_bin = ensure_selfhost_compiler_binary(str(ROOT))
     with tempfile.TemporaryDirectory(prefix='w-flush-failure-') as temporary:
         ok, detail = verify(source, 'flush_failure.wysna', selfhost_bin, temporary, strict=True,
-                            expected='true true true\n', sanitize=os.environ.get('W_SANITIZE') == '1')
+                            expected='true true true\n', sanitize=os.environ.get('WYSNA_SANITIZE') == '1')
         assert ok, detail
 
 

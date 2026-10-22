@@ -408,8 +408,8 @@ class CCodeGen:
         self.current_ns = prev_ns
 
     def _handle_import(self, stmt: ImportDecl, out_main_stmts: List[str]) -> None:
-        from error.Error import WError
-        raise WError("AST emission imports require a checked compilation session", file=self.file,
+        from error.Error import WysnaError
+        raise WysnaError("AST emission imports require a checked compilation session", file=self.file,
                      line=stmt.line, col=stmt.col, code="W9999", stage="module-linking")
 
     def _emit_fn_decl(self, stmt: FnDecl, ns: str) -> None:
@@ -699,7 +699,7 @@ class CCodeGen:
 
     @staticmethod
     def _error_type_descriptor(error_type) -> Tuple[str, str]:
-        from checker.WType import IntType, FloatType, BoolType, StrType, StructType, EnumType
+        from checker.WysnaType import IntType, FloatType, BoolType, StrType, StructType, EnumType
         if error_type == IntType:
             return "int", "int"
         if error_type == FloatType:
@@ -724,7 +724,7 @@ class CCodeGen:
             index = self.emit_value(target.index, out)
             return self._source_call("wysna_index_ref_at", f"{parent}, {index}", target)
         if isinstance(target, MemberExpr):
-            from checker.WType import ClassType
+            from checker.WysnaType import ClassType
             if isinstance(getattr(target.object, 'inferred_type', None), ClassType):
                 parent = '&' + self.emit_value(target.object, out)
             else:
@@ -1130,7 +1130,7 @@ class CCodeGen:
                         return self._bind_call(f"{mod_fn}({', '.join(arg_vals)})", out)
 
                 # Collection methods
-                from checker.WType import ListType, DictType
+                from checker.WysnaType import ListType, DictType
                 receiver_type = getattr(obj_expr, "inferred_type", None)
                 if method == "append" and isinstance(receiver_type, ListType):
                     lref = self.prepare_assignment_ref(obj_expr, out)

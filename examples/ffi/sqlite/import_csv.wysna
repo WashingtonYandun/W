@@ -91,7 +91,7 @@ fn run() -> int {
     let checking = len(arguments) == 3 and arguments[1] == "--check"
     let status_only = len(arguments) == 2 and arguments[1] == "--status"
     if len(arguments) != 2 and not checking {
-        print("usage: import_csv [--check] measurements.csv | --status (W_SQLITE_DB selects database)")
+        print("usage: import_csv [--check] measurements.csv | --status (WYSNA_SQLITE_DB selects database)")
         return 2
     }
     let text = if status_only { "" } else {

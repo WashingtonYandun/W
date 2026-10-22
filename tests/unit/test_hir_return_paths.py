@@ -6,7 +6,7 @@ def run_hir_return_path_tests():
     from checker.TypeChecker import TypeChecker
     from hir.HirBuilder import HirBuilder
     from hir.HirCCodeGen import HirCCodeGen
-    from error.Error import WError
+    from error.Error import WysnaError
     sources = [
         'fn choose(b: bool) -> int { if b { return 1 } else { return 2 } }',
         'enum E { A, B }\nfn choose(e: E) -> int { match e { E.A => { return 1 }, E.B => { return 2 } } }',
@@ -24,7 +24,7 @@ def run_hir_return_path_tests():
             tail.arms.pop()
         try:
             HirCCodeGen(checker.interner).generate(module)
-        except WError as error:
+        except WysnaError as error:
             assert error.code == 'W9999'
         else:
             raise AssertionError('Non-terminating malformed HIR tail was accepted')

@@ -32,7 +32,7 @@ def measure(samples=5):
             for sample in range(samples + 1):
                 started = time.perf_counter()
                 result = subprocess.run([str(binary), str(corpus)], capture_output=True, text=True,
-                                        env=dict(os.environ, W_MEM_CHECK='1'), check=True, timeout=30)
+                                        env=dict(os.environ, WYSNA_MEM_CHECK='1'), check=True, timeout=30)
                 elapsed = (time.perf_counter() - started) * 1000
                 assert not result.stderr, result.stderr
                 assert int(result.stdout) == repetitions * 3 + 1, result.stdout
@@ -46,7 +46,7 @@ def measure(samples=5):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--samples', type=int, default=5)
-    parser.add_argument('--report', type=Path, default=ROOT / '.w_cache/tokenizer-scaling.json')
+    parser.add_argument('--report', type=Path, default=ROOT / '.wysna_cache/tokenizer-scaling.json')
     arguments = parser.parse_args()
     if not 1 <= arguments.samples <= 100:
         parser.error('samples must be 1..100')

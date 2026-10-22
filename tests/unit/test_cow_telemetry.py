@@ -14,9 +14,9 @@ Verifies:
      - Class instance in CoW list (field mutation retains shared reference semantics, slot mutation detaches list).
   3. Strict parity across all four execution engines:
      - W0 Python Interpreter
-     - W0 AST C99 (under ASan, UBSan, and W_MEM_CHECK=1)
-     - W0 HIR C99 (under ASan, UBSan, and W_MEM_CHECK=1)
-     - W1 Self-Hosted Stage 2 (under ASan, UBSan, and W_MEM_CHECK=1)
+     - W0 AST C99 (under ASan, UBSan, and WYSNA_MEM_CHECK=1)
+     - W0 HIR C99 (under ASan, UBSan, and WYSNA_MEM_CHECK=1)
+     - W1 Self-Hosted Stage 2 (under ASan, UBSan, and WYSNA_MEM_CHECK=1)
 """
 
 import os
@@ -37,7 +37,7 @@ from main import ensure_selfhost_compiler_binary, get_repo_root
 
 def parse_checkpoints(stderr_text: str) -> Dict[str, Dict[str, int]]:
     checkpoints = {}
-    pattern = re.compile(r"\[W_COW_CHECKPOINT:([^\]]+)\]\s+(.*)")
+    pattern = re.compile(r"\[WYSNA_COW_CHECKPOINT:([^\]]+)\]\s+(.*)")
     for line in stderr_text.splitlines():
         match = pattern.fullmatch(line)
         if match:
@@ -53,7 +53,7 @@ def run_cow_telemetry_suite() -> bool:
     exp_file = os.path.join(repo_root, "tests", "runtime", "cow_telemetry.expected")
 
     print("==================================================")
-    print("W Language B02 CoW Telemetry & Asymptotics Suite")
+    print("Wysna B02 CoW Telemetry & Asymptotics Suite")
     print("==================================================")
 
     with open(test_file, "r", encoding="utf-8") as f:
@@ -74,8 +74,8 @@ def run_cow_telemetry_suite() -> bool:
     interp_err = io.StringIO()
     from runtime.Values import cow_telemetry
     cow_telemetry.reset()
-    old_metrics = os.environ.get("W_COW_METRICS")
-    os.environ["W_COW_METRICS"] = "1"
+    old_metrics = os.environ.get("WYSNA_COW_METRICS")
+    os.environ["WYSNA_COW_METRICS"] = "1"
     old_stderr = sys.stderr
     sys.stderr = interp_err
     try:
@@ -84,9 +84,9 @@ def run_cow_telemetry_suite() -> bool:
     finally:
         sys.stderr = old_stderr
         if old_metrics is None:
-            os.environ.pop("W_COW_METRICS", None)
+            os.environ.pop("WYSNA_COW_METRICS", None)
         else:
-            os.environ["W_COW_METRICS"] = old_metrics
+            os.environ["WYSNA_COW_METRICS"] = old_metrics
 
     assert interp_out.getvalue() == expected_stdout, "Interpreter stdout mismatch"
     py_checkpoints = parse_checkpoints(interp_err.getvalue())
@@ -143,12 +143,12 @@ def run_cow_telemetry_suite() -> bool:
     assert py_checkpoints["list_struct_repeat"] == nested_after
     with tempfile.TemporaryDirectory() as tmpdir:
         env = os.environ.copy()
-        env["W_MEM_CHECK"] = "1"
-        env["W_COW_METRICS"] = "1"
+        env["WYSNA_MEM_CHECK"] = "1"
+        env["WYSNA_COW_METRICS"] = "1"
         env["ASAN_OPTIONS"] = "detect_leaks=1" if sys.platform.startswith("linux") else "detect_leaks=0"
 
         # 2. Wysna Seed AST C99
-        print("[2/4] Testing Wysna Seed AST C99 (Clang ASan + UBSan + W_MEM_CHECK)...")
+        print("[2/4] Testing Wysna Seed AST C99 (Clang ASan + UBSan + WYSNA_MEM_CHECK)...")
         c_code = CCodeGen(file=test_file).generate(ast)
         c_path = os.path.join(tmpdir, "ast.c")
         bin_path = os.path.join(tmpdir, "ast_bin")
@@ -163,7 +163,7 @@ def run_cow_telemetry_suite() -> bool:
         print("  -> AST C99 passed output & checkpoints validated.")
 
         # 3. Wysna Seed HIR C99
-        print("[3/4] Testing Wysna Seed HIR C99 (Clang ASan + UBSan + W_MEM_CHECK)...")
+        print("[3/4] Testing Wysna Seed HIR C99 (Clang ASan + UBSan + WYSNA_MEM_CHECK)...")
         builder = HirBuilder(checker.interner, file_path=test_file)
         hir_mod = builder.lower(ast)
         hir_codegen = HirCCodeGen(checker.interner, file_path=test_file)
@@ -181,7 +181,7 @@ def run_cow_telemetry_suite() -> bool:
         print("  -> HIR C99 passed output & checkpoints validated.")
 
         # 4. Wysna Compiler Self-Hosted Stage 2
-        print("[4/4] Testing Wysna Compiler Stage 2 (Clang ASan + UBSan + W_MEM_CHECK)...")
+        print("[4/4] Testing Wysna Compiler Stage 2 (Clang ASan + UBSan + WYSNA_MEM_CHECK)...")
         selfhost_bin = ensure_selfhost_compiler_binary(repo_root)
         selfhost_c_path = os.path.join(tmpdir, "selfhost.c")
         selfhost_bin_path = os.path.join(tmpdir, "selfhost_bin")

@@ -18,7 +18,7 @@ from hir.HirCCodeGen import HirCCodeGen
 
 def run_hir_codegen_suite() -> bool:
     print("==================================================")
-    print("W Language Typed HIR -> C99 Backend Conformance")
+    print("Wysna Typed HIR -> C99 Backend Conformance")
     print("==================================================")
 
     repo_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -72,7 +72,7 @@ def run_hir_codegen_suite() -> bool:
 
                 # Execute
                 exec_env = os.environ.copy()
-                exec_env["W_MEM_CHECK"] = "1"
+                exec_env["WYSNA_MEM_CHECK"] = "1"
                 run_res = subprocess.run([bin_path], timeout=30, capture_output=True, text=True, env=exec_env)
 
                 if run_res.returncode != 0:

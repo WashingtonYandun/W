@@ -2,7 +2,7 @@
 from collections import deque
 import re
 from checker.TypeInterner import TYPE_BOOL, TYPE_INT, TYPE_UNIT, TYPE_NONE, TYPE_FLOAT, TYPE_STR
-from error.Error import WError
+from error.Error import WysnaError
 from mir.Nodes import EFFECTS, Place
 
 RUNTIME = {
@@ -42,7 +42,7 @@ class Verifier:
         self.interner = interner
 
     def fail(self, message, source=None):
-        raise WError(message, file=getattr(source, 'file', '<mir>'), line=getattr(source, 'line', 1),
+        raise WysnaError(message, file=getattr(source, 'file', '<mir>'), line=getattr(source, 'line', 1),
                      col=getattr(source, 'col', 1), code='W9999', stage='mir-verification')
 
     def compatible(self, source, target):

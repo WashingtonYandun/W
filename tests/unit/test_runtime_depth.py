@@ -29,7 +29,7 @@ def test_deep_runtime_operations_are_iterative():
         assert compiled.returncode == 0, compiled.stderr
 
         environment = os.environ.copy()
-        environment["W_MEM_CHECK"] = "1"
+        environment["WYSNA_MEM_CHECK"] = "1"
         result = subprocess.run(
             [str(executable)],
             capture_output=True,

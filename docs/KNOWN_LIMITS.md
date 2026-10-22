@@ -131,7 +131,7 @@ let n = Node("root")
 n.children.append(n)           # value storage now reaches back to the object
 ```
 
-Nothing is reclaimed. `W_MEM_CHECK=1` reports it at exit:
+Nothing is reclaimed. `WYSNA_MEM_CHECK=1` reports it at exit:
 
 ```
 [W4003] RuntimeError: Memory leak detected at exit (alloc=3, free=0, live=3)
@@ -143,7 +143,7 @@ Without that environment variable the program exits 0 in silence.
 pause behaviour and complexity that the "deterministic refcounting" promise in SPEC §8
 rules out.
 
-**Policy.** `W_MEM_CHECK` is opt-in and checks logical runtime allocation counters during
+**Policy.** `WYSNA_MEM_CHECK` is opt-in and checks logical runtime allocation counters during
 normal cleanup. It does not collect cycles, run on panic-driven `exit()`, or replace
 ASan/LSan byte-level checks in development and CI. Keeping it opt-in avoids changing
 stderr or exit status for production programs that intentionally retain process-lifetime
@@ -152,8 +152,8 @@ objects.
 **Cost.** `Weak[C]` is the sanctioned escape hatch and works, but nothing forces its use
 and a strong cycle is silent unless the memory check or an external leak detector is on.
 
-**Decision.** Keep `W_MEM_CHECK` explicitly opt-in in every execution mode. Runtime
-defaults must not change stderr or exit status based on build mode. Native runtime diagnostics remain opt-in through `W_MEM_CHECK`.
+**Decision.** Keep `WYSNA_MEM_CHECK` explicitly opt-in in every execution mode. Runtime
+defaults must not change stderr or exit status based on build mode. Native runtime diagnostics remain opt-in through `WYSNA_MEM_CHECK`.
 
 ---
 

@@ -10,7 +10,7 @@ from unittest.mock import patch
 
 import main
 from common.Platform import compiler_command, executable_name
-from error.Error import ToolchainError, WError
+from error.Error import ToolchainError, WysnaError
 
 
 def test_compiler_configuration_and_unavailable_command():
@@ -50,11 +50,11 @@ def test_missing_selfhost_sources_fail_before_any_cache_write():
         directory = Path(temporary)
         try:
             main.ensure_selfhost_compiler_binary(str(directory))
-        except WError as error:
+        except WysnaError as error:
             assert error.code == 'W2013'
         else:
             raise AssertionError('Missing selfhost sources accepted')
-        assert not (directory / '.w_cache').exists()
+        assert not (directory / '.wysna_cache').exists()
 
 
 def test_benchmark_checkout_requirement_precedes_bootstrap():

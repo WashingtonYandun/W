@@ -144,7 +144,7 @@ def run_engine(engine, source, label, selfhost_bin, directory, sanitize=False, r
     if compiled['returncode'] != 0:
         return EngineResult(engine, stderr=compiled['stderr'], exit_code=compiled['returncode'],
                             compile_ok=False, runtime_ok=False, infrastructure_error='C compilation failed')
-    env = dict(os.environ, W_MEM_CHECK='1')
+    env = dict(os.environ, WYSNA_MEM_CHECK='1')
     if sanitize:
         env['ASAN_OPTIONS'] = 'detect_leaks=' + ('1' if sys.platform.startswith('linux') else '0')
         env['UBSAN_OPTIONS'] = 'halt_on_error=1:print_stacktrace=1'
@@ -205,7 +205,7 @@ def verify_case(source, label, selfhost_bin, work_dir, expected=None, sanitize=F
                 candidate = ROOT / requested
             return 'import ' + json.dumps(str(candidate.resolve()), ensure_ascii=False)
         source = re.sub(r'import\s+"([^"\n]+)"', qualify_import, source)
-    artifacts = Path(os.environ.get('W_CI_ARTIFACTS', ROOT / '.w_cache/ci-artifacts'))
+    artifacts = Path(os.environ.get('WYSNA_CI_ARTIFACTS', ROOT / '.wysna_cache/ci-artifacts'))
     case_id = hashlib.sha256(label.encode()).hexdigest()[:12]
     directory = Path(work_dir) / case_id
     directory.mkdir(parents=True, exist_ok=True)

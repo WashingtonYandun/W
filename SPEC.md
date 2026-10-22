@@ -528,7 +528,7 @@ fn compile(source: str) {
    }
    ```
 3. **Stable AST Representation (`wysna ast file.wysna --json`):**
-   - Emits a standardized JSON AST containing `"w_ast_version": "0.1"` for reliable agentic code analysis.
+   - Emits a standardized JSON AST containing `"wysna_ast_version": "0.1"` for reliable agentic code analysis.
 
 ---
 

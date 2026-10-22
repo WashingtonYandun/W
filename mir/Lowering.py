@@ -1,6 +1,6 @@
 """Lower resolved HIR to explicit CFG, physical places and ARC operations."""
 from checker.TypeInterner import TYPE_UNIT, TYPE_INT, TYPE_BOOL, TYPE_NONE, TYPE_STR, TYPE_FLOAT
-from error.Error import WError
+from error.Error import WysnaError
 from hir import HirNodes as H
 from mir.Nodes import (Source, Slot, Projection, Place, Operation, Terminator,
                        BasicBlock, Function, Layout, Module)
@@ -18,7 +18,7 @@ class Lowering:
 
     def fail(self, node, message):
         source = self.source(node)
-        raise WError(message, file=source.file, line=source.line, col=source.col,
+        raise WysnaError(message, file=source.file, line=source.line, col=source.col,
                      code='W9999', stage='mir-lowering')
 
     def lower(self, hir, optimize=True):
@@ -728,7 +728,7 @@ class Lowering:
             if self.current is None:
                 break
         if self.current is not None:
-            exhaustive = pattern_matrix_exhaustive([self.interner.to_wtype(node.subject.type_id)],
+            exhaustive = pattern_matrix_exhaustive([self.interner.to_type(node.subject.type_id)],
                                                    [[arm.pattern] for arm in node.arms if arm.guard is None], self.interner)
             if exhaustive:
                 self.terminate('unreachable', node=node)

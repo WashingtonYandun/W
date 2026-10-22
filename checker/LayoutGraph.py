@@ -1,5 +1,5 @@
 """
-checker/LayoutGraph.py - Layout graph construction and finite size verification for W Language.
+checker/LayoutGraph.py - Layout graph construction and finite size verification for Wysna.
 
 Part of Milestone C04:
 - Distinguishes between INLINE edges (direct value embedding in struct / tuple) and
@@ -19,10 +19,8 @@ from node.NodeType import (
     ListType as AstListType, DictType as AstDictType, OptionalType as AstOptionalType,
     ResultType as AstResultType, StructDecl, EnumDecl, ClassDecl
 )
-from checker.WType import (
-    WType, StructType, EnumType, ClassType, TupleType as WTupType,
-    ListType as WListType, DictType as WDictType, OptionalType as WOptType,
-    ResultType as WResType, WeakType as WWeakType
+from checker.WysnaType import (
+    StructType, EnumType, ClassType
 )
 
 

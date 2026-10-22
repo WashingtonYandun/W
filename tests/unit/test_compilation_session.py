@@ -12,7 +12,7 @@ from runtime.Interpreter import Interpreter
 from codegen.CCodeGen import CCodeGen
 from hir.HirBuilder import HirBuilder
 from hir.HirCCodeGen import HirCCodeGen
-from error.Error import WError
+from error.Error import WysnaError
 
 
 def run_session_tests():
@@ -93,7 +93,7 @@ def run_session_tests():
                     from checker.TypeInterner import TypeInterner
                     try:
                         HirCCodeGen(TypeInterner(), str(entry)).generate(module)
-                    except WError as error:
+                    except WysnaError as error:
                         assert error.code == 'W9999'
                     else:
                         raise AssertionError('Foreign arena was accepted by HIR emitter')
@@ -101,7 +101,7 @@ def run_session_tests():
                     imported.return_type_id = 0
                     try:
                         HirCCodeGen(session.interner, str(entry)).generate(module)
-                    except WError as error:
+                    except WysnaError as error:
                         assert error.file == str(root / 'left.wysna'), str(error)
                     else:
                         raise AssertionError('Malformed dependency HIR was accepted')
@@ -111,10 +111,10 @@ def run_session_tests():
                     code = CCodeGen(file=str(entry)).generate(unit.program)
                 c_path, binary = root / (backend + '.c'), root / backend
                 c_path.write_text(code)
-                flags = ['-fsanitize=address,undefined', '-fno-omit-frame-pointer'] if os.environ.get('W_SANITIZE') == '1' else []
+                flags = ['-fsanitize=address,undefined', '-fno-omit-frame-pointer'] if os.environ.get('WYSNA_SANITIZE') == '1' else []
                 compile_result = subprocess.run([os.environ.get('CC', 'cc')] + flags + ['-std=c99', '-I' + str(Path(__file__).resolve().parents[2]), str(c_path), '-o', str(binary)], capture_output=True, text=True, timeout=120)
                 assert compile_result.returncode == 0, compile_result.stderr
-                result = subprocess.run([str(binary)], capture_output=True, text=True, timeout=30, env=dict(os.environ, W_MEM_CHECK='1', ASAN_OPTIONS='detect_leaks=' + ('1' if sys.platform.startswith('linux') else '0'), UBSAN_OPTIONS='halt_on_error=1'))
+                result = subprocess.run([str(binary)], capture_output=True, text=True, timeout=30, env=dict(os.environ, WYSNA_MEM_CHECK='1', ASAN_OPTIONS='detect_leaks=' + ('1' if sys.platform.startswith('linux') else '0'), UBSAN_OPTIONS='halt_on_error=1'))
                 assert result.returncode == 0, result.stderr
                 assert result.stdout == expected, (backend, result.stdout)
         finally:
@@ -123,7 +123,7 @@ def run_session_tests():
         from checker.TypeInterner import TypeInterner
         try:
             HirBuilder(TypeInterner(), str(entry)).lower(unit.program)
-        except WError as error:
+        except WysnaError as error:
             assert error.code == 'W9999'
         else:
             raise AssertionError('Foreign arena was accepted by HIR builder')
@@ -146,7 +146,7 @@ def run_session_tests():
         assert refreshed_output.getvalue() == 'init\n9 right 7 yes 4 9\nItem { value: 9 } Item { value: "right" } 9 Mode.On 2\n'
         try:
             session.link(unit.program)
-        except WError as error:
+        except WysnaError as error:
             assert error.code == 'W9999'
         else:
             raise AssertionError('Stale arena was accepted')
@@ -154,14 +154,14 @@ def run_session_tests():
         mismatch = 'import "left.wysna"\nimport "right.wysna"\nfn take(x: int) {}\ntake(left.make())'
         try:
             session.check_source(mismatch, str(entry))
-        except WError as error:
+        except WysnaError as error:
             assert '__wm_' not in str(error) and 'left.wysna::Item' in str(error), str(error)
         else:
             raise AssertionError('Nominal argument mismatch was accepted')
         for suffix in ('let alias = shared', 'print(shared)', 'print(left.shared)'):
             try:
                 session.check_source('import "shared.wysna"\nimport "left.wysna"\n' + suffix, str(entry))
-            except WError as error:
+            except WysnaError as error:
                 assert error.code == 'W2003' and 'runtime values' in error.message, str(error)
             else:
                 raise AssertionError('Runtime module value reached lowering')
@@ -169,7 +169,7 @@ def run_session_tests():
         for source in ('fn main(__wm_local: int) {}', 'enum Option[T] { Mine(T) }'):
             try:
                 session.check_source(source, str(entry))
-            except WError as error:
+            except WysnaError as error:
                 assert error.code == 'W1002', str(error)
             else:
                 raise AssertionError('Reserved identity was accepted')
@@ -181,7 +181,7 @@ def run_session_tests():
         cycle_source = 'import "cycle.wysna"'
         try:
             session.check_source(cycle_source, str(entry))
-        except WError as error:
+        except WysnaError as error:
             assert error.code == 'W1003' and 'main.wysna -> cycle.wysna -> main.wysna' in str(error), str(error)
             assert error.file == str(root / 'cycle.wysna')
         else:
@@ -189,7 +189,7 @@ def run_session_tests():
         (root / 'bad.wysna').write_text('let value: int = "wrong"')
         try:
             session.check_source('import "bad.wysna"', str(entry))
-        except WError as error:
+        except WysnaError as error:
             assert error.file == str(root / 'bad.wysna'), str(error)
         else:
             raise AssertionError('Invalid dependency was accepted')

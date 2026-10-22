@@ -16,7 +16,7 @@ def test_parser_suite():
     failures = []
 
     print("==================================================")
-    print("W Language Parser Conformance Suite")
+    print("Wysna Parser Conformance Suite")
     print("==================================================")
 
     print(f"\n--- Parser Valid ({len(valid_files)} tests) ---")
@@ -32,7 +32,7 @@ def test_parser_suite():
             # Assert AST validity
             assert isinstance(ast, Program), f"Expected Program AST root, got {type(ast)}"
             ast_dict = ast.to_dict()
-            assert ast_dict.get("w_ast_version") == "0.1", "AST must have w_ast_version 0.1"
+            assert ast_dict.get("wysna_ast_version") == "0.1", "AST must have wysna_ast_version 0.1"
 
             # Check that AST is serializable to JSON
             json_str = json.dumps(ast_dict)

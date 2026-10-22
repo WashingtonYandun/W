@@ -12,14 +12,14 @@ from formatter.Formatter import Formatter
 from codegen.CCodeGen import CCodeGen
 from hir.HirBuilder import HirBuilder
 from hir.HirCCodeGen import HirCCodeGen
-from error.Error import WError
+from error.Error import WysnaError
 
 
 from tests.engine_harness import ENGINES, unsupported_reason, verify
 
 
 def verify_four_way_equivalence(source_code, label, selfhost_bin, repo_root, work_dir):
-    return verify(source_code, label, selfhost_bin, work_dir, sanitize=os.environ.get('W_SANITIZE') == '1')
+    return verify(source_code, label, selfhost_bin, work_dir, sanitize=os.environ.get('WYSNA_SANITIZE') == '1')
 
 
 def generate_valid_program(seed: int) -> str:
@@ -338,7 +338,7 @@ def run_fuzz_suite(
                 hir_mod = HirBuilder(tc.interner, file_path=label).lower(ast)
                 HirCCodeGen(tc.interner, file_path=label).generate(hir_mod)
                 CCodeGen(file=label).generate(ast)
-        except WError:
+        except WysnaError:
             # Expected structured diagnostic rejection on invalid fuzz inputs
             pass
         except Exception as exc:

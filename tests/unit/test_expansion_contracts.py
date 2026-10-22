@@ -7,7 +7,7 @@ import subprocess
 import sys
 import tempfile
 from checker.TypeChecker import TypeChecker
-from error.Error import WError
+from error.Error import WysnaError
 from formatter.Formatter import Formatter
 from lexer.Lexer import Lexer
 from parser.Parser import Parser
@@ -45,7 +45,7 @@ def run_expansion_tests():
                 source = source.replace('"library.wysna"', json.dumps(str(ROOT / 'tests/generic_oop/modules/library.wysna')))
             engines = ('interpreter', 'ast', 'hir') if '/generic_oop/' in label or '/stdlib/' in label else ('interpreter', 'ast', 'hir', 'selfhost')
             results = [run_engine(engine, source, label, selfhost_bin, directory / label.replace('/', '_'),
-                                  sanitize=bool(os.environ.get('W_SANITIZE'))) for engine in engines]
+                                  sanitize=bool(os.environ.get('WYSNA_SANITIZE'))) for engine in engines]
             ok, error = compare(results, expected)
             assert ok, (label, error, [vars(result) for result in results])
         for name, code in [('inherited_field_type', 'W3003'), ('override_visibility', 'W3002'),
@@ -66,7 +66,7 @@ def run_expansion_tests():
             built = subprocess.run([sys.executable, str(ROOT / 'main.py'), 'build', str(ROOT / 'tests/ffi/scalars.wysna'),
                                     '--backend=' + backend, '--link-lib', 'm', '-o', str(binary)], capture_output=True, text=True)
             assert built.returncode == 0, built.stderr
-            result = subprocess.run([str(binary)], capture_output=True, text=True, env=dict(os.environ, W_MEM_CHECK='1'))
+            result = subprocess.run([str(binary)], capture_output=True, text=True, env=dict(os.environ, WYSNA_MEM_CHECK='1'))
             assert (result.returncode, result.stdout) == (0, '9.0\n7\n'), result.stderr
         cfg = directory / 'read_cfg.wysna'
         cfg.write_text('fn read_cfg() -> int { return 7 }\nprint(read_cfg())\n')

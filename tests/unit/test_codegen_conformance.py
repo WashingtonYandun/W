@@ -6,35 +6,37 @@ import tempfile
 from parser.Parser import Parser
 from checker.TypeChecker import TypeChecker
 from codegen.CCodeGen import CCodeGen
+from tests.engine_harness import panic_expectation
 
 
 def run_codegen_tests() -> bool:
-    w_files = sorted(glob.glob("tests/runtime/*.wysna"))
+    wysna_files = sorted(glob.glob("tests/runtime/*.wysna"))
     passed = 0
     failed = 0
     repo_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
     print("==========================================")
-    print("W v0.1 Native C99 Backend Conformance Suite")
+    print("Wysna Native C99 Backend Conformance Suite")
     print("==========================================")
 
     with tempfile.TemporaryDirectory() as tmpdir:
-        for w_file in w_files:
-            exp_file = w_file[:-6] + ".expected"
+        for wysna_file in wysna_files:
+            exp_file = wysna_file[:-6] + ".expected"
             if not os.path.exists(exp_file):
                 continue
 
-            with open(w_file, "r", encoding="utf-8") as f:
+            with open(wysna_file, "r", encoding="utf-8") as f:
                 src = f.read()
             with open(exp_file, "r", encoding="utf-8") as f:
                 expected = f.read()
+            panic_code = panic_expectation(expected)
 
             try:
-                ast = Parser(file=w_file).parse(src)
-                TypeChecker(file=w_file).check(ast)
-                c_code = CCodeGen(file=w_file).generate(ast)
+                ast = Parser(file=wysna_file).parse(src)
+                TypeChecker(file=wysna_file).check(ast)
+                c_code = CCodeGen(file=wysna_file).generate(ast)
 
-                base = os.path.basename(w_file)[:-6]
+                base = os.path.basename(wysna_file)[:-6]
                 c_path = os.path.join(tmpdir, f"{base}.c")
                 bin_path = os.path.join(tmpdir, base)
 
@@ -47,21 +49,28 @@ def run_codegen_tests() -> bool:
                     text=True
                 )
                 if comp.returncode != 0:
-                    print(f"[FAIL] {os.path.basename(w_file)} (C compile error):\n{comp.stderr}")
+                    print(f"[FAIL] {os.path.basename(wysna_file)} (C compile error):\n{comp.stderr}")
                     failed += 1
                     continue
 
                 run_res = subprocess.run([bin_path], capture_output=True, text=True)
-                if run_res.stdout == expected:
-                    print(f"[PASS] C99 {os.path.basename(w_file)}")
+                if panic_code is not None:
+                    if run_res.returncode != 0 and panic_code in run_res.stderr:
+                        print(f"[PASS] C99 {os.path.basename(wysna_file)} (caught {panic_code})")
+                        passed += 1
+                    else:
+                        print(f"[FAIL] C99 {os.path.basename(wysna_file)} panic mismatch (expected {panic_code})")
+                        failed += 1
+                elif run_res.stdout == expected:
+                    print(f"[PASS] C99 {os.path.basename(wysna_file)}")
                     passed += 1
                 else:
-                    print(f"[FAIL] C99 {os.path.basename(w_file)} output mismatch")
+                    print(f"[FAIL] C99 {os.path.basename(wysna_file)} output mismatch")
                     print(f"  Expected: {repr(expected)}")
                     print(f"  Actual:   {repr(run_res.stdout)}")
                     failed += 1
             except Exception as e:
-                print(f"[FAIL] C99 {os.path.basename(w_file)}: {e}")
+                print(f"[FAIL] C99 {os.path.basename(wysna_file)}: {e}")
                 failed += 1
 
     print("------------------------------------------")

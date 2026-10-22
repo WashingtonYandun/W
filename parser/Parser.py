@@ -1,7 +1,7 @@
 import os
 from typing import List, Optional
-from wtokens.Token import Token
-from wtokens.TokenType import TokenType
+from tokens.Token import Token
+from tokens.TokenType import TokenType
 from lexer.Lexer import Lexer
 from error.Error import ParserError, ParserErrors
 from node.NodeType import (
@@ -58,7 +58,7 @@ _STATEMENT_END_TOKENS = frozenset({TokenType.RBRACE, TokenType.EOF})
 
 class Parser:
     """
-    Recursive Descent + Pratt Parser for W Language v0.1.
+    Recursive Descent + Pratt Parser for Wysna v0.1.
     Never calls exit(); raises ParserError with exact diagnostic codes and positions.
     """
     def __init__(self, file: str = "<stdin>") -> None:

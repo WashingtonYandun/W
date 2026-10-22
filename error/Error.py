@@ -97,9 +97,9 @@ def normalize_diagnostic_code(code: str, default: str = "W0001") -> str:
     return default
 
 
-class WError(Exception):
+class WysnaError(Exception):
     """
-    Base diagnostic exception for W Language toolchain.
+    Base diagnostic exception for Wysna toolchain.
 
     Attributes:
         message (str): Explanatory error message.
@@ -149,12 +149,12 @@ class WError(Exception):
         }
 
 
-class ToolchainError(WError):
+class ToolchainError(WysnaError):
     def __init__(self, message: str) -> None:
         super().__init__(message, file="<toolchain>", code="W5001", stage="toolchain")
 
 
-class LexerError(WError):
+class LexerError(WysnaError):
     def __init__(self, message: str, line: int = 1, col: int = 1, file: str = "<stdin>", code: str = "W0001") -> None:
         super().__init__(
             message=message,
@@ -166,7 +166,7 @@ class LexerError(WError):
         )
 
 
-class ParserError(WError):
+class ParserError(WysnaError):
     def __init__(self, message: str, line: int = 1, col: int = 1, file: str = "<stdin>", code: str = "W0001") -> None:
         super().__init__(
             message=message,
@@ -178,7 +178,7 @@ class ParserError(WError):
         )
 
 
-class TypeError(WError):
+class TypeError(WysnaError):
     def __init__(self, message: str, line: int = 1, col: int = 1, file: str = "<stdin>", code: str = "W2001") -> None:
         super().__init__(
             message=message,
@@ -190,7 +190,7 @@ class TypeError(WError):
         )
 
 
-class EnvironmentError(WError):
+class EnvironmentError(WysnaError):
     def __init__(self, message: str, line: int = 1, col: int = 1, file: str = "<stdin>", code: str = "W4003") -> None:
         super().__init__(
             message=message,
@@ -202,7 +202,7 @@ class EnvironmentError(WError):
         )
 
 
-class WRuntimeError(WError):
+class WysnaRuntimeError(WysnaError):
     def __init__(self, message: str, line: int = 1, col: int = 1, file: str = "<stdin>", code: str = "W4003") -> None:
         norm_code = normalize_diagnostic_code(code, default="W4003")
         if norm_code == "W4003":
@@ -222,8 +222,6 @@ class WRuntimeError(WError):
 
 
 # Backward compatibility aliases
-Error = WError
-RuntimeError = WRuntimeError
 
 class ParserErrors(ParserError):
     """A bounded syntax diagnostic batch; no recovered tree reaches execution."""

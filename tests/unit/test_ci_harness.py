@@ -32,8 +32,8 @@ def run_ci_harness_tests():
         assert signaled['returncode'] == -15
         assert json.loads((directory / 'signal.json').read_text())['command']
         original = harness.run_engine
-        previous = os.environ.get('W_CI_ARTIFACTS')
-        os.environ['W_CI_ARTIFACTS'] = str(directory / 'artifacts')
+        previous = os.environ.get('WYSNA_CI_ARTIFACTS')
+        os.environ['WYSNA_CI_ARTIFACTS'] = str(directory / 'artifacts')
         try:
             harness.run_engine = lambda engine, *args: harness.EngineResult(engine, stdout='ok\n')
             assert harness.verify('', 'tests/runtime/generic_function.wysna', '', directory, 'ok\n')[0]
@@ -52,9 +52,9 @@ def run_ci_harness_tests():
         finally:
             harness.run_engine = original
             if previous is None:
-                os.environ.pop('W_CI_ARTIFACTS')
+                os.environ.pop('WYSNA_CI_ARTIFACTS')
             else:
-                os.environ['W_CI_ARTIFACTS'] = previous
+                os.environ['WYSNA_CI_ARTIFACTS'] = previous
     with tempfile.TemporaryDirectory() as temporary:
         original_execute = harness.execute
         commands = []

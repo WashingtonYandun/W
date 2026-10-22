@@ -15,7 +15,7 @@ def test_types_suite():
     failures = []
 
     print("==================================================")
-    print("W Language Type Checker Conformance Suite (SPEC v0.1)")
+    print("Wysna Type Checker Conformance Suite (SPEC v0.1)")
     print("==================================================")
 
     print(f"\n--- Types Valid ({len(valid_files)} tests) ---")

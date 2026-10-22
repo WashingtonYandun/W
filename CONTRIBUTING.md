@@ -96,7 +96,7 @@ Compile and test with AddressSanitizer and UndefinedBehaviorSanitizer enabled:
 ```bash
 ./wysna test --sanitize
 # or via environment variable:
-W_SANITIZE=1 ./wysna test
+WYSNA_SANITIZE=1 ./wysna test
 ```
 
 ### 3. Four-Engine Differential Oracle

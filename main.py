@@ -8,12 +8,12 @@ from lexer.Lexer import Lexer
 from parser.Parser import Parser
 from checker.TypeChecker import TypeChecker
 from runtime.Interpreter import Interpreter
-from runtime.Values import WUnit
+from runtime.Values import WysnaUnit
 from formatter.Formatter import Formatter
 from codegen.CCodeGen import CCodeGen
 from hir.HirBuilder import HirBuilder
 from hir.HirCCodeGen import HirCCodeGen
-from error.Error import WError
+from error.Error import WysnaError
 
 from common.Version import W_VERSION
 from common.Platform import cache_lock, compiler_command, executable_name, peak_rss_kb
@@ -29,7 +29,7 @@ def get_repo_root() -> str:
 # stale binary silently invalidates every `--backend=selfhost` comparison.
 SELFHOST_BOOTSTRAP_INPUTS = ("selfhost/compiler.wysna", "runtime/wysna_runtime.h", "runtime/wysna_host.h", "main.py") + tuple(
     os.path.relpath(os.path.join(directory, name), get_repo_root())
-    for package in ("lexer", "parser", "node", "checker", "compiler", "codegen", "common", "error", "hir", "mir", "wtokens")
+    for package in ("lexer", "parser", "node", "checker", "compiler", "codegen", "common", "error", "hir", "mir", "tokens")
     for directory, _, names in os.walk(os.path.join(get_repo_root(), package))
     for name in sorted(names)
     if name.endswith(".py")
@@ -52,14 +52,14 @@ def ensure_selfhost_compiler_binary(repo_root: str) -> str:
     if not os.path.isfile(compiler_src_path):
         from error.Error import TypeError
         raise TypeError("Wysna Compiler bootstrap requires a source checkout", file=compiler_src_path, code="W2013")
-    cache_dir = os.path.join(repo_root, ".w_cache")
+    cache_dir = os.path.join(repo_root, ".wysna_cache")
     os.makedirs(cache_dir, exist_ok=True)
     with cache_lock(os.path.join(cache_dir, 'bootstrap.lock')):
         return _ensure_selfhost_compiler_binary_locked(repo_root)
 
 
 def _ensure_selfhost_compiler_binary_locked(repo_root: str) -> str:
-    cache_dir = os.path.join(repo_root, ".w_cache")
+    cache_dir = os.path.join(repo_root, ".wysna_cache")
     os.makedirs(cache_dir, exist_ok=True)
     stage2_bin = os.path.join(cache_dir, executable_name("stage2"))
     compiler_src_path = os.path.join(repo_root, "selfhost", "compiler.wysna")
@@ -368,12 +368,12 @@ def run_pipeline(
         interp.foreign_libraries = link_libraries
         res = interp.interpret(ast)
 
-        if not isinstance(res, WUnit) and file_name == "<stdin>":
+        if not isinstance(res, WysnaUnit) and file_name == "<stdin>":
             print(res)
 
         return 0
 
-    except WError as err:
+    except WysnaError as err:
         if json_diagnostics:
             print(json.dumps(err.to_dict(), indent=2))
         else:
@@ -404,7 +404,7 @@ def run_pipeline(
 
 def repl(show_tokens: bool = False, show_ast: bool = False) -> None:
     print("==================================================")
-    print(f"W Language REPL v{W_VERSION} (Type 'exit' to quit)")
+    print(f"Wysna REPL v{W_VERSION} (Type 'exit' to quit)")
     print("==================================================")
 
     parser = Parser(file="<repl>")
@@ -431,9 +431,9 @@ def repl(show_tokens: bool = False, show_ast: bool = False) -> None:
 
             checker.check(ast)
             res = interp.interpret(ast)
-            if not isinstance(res, WUnit):
+            if not isinstance(res, WysnaUnit):
                 print(res)
-        except WError as err:
+        except WysnaError as err:
             print(str(err))
         except Exception as exc:
             print(f"Error: {exc}")
@@ -541,7 +541,7 @@ def main() -> None:
                 sys.exit(0 if ok else 1)
             else:
                 if args and ("--sanitize" in args or "-s" in args):
-                    os.environ["W_SANITIZE"] = "1"
+                    os.environ["WYSNA_SANITIZE"] = "1"
                 from run_conformance import run_suite
                 run_suite()
                 return

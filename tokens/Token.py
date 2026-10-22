@@ -1,9 +1,9 @@
-from wtokens.TokenType import TokenType
+from tokens.TokenType import TokenType
 from typing import Any, Optional
 
 class Token:
     """
-    Represents a lexical token in W Language.
+    Represents a lexical token in Wysna.
     
     Attributes:
         value (Any): The literal value or symbol of the token.

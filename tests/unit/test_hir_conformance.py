@@ -25,7 +25,7 @@ def verify_expr_types(expr: HirExpr, file_name: str) -> None:
 
 def test_hir_suite() -> None:
     print("==================================================")
-    print("W Language Typed HIR Conformance Suite (SPEC v0.1)")
+    print("Wysna Typed HIR Conformance Suite (SPEC v0.1)")
     print("==================================================")
 
     test_dirs = ["tests/runtime", "examples"]

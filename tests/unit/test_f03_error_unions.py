@@ -1,8 +1,8 @@
 from checker.TypeChecker import TypeChecker
 from checker.TypeInterner import TypeInterner
-from checker.WType import BoolType, EnumType, ErrorUnionType, IntType, ResultType, StrType, StructType, is_assignable
+from checker.WysnaType import BoolType, EnumType, ErrorUnionType, IntType, ResultType, StrType, StructType, is_assignable
 from compiler.CompilationSession import CompilationSession
-from error.Error import TypeError as WTypeError
+from error.Error import TypeError as TypeError
 from formatter.Formatter import Formatter
 from hir.HirBuilder import HirBuilder
 from hir.HirDump import HirDumper
@@ -66,7 +66,7 @@ def test_checked_error_patterns_are_distinct_from_enum_variants():
 
 def test_hir_rejects_invalid_error_type_patterns_before_emission():
     from copy import deepcopy
-    from error.Error import WError
+    from error.Error import WysnaError
     from hir.HirCCodeGen import HirCCodeGen
     from hir.HirNodes import HirErrorTypePattern, HirWildcardPattern, HirEnumPattern, HirMatch
     from hir.HirVerifier import HirVerifier
@@ -96,7 +96,7 @@ def test_hir_rejects_invalid_error_type_patterns_before_emission():
                       lambda: HirCCodeGen(checker.interner, file_path='<test>').generate(broken)):
             try:
                 check()
-            except WError as error:
+            except WysnaError as error:
                 assert error.code == 'W9999'
                 assert error.stage == 'hir-verification'
             else:
@@ -114,7 +114,7 @@ fn recover() -> int { return fail() else err { match err {
 '''
     try:
         TypeChecker().check(Parser().parse(source))
-    except WTypeError as error:
+    except TypeError as error:
         assert error.code == 'W2003'
     else:
         raise AssertionError('A guarded error alternative incorrectly closed the match')
@@ -255,7 +255,7 @@ fn narrower() -> int ! SecondError { return first()? }
 """
     try:
         TypeChecker().check(Parser().parse(invalid))
-    except WTypeError as error:
+    except TypeError as error:
         assert error.code == "W2006"
     else:
         raise AssertionError("A source error outside the target error set was accepted")
@@ -276,7 +276,7 @@ fn nested() -> int ! (str ! bool) { return narrow() }
 """
     try:
         TypeChecker().check(Parser().parse(source))
-    except WTypeError as error:
+    except TypeError as error:
         assert error.code == "W2004"
     else:
         raise AssertionError("A scalar error was implicitly lifted into a nested Result error channel")

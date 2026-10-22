@@ -20,7 +20,7 @@ def test_toolkit_semantics_across_four_engines():
     expected = (ROOT / 'tests/stdlib/toolkit.expected').read_text(encoding='utf-8')
     with tempfile.TemporaryDirectory() as directory:
         results = [run_engine(engine, source, 'toolkit', selfhost_bin, directory,
-                   sanitize=os.environ.get('W_SANITIZE') == '1') for engine in ('interpreter', 'ast', 'hir', 'selfhost')]
+                   sanitize=os.environ.get('WYSNA_SANITIZE') == '1') for engine in ('interpreter', 'ast', 'hir', 'selfhost')]
         ok, detail = compare(results, expected)
         assert ok, detail
 
@@ -67,7 +67,7 @@ print(path.join("root", "child"), path.basename("C:/é/file.wysna"), path.dirnam
         expected = '0 0 6\n6 0\nread true true\nfalse true\nroot/child file.wysna C:/\n'
         for engine in ('interpreter', 'ast', 'hir', 'selfhost'):
             result = run_engine(engine, text, 'streaming', selfhost_bin, directory / engine,
-                                sanitize=os.environ.get('W_SANITIZE') == '1')
+                                sanitize=os.environ.get('WYSNA_SANITIZE') == '1')
             assert (result.exit_code, result.stdout, result.stderr) == (0, expected, ''), (
                 f"Engine {engine} failed: exit={result.exit_code}, stdout={repr(result.stdout)}, stderr={repr(result.stderr)}"
             )
@@ -226,7 +226,7 @@ print(second.close(), audit_live(), first.close(), audit_live(), first.close())
                                         capture_output=True, text=True, timeout=120)
                 assert built.returncode == 0, built.stderr
                 command = [str(binary)]
-            result = subprocess.run(command, capture_output=True, text=True, timeout=30, env=dict(os.environ, W_MEM_CHECK='1'))
+            result = subprocess.run(command, capture_output=True, text=True, timeout=30, env=dict(os.environ, WYSNA_MEM_CHECK='1'))
             assert (result.returncode, result.stdout, result.stderr) == (0, expected, ''), result
 
 

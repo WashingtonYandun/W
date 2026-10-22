@@ -12,9 +12,9 @@ check:
 	./wysna check selfhost/compiler.wysna
 
 selfhost:
-	@mkdir -p .w_cache
-	./wysna build --selfhost selfhost/compiler.wysna -o .w_cache/wysna_selfhost
-	@echo "[OK] Native self-hosted compiler binary ready at .w_cache/wysna_selfhost"
+	@mkdir -p .wysna_cache
+	./wysna build --selfhost selfhost/compiler.wysna -o .wysna_cache/wysna_selfhost
+	@echo "[OK] Native self-hosted compiler binary ready at .wysna_cache/wysna_selfhost"
 
 install:
 	./install.sh "$(BINDIR)"
@@ -24,6 +24,6 @@ uninstall:
 	@echo "[OK] Removed $(BINDIR)/wysna"
 
 clean:
-	rm -rf .w_cache build dist *.egg-info
+	rm -rf .wysna_cache build dist *.egg-info
 	find . -name "__pycache__" -type d -prune -exec rm -rf {} +
 	@echo "[OK] Cleaned build caches"

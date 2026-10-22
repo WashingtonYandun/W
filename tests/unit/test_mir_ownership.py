@@ -7,7 +7,7 @@ import subprocess
 import sys
 import tempfile
 
-from error.Error import WError
+from error.Error import WysnaError
 from mir.Nodes import Operation, dump
 from mir.Ownership import optimize_parameter_reads
 from tests.unit.test_mir import lower
@@ -76,7 +76,7 @@ def test_parameter_optimization_rejects_invalid_input_before_rewriting():
             block.terminator.targets = ()
         try:
             optimize_parameter_reads(module, interner)
-        except WError as error:
+        except WysnaError as error:
             assert error.stage == 'mir-verification' and error.code == 'W9999', error
         else:
             raise AssertionError('Malformed ownership accepted: ' + mode)
@@ -132,7 +132,7 @@ int main(void) {
             '-std=c99', '-O1', '-g', '-fsanitize=address,undefined', '-fno-omit-frame-pointer',
             '-I' + str(ROOT), str(path), '-o', str(binary)]
         subprocess.run(command, check=True, capture_output=True, text=True, timeout=60)
-        environment = dict(os.environ, W_MEM_CHECK='1', UBSAN_OPTIONS='halt_on_error=1')
+        environment = dict(os.environ, WYSNA_MEM_CHECK='1', UBSAN_OPTIONS='halt_on_error=1')
         environment['ASAN_OPTIONS'] = 'detect_leaks=' + ('1' if sys.platform.startswith('linux') else '0')
         result = subprocess.run([str(binary)], env=environment, capture_output=True, text=True, timeout=30)
         assert result.returncode == 0 and not result.stdout and not result.stderr, result
@@ -146,7 +146,7 @@ def test_parameter_lifetimes_across_engines():
         ok, detail = verify(path.read_text(), str(path.relative_to(ROOT)),
                             ensure_selfhost_compiler_binary(str(ROOT)), temporary,
                             expected=path.with_suffix('.expected').read_text(), strict=True,
-                            sanitize=os.environ.get('W_SANITIZE') == '1')
+                            sanitize=os.environ.get('WYSNA_SANITIZE') == '1')
         assert ok, detail
 
 

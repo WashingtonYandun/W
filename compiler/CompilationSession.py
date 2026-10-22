@@ -5,8 +5,8 @@ import os
 from pathlib import Path
 from checker.TypeInterner import TypeInterner
 from checker.SymbolTable import Scope
-from checker.WType import ModuleType
-from error.Error import TypeError, WError
+from checker.WysnaType import ModuleType
+from error.Error import TypeError, WysnaError
 from node import NodeType as A
 from compiler.ModuleNames import DECLARATIONS, ModuleNames, PREFIX
 
@@ -182,7 +182,7 @@ class CompilationSession:
         try:
             checker._check_program(program)
             checker._checked_once = True
-        except WError as error:
+        except WysnaError as error:
             modules = [(module.module_id, module.names) for module in self.modules.values()]
             modules.append((module_id, names))
             for origin, exports_ in modules:
@@ -276,7 +276,7 @@ class CompilationSession:
     def link(self, program):
         unit = program.checked_module
         if unit.generation != self.generation or program.interner is not self.interner:
-            raise WError('Checked module belongs to an invalidated compilation generation',
+            raise WysnaError('Checked module belongs to an invalidated compilation generation',
                          file=unit.path, code='W9999', stage='module-linking')
         if hasattr(program, 'linked_program'):
             return program.linked_program

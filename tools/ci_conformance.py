@@ -19,7 +19,7 @@ def source_fingerprint(root=ROOT):
     """Bind evidence to the commit and exact source, fixture and harness bytes."""
     roots = ('checker', 'codegen', 'common', 'compiler', 'error', 'formatter', 'hir',
              'lexer', 'mir', 'node', 'parser', 'runtime', 'selfhost/src', 'stdlib',
-             'tooling', 'tools', 'tests', 'examples', 'wtokens')
+             'tooling', 'tools', 'tests', 'examples', 'tokens')
     suffixes = {'.py', '.wysna', '.c', '.h', '.expected', '.json', '.txt'}
     paths = {path for name in roots for path in (root / name).rglob('*')
              if path.is_file() and path.suffix in suffixes
@@ -59,7 +59,7 @@ def _measured_summary():
     not disagree with the declaration file it was derived from. It now reports only
     measured results, and says so explicitly when no run is available.
     """
-    summary_path = Path(os.environ.get('W_CI_ARTIFACTS', ROOT / '.w_cache/ci-artifacts')) / 'summary.json'
+    summary_path = Path(os.environ.get('WYSNA_CI_ARTIFACTS', ROOT / '.wysna_cache/ci-artifacts')) / 'summary.json'
     if not summary_path.exists():
         return None
     try:
@@ -183,7 +183,7 @@ def main():
     valid_flags = ('--sanitize', '--profile=release', '--profile=integration', '--matrix')
     if any(arg not in valid_flags for arg in arguments):
         raise SystemExit('Usage: ci_conformance.py [--sanitize] [--profile=integration|release] [--matrix]')
-    artifacts = Path(os.environ.get('W_CI_ARTIFACTS', ROOT / '.w_cache/ci-artifacts'))
+    artifacts = Path(os.environ.get('WYSNA_CI_ARTIFACTS', ROOT / '.wysna_cache/ci-artifacts'))
     artifacts.mkdir(parents=True, exist_ok=True)
     compiler = subprocess.run(shlex.split(os.environ.get('CC', 'cc')) + ['--version'],
                               capture_output=True, text=True, timeout=30, check=True)
@@ -201,7 +201,7 @@ def main():
     if bootstrap['returncode']:
         print(bootstrap['stderr'])
         return 1
-    selfhost_bin = ROOT / '.w_cache' / executable_name('stage2')
+    selfhost_bin = ROOT / '.wysna_cache' / executable_name('stage2')
     support_files = PROFILES['support_files']
     positives, negatives = corpus_paths()
     fixtures = positives + negatives

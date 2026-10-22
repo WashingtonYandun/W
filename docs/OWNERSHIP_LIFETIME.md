@@ -89,7 +89,7 @@ Reassigning a mutable local variable (`x = rhs`) or container/struct slot (`a[i]
 
 ---
 
-## 5. Runtime RC Instrumentation & Leak Verification (`W_MEM_CHECK=1`)
+## 5. Runtime RC Instrumentation & Leak Verification (`WYSNA_MEM_CHECK=1`)
 
 In `runtime/wysna_runtime.h`, all heap-allocated runtime payloads (`WListBuf`, `WDictBuf`, `WTupleBuf`, `WStructBuf` for both `W_STRUCT` and `W_OBJECT`, and `WBoxBuf` for `W_OK`/`W_ERR`) carry an `int32_t refcount` header and participate in global telemetry counters:
 - `wysna_g_alloc_count`: Total heap buffer allocations (`refcount = 1`).
@@ -100,12 +100,12 @@ In `runtime/wysna_runtime.h`, all heap-allocated runtime payloads (`WListBuf`, `
 
 ### Safety Invariants
 1. **Refcount Underflow / Double-Free Detection:** Both `wysna_clone` and `wysna_release` assert `refcount > 0`. Upon deallocation, `refcount` is poisoned to `-1` before `free()`. Any subsequent `wysna_clone` or `wysna_release` on a freed buffer immediately aborts with `[W4003] Runtime error: memory safety violation (refcount underflow / double free)`.
-2. **Zero-Leak Exit Verification (`W_MEM_CHECK=1`):** At the end of `main()`, after releasing top-level and global bindings, `wysna_runtime_cleanup()` checks `getenv("W_MEM_CHECK")`. When set to `"1"`, if `wysna_g_live_objects != 0` or `wysna_g_alloc_count != wysna_g_free_count`, the process aborts with `[W4003]` and prints exact allocation/free/live counters.
+2. **Zero-Leak Exit Verification (`WYSNA_MEM_CHECK=1`):** At the end of `main()`, after releasing top-level and global bindings, `wysna_runtime_cleanup()` checks `getenv("WYSNA_MEM_CHECK")`. When set to `"1"`, if `wysna_g_live_objects != 0` or `wysna_g_alloc_count != wysna_g_free_count`, the process aborts with `[W4003]` and prints exact allocation/free/live counters.
 
 This check is intentionally opt-in. It reports logical W runtime buffers only, runs during
 normal cleanup, and does not collect strong cycles. A runtime panic calls `exit()` and
 does not reach this check. Development and CI use ASan/LSan separately for byte-level
-memory diagnostics; `W_MEM_CHECK` is not a substitute for those tools.
+memory diagnostics; `WYSNA_MEM_CHECK` is not a substitute for those tools.
 
 ---
 
@@ -208,7 +208,7 @@ a fresh empty list stored directly into a global can transfer without a temporar
 
 `python3 -m tests.unit.test_ownership_control_flow` compares the interpreter with AST C, HIR C
 and standalone Wysna Compiler emission. All three native binaries run under ASan/UBSan and
-W_MEM_CHECK; Linux additionally enables LSan. The fixture covers retained fields
+WYSNA_MEM_CHECK; Linux additionally enables LSan. The fixture covers retained fields
 across later mutation, argument/collection order, local field/index returns,
 temporary receivers, self-assignment, append of an existing element, nested loop
 exits, optional/result propagation in match, failing assignment targets, handler
@@ -283,7 +283,7 @@ resource scopes. See [Standard library](STDLIB.md).
 File and Bytes store an owned opaque value: address plus a shared runtime owner
 with a trusted close function. Native clone/release retains/releases that owner;
 last release closes the checked host ID. The reference engine retains the same
-owner with WPointer references. No user finalizer is invoked. Raw external opaque
+owner with WysnaPointer references. No user finalizer is invoked. Raw external opaque
 values keep their original non-owning scalar ABI. Bytes.borrow explicitly strips
 ownership, so retaining a borrowed ID does not extend the allocation lifetime.
 

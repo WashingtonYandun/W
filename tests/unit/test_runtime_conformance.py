@@ -3,7 +3,7 @@ import os
 from parser.Parser import Parser
 from checker.TypeChecker import TypeChecker
 from runtime.Interpreter import Interpreter
-from error.Error import WError
+from error.Error import WysnaError
 from tests.engine_harness import panic_expectation
 
 def test_runtime_suite():
@@ -11,16 +11,16 @@ def test_runtime_suite():
     if not os.path.exists(runtime_dir):
         raise AssertionError(f"Directory {runtime_dir} not found.")
 
-    w_files = sorted([f for f in os.listdir(runtime_dir) if f.endswith(".wysna")])
+    wysna_files = sorted([f for f in os.listdir(runtime_dir) if f.endswith(".wysna")])
     passed = 0
     failures = []
 
     print("==================================================")
-    print("W Language Runtime Conformance Suite (SPEC v0.1)")
+    print("Wysna Runtime Conformance Suite (SPEC v0.1)")
     print("==================================================")
-    print(f"\n--- Running Runtime Tests ({len(w_files)} files) ---")
+    print(f"\n--- Running Runtime Tests ({len(wysna_files)} files) ---")
 
-    for f in w_files:
+    for f in wysna_files:
         path = os.path.join(runtime_dir, f)
         expected_path = os.path.join(runtime_dir, f[:-6] + ".expected")
 
@@ -66,13 +66,13 @@ def test_runtime_suite():
             print(f"  [PASS] {f}")
             passed += 1
 
-        except WError as w_err:
-            if panic_code is not None and w_err.code == panic_code:
-                print(f"  [PASS] {f}: Caught expected {w_err.code}")
+        except WysnaError as wysna_err:
+            if panic_code is not None and wysna_err.code == panic_code:
+                print(f"  [PASS] {f}: Caught expected {wysna_err.code}")
                 passed += 1
             else:
-                print(f"  [FAIL] {f}: Diagnostic error {w_err}")
-                failures.append((f, str(w_err)))
+                print(f"  [FAIL] {f}: Diagnostic error {wysna_err}")
+                failures.append((f, str(wysna_err)))
         except Exception as e:
             print(f"  [FAIL] {f}: Unexpected exception {e}")
             failures.append((f, str(e)))
@@ -86,7 +86,7 @@ def test_runtime_suite():
             pass
 
     print("\n==================================================")
-    print(f"Runtime tests passed: {passed}/{len(w_files)}")
+    print(f"Runtime tests passed: {passed}/{len(wysna_files)}")
     print(f"FAILED:                {len(failures)}")
     print("==================================================")
 

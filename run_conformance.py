@@ -24,12 +24,12 @@ from tests.unit.test_c04_adt_layout import run_all as run_c04_adt_tests
 from tests.unit.test_c05_types_inference import run_all as run_c05_types_tests
 from tests.unit.test_c06_default_backend import run_all as run_c06_backend_tests
 from tests.unit.test_d01_parity_matrix import run_all as run_d01_parity_tests
-from error.Error import DIAGNOSTIC_CODES, LexerError, ParserError, TypeError, WError, WRuntimeError
-from wtokens.TokenType import TokenType
+from error.Error import DIAGNOSTIC_CODES, LexerError, ParserError, TypeError, WysnaError, WysnaRuntimeError
+from tokens.TokenType import TokenType
 from node.NodeType import Program
 
 
-def _check_expected_diag_code(code_text: str, err: WError) -> None:
+def _check_expected_diag_code(code_text: str, err: WysnaError) -> None:
     assert err.code in DIAGNOSTIC_CODES, f"Invalid diagnostic code {err.code!r}"
     for line in code_text.splitlines():
         s = line.strip()
@@ -72,7 +72,7 @@ def run_suite() -> None:
 
 def _run_suite_in_repo(repo_root: str) -> None:
     print("==================================================")
-    print("W Language Conformance Runner (SPEC v0.1)")
+    print("Wysna Conformance Runner (SPEC v0.1)")
     print("==================================================")
 
     # 1. Lexer Tests
@@ -154,7 +154,7 @@ def _run_suite_in_repo(repo_root: str) -> None:
             # matches the source and serialises with the declared AST version.
             assert ast.body, "parsed AST has an empty body"
             dumped = ast.to_dict()
-            assert dumped.get("w_ast_version") == "0.1", "AST must declare w_ast_version 0.1"
+            assert dumped.get("wysna_ast_version") == "0.1", "AST must declare wysna_ast_version 0.1"
             # Only column-zero declarations are top level; members of a class,
             # interface or struct body are indented and belong to that declaration.
             declared = sum(1 for line in code.splitlines()
@@ -338,7 +338,7 @@ def _run_suite_in_repo(repo_root: str) -> None:
                 # "output" is the error, not stdout.
                 try:
                     interp.interpret(ast)
-                except WRuntimeError as err:
+                except WysnaRuntimeError as err:
                     assert err.code == panic_code, (
                         f"{f}: fixture declares {panic_code}, interpreter raised {err.code}: {err.message}")
                 else:
@@ -361,7 +361,7 @@ def _run_suite_in_repo(repo_root: str) -> None:
     c99_passed = 0
     bootstrap_ok = False
 
-    use_sanitize = os.environ.get("W_SANITIZE") == "1" or "--sanitize" in sys.argv
+    use_sanitize = os.environ.get("WYSNA_SANITIZE") == "1" or "--sanitize" in sys.argv
     extra_cc_flags = ["-fsanitize=address,undefined", "-fno-omit-frame-pointer"] if use_sanitize else []
     if use_sanitize:
         print("[SANITIZERS ENABLED] Compiling with Clang ASan and UBSan (-fsanitize=address,undefined)")

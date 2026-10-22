@@ -8,7 +8,7 @@ import sys
 import tempfile
 from checker.TypeChecker import TypeChecker
 from checker.TypeInterner import TYPE_BOOL, TYPE_INT
-from error.Error import WError
+from error.Error import WysnaError
 from hir.HirBuilder import HirBuilder
 from hir.HirCCodeGen import HirCCodeGen
 from mir.Lowering import Lowering
@@ -36,7 +36,7 @@ def operations(module):
 def rejects(module, interner):
     try:
         Verifier(interner).verify(module)
-    except WError as error:
+    except WysnaError as error:
         assert error.code == 'W9999' and error.stage == 'mir-verification', error
     else:
         raise AssertionError('Malformed MIR was accepted')
@@ -68,7 +68,7 @@ def test_cfg_and_ownership_rejections():
     rejects(broken, interner)
     broken = deepcopy(original)
     call = next(operation for operation in operations(broken) if operation.opcode == 'call')
-    call.data['name'] = 'w_missing'
+    call.data['name'] = 'wysna_missing'
     rejects(broken, interner)
     broken = deepcopy(original)
     function = broken.functions[0]
@@ -128,7 +128,7 @@ def test_range_iteration_and_limits_across_engines():
             path = ROOT / 'tests/runtime' / (name + '.wysna')
             ok, detail = verify(path.read_text(), str(path.relative_to(ROOT)), selfhost_bin, directory,
                                 expected=path.with_suffix('.expected').read_text(), strict=True,
-                                sanitize=os.environ.get('W_SANITIZE') == '1')
+                                sanitize=os.environ.get('WYSNA_SANITIZE') == '1')
             assert ok, detail
 
 

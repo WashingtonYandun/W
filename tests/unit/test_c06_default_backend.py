@@ -171,7 +171,7 @@ def test_native_c99_execution_under_sanitizers():
         assert os.path.exists(bin_path), "Target binary must exist"
 
         # Execute binary
-        env = dict(os.environ, W_MEM_CHECK="1")
+        env = dict(os.environ, WYSNA_MEM_CHECK="1")
         res = subprocess.run([bin_path], capture_output=True, text=True, env=env)
         assert res.returncode == 0, f"Execution failed with code {res.returncode}: {res.stderr}"
         assert "LEAVES: 3" in res.stdout, f"Unexpected stdout: {res.stdout}"
@@ -179,7 +179,7 @@ def test_native_c99_execution_under_sanitizers():
 
 def run_all() -> bool:
     print("==================================================")
-    print("W Language C06 Default HIR Backend Suite")
+    print("Wysna C06 Default HIR Backend Suite")
     print("==================================================")
     try:
         test_default_backend_is_hir()

@@ -94,7 +94,7 @@ def test_benchmark_harness_conformance():
 
 def run_all() -> bool:
     print("==================================================")
-    print("W Language D05 Telemetry & Benchmarks Suite")
+    print("Wysna D05 Telemetry & Benchmarks Suite")
     print("==================================================")
     try:
         test_cli_stats_telemetry_fields()

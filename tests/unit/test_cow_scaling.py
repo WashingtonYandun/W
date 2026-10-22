@@ -9,7 +9,7 @@ import tempfile
 
 from parser.Parser import Parser
 from checker.TypeChecker import TypeChecker
-from error.Error import WError
+from error.Error import WysnaError
 from runtime.Interpreter import Interpreter
 from runtime.Values import cow_telemetry
 from codegen.CCodeGen import CCodeGen
@@ -88,22 +88,22 @@ def run_scaling_tests():
                     'let mut pair = (1, 2)\npair[0] = 3']:
         try:
             TypeChecker().check(Parser().parse(invalid))
-        except WError:
+        except WysnaError:
             pass
         else:
             raise AssertionError('Immutable/tuple mutation was accepted')
     output, errors = io.StringIO(), io.StringIO()
     cow_telemetry.reset()
-    previous = os.environ.get('W_COW_METRICS')
-    os.environ['W_COW_METRICS'] = '1'
+    previous = os.environ.get('WYSNA_COW_METRICS')
+    os.environ['WYSNA_COW_METRICS'] = '1'
     try:
         with contextlib.redirect_stderr(errors):
             Interpreter(stdout=output).interpret(ast)
     finally:
         if previous is None:
-            os.environ.pop('W_COW_METRICS', None)
+            os.environ.pop('WYSNA_COW_METRICS', None)
         else:
-            os.environ['W_COW_METRICS'] = previous
+            os.environ['WYSNA_COW_METRICS'] = previous
     assert output.getvalue() == expected
     reference = parse_checkpoints(errors.getvalue())
     validate_scaling(reference, dimensions)
@@ -126,7 +126,7 @@ def run_scaling_tests():
             subprocess.run([os.environ.get('CC', 'cc'), '-std=c99', '-fsanitize=address,undefined',
                             '-fno-omit-frame-pointer', '-I' + str(root), str(c_path), '-o', str(binary)],
                            check=True, capture_output=True, text=True, timeout=60)
-            env = dict(os.environ, W_MEM_CHECK='1', W_COW_METRICS='1')
+            env = dict(os.environ, WYSNA_MEM_CHECK='1', WYSNA_COW_METRICS='1')
             env['ASAN_OPTIONS'] = 'detect_leaks=1' if sys.platform.startswith('linux') else 'detect_leaks=0'
             result = subprocess.run([str(binary)], env=env, capture_output=True, text=True, timeout=30)
             assert result.returncode == 0, (backend, result.stderr)
