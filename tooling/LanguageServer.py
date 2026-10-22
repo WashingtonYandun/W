@@ -7,8 +7,10 @@ from urllib.parse import unquote, urlparse
 from urllib.request import url2pathname
 from compiler.CompilationSession import CompilationSession
 from error.Error import WysnaError
+from formatter.Formatter import Formatter
 from lexer.Lexer import Lexer
 from node.NodeType import Node, IdentExpr, MemberExpr
+from parser.Parser import Parser
 
 
 def source_path(uri):
@@ -139,6 +141,53 @@ class LanguageServer:
         end = target.end_offset if target else start + len(name)
         return {'uri': Path(path).as_uri(), 'range': {'start': position_at(source, start), 'end': position_at(source, end)}}
 
+    def symbol_at(self, uri, position):
+        unit = self.checked.get(uri)
+        if not unit:
+            return None
+        token = self.token_at(uri, position)
+        if not token:
+            return None
+        source = self.documents[uri]['text']
+        tokens = Lexer(source).tokenize()
+        previous = next((tokens[index - 1] for index, candidate in enumerate(tokens)
+                         if candidate.line == token.line and candidate.col == token.col and index > 0), None)
+        for node in nodes(unit.program):
+            if isinstance(node, IdentExpr) and (node.line, node.col) == (token.line, token.col):
+                symbol = getattr(node, 'resolved_symbol', None)
+                if symbol is not None:
+                    return symbol
+            if (isinstance(node, MemberExpr) and getattr(node, 'resolved_module_member', None)
+                    and previous and (node.line, node.col) == (previous.line, previous.col)
+                    and node.property == token.value):
+                for dependency in self.session.modules.values():
+                    symbol = dependency.checker.global_scope.lookup_symbol(node.resolved_module_member)
+                    if symbol:
+                        return symbol
+        return None
+
+    def hover(self, uri, position):
+        symbol = self.symbol_at(uri, position)
+        if symbol is None:
+            return None
+        label = f"{symbol.kind} {symbol.name}: {symbol.type}"
+        return {'contents': {'kind': 'markdown', 'value': f'```wysna\n{label}\n```'}}
+
+    def formatting(self, uri):
+        document = self.documents.get(uri)
+        if document is None:
+            return []
+        source = document['text']
+        try:
+            program = Parser(file=source_path(uri)).parse(source)
+            formatted = Formatter().format(program)
+        except WysnaError:
+            return []
+        if formatted == source:
+            return []
+        return [{'range': {'start': position_at(source, 0), 'end': position_at(source, len(source))},
+                 'newText': formatted}]
+
     def completion(self, uri, position):
         unit = self.checked.get(uri)
         if not unit:
@@ -166,8 +215,10 @@ class LanguageServer:
         result = None
         if method == 'initialize':
             result = {'capabilities': {'positionEncoding': 'utf-16', 'textDocumentSync': {'openClose': True, 'change': 1},
-                                      'definitionProvider': True, 'completionProvider': {'triggerCharacters': ['.']}},
-                      'serverInfo': {'name': 'w'}}
+                                      'definitionProvider': True, 'hoverProvider': True,
+                                      'documentFormattingProvider': True,
+                                      'completionProvider': {'triggerCharacters': ['.']}},
+                      'serverInfo': {'name': 'wysna'}}
         elif method == 'shutdown':
             self.stopping = True
         elif method == 'exit':
@@ -195,6 +246,10 @@ class LanguageServer:
             result = self.definition(params['textDocument']['uri'], params['position'])
         elif method == 'textDocument/completion':
             result = self.completion(params['textDocument']['uri'], params['position'])
+        elif method == 'textDocument/hover':
+            result = self.hover(params['textDocument']['uri'], params['position'])
+        elif method == 'textDocument/formatting':
+            result = self.formatting(params['textDocument']['uri'])
         elif 'id' in message:
             self.send({'jsonrpc': '2.0', 'id': message['id'], 'error': {'code': -32601, 'message': 'Method not found'}})
             return True

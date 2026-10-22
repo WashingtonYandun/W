@@ -160,12 +160,14 @@ defaults must not change stderr or exit status based on build mode. Native runti
 ## 6. The runtime is single-threaded, and that is the whole concurrency story
 
 Refcounts are plain `int32_t`, there is no atomic operation anywhere, and there is no
-thread, task or async primitive in the language or the stdlib. This is consistent and
-documented, but it bounds the audience: W is for single-threaded native tools. Anything
-that needs to overlap I/O or use more than one core is out of scope until the memory model
-gains either atomics or a "no shared state" discipline with a runtime that enforces it.
+thread, task or async primitive in the language or the stdlib. Wysna's current supported
+profile is synchronous, single-threaded native programs. Adding concurrency would require
+a separate memory-model decision, an explicit sharing/ownership contract, and cross-engine
+runtime work; it is not part of the current language roadmap.
 
-*Open decision* — the largest one in this file.
+**Decision: closed for the current release line.** Keep the runtime single-threaded and
+the standard library synchronous. Reopen this decision only with a concrete workload and
+a proposed memory model; do not treat this as an implicit promise that ARC is thread-safe.
 
 ---
 
@@ -176,7 +178,7 @@ gains either atomics or a "no shared state" discipline with a runtime that enfor
 | Chained assignment | HIR uses `HirAssignment`; the value is preserved and each index is evaluated once. The artificial depth limit was removed. |
 | Parser error recovery | Check and LSP recover up to 100 syntax diagnostics. JSON preserves the first error and adds `diagnostics`; recovered programs never execute. |
 | `w fmt` coverage | The gate checks idempotence and AST preservation across fixtures, runtime programs, recursive examples, the standard library, and self-hosted sources. It also runs generated trees before and after formatting. |
-| LSP | `initialize`, `didOpen/didChange/didClose`, `definition`, `completion` and `publishDiagnostics`. No hover, references, rename, formatting, signature help, semantic tokens or incremental sync. |
+| LSP | `initialize`, `didOpen/didChange/didClose`, `definition`, `hover`, `completion`, document formatting and `publishDiagnostics`. No references, rename, signature help, semantic tokens or incremental sync. |
 | Dictionary keys | `int`, `str`, `bool`, `enum` only; `float` and composites containing it are rejected with `W2010`. |
 | `NetError` | Declared in the prelude (`checker/SymbolTable.py`) and referenced by a parser fixture, but nothing produces one. Either implement a network module or remove the type. |
 | Standard library size | `text` (3 functions), `algorithms` (3), `io` (2), `bytes` (2). `join` takes O(output bytes + parts) using a two-pass builder. No Unicode normalization. |

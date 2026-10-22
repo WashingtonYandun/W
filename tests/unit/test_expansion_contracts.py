@@ -104,10 +104,17 @@ def test_lsp():
         assert definition and definition['uri'] == library.as_uri(), definition
         completions = server.completion(uri, {'line': 1, 'character': 55})['items']
         assert 'value' in {item['label'] for item in completions}
+        hover_position = position_at(source, source.rindex('value'))
+        hover = server.hover(uri, hover_position)
+        assert hover and 'param value: int' in hover['contents']['value'], hover
         # Unsaved dependency changes must invalidate the importing document.
         server.update(library.as_uri(), 'pub fn plus(x: str) -> str { return x }\n', 2)
         diagnostics = [message for message in outgoing if message['params']['uri'] == uri][-1]['params']['diagnostics']
         assert diagnostics and diagnostics[0]['code'] == 'W2001', outgoing
+        format_uri = (directory / 'format.wysna').as_uri()
+        server.update(format_uri, 'fn formatted(){\nprint(1)\n}\n', 1)
+        edits = server.formatting(format_uri)
+        assert len(edits) == 1 and 'fn formatted() -> unit {' in edits[0]['newText'], edits
     source = '"😀" + missing\n'
     assert position_at(source, source.index('missing')) == {'line': 0, 'character': 7}
     assert offset_at(source, {'line': 0, 'character': 7}) == source.index('missing')
@@ -122,7 +129,9 @@ def test_lsp():
     serve(incoming, output)
     headers, body = output.getvalue().split(b'\r\n\r\n', 1)
     assert int(headers.split(b':')[1]) == len(body)
-    assert json.loads(body)['result']['capabilities']['definitionProvider']
+    capabilities = json.loads(body)['result']['capabilities']
+    assert capabilities['definitionProvider'] and capabilities['hoverProvider']
+    assert capabilities['documentFormattingProvider']
 
 
 if __name__ == '__main__':
