@@ -16,9 +16,9 @@ Only the latest minor release line receives security updates and backports.
 
 ## Reporting a Vulnerability
 
-If you discover a security vulnerability in the W compiler, runtime, or tooling, please **do not report it via a public GitHub issue**. Instead, follow one of these responsible disclosure methods:
+If you discover a security vulnerability in the Wysna compiler, runtime, or tooling, please **do not report it via a public GitHub issue**. Instead, follow one of these responsible disclosure methods:
 
-1. **GitHub Security Advisory (Preferred):** Open a private report at [github.com/WashingtonYandun/W/security/advisories/new](https://github.com/WashingtonYandun/W/security/advisories/new).
+1. **GitHub Security Advisory (Preferred):** Open a private report at [github.com/WashingtonYandun/Wysna/security/advisories/new](https://github.com/WashingtonYandun/Wysna/security/advisories/new).
 2. **Direct Email:** Send an encrypted or plain email to [washington.yandun.morales@gmail.com](mailto:washington.yandun.morales@gmail.com) with the subject prefix `[SECURITY]`.
 
 ### What to Include in Your Report

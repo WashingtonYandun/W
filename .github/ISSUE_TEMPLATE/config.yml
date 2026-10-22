@@ -1,8 +1,8 @@
 blank_issues_enabled: false
 contact_links:
   - name: Community Discussions & Q&A
-    url: https://github.com/WashingtonYandun/W/discussions
-    about: Ask questions, share your W projects, and discuss language design.
+    url: https://github.com/WashingtonYandun/Wysna/discussions
+    about: Ask questions, share your Wysna projects, and discuss language design.
   - name: Security Vulnerabilities
-    url: https://github.com/WashingtonYandun/W/security/advisories/new
+    url: https://github.com/WashingtonYandun/Wysna/security/advisories/new
     about: Please report security vulnerabilities privately.

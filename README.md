@@ -1,6 +1,6 @@
 # Wysna Programming Language
 
-[![CI](https://github.com/WashingtonYandun/W/actions/workflows/ci.yml/badge.svg)](https://github.com/WashingtonYandun/W/actions/workflows/ci.yml)
+[![CI](https://github.com/WashingtonYandun/Wysna/actions/workflows/ci.yml/badge.svg)](https://github.com/WashingtonYandun/Wysna/actions/workflows/ci.yml)
 
 <p align="center">
   <img src="assets/wawi.jpg" alt="Wysna language mascot" width="160">
@@ -58,7 +58,7 @@ See [docs/ENGINE_PARITY_MATRIX.md](docs/ENGINE_PARITY_MATRIX.md) for full breakd
 
 ### Windows: Standalone Installer
 
-Download `wysna-<version>-windows-x64-setup.exe` from [Wysna Releases](https://github.com/WashingtonYandun/W/releases):
+Download `wysna-<version>-windows-x64-setup.exe` from [Wysna Releases](https://github.com/WashingtonYandun/Wysna/releases):
 
 1. Run the `-setup.exe` installer.
 2. Keep the default option to add Wysna to your system `PATH`.
@@ -89,8 +89,8 @@ The standalone installer bundles a private Python runtime and a portable C toolc
 Requirements: Python 3.10 or higher and a C99 compiler (`clang` or `gcc`).
 
 ```sh
-git clone https://github.com/WashingtonYandun/W.git
-cd W
+git clone https://github.com/WashingtonYandun/Wysna.git
+cd Wysna
 ./wysna --version
 ./wysna run examples/01_hello_world.wysna
 ./wysna test
