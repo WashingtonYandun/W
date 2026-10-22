@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Measure the actual W1 lexer with owned UTF-8 source at geometric input sizes."""
+"""Measure the actual Wysna Compiler lexer with owned UTF-8 source at geometric input sizes."""
 import argparse
 import json
 import os
@@ -18,7 +18,7 @@ def measure(samples=5):
     source = prefix + (ROOT / 'selfhost/src/02_lexer.wysna').read_text()
     source += '\nfn measure() -> unit ! IoError { let text = read_file(args()[1])?\nprint(len(tokenize(text))) }\nmeasure() else err { print(err.message) }\n'
     report = {'samples': samples, 'platform': sys.platform, 'compiler': os.environ.get('CC', 'cc'),
-              'workload': 'unmodified W1 tokenizer; alpha + beta newline; owned source read_file', 'rows': []}
+              'workload': 'unmodified Wysna Compiler tokenizer; alpha + beta newline; owned source read_file', 'rows': []}
     with tempfile.TemporaryDirectory(prefix='w-tokenizer-scaling-') as temporary:
         directory = Path(temporary)
         path, binary = directory / 'lexer.wysna', directory / 'lexer'

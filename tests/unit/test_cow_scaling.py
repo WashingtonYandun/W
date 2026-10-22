@@ -15,7 +15,7 @@ from runtime.Values import cow_telemetry
 from codegen.CCodeGen import CCodeGen
 from hir.HirBuilder import HirBuilder
 from hir.HirCCodeGen import HirCCodeGen
-from main import ensure_selfhost_w1_binary
+from main import ensure_selfhost_compiler_binary
 from tests.unit.test_cow_telemetry import parse_checkpoints
 
 
@@ -113,11 +113,11 @@ def run_scaling_tests():
         w_path = Path(directory) / 'scaling.wysna'
         w_path.write_text(source)
         native_reference = None
-        for backend in ['ast', 'hir', 'w1']:
+        for backend in ['ast', 'hir', 'selfhost']:
             c_path, binary = Path(directory) / (backend + '.c'), Path(directory) / backend
-            if backend == 'w1':
-                w1 = ensure_selfhost_w1_binary(str(root))
-                subprocess.run([w1, str(w_path), str(c_path)], cwd=root,
+            if backend == 'selfhost':
+                selfhost_bin = ensure_selfhost_compiler_binary(str(root))
+                subprocess.run([selfhost_bin, str(w_path), str(c_path)], cwd=root,
                                check=True, capture_output=True, text=True, timeout=60)
             else:
                 code = (CCodeGen().generate(ast) if backend == 'ast'

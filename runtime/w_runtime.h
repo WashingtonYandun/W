@@ -2070,7 +2070,7 @@ static inline char* w_format_float(double value) {
     }
 }
 
-/* Formatting & String Conversion (matching W0 Values.__str__ exactly) */
+/* Formatting & String Conversion (matching Wysna Seed Values.__str__ exactly) */
 /* Internal module identity is retained for equality/dispatch, not display. */
 static inline const char* w_nominal_display_name(const char* name) {
     if (strncmp(name, "__wm_", 5) == 0) {

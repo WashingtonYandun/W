@@ -9,7 +9,7 @@ import sys
 import tempfile
 
 from error.Error import ParserErrors
-from main import ensure_selfhost_w1_binary
+from main import ensure_selfhost_compiler_binary
 from mir.Verifier import RUNTIME, RUNTIME_ARITIES, Verifier
 from parser.Parser import Parser
 from tests.engine_harness import verify
@@ -19,15 +19,15 @@ ROOT = Path(__file__).resolve().parents[2]
 
 
 def test_principal_regressions_across_engines():
-    w1 = ensure_selfhost_w1_binary(str(ROOT))
+    selfhost_bin = ensure_selfhost_compiler_binary(str(ROOT))
     with tempfile.TemporaryDirectory(prefix='w-readiness-') as directory:
         for path in sorted((ROOT / 'tests/runtime').glob('readiness_*.wysna')):
-            ok, detail = verify(path.read_text(), str(path.relative_to(ROOT)), w1, directory,
+            ok, detail = verify(path.read_text(), str(path.relative_to(ROOT)), selfhost_bin, directory,
                                 expected=path.with_suffix('.expected').read_text(), strict=True,
                                 sanitize=os.environ.get('W_SANITIZE') == '1')
             assert ok, detail
         for path in sorted((ROOT / 'tests/types/invalid').glob('readiness_*.wysna')):
-            ok, detail = verify(path.read_text(), str(path.relative_to(ROOT)), w1, directory,
+            ok, detail = verify(path.read_text(), str(path.relative_to(ROOT)), selfhost_bin, directory,
                                 strict=True, expect_rejection=True)
             assert ok, detail
 
@@ -117,13 +117,13 @@ def test_recovery_reports_multiple_errors_without_returning_a_partial_program():
 def test_compositional_patterns_and_closures():
     from tests.fuzz.readiness_properties import generate_readiness_case
     from tests.formatter_contract import verify_formatting
-    w1 = ensure_selfhost_w1_binary(str(ROOT))
+    selfhost_bin = ensure_selfhost_compiler_binary(str(ROOT))
     with tempfile.TemporaryDirectory(prefix='w-readiness-properties-') as directory:
         for seed in (0, 1, 3, 8, 13, 21, 34, 55):
             source, expected = generate_readiness_case(seed)
             formatted = verify_formatting(source)
             for variant, text in (('original', source), ('formatted', formatted)):
-                ok, detail = verify(text, f'readiness_{seed}_{variant}.wysna', w1, directory,
+                ok, detail = verify(text, f'readiness_{seed}_{variant}.wysna', selfhost_bin, directory,
                                     expected=expected, strict=True,
                                     sanitize=os.environ.get('W_SANITIZE') == '1')
                 assert ok, detail

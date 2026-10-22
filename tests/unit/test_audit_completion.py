@@ -6,7 +6,7 @@ import subprocess
 import sys
 import tempfile
 
-from main import ensure_selfhost_w1_binary
+from main import ensure_selfhost_compiler_binary
 from tests.engine_harness import verify
 from tests.formatter_contract import formatter_paths, structural_ast, verify_formatting
 from tests.fuzz.typed_properties import generate_typed_properties
@@ -169,13 +169,13 @@ def test_typed_generator_shape_and_independent_model():
 
 
 def test_typed_composition_across_engines():
-    w1 = ensure_selfhost_w1_binary(str(ROOT))
+    selfhost_bin = ensure_selfhost_compiler_binary(str(ROOT))
     with tempfile.TemporaryDirectory(prefix='w-typed-composition-') as temporary:
         for seed in SEEDS:
             source, expected, _ = generate_typed_properties(seed)
             formatted = verify_formatting(source, 'typed_properties_' + str(seed) + '.wysna')
             for variant, code in [('source', source), ('formatted', formatted)]:
-                ok, detail = verify(code, f'typed_properties_{seed}_{variant}.wysna', w1, temporary,
+                ok, detail = verify(code, f'typed_properties_{seed}_{variant}.wysna', selfhost_bin, temporary,
                                     expected=expected, strict=True,
                                     sanitize=os.environ.get('W_SANITIZE') == '1')
                 assert ok, f'seed {seed}, {variant}: {detail}\n{code}'

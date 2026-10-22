@@ -2,7 +2,7 @@
 
 > **Status:** The current alpha toolchain is `0.4.0a1`. Sections 1–11 describe the frozen core grammar and are normative; sections 12–14 describe implementation contracts.
 >
-> **Targets:** `W0` is the reference implementation and the authority on whether a program is valid. `W1` is an experimental self-hosted compiler whose supported subset is measured by the public release corpus. The measured support boundary is documented in [docs/ENGINE_PARITY_MATRIX.md](docs/ENGINE_PARITY_MATRIX.md).
+> **Targets:** `Wysna Seed` is the reference implementation and the authority on whether a program is valid. `Wysna Compiler` is an independent self-hosted compiler whose supported subset is measured by the public release corpus. The measured support boundary is documented in [docs/ENGINE_PARITY_MATRIX.md](docs/ENGINE_PARITY_MATRIX.md).
 >
 > **Thesis:** Wysna is a compact, statically typed language for small native tools, with deterministic diagnostics and inspectable C99 output. This document defines the language syntax and semantics.
 

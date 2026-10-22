@@ -355,11 +355,10 @@ def _run_suite_in_repo(repo_root: str) -> None:
 
     print(f"Runtime execution:   {runtime_passed}/{len(runtime_files)}")
 
-    # 7. Native C99 Backend Tests (W0) & 8. Self-Hosting W1 Stage-2 Suite
+    # 7. Native C99 Backend Tests (Wysna Seed) & 8. Self-Hosting Wysna Compiler Stage-2 Suite
     repo_root = os.path.dirname(os.path.abspath(__file__))
     c99_targets = [f for f in runtime_files if os.path.exists(os.path.join(runtime_dir, f[:-6] + ".expected"))]
     c99_passed = 0
-    w1_runtime_passed = 0
     bootstrap_ok = False
 
     use_sanitize = os.environ.get("W_SANITIZE") == "1" or "--sanitize" in sys.argv
@@ -392,7 +391,7 @@ def _run_suite_in_repo(repo_root: str) -> None:
             except Exception as e:
                 print(f"  [C99 FAIL] {f}: {e}")
 
-        selfhost_targets = [f for f in c99_targets if not unsupported_reason("tests/runtime/" + f, "selfhost") and not unsupported_reason("tests/runtime/" + f, "w1")]
+        selfhost_targets = [f for f in c99_targets if not unsupported_reason("tests/runtime/" + f, "selfhost")]
         print(f"Wysna Compiler profile: {len(selfhost_targets)} supported, {len(c99_targets) - len(selfhost_targets)} unsupported (see tests/engine_profiles.json)")
         selfhost_runtime_passed = 0
 
@@ -426,7 +425,7 @@ def _run_suite_in_repo(repo_root: str) -> None:
             bootstrap_ok = True
 
             # 9. Verify Wysna Compiler Stage 2 Native Compiler on Core Runtime Conformance Programs
-            selfhost_targets = [f for f in c99_targets if not unsupported_reason("tests/runtime/" + f, "selfhost") and not unsupported_reason("tests/runtime/" + f, "w1")]
+            selfhost_targets = [f for f in c99_targets if not unsupported_reason("tests/runtime/" + f, "selfhost")]
             for f in selfhost_targets:
                 path = os.path.join(runtime_dir, f)
                 expected_path = os.path.join(runtime_dir, f[:-6] + ".expected")

@@ -70,7 +70,7 @@ def test_unsupported_reasons_and_milestones():
             )
 
 
-def test_standalone_w1_execution_contracts():
+def test_standalone_selfhost_execution_contracts():
     """Verify standalone Wysna Compiler core and generic compilation without Seed pre-filtering."""
     print("  [TEST] Standalone Wysna Compiler execution contracts (core and generic compilation)...")
     from main import ensure_selfhost_compiler_binary
@@ -192,7 +192,7 @@ def run_all() -> bool:
     try:
         test_fixture_accounting_and_staleness()
         test_unsupported_reasons_and_milestones()
-        test_standalone_w1_execution_contracts()
+        test_standalone_selfhost_execution_contracts()
         test_ci_matrix_generation_tooling()
         test_documentation_consistency()
         print("==================================================")

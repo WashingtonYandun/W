@@ -36,6 +36,6 @@ body:
     id: impact
     attributes:
       label: Impact on Self-Hosting & Runtime
-      description: How does this affect the C99 runtime, ARC/CoW invariants, or the W1 self-hosted compiler?
+      description: How does this affect the C99 runtime, ARC/CoW invariants, or the Wysna Compiler (self-hosted)?
     validations:
       false

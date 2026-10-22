@@ -98,7 +98,7 @@ def run_bootstrap_test() -> bool:
             exp_file = w_file[:-6] + ".expected"
             if not os.path.exists(exp_file):
                 continue
-            reason = unsupported_reason(os.path.relpath(w_file, repo_root), 'selfhost') or unsupported_reason(os.path.relpath(w_file, repo_root), 'w1')
+            reason = unsupported_reason(os.path.relpath(w_file, repo_root), 'selfhost')
             if reason:
                 print(f'  [UNSUPPORTED SELFHOST] {os.path.relpath(w_file, repo_root)}: {reason}')
                 continue

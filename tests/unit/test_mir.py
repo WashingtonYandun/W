@@ -15,7 +15,7 @@ from mir.Lowering import Lowering
 from mir.Nodes import Operation, Terminator
 from mir.Verifier import Verifier
 from parser.Parser import Parser
-from main import ensure_selfhost_w1_binary
+from main import ensure_selfhost_compiler_binary
 from tests.engine_harness import verify
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -122,11 +122,11 @@ print(fail() else error { match error { A(detail) => detail.value, B(_) => 0 } }
 
 
 def test_range_iteration_and_limits_across_engines():
-    w1 = ensure_selfhost_w1_binary(str(ROOT))
+    selfhost_bin = ensure_selfhost_compiler_binary(str(ROOT))
     with tempfile.TemporaryDirectory(prefix='w-mir-contracts-') as directory:
         for name in ('mir_range_iteration', 'mir_range_limit', 'mir_range_overflow'):
             path = ROOT / 'tests/runtime' / (name + '.wysna')
-            ok, detail = verify(path.read_text(), str(path.relative_to(ROOT)), w1, directory,
+            ok, detail = verify(path.read_text(), str(path.relative_to(ROOT)), selfhost_bin, directory,
                                 expected=path.with_suffix('.expected').read_text(), strict=True,
                                 sanitize=os.environ.get('W_SANITIZE') == '1')
             assert ok, detail

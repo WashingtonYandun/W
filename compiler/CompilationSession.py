@@ -1,4 +1,4 @@
-"""Whole-program W0 source ownership, checked-module cache and identity arena."""
+"""Whole-program Wysna Seed source ownership, checked-module cache and identity arena."""
 import hashlib
 import json
 import os

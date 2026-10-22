@@ -7,7 +7,7 @@ from error.Error import WError
 from hir.HirBuilder import HirBuilder
 from hir.HirCCodeGen import HirCCodeGen
 from hir.HirNodes import CollectionCallTarget, HirConstInt
-from main import ensure_selfhost_w1_binary, SELFHOST_BOOTSTRAP_INPUTS
+from main import ensure_selfhost_compiler_binary, SELFHOST_BOOTSTRAP_INPUTS
 from parser.Parser import Parser
 from tests.engine_harness import verify
 from tests.fuzz.semantic_properties import generate_properties
@@ -63,11 +63,11 @@ def test_bootstrap_tracks_extracted_semantics():
 
 
 def test_seeded_semantic_properties():
-    w1 = ensure_selfhost_w1_binary(str(ROOT))
+    selfhost_bin = ensure_selfhost_compiler_binary(str(ROOT))
     with tempfile.TemporaryDirectory(prefix='w-semantic-properties-') as temporary:
         for seed in (17, 29, 37, 51, 63, 101, 202, 303):
             source, expected = generate_properties(seed)
-            ok, detail = verify(source, f'audit_properties_{seed}.wysna', w1, temporary,
+            ok, detail = verify(source, f'audit_properties_{seed}.wysna', selfhost_bin, temporary,
                                 expected=expected, strict=True, sanitize=os.environ.get('W_SANITIZE') == '1')
             assert ok, f'seed {seed}: {detail}\n{source}'
 

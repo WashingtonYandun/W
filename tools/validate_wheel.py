@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Verify an installed W0 wheel without importing or reading its source checkout."""
+"""Verify an installed Wysna wheel without importing or reading its source checkout."""
 import argparse
 import hashlib
 import json

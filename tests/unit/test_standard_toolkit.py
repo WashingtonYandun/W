@@ -6,7 +6,7 @@ import subprocess
 import sys
 import tempfile
 
-from main import ensure_selfhost_w1_binary
+from main import ensure_selfhost_compiler_binary
 from common.Platform import compiler_command, executable_name
 from tests.engine_harness import run_engine, compare
 from runtime import HostAbi
@@ -15,18 +15,18 @@ ROOT = Path(__file__).resolve().parents[2]
 
 
 def test_toolkit_semantics_across_four_engines():
-    w1 = ensure_selfhost_w1_binary(str(ROOT))
+    selfhost_bin = ensure_selfhost_compiler_binary(str(ROOT))
     source = (ROOT / 'tests/stdlib/toolkit.wysna').read_text(encoding='utf-8')
     expected = (ROOT / 'tests/stdlib/toolkit.expected').read_text(encoding='utf-8')
     with tempfile.TemporaryDirectory() as directory:
-        results = [run_engine(engine, source, 'toolkit', w1, directory,
-                   sanitize=os.environ.get('W_SANITIZE') == '1') for engine in ('interpreter', 'ast', 'hir', 'w1')]
+        results = [run_engine(engine, source, 'toolkit', selfhost_bin, directory,
+                   sanitize=os.environ.get('W_SANITIZE') == '1') for engine in ('interpreter', 'ast', 'hir', 'selfhost')]
         ok, detail = compare(results, expected)
         assert ok, detail
 
 
 def test_streaming_files_and_filesystem_across_four_engines():
-    w1 = ensure_selfhost_w1_binary(str(ROOT))
+    selfhost_bin = ensure_selfhost_compiler_binary(str(ROOT))
     with tempfile.TemporaryDirectory(prefix='w toolkit é ') as temporary:
         directory = Path(temporary)
         path = directory / 'data é.bin'
@@ -65,8 +65,8 @@ fs.remove(MOVED) else error { exit(1) }
 print(path.join("root", "child"), path.basename("C:/é/file.wysna"), path.dirname("C:/file.wysna"))
 '''.replace('PATH', json.dumps(str(path), ensure_ascii=False)).replace('MOVED', json.dumps(str(moved), ensure_ascii=False))
         expected = '0 0 6\n6 0\nread true true\nfalse true\nroot/child file.wysna C:/\n'
-        for engine in ('interpreter', 'ast', 'hir', 'w1'):
-            result = run_engine(engine, text, 'streaming', w1, directory / engine,
+        for engine in ('interpreter', 'ast', 'hir', 'selfhost'):
+            result = run_engine(engine, text, 'streaming', selfhost_bin, directory / engine,
                                 sanitize=os.environ.get('W_SANITIZE') == '1')
             assert (result.exit_code, result.stdout, result.stderr) == (0, expected, ''), (
                 f"Engine {engine} failed: exit={result.exit_code}, stdout={repr(result.stdout)}, stderr={repr(result.stderr)}"

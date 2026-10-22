@@ -1,4 +1,4 @@
-"""Direct W1 coverage for generic function inference and constraints."""
+"""Direct Wysna Compiler coverage for generic function inference and constraints."""
 
 import os
 import subprocess
@@ -12,7 +12,7 @@ def test_generic_function_inference_and_explicit_arguments():
     from main import ensure_selfhost_compiler_binary
 
     compiler = ensure_selfhost_compiler_binary(str(ROOT))
-    with tempfile.TemporaryDirectory(prefix="w1-generic-function-") as directory:
+    with tempfile.TemporaryDirectory(prefix="selfhost-generic-function-") as directory:
         output_c = Path(directory) / "generic_function.c"
         built = subprocess.run(
             [compiler, str(ROOT / "tests/runtime/generic_function.wysna"), str(output_c)],
@@ -46,7 +46,7 @@ def test_generic_interface_constraints_reject_non_implementations():
         ROOT / "tests/types/invalid/generic_constraint_failure.wysna",
         ROOT / "tests/types/invalid/generic_nominal_constraint_violation.wysna",
     )
-    with tempfile.TemporaryDirectory(prefix="w1-generic-constraint-") as directory:
+    with tempfile.TemporaryDirectory(prefix="selfhost-generic-constraint-") as directory:
         for index, fixture in enumerate(fixtures):
             output_c = Path(directory) / f"invalid_{index}.c"
             result = subprocess.run(
@@ -56,9 +56,9 @@ def test_generic_interface_constraints_reject_non_implementations():
                 text=True,
                 timeout=30,
             )
-            assert result.returncode != 0, f"W1 accepted invalid generic constraint fixture {fixture}"
+            assert result.returncode != 0, f"Wysna Compiler accepted invalid generic constraint fixture {fixture}"
             assert "[W2001]" in result.stderr, result.stderr
-            assert not output_c.exists(), "W1 must reject invalid source before emitting C"
+            assert not output_c.exists(), "Wysna Compiler must reject invalid source before emitting C"
 
 
 def test_generic_runtime_and_checked_module_fixtures():
@@ -71,7 +71,7 @@ def test_generic_runtime_and_checked_module_fixtures():
         ROOT / "tests/modules/checked_session/main.wysna",
     ]
     environment = dict(os.environ, W_MEM_CHECK="1")
-    with tempfile.TemporaryDirectory(prefix="w1-generic-runtime-") as directory:
+    with tempfile.TemporaryDirectory(prefix="selfhost-generic-runtime-") as directory:
         for index, fixture in enumerate(fixtures):
             output_c = Path(directory) / f"fixture_{index}.c"
             built = subprocess.run(
@@ -81,7 +81,7 @@ def test_generic_runtime_and_checked_module_fixtures():
                 text=True,
                 timeout=120,
             )
-            assert built.returncode == 0, f"W1 failed to compile {fixture}: {built.stderr}"
+            assert built.returncode == 0, f"Wysna Compiler failed to compile {fixture}: {built.stderr}"
 
             binary = Path(directory) / f"fixture_{index}"
             compiled = subprocess.run(
@@ -102,8 +102,8 @@ def test_generic_runtime_and_checked_module_fixtures():
                 timeout=20,
             )
             expected = fixture.with_suffix(".expected").read_text()
-            assert executed.returncode == 0, f"W1 runtime failed for {fixture}: {executed.stderr}"
-            assert executed.stdout == expected, f"Unexpected W1 output for {fixture}: {executed.stdout!r}"
+            assert executed.returncode == 0, f"Wysna Compiler runtime failed for {fixture}: {executed.stderr}"
+            assert executed.stdout == expected, f"Unexpected Wysna Compiler output for {fixture}: {executed.stdout!r}"
 
 
 def test_generic_cycle_diagnostics():
@@ -115,7 +115,7 @@ def test_generic_cycle_diagnostics():
         ROOT / "tests/types/invalid/generic_struct_recursive_cycle.wysna",
         ROOT / "tests/types/invalid/generic_structural_growth_cycle.wysna",
     )
-    with tempfile.TemporaryDirectory(prefix="w1-generic-cycle-") as directory:
+    with tempfile.TemporaryDirectory(prefix="selfhost-generic-cycle-") as directory:
         for index, fixture in enumerate(fixtures):
             output_c = Path(directory) / f"invalid_{index}.c"
             result = subprocess.run(
@@ -125,9 +125,9 @@ def test_generic_cycle_diagnostics():
                 text=True,
                 timeout=30,
             )
-            assert result.returncode != 0, f"W1 accepted invalid generic cycle fixture {fixture}"
+            assert result.returncode != 0, f"Wysna Compiler accepted invalid generic cycle fixture {fixture}"
             assert "[W2011]" in result.stderr, result.stderr
-            assert not output_c.exists(), "W1 must reject invalid source before emitting C"
+            assert not output_c.exists(), "Wysna Compiler must reject invalid source before emitting C"
 
 
 if __name__ == "__main__":
@@ -135,4 +135,4 @@ if __name__ == "__main__":
     test_generic_interface_constraints_reject_non_implementations()
     test_generic_runtime_and_checked_module_fixtures()
     test_generic_cycle_diagnostics()
-    print("W1 generic specialization and module fixtures passed")
+    print("Wysna Compiler generic specialization and module fixtures passed")

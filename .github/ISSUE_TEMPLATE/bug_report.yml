@@ -60,7 +60,7 @@ body:
         - "Type Checker (WType, TypeInterner)"
         - "Typed HIR (HirBuilder, HirCCodeGen)"
         - "C99 Runtime (w_runtime.h, ARC, CoW)"
-        - "W1 Self-Hosted Compiler"
+        - "Wysna Compiler (Self-Hosted)"
         - "CLI / Formatter (w fmt)"
         - "Other / Unknown"
     validations:

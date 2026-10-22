@@ -55,11 +55,7 @@ def ensure_selfhost_compiler_binary(repo_root: str) -> str:
     cache_dir = os.path.join(repo_root, ".w_cache")
     os.makedirs(cache_dir, exist_ok=True)
     with cache_lock(os.path.join(cache_dir, 'bootstrap.lock')):
-        rebuild_fn = globals().get('_ensure_selfhost_compiler_binary_locked', _ensure_selfhost_compiler_binary_locked)
-        return rebuild_fn(repo_root)
-
-
-ensure_selfhost_w1_binary = ensure_selfhost_compiler_binary
+        return _ensure_selfhost_compiler_binary_locked(repo_root)
 
 
 def _ensure_selfhost_compiler_binary_locked(repo_root: str) -> str:
@@ -113,9 +109,6 @@ def _ensure_selfhost_compiler_binary_locked(repo_root: str) -> str:
         )
 
     return stage2_bin
-
-
-_ensure_selfhost_w1_binary_locked = _ensure_selfhost_compiler_binary_locked
 
 
 def run_pipeline(
@@ -240,29 +233,29 @@ def run_pipeline(
             codegen_inst = None
             hir_ms = None
             if backend == "selfhost" and file_name != "<stdin>":
-                w1_bin = ensure_selfhost_w1_binary(repo_root)
+                selfhost_bin = ensure_selfhost_compiler_binary(repo_root)
                 abs_input = os.path.abspath(file_name)
                 input_dir = os.path.dirname(abs_input) or os.getcwd()
-                with tempfile.NamedTemporaryFile(mode="w", suffix=".c", delete=False, encoding="utf-8") as tmp_w1_c:
-                    tmp_w1_c_path = tmp_w1_c.name
+                with tempfile.NamedTemporaryFile(mode="w", suffix=".c", delete=False, encoding="utf-8") as tmp_selfhost_c:
+                    tmp_selfhost_c_path = tmp_selfhost_c.name
                 try:
-                    t_w10 = time.perf_counter()
-                    w1_proc = subprocess.run(
-                        [w1_bin, abs_input, tmp_w1_c_path],
+                    t_selfhost0 = time.perf_counter()
+                    selfhost_proc = subprocess.run(
+                        [selfhost_bin, abs_input, tmp_selfhost_c_path],
                         capture_output=True,
                         text=True,
                         cwd=input_dir,
                         timeout=120,
                     )
-                    codegen_ms = (time.perf_counter() - t_w10) * 1000.0
-                    if w1_proc.returncode != 0:
-                        print(f"[Wysna Compiler Error]\n{w1_proc.stderr}", file=sys.stderr)
+                    codegen_ms = (time.perf_counter() - t_selfhost0) * 1000.0
+                    if selfhost_proc.returncode != 0:
+                        print(f"[Wysna Compiler Error]\n{selfhost_proc.stderr}", file=sys.stderr)
                         return 1
-                    with open(tmp_w1_c_path, "r", encoding="utf-8") as cf:
+                    with open(tmp_selfhost_c_path, "r", encoding="utf-8") as cf:
                         c_code = cf.read()
                 finally:
-                    if os.path.exists(tmp_w1_c_path):
-                        os.remove(tmp_w1_c_path)
+                    if os.path.exists(tmp_selfhost_c_path):
+                        os.remove(tmp_selfhost_c_path)
             elif backend == "ast":
                 t_ast0 = time.perf_counter()
                 codegen_inst = CCodeGen(file=file_name)
@@ -453,7 +446,7 @@ def print_help(prog: Optional[str] = None) -> None:
     print("Usage:")
     print(f"  {prog} lsp                                       # LSP over stdio")
     print(f"  {prog} repl                                    # Start interactive REPL")
-    print(f"  {prog} [run] [--stats] <file.wysna>            # Execute Wysna source file (W0 interpreter)")
+    print(f"  {prog} [run] [--stats] <file.wysna>            # Execute Wysna source file (Seed interpreter)")
     print(f"  {prog} check [--json] [--stats] <file.wysna>   # Static typecheck without execution")
     print(f"  {prog} fmt [--write] <file.wysna>              # Canonical deterministic formatter")
     print(f"  {prog} ast [--json] <file.wysna>               # Emit canonical JSON AST (v0.1)")
@@ -462,7 +455,7 @@ def print_help(prog: Optional[str] = None) -> None:
     print(f"  {prog} emit-c [--backend=hir|ast|selfhost] [--stats] <file.wysna> [-o <out.c>] # Transpile Wysna source to C99 (default: hir)")
     print(f"  {prog} build [--backend=hir|ast|selfhost] [--stats] <file.wysna> [-o <bin>]    # Compile Wysna source to native binary (default: hir)")
     print(f"  {prog} test [--differential [N]] [--fuzz [N]]            # Run conformance, differential, or fuzz suite")
-    print(f"  {prog} bench [--update-baseline]                         # Run W0/W1 performance benchmark harness")
+    print(f"  {prog} bench [--update-baseline]                         # Run Seed/Compiler performance benchmark harness")
     print(f"  {prog} version                                           # Show compiler version")
 
 
@@ -500,9 +493,9 @@ def main() -> None:
                 sys.exit(1)
             update_baseline = "--update-baseline" in args
             repo_root = get_repo_root()
-            w1_bin = ensure_selfhost_w1_binary(repo_root)
+            selfhost_bin = ensure_selfhost_compiler_binary(repo_root)
             from bench.run_bench import run_benchmark_suite
-            ok = run_benchmark_suite(repo_root, w1_bin, update_baseline=update_baseline)
+            ok = run_benchmark_suite(repo_root, selfhost_bin, update_baseline=update_baseline)
             sys.exit(0 if ok else 1)
         elif subcmd == "test":
             if args in (["--help"], ["-h"]):
@@ -525,9 +518,9 @@ def main() -> None:
                     else:
                         idx += 1
                 repo_root = get_repo_root()
-                w1_bin = ensure_selfhost_w1_binary(repo_root)
+                selfhost_bin = ensure_selfhost_compiler_binary(repo_root)
                 from tests.differential.differential_test import run_differential_suite
-                ok = run_differential_suite(repo_root, w1_bin, generated_count=gen_count, base_seed=base_seed)
+                ok = run_differential_suite(repo_root, selfhost_bin, generated_count=gen_count, base_seed=base_seed)
                 sys.exit(0 if ok else 1)
             elif args and args[0] == "--fuzz":
                 fuzz_count = 200
@@ -553,7 +546,7 @@ def main() -> None:
                 run_suite()
                 return
         elif subcmd == "version":
-            print(f"Wysna Language Compiler v{W_VERSION} (W0 + W1 Self-Hosted C99)")
+            print(f"Wysna Language Compiler v{W_VERSION} (Wysna Seed + Wysna Compiler Self-Hosted C99)")
             return
         elif subcmd == "check":
             check_only = True
@@ -604,7 +597,7 @@ def main() -> None:
                 print(f"Error: Unknown backend '{b_val}'. Valid backends: hir, ast, selfhost", file=sys.stderr)
                 sys.exit(1)
         elif arg in ("--version", "-v"):
-            print(f"Wysna Language Compiler v{W_VERSION} (W0 + W1 Self-Hosted C99)")
+            print(f"Wysna Language Compiler v{W_VERSION} (Wysna Seed + Wysna Compiler Self-Hosted C99)")
             sys.exit(0)
         elif arg == "--emit-c":
             i += 1

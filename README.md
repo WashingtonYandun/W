@@ -23,7 +23,7 @@ Wysna implements a multi-stage compiler pipeline designed for verifiable transfo
 | **Mid-Level IR** | Control-Flow Graph & MIR | Basic blocks, place projections, borrow checking, and CoW detach injection | Verified Mid-Level IR (`MIR`) |
 | **Backend** | C99 Code Generator | Translation of MIR to clean C99 code, ARC reference counting, and literal pooling | C99 Translation Unit (`.c`) |
 | **Native Compilation** | C Toolchain (`clang` / `gcc`) | Native compilation and linking against `wysna_runtime.h` and `wysna_host.h` | Standalone Executable (`.exe` / ELF / Mach-O) |
-| **Self-Hosting (W1)** | Self-Hosted Compiler | Bootstrap pipeline verifying fixed-point identity (`compiler0.c == compiler1.c`) | Self-Hosted Native Binary (`wysna1`) |
+| **Self-Hosting** | Wysna Compiler | Bootstrap pipeline verifying fixed-point identity (`compiler0.c == compiler1.c`) | Self-Hosted Native Binary (`stage2`) |
 
 ---
 

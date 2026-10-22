@@ -8,7 +8,7 @@ import sys
 import tempfile
 from unittest.mock import patch
 
-from main import ensure_selfhost_w1_binary
+from main import ensure_selfhost_compiler_binary
 from common.Platform import compiler_command, executable_name
 from tests.engine_harness import run_engine, compare
 from tools.ci_conformance import source_fingerprint, generate_markdown_matrix
@@ -17,7 +17,7 @@ ROOT = Path(__file__).resolve().parents[2]
 
 
 def test_nominal_equality_and_undeclared_super_constructor_are_rejected():
-    w1 = ensure_selfhost_w1_binary(str(ROOT))
+    selfhost_bin = ensure_selfhost_compiler_binary(str(ROOT))
     programs = [
         'struct A { x: int }\nstruct B { x: int }\nprint(A { x: 1 } == B { x: 1 })',
         'enum A { X }\nenum B { X }\nprint(A.X != B.X)',
@@ -33,15 +33,15 @@ def test_nominal_equality_and_undeclared_super_constructor_are_rejected():
                      f'import {json.dumps(module.as_posix())}\nenum E {{ X }}\nprint(nominals.event() == E.X)']
         for index, source in enumerate(programs):
             expected = 'W3002' if index == 4 else 'W2001'
-            for engine in ('interpreter', 'ast', 'hir', 'w1'):
-                result = run_engine(engine, source, 'nominal', w1, directory / str(index))
+            for engine in ('interpreter', 'ast', 'hir', 'selfhost'):
+                result = run_engine(engine, source, 'nominal', selfhost_bin, directory / str(index))
                 assert result.exit_code == 1 and result.diag_code == expected, vars(result)
                 assert not result.infrastructure_error, vars(result)
 
 
 def test_literal_indexing_scales_linearly_by_work_not_wall_clock():
-    w1 = ensure_selfhost_w1_binary(str(ROOT))
-    metrics = {engine: [] for engine in ('ast', 'hir', 'w1')}
+    selfhost_bin = ensure_selfhost_compiler_binary(str(ROOT))
+    metrics = {engine: [] for engine in ('ast', 'hir', 'selfhost')}
     with tempfile.TemporaryDirectory(prefix='w-string-scaling-') as temporary:
         directory = Path(temporary)
         for count in (128, 256, 512):
@@ -55,12 +55,12 @@ def test_literal_indexing_scales_linearly_by_work_not_wall_clock():
             expected = f'{expected_sum} {expected_sum} {len(text)} {len(text)}\n'
             source_path = directory / 'source.wysna'
             source_path.write_text(source, encoding='utf-8')
-            interpreted = run_engine('interpreter', source, 'literal', w1, directory / 'reference')
+            interpreted = run_engine('interpreter', source, 'literal', selfhost_bin, directory / 'reference')
             assert interpreted.stdout == expected and interpreted.exit_code == 0, vars(interpreted)
             for engine in metrics:
                 emitted = directory / (engine + '.c')
-                if engine == 'w1':
-                    command = [w1, str(source_path), str(emitted)]
+                if engine == 'selfhost':
+                    command = [selfhost_bin, str(source_path), str(emitted)]
                 else:
                     command = [sys.executable, str(ROOT / 'main.py'), 'emit-c', '--backend=' + engine,
                                str(source_path), '-o', str(emitted)]
@@ -90,7 +90,7 @@ def test_matrix_invalidates_changes_without_renaming_inputs():
     from tests.engine_harness import corpus_paths
     labels = [path.relative_to(ROOT).as_posix() for group in corpus_paths() for path in group]
     measured = {'provenance': current, 'corpus': labels,
-                'coverage': {engine: {'passed': len(labels)} for engine in ('interpreter', 'ast', 'hir', 'w1')}}
+                'coverage': {engine: {'passed': len(labels)} for engine in ('interpreter', 'ast', 'hir', 'selfhost')}}
     assert 'STALE' not in generate_markdown_matrix(measured)
     for altered in (dict(current, sha='changed-commit'),
                     dict(current, inputs={**current['inputs'], 'runtime/w_runtime.h': 'changed-bytes'})):

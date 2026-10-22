@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Assemble an offline Windows W0 distribution from a wheel and pinned runtimes."""
+"""Assemble an offline Windows Wysna distribution from a wheel and pinned runtimes."""
 import argparse
 import hashlib
 import json
@@ -110,7 +110,7 @@ def assemble(wheel, output, cache, launcher_compiler=None, source_commit=None):
             'and Zig/LLVM and their bundled libraries (toolchain/zig/LICENSE and '
             'toolchain/zig/lib).\n'
             'The complete bundled toolchain is retained, including its license notices.\n', encoding='utf-8')
-        manifest = {'version': version, 'profile': 'W0', 'platform': 'windows-x64',
+        manifest = {'version': version, 'profile': 'wysna', 'platform': 'windows-x64',
                     'source_commit': source_commit, 'components': COMPONENTS,
                     'wheel': {'name': wheel.name, 'sha256': sha256(wheel)},
                     'source_only_commands': ['test', 'bench', '--backend=selfhost']}

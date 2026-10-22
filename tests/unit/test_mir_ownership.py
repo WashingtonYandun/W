@@ -139,12 +139,12 @@ int main(void) {
 
 
 def test_parameter_lifetimes_across_engines():
-    from main import ensure_selfhost_w1_binary
+    from main import ensure_selfhost_compiler_binary
     from tests.engine_harness import verify
     path = ROOT / 'tests/runtime/mir_parameter_lifetime.wysna'
     with tempfile.TemporaryDirectory(prefix='w-parameter-lifetime-') as temporary:
         ok, detail = verify(path.read_text(), str(path.relative_to(ROOT)),
-                            ensure_selfhost_w1_binary(str(ROOT)), temporary,
+                            ensure_selfhost_compiler_binary(str(ROOT)), temporary,
                             expected=path.with_suffix('.expected').read_text(), strict=True,
                             sanitize=os.environ.get('W_SANITIZE') == '1')
         assert ok, detail

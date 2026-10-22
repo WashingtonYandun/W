@@ -5265,10 +5265,10 @@ fn run_compiler() -> unit ! IoError {
     check_source(src, in_path)
     let c_code = compile_source(src)
     write_file(out_path, c_code)?
-    print("[W1] Compiled", in_path, "->", out_path)
+    print("[Wysna Compiler] Compiled", in_path, "->", out_path)
 }
 
 let res = run_compiler() else err {
-    eprint("[W4003] W1 I/O error:", err.message)
+    eprint("[W4003] Wysna Compiler I/O error:", err.message)
     exit(1)
 }

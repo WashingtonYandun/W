@@ -118,7 +118,7 @@ def generate_markdown_matrix(measured=None) -> str:
     for feat in feature_order:
         items = by_feature.get(feat, [])
         count = len(items)
-        unsupported_selfhost = PROFILES.get('features', {}).get(feat, {}).get('selfhost', PROFILES.get('features', {}).get(feat, {}).get('w1', ''))
+        unsupported_selfhost = PROFILES.get('features', {}).get(feat, {}).get('selfhost', '')
         note = f"Pending {unsupported_selfhost.split(':')[0].strip()}" if unsupported_selfhost else "Declared supported"
         cells = [cell(engine, feat, count) for engine in engine_columns]
         rows.append(f"| **`{feat}`** | {count} | " + " | ".join(cells) + f" | {note} |")

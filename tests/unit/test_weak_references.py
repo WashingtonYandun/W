@@ -65,13 +65,13 @@ def run_weak_tests():
                                              cwd=root, capture_output=True, text=True, timeout=30)
                 assert interpreted.returncode == 0, interpreted.stderr
                 assert interpreted.stdout == expected, interpreted.stdout
-            for backend in ['ast', 'hir', 'w1']:
+            for backend in ['ast', 'hir', 'selfhost']:
                 c_path = Path(directory) / (name + backend + '.c')
                 binary = Path(directory) / (name + backend)
-                if backend == 'w1':
-                    from main import ensure_selfhost_w1_binary
-                    w1 = ensure_selfhost_w1_binary(str(root))
-                    command = [w1, str(source), str(c_path)]
+                if backend == 'selfhost':
+                    from main import ensure_selfhost_compiler_binary
+                    selfhost_bin = ensure_selfhost_compiler_binary(str(root))
+                    command = [selfhost_bin, str(source), str(c_path)]
                 else:
                     command = [sys.executable, 'main.py', 'emit-c']
                     if backend == 'hir':

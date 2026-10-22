@@ -52,7 +52,8 @@ def feature_for(label):
 
 
 def unsupported_reason(label, engine):
-    return PROFILES['features'][feature_for(label)].get(engine, '')
+    feature = feature_for(label)
+    return PROFILES.get('features', {}).get(feature, {}).get(engine, '')
 
 
 class EngineResult:
@@ -108,7 +109,7 @@ def execute(command, directory, phase, timeout, env=None):
     return record
 
 
-def run_engine(engine, source, label, w1_bin, directory, sanitize=False, run_timeout=30):
+def run_engine(engine, source, label, selfhost_bin, directory, sanitize=False, run_timeout=30):
     directory = Path(directory) / engine
     directory.mkdir(parents=True, exist_ok=True)
     source_path = directory / 'source.wysna'
@@ -117,9 +118,9 @@ def run_engine(engine, source, label, w1_bin, directory, sanitize=False, run_tim
     driver = [sys.executable, str(ROOT / 'main.py')]
     if engine == 'interpreter':
         command = driver + ['run', str(source_path)]
-    elif engine in ('selfhost', 'w1'):
+    elif engine == 'selfhost':
         # Direct invocation: no Seed parser/checker runs on the input first.
-        command = [str(w1_bin), str(source_path), str(c_path)]
+        command = [str(selfhost_bin), str(source_path), str(c_path)]
     elif engine == 'ast':
         command = driver + ['emit-c', '--backend=ast', str(source_path), '-o', str(c_path)]
     elif engine == 'hir':
@@ -192,7 +193,7 @@ def compare(results, expected=None):
     return True, 'OK'
 
 
-def verify_case(source, label, w1_bin, work_dir, expected=None, sanitize=False, strict=False, expect_rejection=False, run_timeout=30):
+def verify_case(source, label, selfhost_bin, work_dir, expected=None, sanitize=False, strict=False, expect_rejection=False, run_timeout=30):
     original = ROOT / label
     if original.is_file():
         def qualify_import(match):
@@ -214,7 +215,7 @@ def verify_case(source, label, w1_bin, work_dir, expected=None, sanitize=False, 
         if reason:
             unsupported[engine] = reason
         else:
-            results.append(run_engine(engine, source, label, w1_bin, directory, sanitize, run_timeout))
+            results.append(run_engine(engine, source, label, selfhost_bin, directory, sanitize, run_timeout))
     ok, detail = compare(results, expected)
     if expect_rejection and panic_expectation(expected) is None:
         for result in results:

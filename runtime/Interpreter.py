@@ -29,7 +29,7 @@ from runtime.Environment import (
 
 class Interpreter:
     """
-    Canonical Tree-Walking Interpreter for W Language v0.1 (W0).
+    Canonical Tree-Walking Interpreter for Wysna Seed.
     Executes AST programs preserving strict value semantics (ARC + CoW)
     for structs/collections and reference semantics for class instances.
     """
