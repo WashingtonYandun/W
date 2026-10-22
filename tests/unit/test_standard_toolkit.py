@@ -117,7 +117,7 @@ def _wysna_string_literal(value):
 
 def _random_json_value(generator, depth=0):
     scalar_values = [None, True, False, 0, -17, 2**63 + 5, -0.0, 1.25e-7,
-                     'plain', 'café', '😀', 'quote"slash\\', 'line\nnext', '\u0001']
+                     'plain', 'façade', '😀', 'quote"slash\\', 'line\nnext', '\u0001']
     if depth >= 3:
         return generator.choice(scalar_values)
     kind = generator.randrange(5)
@@ -130,7 +130,7 @@ def _random_json_value(generator, depth=0):
         field_count = generator.randrange(4)
         fields = {}
         for index in range(field_count):
-            key = generator.choice(['name', 'café', '😀', f'key-{index}'])
+            key = generator.choice(['name', 'façade', '😀', f'key-{index}'])
             fields[key] = _random_json_value(generator, depth + 1)
         return fields
     return generator.choice(scalar_values)
@@ -168,7 +168,7 @@ def test_json_differential_against_python_across_four_engines():
         '{"b":1,"a":[2.0,{"ok":false}]}',
         '{"same":1,"same":2}',
         '"quotes \\" and slash \\\\"',
-        '"line\\nnext\\ttab"', '"café 😀"',
+        '"line\\nnext\\ttab"', '"façade 😀"',
         '"\\uD83D\\uDE00"',
         '"\\uD800"',
         '', ' ', '[1,]', '{"a":}', '[,1]',
