@@ -638,6 +638,7 @@ def print_help(prog: Optional[str] = None) -> None:
     print(f"  {prog} fmt [--write] [--output-format=json-v1] <file.wysna> # Canonical deterministic formatter")
     print(f"  {prog} ast [--json] <file.wysna>               # Emit canonical JSON AST (v0.1)")
     print(f"  {prog} mir <file.wysna>                        # Emit verified MIR as JSON")
+    print(f"  {prog} emit-mir [--implementation=seed|compiler] <file.wysna> [-o <out.json>] # Emit portable MIR")
     print(f"  {prog} tokens <file.wysna>                     # Emit lexical token stream")
     print(f"  {prog} emit-c [--backend=hir|ast|selfhost] [--output-format=json-v1] <file.wysna> [-o <out.c>] # Transpile to C99")
     print(f"  {prog} build [--backend=hir|ast|selfhost] [--output-format=json-v1] <file.wysna> [-o <bin>] # Compile native binary")
@@ -674,6 +675,9 @@ def main(argv=None) -> None:
     if args and args[0] == "project":
         from tooling.ProjectCLI import run_project_command
         raise SystemExit(run_project_command(args[1:]))
+    if args and args[0] == "emit-mir":
+        from tooling.MirCLI import run_mir_command
+        raise SystemExit(run_mir_command(args[1:]))
     if args and args[0] == "service":
         from tooling.ServiceCLI import run_service_command
         raise SystemExit(run_service_command(args[1:]))
