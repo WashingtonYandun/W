@@ -28,6 +28,13 @@ root = "src"
 entry = "src/main.wysna"
 profile = "native-cli"
 
+[targets.wasm]
+entry = "src/main.wysna"
+profile = "wasi-command"
+fuel = 100000000
+memory_limit_mb = 128
+preopens = [{ path = "data", access = "read-only" }]
+
 [dependencies.stats]
 path = "vendor/stats"
 
@@ -42,6 +49,28 @@ Manifest keys are strict; unsupported fields and profiles fail instead of being
 silently ignored. Dependency paths must remain inside the declaring package. Each
 dependency has its own `wysna.toml` and source root. Project manifests do not run
 install hooks, plugins, or registry lookups.
+
+The `wasi-command` profile builds a `wasm32-wasip1` command from Seed-generated C99.
+The CI compatibility baseline uses [wasi-sdk 34](https://github.com/WebAssembly/wasi-sdk/releases/tag/wasi-sdk-34)
+and verifies its release archive checksum; set `WASI_SDK_PATH` to a compatible SDK installation.
+Running the artifact requires the [Wasmtime Python binding 50.0.1](https://pypi.org/project/wasmtime/50.0.1/).
+Install the optional runner dependency with
+`python -m pip install -e ".[wasi]"` in a checkout, or install the published package
+with its `wasi` extra. WASI commands receive only their declared arguments, no inherited
+environment, standard streams, clock/random access, and explicitly declared directory
+preopens. A preopen maps to the same guest path; for example, `data` is available as
+`data/input.txt`. `read-only` grants no filesystem writes. Each target defaults to 100
+million fuel and 128 MiB of linear memory; `fuel` and `memory_limit_mb` can lower or
+raise these values within manifest validation limits. Child processes, networking,
+native C FFI, browser execution, and WASIp2 are outside this profile.
+Wysna reserves a 1 MiB guest stack and places it before static data so stack overflow
+traps instead of overwriting global state. The stack consumes part of the configured
+linear-memory limit.
+
+Target checks reject unsupported imports and capabilities before invoking the SDK.
+WASI build provenance includes the target triple, artifact kind, compiler identity,
+module imports/exports, configured capabilities, fuel, memory and stack limits, and
+preopens.
 
 Imports use existing Wysna syntax. Relative imports resolve inside the declared
 `sources.root`; tests outside that directory can import package modules through
@@ -72,12 +101,13 @@ versions, and ordered hashes for dependency inputs. `--frozen` requires the lock
 to exist and rejects manifest or dependency drift. Root-package source edits do
 not require a lock refresh. Resolution is local and offline by design.
 
-`project check` type-checks the selected target without executing it. `project
-build` generates a native executable and reports source, lock, toolchain, target,
-and C compiler provenance in machine output. `project run` uses the reference
-interpreter and sets `args()[0]` to `"wysna"`; arguments after `--` are passed
-unchanged. The built executable receives the operating system's native argument
-vector.
+`project check` type-checks the selected target and validates its required
+capabilities without executing it. `project build` generates the artifact declared
+by the target profile and reports source, lock, target, and toolchain provenance in
+machine output. Native `project run` uses the reference interpreter and sets
+`args()[0]` to "wysna"; arguments after `--` are passed unchanged. A `wasi-command`
+target is compiled and executed in a fresh Wasmtime instance with the manifest's
+capability and resource limits.
 
 Each `[[tests]]` entry runs in its own process. Tests execute sequentially, use
 their declared timeout, and preserve stdout/stderr with a 1 MiB cap per stream.

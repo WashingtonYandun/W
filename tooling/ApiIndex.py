@@ -62,6 +62,17 @@ def _leading_documentation(lines, line_number):
     return "\n".join(comments) if comments else None
 
 
+def _availability(module_id):
+    if module_id == "std/process" or module_id.startswith("std/process/"):
+        wasm = "unavailable"
+    elif module_id in ("std/fs", "std/files"):
+        wasm = "requires-declared-preopens"
+    else:
+        wasm = "supported"
+    return {"interpreter": "supported", "native": "supported",
+            "selfhost": "unknown", "wasm": wasm}
+
+
 def _function_record(node, module_id, owner, lines, *, public=True, kind="function"):
     type_parameters = [str(item) for item in getattr(node, "type_params", ())]
     params = [{"name": item.name, "type": _type_name(item.type_ann)} for item in node.params]
@@ -86,7 +97,7 @@ def _function_record(node, module_id, owner, lines, *, public=True, kind="functi
         "effects": "unknown",
         "documentation": _leading_documentation(lines, node.line),
         "ownership": "unknown",
-        "availability": {"interpreter": "supported", "native": "supported", "selfhost": "unknown", "wasm": "unavailable"},
+        "availability": _availability(module_id),
         "package": owner,
     }
 
@@ -113,7 +124,7 @@ def _module_records(source, path, module_id, owner):
                 "effects": "unknown",
                 "documentation": _leading_documentation(lines, declaration.line),
                 "ownership": "unknown",
-                "availability": {"interpreter": "supported", "native": "supported", "selfhost": "unknown", "wasm": "unavailable"},
+                "availability": _availability(module_id),
                 "package": owner,
             })
         elif isinstance(declaration, EnumDecl) and getattr(declaration, "is_exported", False):
@@ -127,7 +138,7 @@ def _module_records(source, path, module_id, owner):
                 "effects": "unknown",
                 "documentation": _leading_documentation(lines, declaration.line),
                 "ownership": "unknown",
-                "availability": {"interpreter": "supported", "native": "supported", "selfhost": "unknown", "wasm": "unavailable"},
+                "availability": _availability(module_id),
                 "package": owner,
             })
         elif isinstance(declaration, InterfaceDecl) and getattr(declaration, "is_exported", False):
@@ -145,7 +156,7 @@ def _module_records(source, path, module_id, owner):
                 "effects": "unknown",
                 "documentation": _leading_documentation(lines, declaration.line),
                 "ownership": "unknown",
-                "availability": {"interpreter": "supported", "native": "supported", "selfhost": "unknown", "wasm": "unavailable"},
+                "availability": _availability(module_id),
                 "package": owner,
             })
         elif isinstance(declaration, ClassDecl) and getattr(declaration, "is_exported", False):
@@ -162,7 +173,7 @@ def _module_records(source, path, module_id, owner):
                 "effects": "unknown",
                 "documentation": _leading_documentation(lines, declaration.line),
                 "ownership": "unknown",
-                "availability": {"interpreter": "supported", "native": "supported", "selfhost": "unknown", "wasm": "unavailable"},
+                "availability": _availability(module_id),
                 "package": owner,
             })
     symbols.sort(key=lambda symbol: (symbol["kind"], symbol["name"]))
@@ -299,9 +310,13 @@ def run_capabilities_command(argv):
             "machine_output": {"format": "json-v1", "commands": ["check", "fmt", "emit-c", "build",
                                                                           "project.check", "project.build",
                                                                           "api", "capabilities"]},
-            "profiles": ["native-cli", "c99-source"],
-            "targets": ["native"],
-            "limitations": ["wasm is not supported", "project dependencies are local paths only",
+            "profiles": ["native-cli", "wasi-command", "c99-source"],
+            "targets": ["native", "wasm32-wasip1"],
+            "runtimes": {"wasi-command": "wasmtime==50.0.1"},
+            "capabilities": {"wasi-command": ["stdio", "arguments", "clock", "random",
+                                                   "manifest-declared-preopens"]},
+            "limitations": ["WASI Preview 1 does not provide networking, child processes, or native FFI",
+                            "project dependencies are local paths only",
                             "project lockfiles do not claim bit-for-bit binary reproducibility"],
         }
         return _emit("capabilities", payload=payload)
