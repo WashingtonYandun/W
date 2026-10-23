@@ -63,10 +63,14 @@ preopens. A preopen maps to the same guest path; for example, `data` is availabl
 million fuel and 128 MiB of linear memory; `fuel` and `memory_limit_mb` can lower or
 raise these values within manifest validation limits. Child processes, networking,
 native C FFI, browser execution, and WASIp2 are outside this profile.
+Wysna reserves a 1 MiB guest stack and places it before static data so stack overflow
+traps instead of overwriting global state. The stack consumes part of the configured
+linear-memory limit.
 
 Target checks reject unsupported imports and capabilities before invoking the SDK.
 WASI build provenance includes the target triple, artifact kind, compiler identity,
-module imports/exports, configured capabilities, fuel limit, memory limit, and preopens.
+module imports/exports, configured capabilities, fuel, memory and stack limits, and
+preopens.
 
 Imports use existing Wysna syntax. Relative imports resolve inside the declared
 `sources.root`; tests outside that directory can import package modules through

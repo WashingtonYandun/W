@@ -210,15 +210,18 @@ def _run_build(resolver, target_name, output, json_mode):
     lock_hash = hashlib.sha256(lock_path.read_bytes()).hexdigest() if lock_path.is_file() else None
     from tooling.ToolResult import artifact_inline
     if target.profile == "wasi-command":
+        from compiler.WasiToolchain import WASI_STACK_SIZE_BYTES
         compiler_metadata = {
             "wasi_sdk_path": built.sdk_path,
             "wasi_sdk_compiler": built.compiler_path,
             "wasi_sdk_compiler_version": built.compiler_version,
             "wasi_runtime": "wasmtime==50.0.1",
+            "wasi_stack_size_bytes": WASI_STACK_SIZE_BYTES,
             "wasi_imports": list(built.imports),
             "wasm_exports": list(built.exports),
         }
-        build_flags = ["--target=wasm32-wasip1", "-std=c99", "-O2"]
+        build_flags = ["--target=wasm32-wasip1", "-std=c99", "-O2",
+                       f"-Wl,-z,stack-size={WASI_STACK_SIZE_BYTES}", "-Wl,--stack-first"]
     else:
         from common.Platform import compiler_command
         compiler_metadata = {"c_compiler_command": compiler_command()}
@@ -243,6 +246,7 @@ def _run_build(resolver, target_name, output, json_mode):
             "wasi": {
                 "fuel": target.fuel,
                 "memory_limit_bytes": target.memory_limit_mb * 1024 * 1024,
+                "stack_size_bytes": WASI_STACK_SIZE_BYTES,
                 "preopens": [{"path": item.path, "access": item.access}
                              for item in target.preopens],
             },

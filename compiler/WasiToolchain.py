@@ -9,6 +9,9 @@ import time
 from tooling.WasmModule import inspect_wasm, validate_wasi_command
 
 
+WASI_STACK_SIZE_BYTES = 1_048_576
+
+
 class WasiCompilationError(Exception):
     """A WASI SDK setup, compilation, or target validation failure."""
 
@@ -69,6 +72,7 @@ class WasiToolchain:
             source_path.write_text(c_source, encoding="utf-8")
             command = [str(compiler), "--target=wasm32-wasip1",
                        f"--sysroot={sysroot}", "-std=c99", "-O2",
+                       f"-Wl,-z,stack-size={WASI_STACK_SIZE_BYTES}", "-Wl,--stack-first",
                        f"-I{self.repo_root}", str(source_path), "-o", str(candidate)]
             started = time.perf_counter()
             try:

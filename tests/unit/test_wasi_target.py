@@ -143,6 +143,11 @@ fn main() -> unit {
         wasm_path = Path(artifact["path"])
         _assert(wasm_path.suffix == ".wasm" and wasm_path.read_bytes().startswith(b"\x00asm\x01\x00\x00\x00"),
                 "WASI build did not produce a core WebAssembly module")
+        provenance_artifact = next(item for item in build_result["artifacts"]
+                                   if item["kind"] == "build_provenance")
+        provenance = json.loads(provenance_artifact["content"])
+        _assert(provenance["wasi"]["stack_size_bytes"] == 1_048_576,
+                "WASI build provenance does not record the reserved guest stack")
         module_info = inspect_wasm(wasm_path)
         validate_wasi_command(module_info)
         _assert(all(item["module"] == "wasi_snapshot_preview1" for item in module_info.imports),
