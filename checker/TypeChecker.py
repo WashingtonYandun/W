@@ -276,6 +276,10 @@ class TypeChecker:
         templates = list(self.generic_struct_templates.values())
         templates.extend(self.generic_fn_templates.values())
         templates.extend(self.generic_enum_templates.values())
+        templates.extend(
+            template for template in self.global_scope.types.values()
+            if isinstance(template, GenericOopTemplate)
+        )
         for template in templates:
             for parameter in template.type_params:
                 constraint = getattr(parameter, "constraint", None)

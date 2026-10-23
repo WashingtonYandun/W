@@ -18,7 +18,7 @@ class GenericOopTemplate(WysnaType):
         return self.name
 
 
-def specialize(template, arguments, line, col):
+def specialize(template, arguments, line, col, *, refresh_session=True):
     checker = template.checker
     if len(arguments) != len(template.type_params):
         raise TypeError('Generic OOP type arity mismatch', file=checker.file, line=line, col=col, code='W2001')
@@ -65,7 +65,7 @@ def specialize(template, arguments, line, col):
         if isinstance(declaration, A.ClassDecl):
             checker._check_class_decl(declaration)
         unit = checker.session.modules.get(checker.file)
-        if unit:
+        if unit and refresh_session:
             checker.session.refresh_specializations(unit)
         return type_
     except Exception:
