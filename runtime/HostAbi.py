@@ -409,7 +409,7 @@ def http_request(url_handle, method_handle, request_headers_handle, request_body
         curl.setopt(pycurl.NOSIGNAL, 1)
         curl.setopt(pycurl.NETRC, pycurl.NETRC_IGNORED)
         curl.setopt(pycurl.PROTOCOLS, pycurl.PROTO_HTTP | pycurl.PROTO_HTTPS)
-        curl.setopt(pycurl.HTTP_VERSION, pycurl.HTTP_VERSION_1_1)
+        curl.setopt(pycurl.HTTP_VERSION, pycurl.CURL_HTTP_VERSION_1_1)
         if method == 'HEAD':
             curl.setopt(pycurl.NOBODY, 1)
         if request_body or method in ('POST', 'PUT', 'PATCH'):
