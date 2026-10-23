@@ -395,13 +395,21 @@ def test_http_host_returns_service_busy_when_worker_queue_is_full():
                     time.sleep(0.01)
                 assert marker.exists(), "the slow worker did not start"
 
-                queued = executor.submit(_http_request, endpoint + "/slow")
-                time.sleep(0.05)
-                rejected = _http_request(endpoint + "/slow")
+                request_gate = threading.Barrier(3)
 
-                assert rejected == (503, {"error": "service_busy", "status": 503})
+                def request_after_gate():
+                    request_gate.wait(timeout=3)
+                    return _http_request(endpoint + "/slow")
+
+                queued = executor.submit(request_after_gate)
+                contender = executor.submit(request_after_gate)
+                request_gate.wait(timeout=3)
+                queue_results = [queued.result(timeout=5), contender.result(timeout=5)]
+
                 assert active.result(timeout=5) == (200, {"ok": True})
-                assert queued.result(timeout=5) == (200, {"ok": True})
+                assert sorted(status for status, _ in queue_results) == [200, 503]
+                assert (503, {"error": "service_busy", "status": 503}) in queue_results
+                assert (200, {"ok": True}) in queue_results
         finally:
             _stop_service(server)
 
