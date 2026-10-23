@@ -91,14 +91,26 @@ def _bounded_tool_output(value: str, limit: int = 8192) -> str:
 def _write_json_v1(command, status, exit_code, *, errors=(), source_by_file=None,
                    extra_diagnostics=(), artifacts=(), target=None):
     diagnostics = list(extra_diagnostics)
+    span_cache = {}
     for error in errors:
         nested = getattr(error, "diagnostics", (error,))
-        diagnostics.extend(diagnostic_from_error(item, source_by_file) for item in nested)
+        diagnostics.extend(diagnostic_from_error(item, source_by_file, span_cache=span_cache)
+                           for item in nested)
     write_tool_result(
         tool_result(command, status, exit_code, diagnostics=diagnostics,
                     artifacts=artifacts, target=target),
         sys.stdout,
     )
+
+
+def _sources_for_diagnostics(file_name, source_code, service=None):
+    sources = {
+        file_name: source_code,
+        os.path.abspath(file_name): source_code,
+    }
+    if service is not None:
+        sources.update(service.source_texts())
+    return sources
 
 
 # Every input that can change the bytes of the stage-2 compiler binary. The hand-written
@@ -494,11 +506,11 @@ def run_pipeline(
         return 1
     except WysnaError as err:
         if report_state is not None:
+            span_cache = {}
+            source_by_file = _sources_for_diagnostics(
+                file_name, source_code, locals().get("service"))
             diagnostics = [
-                diagnostic_from_error(item, {
-                    file_name: source_code,
-                    os.path.abspath(file_name): source_code,
-                })
+                diagnostic_from_error(item, source_by_file, span_cache=span_cache)
                 for item in getattr(err, "diagnostics", (err,))
             ]
             _set_run_report(report_state, "diagnostic_error", 1, 1,
@@ -509,8 +521,8 @@ def run_pipeline(
         if json_v1:
             _write_json_v1(
                 tool_command, "diagnostic_error", 1, errors=[err],
-                source_by_file={file_name: source_code,
-                                os.path.abspath(file_name): source_code},
+                source_by_file=_sources_for_diagnostics(
+                    file_name, source_code, locals().get("service")),
             )
             return 1
         if json_diagnostics:
@@ -977,7 +989,8 @@ def main(argv=None) -> None:
                 usage_error("the output path must not overwrite the source file")
 
         try:
-            with open(file_to_run, "r", encoding="utf-8", newline="" if json_v1 else None) as f:
+            with open(file_to_run, "r", encoding="utf-8",
+                      newline="" if json_v1 or report_state is not None else None) as f:
                 source = f.read()
         except (OSError, UnicodeError) as e:
             if report_state is not None:

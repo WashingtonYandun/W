@@ -1,4 +1,4 @@
-from typing import Dict
+from typing import Dict, Optional
 
 # Canonical W Diagnostic Code Taxonomy (v0.1.2+)
 # W0xxx: Lexical & Syntactic Diagnostics
@@ -116,16 +116,19 @@ class WysnaError(Exception):
     def __init__(
         self,
         message: str,
-        line: int = 1,
-        col: int = 1,
+        line: Optional[int] = None,
+        col: Optional[int] = None,
         file: str = "<stdin>",
         code: str = "W0001",
         severity: str = "error",
         stage: str = "compiler",
     ) -> None:
         self.message = message
-        self.line = line
-        self.col = col
+        self.has_location = line is not None and col is not None
+        self.line = line if line is not None else 1
+        self.col = col if col is not None else 1
+        self.start_byte = None
+        self.end_byte = None
         self.file = file
         self.code = normalize_diagnostic_code(code)
         self.severity = severity
@@ -158,7 +161,7 @@ class ToolchainError(WysnaError):
 
 
 class LexerError(WysnaError):
-    def __init__(self, message: str, line: int = 1, col: int = 1, file: str = "<stdin>", code: str = "W0001") -> None:
+    def __init__(self, message: str, line: Optional[int] = None, col: Optional[int] = None, file: str = "<stdin>", code: str = "W0001") -> None:
         super().__init__(
             message=message,
             line=line,
@@ -170,7 +173,7 @@ class LexerError(WysnaError):
 
 
 class ParserError(WysnaError):
-    def __init__(self, message: str, line: int = 1, col: int = 1, file: str = "<stdin>", code: str = "W0001") -> None:
+    def __init__(self, message: str, line: Optional[int] = None, col: Optional[int] = None, file: str = "<stdin>", code: str = "W0001") -> None:
         super().__init__(
             message=message,
             line=line,
@@ -182,7 +185,7 @@ class ParserError(WysnaError):
 
 
 class TypeError(WysnaError):
-    def __init__(self, message: str, line: int = 1, col: int = 1, file: str = "<stdin>", code: str = "W2001") -> None:
+    def __init__(self, message: str, line: Optional[int] = None, col: Optional[int] = None, file: str = "<stdin>", code: str = "W2001") -> None:
         super().__init__(
             message=message,
             line=line,
@@ -194,7 +197,7 @@ class TypeError(WysnaError):
 
 
 class EnvironmentError(WysnaError):
-    def __init__(self, message: str, line: int = 1, col: int = 1, file: str = "<stdin>", code: str = "W4003") -> None:
+    def __init__(self, message: str, line: Optional[int] = None, col: Optional[int] = None, file: str = "<stdin>", code: str = "W4003") -> None:
         super().__init__(
             message=message,
             line=line,
@@ -206,7 +209,7 @@ class EnvironmentError(WysnaError):
 
 
 class WysnaRuntimeError(WysnaError):
-    def __init__(self, message: str, line: int = 1, col: int = 1, file: str = "<stdin>", code: str = "W4003") -> None:
+    def __init__(self, message: str, line: Optional[int] = None, col: Optional[int] = None, file: str = "<stdin>", code: str = "W4003") -> None:
         norm_code = normalize_diagnostic_code(code, default="W4003")
         if norm_code == "W4003":
             msg_low = message.lower()
@@ -230,7 +233,10 @@ class ParserErrors(ParserError):
     """A bounded syntax diagnostic batch; no recovered tree reaches execution."""
     def __init__(self, diagnostics):
         first = diagnostics[0]
-        super().__init__(first.message, first.line, first.col, first.file, first.code)
+        super().__init__(first.message,
+                         first.line if first.has_location else None,
+                         first.col if first.has_location else None,
+                         first.file, first.code)
         self.diagnostics = tuple(diagnostics)
 
     def to_dict(self):
