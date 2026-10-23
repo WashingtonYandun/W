@@ -232,8 +232,9 @@ def test_sqlite_worker_runs_through_the_bounded_http_host():
 
     source_path = ROOT / "examples/service/sqlite_worker.wysna"
     adapter_path = ROOT / "examples/service/sqlite_adapter.c"
-    checked = CompilerService(project_root=ROOT).check_file(source_path)
-    c_source = CompilerService(project_root=ROOT).emit_c(checked).source
+    compiler_service = CompilerService(project_root=ROOT)
+    checked = compiler_service.check_file(source_path)
+    c_source = compiler_service.emit_c(checked).source
 
     with tempfile.TemporaryDirectory(prefix="wysna-service-e2e-") as directory:
         worker = Path(directory) / "sqlite_worker"
