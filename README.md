@@ -195,6 +195,7 @@ See [docs/STDLIB.md](docs/STDLIB.md) for full API reference and examples.
 
 ```text
 wysna run <file.wysna> [-- args...]    # Execute with program arguments
+wysna run --report-json <path> [--invocation-id <id>] <file.wysna> [-- args...]
 wysna check <file.wysna>               # Parse and type-check without code execution
 wysna check --output-format=json-v1 <file.wysna>  # Emit a versioned machine-readable result
 wysna fmt --output-format=json-v1 <file.wysna>    # Return formatted source as a JSON artifact
@@ -210,6 +211,13 @@ wysna bench                            # Run self-hosted performance benchmarks
 formatter returns inline source content; code and binary generation report artifact
 paths and SHA-256 hashes. The default text output and legacy `--json` format remain
 unchanged when the option is omitted.
+
+`run --report-json <path>` writes its versioned control result to a sidecar file and
+leaves the program's stdout and stderr untouched. Wysna atomically writes a `pending`
+result before execution, then replaces it with the final result. If the pending result
+cannot be written, the program is not started. Supply `--invocation-id <id>` when a
+caller needs to match the report to a specific request; otherwise Wysna generates one.
+The report distinguishes the tool result from the application's exit code.
 
 Arguments after `--` are available through `args()`. The interpreter uses `"wysna"` as
 `args()[0]`; a native executable receives the operating system's argument vector.

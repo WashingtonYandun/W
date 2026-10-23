@@ -3,12 +3,14 @@
 import hashlib
 import json
 import os
+import tempfile
 import uuid
 
 from common.Version import WYSNA_VERSION
 
 
 SCHEMA_VERSION = "wysna.tool-result/1"
+_DEFAULT_PROCESS_EXIT_CODE = object()
 
 
 def _line_starts(source):
@@ -139,16 +141,20 @@ def artifact_file(kind, media_type, path):
 
 
 def tool_result(command, status, exit_code, *, diagnostics=None, artifacts=None,
-                invocation_id=None, target=None):
-    """Build the stable v1 envelope; process_exit_code mirrors tool_exit_code."""
+                invocation_id=None, target=None,
+                process_exit_code=_DEFAULT_PROCESS_EXIT_CODE, execution=None):
+    """Build the stable v1 envelope for stdout results and run sidecars."""
     return {
         "schema_version": SCHEMA_VERSION,
         "command": command,
         "status": status,
         "invocation_id": invocation_id or str(uuid.uuid4()),
         "tool_exit_code": exit_code,
-        "process_exit_code": exit_code,
-        "execution": None,
+        "process_exit_code": (
+            exit_code if process_exit_code is _DEFAULT_PROCESS_EXIT_CODE
+            else process_exit_code
+        ),
+        "execution": execution,
         "toolchain": {"compiler": WYSNA_VERSION},
         "target": target or {"profile": "native-cli", "triple": None},
         "diagnostics": diagnostics or [],
@@ -160,3 +166,32 @@ def tool_result(command, status, exit_code, *, diagnostics=None, artifacts=None,
 def write_tool_result(result, stream):
     """Write exactly one JSON document to the selected stream."""
     stream.write(json.dumps(result, ensure_ascii=False, separators=(",", ":")) + "\n")
+
+
+def write_tool_result_atomic(result, path):
+    """Atomically replace a JSON report using a temporary file beside its target."""
+    target = os.path.abspath(os.fspath(path))
+    directory = os.path.dirname(target)
+    descriptor = None
+    temporary_path = None
+    try:
+        descriptor, temporary_path = tempfile.mkstemp(
+            prefix=f".{os.path.basename(target)}.",
+            suffix=".tmp",
+            dir=directory,
+        )
+        with os.fdopen(descriptor, "w", encoding="utf-8", newline="\n") as stream:
+            descriptor = None
+            write_tool_result(result, stream)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary_path, target)
+        temporary_path = None
+    finally:
+        if descriptor is not None:
+            os.close(descriptor)
+        if temporary_path is not None:
+            try:
+                os.unlink(temporary_path)
+            except FileNotFoundError:
+                pass
