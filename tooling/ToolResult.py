@@ -7,6 +7,7 @@ import tempfile
 import uuid
 
 from common.Version import WYSNA_VERSION
+from error.Error import WysnaError
 
 
 SCHEMA_VERSION = "wysna.tool-result/1"
@@ -28,8 +29,8 @@ def _line_starts(source):
     return starts
 
 
-def _byte_offset(source, line, column):
-    """Map a one-based Unicode-scalar position to its UTF-8 byte offset."""
+def _character_offset(source, line, column):
+    """Map a one-based Unicode-scalar position to a Python string offset."""
     if not isinstance(line, int) or not isinstance(column, int) or line < 1 or column < 1:
         return None
 
@@ -42,8 +43,68 @@ def _byte_offset(source, line, column):
     while end < len(source) and source[end] not in "\r\n":
         end += 1
 
-    character_offset = min(start + column - 1, end)
-    return len(source[:character_offset].encode("utf-8"))
+    return min(start + column - 1, end)
+
+
+def _byte_offset(source, line, column):
+    """Map a one-based Unicode-scalar position to its UTF-8 byte offset."""
+    character_offset = _character_offset(source, line, column)
+    if character_offset is None:
+        return None
+    try:
+        return len(source[:character_offset].encode("utf-8"))
+    except UnicodeEncodeError:
+        return None
+
+
+def _character_span(source, line, column):
+    """Return the scalar at a lexer-reported position, or an exact EOF point."""
+    char_offset = _character_offset(source, line, column)
+    if char_offset is None:
+        return None
+    try:
+        start_byte = len(source[:char_offset].encode("utf-8"))
+    except UnicodeEncodeError:
+        return None
+    if char_offset >= len(source) or source[char_offset] in "\r\n":
+        return start_byte, start_byte
+    end_byte = start_byte + len(source[char_offset].encode("utf-8"))
+    return start_byte, end_byte
+
+
+def _token_span(source, filename, line, column, source_sha256, span_cache):
+    """Resolve a diagnostic location to the exact token from its source snapshot."""
+    key = (filename, source_sha256)
+    if key not in span_cache:
+        try:
+            from lexer.Lexer import Lexer
+
+            tokens = Lexer(source, file=filename).tokenize()
+            index = {}
+            for token in tokens:
+                if not hasattr(token, "start_offset") or not hasattr(token, "end_offset"):
+                    continue
+                key_position = (token.line, token.col)
+                if token.type.name == "EOF":
+                    index.setdefault(key_position, (token.start_offset, token.end_offset))
+                else:
+                    index[key_position] = (token.start_offset, token.end_offset)
+            span_cache[key] = index
+        except (WysnaError, UnicodeError, ValueError, RuntimeError):
+            # Lexer diagnostics cannot be indexed as a complete token stream.
+            span_cache[key] = None
+
+    index = span_cache[key]
+    if index is None:
+        return _character_span(source, line, column)
+    char_span = index.get((line, column))
+    if char_span is None:
+        return None
+    start, end = char_span
+    try:
+        return len(source[:start].encode("utf-8")), len(source[:end].encode("utf-8"))
+    except UnicodeEncodeError:
+        return None
 
 
 def _source_for_file(source_by_file, filename):
@@ -62,21 +123,39 @@ def _source_for_file(source_by_file, filename):
     return None
 
 
-def _primary_span(filename, line, column, source):
-    if source is None:
+def _primary_span(filename, line, column, source, *, has_location=True,
+                  explicit_start_byte=None, explicit_end_byte=None, span_cache=None):
+    if not filename or source is None:
         return None
-    start_byte = _byte_offset(source, line, column)
-    if start_byte is None:
+    try:
+        source_bytes = source.encode("utf-8")
+    except (AttributeError, UnicodeEncodeError):
+        return None
+    source_sha256 = hashlib.sha256(source_bytes).hexdigest()
+
+    span = None
+    if (isinstance(explicit_start_byte, int) and isinstance(explicit_end_byte, int)
+            and 0 <= explicit_start_byte <= explicit_end_byte <= len(source_bytes)):
+        try:
+            source_bytes[:explicit_start_byte].decode("utf-8")
+            source_bytes[:explicit_end_byte].decode("utf-8")
+            span = (explicit_start_byte, explicit_end_byte)
+        except UnicodeDecodeError:
+            pass
+    if span is None and has_location:
+        span = _token_span(source, filename, line, column, source_sha256,
+                           span_cache if span_cache is not None else {})
+    if span is None:
         return None
     return {
         "source_id": filename,
-        "source_sha256": hashlib.sha256(source.encode("utf-8")).hexdigest(),
-        "start_byte": start_byte,
-        "end_byte": start_byte,
+        "source_sha256": source_sha256,
+        "start_byte": span[0],
+        "end_byte": span[1],
     }
 
 
-def diagnostic_from_error(error, source_by_file=None):
+def diagnostic_from_error(error, source_by_file=None, *, span_cache=None):
     """Adapt a legacy compiler diagnostic without inventing an unknown range."""
     source_by_file = source_by_file or {}
     filename = getattr(error, "file", None)
@@ -92,6 +171,10 @@ def diagnostic_from_error(error, source_by_file=None):
             getattr(error, "line", None),
             getattr(error, "col", None),
             source,
+            has_location=getattr(error, "has_location", True),
+            explicit_start_byte=getattr(error, "start_byte", None),
+            explicit_end_byte=getattr(error, "end_byte", None),
+            span_cache=span_cache,
         ),
         "related": [],
         "data": {},
@@ -100,14 +183,16 @@ def diagnostic_from_error(error, source_by_file=None):
 
 
 def diagnostic_record(code, stage, message, *, severity="error", filename=None,
-                      line=None, column=None, source=None):
+                      line=None, column=None, source=None, span_cache=None):
     """Create a protocol diagnostic for CLI and host errors."""
     return {
         "code": code,
         "severity": severity,
         "stage": stage,
         "message": message,
-        "primary_span": _primary_span(filename, line, column, source),
+        "primary_span": _primary_span(filename, line, column, source,
+                                      has_location=line is not None and column is not None,
+                                      span_cache=span_cache),
         "related": [],
         "data": {},
         "fixes": [],

@@ -4,6 +4,8 @@ from pathlib import Path
 import subprocess
 import sys
 
+from error.Error import WysnaError
+from tooling.ToolResult import diagnostic_from_error
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -50,7 +52,63 @@ def test_check_json_v1_diagnostic_uses_exact_source_hash_and_byte_position(tmp_p
     assert payload["status"] == "diagnostic_error"
     assert diagnostic["code"] == "W2001"
     assert span["source_sha256"] == hashlib.sha256(source_bytes).hexdigest()
-    assert span["start_byte"] == span["end_byte"] == source_bytes.index(b"let")
+    assert source_bytes[span["start_byte"]:span["end_byte"]] == b"let"
+    assert span["start_byte"] == source_bytes.index(b"let")
+
+
+def test_check_json_v1_uses_utf8_token_ranges_and_exact_crlf_snapshot(tmp_path):
+    source_bytes = '# 🚀\r\nlet value: int = "wrong"\r\n'.encode("utf-8")
+    source = tmp_path / "unicode-invalid.wysna"
+    source.write_bytes(source_bytes)
+
+    result = run_cli("check", "--output-format=json-v1", source)
+
+    payload = json.loads(result.stdout)
+    span = payload["diagnostics"][0]["primary_span"]
+    assert result.returncode == 1
+    assert span["source_sha256"] == hashlib.sha256(source_bytes).hexdigest()
+    assert source_bytes[span["start_byte"]:span["end_byte"]] == b"let"
+    assert span["start_byte"] == source_bytes.index(b"let")
+
+
+def test_check_json_v1_resolves_imported_diagnostics_to_import_snapshot(tmp_path):
+    entry = tmp_path / "main.wysna"
+    library = tmp_path / "library.wysna"
+    library_bytes = b'pub fn broken() -> int {\r\n    let value: int = "wrong"\r\n    return 0\r\n}\r\n'
+    entry.write_bytes(b'import "library.wysna"\r\nfn main() -> unit {}\r\n')
+    library.write_bytes(library_bytes)
+
+    result = run_cli("check", "--output-format=json-v1", entry)
+
+    payload = json.loads(result.stdout)
+    span = payload["diagnostics"][0]["primary_span"]
+    assert result.returncode == 1
+    assert span["source_id"] == str(library.resolve())
+    assert span["source_sha256"] == hashlib.sha256(library_bytes).hexdigest()
+    assert library_bytes[span["start_byte"]:span["end_byte"]] == b"let"
+
+
+def test_check_json_v1_reports_lexer_character_range_and_missing_location_as_null(tmp_path):
+    malformed = tmp_path / "malformed.wysna"
+    malformed.write_text("let value = 1__2\n", encoding="utf-8")
+    lexical_result = run_cli("check", "--output-format=json-v1", malformed)
+    lexical_payload = json.loads(lexical_result.stdout)
+    lexical_span = lexical_payload["diagnostics"][0]["primary_span"]
+    assert lexical_payload["diagnostics"][0]["code"] == "W0002"
+    assert malformed.read_bytes()[lexical_span["start_byte"]:lexical_span["end_byte"]] == b"_"
+
+    syntax = tmp_path / "missing-expression.wysna"
+    syntax.write_text("let value =", encoding="utf-8")
+    syntax_result = run_cli("check", "--output-format=json-v1", syntax)
+    syntax_payload = json.loads(syntax_result.stdout)
+    syntax_span = syntax_payload["diagnostics"][0]["primary_span"]
+    assert syntax_payload["diagnostics"][0]["code"] == "W0001"
+    assert syntax_span["start_byte"] == syntax_span["end_byte"] == len(syntax.read_bytes())
+
+    source_text = syntax.read_bytes().decode("utf-8")
+    unlocated = WysnaError("Host failure without a source location", file=str(syntax), code="W9999")
+    unlocated_diagnostic = diagnostic_from_error(unlocated, {str(syntax): source_text})
+    assert unlocated_diagnostic["primary_span"] is None
 
 
 def test_check_json_v1_serializes_usage_and_file_errors(tmp_path):
@@ -169,6 +227,22 @@ def test_run_report_json_reports_pre_execution_diagnostics(tmp_path):
     assert payload["tool_exit_code"] == payload["process_exit_code"] == 1
     assert payload["execution"] is None
     assert payload["diagnostics"][0]["code"] == "W2001"
+
+
+def test_run_report_json_hashes_the_unmodified_crlf_source_snapshot(tmp_path):
+    source_bytes = b'fn main() -> unit {\r\n    let value: int = "wrong"\r\n}\r\n'
+    source = tmp_path / "crlf-invalid.wysna"
+    report = tmp_path / "result.json"
+    source.write_bytes(source_bytes)
+
+    result = run_cli("run", "--report-json", report, source)
+
+    payload = json.loads(report.read_text(encoding="utf-8"))
+    span = payload["diagnostics"][0]["primary_span"]
+    assert result.returncode == 1
+    assert payload["status"] == "diagnostic_error"
+    assert span["source_sha256"] == hashlib.sha256(source_bytes).hexdigest()
+    assert source_bytes[span["start_byte"]:span["end_byte"]] == b"let"
 
 
 def test_run_report_json_rejects_source_overwrite(tmp_path):

@@ -94,7 +94,7 @@ class CompilerService:
         path = self._session.path(str(path))
         source = self._session.sources.overlays.get(path)
         if source is None:
-            source = Path(path).read_text(encoding='utf-8')
+            source = Path(path).read_bytes().decode('utf-8')
         return self.check(source, path)
 
     def set_overlay(self, path, source):
@@ -111,6 +111,10 @@ class CompilerService:
     def source_text(self, path, default=''):
         snapshot = self.source_snapshot(path)
         return snapshot.text if snapshot is not None else default
+
+    def source_texts(self):
+        """Return the immutable text snapshots loaded for the current compilation."""
+        return dict(self._session.sources.snapshots)
 
     def _validate(self, checked):
         if not isinstance(checked, CheckedProgram):

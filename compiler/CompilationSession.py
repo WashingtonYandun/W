@@ -30,7 +30,8 @@ class SourceManager:
 
     def read(self, path):
         if path not in self.batch:
-            self.batch[path] = self.overlays[path] if path in self.overlays else Path(path).read_text(encoding='utf-8')
+            self.batch[path] = (self.overlays[path] if path in self.overlays
+                                else Path(path).read_bytes().decode('utf-8'))
             self.read_counts[path] = self.read_counts.get(path, 0) + 1
         self.snapshots[path] = self.batch[path]
         return self.batch[path]

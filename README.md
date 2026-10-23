@@ -212,6 +212,10 @@ formatter returns inline source content; code and binary generation report artif
 paths and SHA-256 hashes. The default text output and legacy `--json` format remain
 unchanged when the option is omitted.
 
+Diagnostic `primary_span` values identify an exact source range in the UTF-8 snapshot
+named by `source_sha256`. Offsets are zero-based bytes with an exclusive end; locations
+without reliable source attribution are returned as `null`.
+
 `run --report-json <path>` writes its versioned control result to a sidecar file and
 leaves the program's stdout and stderr untouched. Wysna atomically writes a `pending`
 result before execution, then replaces it with the final result. If the pending result

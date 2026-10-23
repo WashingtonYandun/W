@@ -39,6 +39,21 @@ def expect_invariant(action):
         raise AssertionError('Invalid checked result was accepted')
 
 
+def test_check_file_keeps_original_crlf_source_snapshot(tmp_path):
+    source_bytes = b'import "library.wysna"\r\nfn main() -> unit { print(library.answer()) }\r\n'
+    library_bytes = b'pub fn answer() -> int {\r\n    return 42\r\n}\r\n'
+    source_path = tmp_path / 'crlf.wysna'
+    library_path = tmp_path / 'library.wysna'
+    source_path.write_bytes(source_bytes)
+    library_path.write_bytes(library_bytes)
+
+    checked = CompilerService(project_root=str(tmp_path)).check_file(source_path)
+
+    assert checked.source.text.encode('utf-8') == source_bytes
+    assert checked.source.content_hash == hashlib.sha256(source_bytes).hexdigest()
+    assert checked._session.sources.snapshots[str(library_path)] == library_bytes.decode('utf-8')
+
+
 def test_checked_snapshot_and_consumer_isolation():
     with tempfile.TemporaryDirectory(prefix='wysna-service-') as temporary:
         root = Path(temporary).resolve()
