@@ -101,7 +101,7 @@ jobs:
           brew install curl
           echo "$(brew --prefix curl)/bin" >> "$GITHUB_PATH"
       - name: Install the optional interpreter HTTP adapter
-        run: python -m pip install -e '.[http]'
+        run: python -m pip install -e '.[http,service]'
       - name: Verify CI harness failure contracts
         run: |
           python3 -m tests.unit.test_ci_harness
@@ -129,6 +129,8 @@ jobs:
       - name: Install SQLite development headers on Linux
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y libsqlite3-dev
+      - name: Verify the loopback service and SQLite worker pilot
+        run: python3 -m tests.unit.test_service_pilot
       - name: Verify SQLite FFI against C with sanitizers and persisted data
         run: python3 tools/validate_sqlite_ffi.py --sanitize --report .wysna_cache/ci-artifacts/sqlite-ffi.json
       - name: Verify atomic CSV imports, rollback and process memory against C

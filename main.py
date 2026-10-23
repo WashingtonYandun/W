@@ -631,6 +631,7 @@ def print_help(prog: Optional[str] = None) -> None:
     print(f"Wysna Language Compiler & Toolchain v{WYSNA_VERSION}")
     print("Usage:")
     print(f"  {prog} lsp                                       # LSP over stdio")
+    print(f"  {prog} service serve --worker <bin> --database <db> # Local bounded HTTP/JSON pilot")
     print(f"  {prog} repl                                    # Start interactive REPL")
     print(f"  {prog} [run] [--stats] [--report-json <path>] [--invocation-id <id>] <file.wysna> [-- args...] # Execute Wysna source file")
     print(f"  {prog} check [--json|--output-format=json-v1] [--stats] <file.wysna>   # Static typecheck without execution")
@@ -673,6 +674,9 @@ def main(argv=None) -> None:
     if args and args[0] == "project":
         from tooling.ProjectCLI import run_project_command
         raise SystemExit(run_project_command(args[1:]))
+    if args and args[0] == "service":
+        from tooling.ServiceCLI import run_service_command
+        raise SystemExit(run_service_command(args[1:]))
     if args and args[0] == "api":
         from tooling.ApiIndex import run_api_command
         raise SystemExit(run_api_command(args[1:]))
