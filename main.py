@@ -20,10 +20,60 @@ from tooling.ToolResult import (
     diagnostic_record,
     tool_result,
     write_tool_result,
+    write_tool_result_atomic,
 )
 
 from common.Version import WYSNA_VERSION
 from common.Platform import cache_lock, compiler_command, executable_name, peak_rss_kb
+
+
+class _ApplicationExit(Exception):
+    """Carry an interpreted application's requested exit code to the run reporter."""
+
+    def __init__(self, code):
+        super().__init__(code)
+        self.code = code
+
+
+def _capture_application_exit(code):
+    raise _ApplicationExit(code)
+
+
+def _set_run_report(report_state, status, tool_exit_code, process_exit_code,
+                    *, execution=None, diagnostics=()):
+    if report_state is None:
+        return
+    report_state.update({
+        "status": status,
+        "tool_exit_code": tool_exit_code,
+        "process_exit_code": process_exit_code,
+        "execution": execution,
+        "diagnostics": list(diagnostics),
+    })
+
+
+def _write_run_report(path, invocation_id, report_state):
+    result = tool_result(
+        "run",
+        report_state["status"],
+        report_state["tool_exit_code"],
+        process_exit_code=report_state["process_exit_code"],
+        execution=report_state["execution"],
+        diagnostics=report_state["diagnostics"],
+        invocation_id=invocation_id,
+    )
+    write_tool_result_atomic(result, path)
+
+
+def _same_file_path(first, second):
+    first = os.path.normcase(os.path.realpath(os.path.abspath(os.fspath(first))))
+    second = os.path.normcase(os.path.realpath(os.path.abspath(os.fspath(second))))
+    if first == second:
+        return True
+    try:
+        return os.path.samefile(first, second)
+    except OSError:
+        return False
 
 
 def get_repo_root() -> str:
@@ -160,6 +210,7 @@ def run_pipeline(
     execution_context: Optional[ExecutionContext] = None,
     json_v1: bool = False,
     tool_command: Optional[str] = None,
+    report_state=None,
 ) -> int:
     if tool_command is None:
         if check_only:
@@ -375,9 +426,61 @@ def run_pipeline(
         if not isinstance(res, WysnaUnit) and file_name == "<stdin>":
             print(res)
 
+        if report_state is not None:
+            _set_run_report(
+                report_state,
+                "ok",
+                0,
+                0,
+                execution={"kind": "application_exit", "exit_code": 0, "signal": None},
+            )
+
         return 0
 
+    except _ApplicationExit as termination:
+        code = termination.code
+        if report_state is None:
+            raise SystemExit(code)
+        if not 0 <= code <= 255:
+            diagnostic = diagnostic_record(
+                "W5002", "execution",
+                "Application exit code is outside the portable range 0..255.",
+                filename=file_name,
+            )
+            _set_run_report(
+                report_state,
+                "execution_error",
+                5,
+                5,
+                execution={
+                    "kind": "application_exit",
+                    "exit_code": code,
+                    "signal": None,
+                    "data": {"portable_range": [0, 255]},
+                },
+                diagnostics=[diagnostic],
+            )
+            return 5
+        _set_run_report(
+            report_state,
+            "ok",
+            0,
+            code,
+            execution={"kind": "application_exit", "exit_code": code, "signal": None},
+        )
+        return code
+
     except NativeCompilationError as err:
+        if report_state is not None:
+            diagnostic = diagnostic_record(
+                "W5001", "toolchain",
+                _bounded_tool_output(f"{err.phase} failed: {err.stderr}"),
+                filename=file_name,
+            )
+            _set_run_report(report_state, "toolchain_error", 3, 3,
+                            diagnostics=[diagnostic])
+            print(f"[{err.label}]\n{err.stderr}", file=sys.stderr)
+            return 3
         if json_v1:
             diagnostic = diagnostic_record(
                 "W5001", "toolchain",
@@ -390,6 +493,19 @@ def run_pipeline(
         print(f"[{err.label}]\n{err.stderr}", file=sys.stderr)
         return 1
     except WysnaError as err:
+        if report_state is not None:
+            diagnostics = [
+                diagnostic_from_error(item, {
+                    file_name: source_code,
+                    os.path.abspath(file_name): source_code,
+                })
+                for item in getattr(err, "diagnostics", (err,))
+            ]
+            _set_run_report(report_state, "diagnostic_error", 1, 1,
+                            diagnostics=diagnostics)
+            for diagnostic in getattr(err, "diagnostics", (err,)):
+                print(str(diagnostic), file=sys.stderr)
+            return 1
         if json_v1:
             _write_json_v1(
                 tool_command, "diagnostic_error", 1, errors=[err],
@@ -404,6 +520,23 @@ def run_pipeline(
                 print(str(diagnostic), file=sys.stderr)
         return 1
     except Exception as exc:
+        if report_state is not None:
+            if isinstance(exc, OSError):
+                diagnostic = diagnostic_record(
+                    "W5004", "filesystem", f"Unable to access a requested file: {exc}",
+                    filename=file_name,
+                )
+                _set_run_report(report_state, "toolchain_error", 3, 3,
+                                diagnostics=[diagnostic])
+                print(f"[Filesystem Error] {exc}", file=sys.stderr)
+                return 3
+            diagnostic = diagnostic_record(
+                "W9999", "internal", str(exc), filename=file_name,
+            )
+            _set_run_report(report_state, "internal_error", 4, 4,
+                            diagnostics=[diagnostic])
+            print(f"[Internal Error] {exc}", file=sys.stderr)
+            return 4
         if json_v1:
             if isinstance(exc, OSError):
                 diagnostic = diagnostic_record(
@@ -484,7 +617,7 @@ def print_help(prog: Optional[str] = None) -> None:
     print("Usage:")
     print(f"  {prog} lsp                                       # LSP over stdio")
     print(f"  {prog} repl                                    # Start interactive REPL")
-    print(f"  {prog} [run] [--stats] <file.wysna> [-- args...] # Execute Wysna source file")
+    print(f"  {prog} [run] [--stats] [--report-json <path>] [--invocation-id <id>] <file.wysna> [-- args...] # Execute Wysna source file")
     print(f"  {prog} check [--json|--output-format=json-v1] [--stats] <file.wysna>   # Static typecheck without execution")
     print(f"  {prog} fmt [--write] [--output-format=json-v1] <file.wysna> # Canonical deterministic formatter")
     print(f"  {prog} ast [--json] <file.wysna>               # Emit canonical JSON AST (v0.1)")
@@ -502,13 +635,15 @@ def main(argv=None) -> None:
     args = list(sys.argv[1:] if argv is None else argv)
     cli_args = args[:args.index("--")] if "--" in args else args
     json_v1 = "--output-format=json-v1" in cli_args
+    report_json_path = None
+    requested_invocation_id = None
     command_for_output = args[0] if args and args[0] in (
         "run", "check", "fmt", "ast", "mir", "tokens", "emit-c", "build",
         "test", "bench", "version", "repl",
     ) else "run"
 
     def usage_error(message: str) -> None:
-        if json_v1:
+        if json_v1 and report_json_path is None:
             diagnostic = diagnostic_record("W5002", "usage", message)
             write_tool_result(
                 tool_result(command_for_output, "usage_error", 2,
@@ -660,6 +795,20 @@ def main(argv=None) -> None:
             json_diagnostics = True
         elif arg == "--output-format=json-v1":
             json_v1 = True
+        elif arg == "--report-json":
+            if report_json_path is not None:
+                usage_error("--report-json may be specified only once")
+            i += 1
+            if i >= len(args) or not args[i] or args[i].startswith("-"):
+                usage_error("--report-json requires a file path")
+            report_json_path = args[i]
+        elif arg == "--invocation-id":
+            if requested_invocation_id is not None:
+                usage_error("--invocation-id may be specified only once")
+            i += 1
+            if i >= len(args) or args[i].startswith("-"):
+                usage_error("--invocation-id requires a value")
+            requested_invocation_id = args[i]
         elif arg in ("--stats", "--metrics"):
             show_stats = True
         elif arg == "--fmt":
@@ -726,6 +875,20 @@ def main(argv=None) -> None:
 
     prog_cmd = "wysna"
 
+    if requested_invocation_id is not None and report_json_path is None:
+        usage_error("--invocation-id requires --report-json")
+
+    if report_json_path is not None:
+        if subcmd not in (None, "run"):
+            usage_error("--report-json is supported only by run")
+        if json_v1 or json_diagnostics:
+            usage_error("run --report-json cannot be combined with JSON output modes")
+        if (show_tokens or show_ast or check_only or fmt_only or fmt_write
+                or emit_c_path is not None or build_bin_path is not None or show_mir):
+            usage_error("run --report-json supports program execution only")
+        if requested_invocation_id == "":
+            usage_error("--invocation-id must not be empty")
+
     if json_v1:
         supported_commands = ("check", "fmt", "emit-c", "build")
         if subcmd not in supported_commands:
@@ -773,6 +936,35 @@ def main(argv=None) -> None:
         elif subcmd == "build" and build_bin_path is None:
             build_bin_path = _strip_src_ext(file_to_run) if file_to_run.endswith(".wysna") else file_to_run + ".bin"
 
+        report_state = None
+        invocation_id = requested_invocation_id
+        if report_json_path is not None:
+            if _same_file_path(report_json_path, file_to_run):
+                usage_error("the report path must not overwrite the source file")
+            pending = tool_result(
+                "run",
+                "pending",
+                None,
+                process_exit_code=None,
+                invocation_id=invocation_id,
+            )
+            invocation_id = pending["invocation_id"]
+            try:
+                write_tool_result_atomic(pending, report_json_path)
+            except OSError as error:
+                print(
+                    f"{prog}: unable to initialize JSON report '{report_json_path}': {error}",
+                    file=sys.stderr,
+                )
+                raise SystemExit(3)
+            report_state = {
+                "status": "pending",
+                "tool_exit_code": None,
+                "process_exit_code": None,
+                "execution": None,
+                "diagnostics": [],
+            }
+
         if json_v1 and subcmd in ("emit-c", "build"):
             output_path = emit_c_path if subcmd == "emit-c" else build_bin_path
             canonical_output = os.path.normcase(os.path.realpath(output_path))
@@ -788,6 +980,20 @@ def main(argv=None) -> None:
             with open(file_to_run, "r", encoding="utf-8", newline="" if json_v1 else None) as f:
                 source = f.read()
         except (OSError, UnicodeError) as e:
+            if report_state is not None:
+                diagnostic = diagnostic_record(
+                    "W5003", "filesystem",
+                    f"Unable to read source file '{file_to_run}': {e}",
+                    filename=file_to_run,
+                )
+                _set_run_report(report_state, "toolchain_error", 3, 3,
+                                diagnostics=[diagnostic])
+                print(f"Error reading file '{file_to_run}': {e}", file=sys.stderr)
+                try:
+                    _write_run_report(report_json_path, invocation_id, report_state)
+                except OSError as report_error:
+                    print(f"{prog}: unable to finalize JSON report: {report_error}", file=sys.stderr)
+                raise SystemExit(3)
             if json_v1:
                 diagnostic = diagnostic_record(
                     "W5003", "filesystem", f"Unable to read source file '{file_to_run}': {e}",
@@ -820,15 +1026,37 @@ def main(argv=None) -> None:
             sanitize=sanitize,
             show_stats=show_stats,
             link_libraries=link_libraries,
-            execution_context=ExecutionContext.for_program(prog_cmd, program_args),
+            execution_context=ExecutionContext.for_program(
+                prog_cmd,
+                program_args,
+                **({"terminate": _capture_application_exit} if report_state is not None else {}),
+            ),
             json_v1=json_v1,
             tool_command=command_for_output,
+            report_state=report_state,
         )
+        if report_state is not None:
+            if report_state["status"] == "pending":
+                _set_run_report(
+                    report_state,
+                    "ok",
+                    0,
+                    0,
+                    execution={"kind": "application_exit", "exit_code": 0, "signal": None},
+                )
+            try:
+                _write_run_report(report_json_path, invocation_id, report_state)
+            except OSError as report_error:
+                print(f"{prog}: unable to finalize JSON report: {report_error}", file=sys.stderr)
+                raise SystemExit(3)
+            sys.exit(report_state["process_exit_code"])
         sys.exit(code)
 
     # No file argument. Dropping into the REPL silently made `w check` in a Makefile exit
     # 0 without checking anything, so the REPL now needs to be asked for explicitly and
     # every other subcommand is a usage error.
+    if report_json_path is not None:
+        usage_error("--report-json requires a source file")
     if program_args:
         usage_error("program arguments require a source file")
     if subcmd is None or subcmd == "repl":

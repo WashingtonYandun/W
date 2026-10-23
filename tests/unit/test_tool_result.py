@@ -103,6 +103,100 @@ def test_run_passes_json_v1_looking_argument_after_separator(tmp_path):
     assert result.stderr == ""
 
 
+def test_run_report_json_preserves_program_streams_and_reports_application_exit(tmp_path):
+    source = tmp_path / "run.wysna"
+    report = tmp_path / "run-result.json"
+    source.write_text(
+        'fn main() -> unit { print("program output"); exit(7) }\n',
+        encoding="utf-8",
+    )
+
+    result = run_cli(
+        "run", "--report-json", report, "--invocation-id", "task-42", source,
+    )
+
+    payload = json.loads(report.read_text(encoding="utf-8"))
+    assert result.returncode == 7
+    assert result.stdout == "program output\n"
+    assert result.stderr == ""
+    assert payload["schema_version"] == "wysna.tool-result/1"
+    assert payload["command"] == "run"
+    assert payload["status"] == "ok"
+    assert payload["invocation_id"] == "task-42"
+    assert payload["tool_exit_code"] == 0
+    assert payload["process_exit_code"] == 7
+    assert payload["execution"] == {
+        "kind": "application_exit",
+        "exit_code": 7,
+        "signal": None,
+    }
+
+
+def test_run_report_json_exposes_pending_snapshot_to_the_program(tmp_path):
+    source = tmp_path / "read-report.wysna"
+    report = tmp_path / "result.json"
+    source.write_text(
+        "fn main() -> unit {\n"
+        "    let snapshot = read_file(args()[1]) else err { return }\n"
+        "    print(snapshot)\n"
+        "}\n",
+        encoding="utf-8",
+    )
+
+    result = run_cli("run", "--report-json", report, source, "--", report)
+
+    pending = json.loads(result.stdout)
+    final = json.loads(report.read_text(encoding="utf-8"))
+    assert result.returncode == 0
+    assert result.stderr == ""
+    assert pending["status"] == "pending"
+    assert pending["invocation_id"] == final["invocation_id"]
+    assert final["status"] == "ok"
+
+
+def test_run_report_json_reports_pre_execution_diagnostics(tmp_path):
+    source = tmp_path / "invalid.wysna"
+    report = tmp_path / "result.json"
+    source.write_text("fn main() -> unit { let value: int = \"wrong\" }\n", encoding="utf-8")
+
+    result = run_cli("run", "--report-json", report, source)
+
+    payload = json.loads(report.read_text(encoding="utf-8"))
+    assert result.returncode == 1
+    assert result.stdout == ""
+    assert result.stderr
+    assert payload["status"] == "diagnostic_error"
+    assert payload["tool_exit_code"] == payload["process_exit_code"] == 1
+    assert payload["execution"] is None
+    assert payload["diagnostics"][0]["code"] == "W2001"
+
+
+def test_run_report_json_rejects_source_overwrite(tmp_path):
+    source = tmp_path / "source.wysna"
+    original = b"fn main() -> unit { print(42) }\n"
+    source.write_bytes(original)
+
+    result = run_cli("run", "--report-json", source, source)
+
+    assert result.returncode == 2
+    assert result.stdout == ""
+    assert "must not overwrite the source" in result.stderr
+    assert source.read_bytes() == original
+
+
+def test_run_report_json_does_not_start_program_when_pending_write_fails(tmp_path):
+    source = tmp_path / "run.wysna"
+    report = tmp_path / "missing-directory" / "result.json"
+    source.write_text('fn main() -> unit { print("started") }\n', encoding="utf-8")
+
+    result = run_cli("run", "--report-json", report, source)
+
+    assert result.returncode == 3
+    assert result.stdout == ""
+    assert "unable to initialize JSON report" in result.stderr
+    assert not report.parent.exists()
+
+
 def test_fmt_json_v1_returns_inline_formatted_source_and_hash(tmp_path):
     source = tmp_path / "format.wysna"
     source.write_text("fn main() -> unit { print(42) }\n", encoding="utf-8")
