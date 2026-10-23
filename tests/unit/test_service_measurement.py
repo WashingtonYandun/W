@@ -7,6 +7,7 @@ import sys
 import tempfile
 import threading
 import time
+from unittest.mock import patch
 
 import tools.measure_service as service_measurement
 from tools.measure_service import (
@@ -165,6 +166,36 @@ def test_process_tree_sampler_records_root_rss_on_supported_platforms():
     assert report["sampler_error"] is None
 
 
+def test_linux_process_tree_sampler_tolerates_exiting_process_races():
+    if not sys.platform.startswith("linux"):
+        return
+
+    sampler = ProcessTreeSampler(os.getpid(), interval_seconds=0.01)
+    original_iterdir = Path.iterdir
+
+    def process_exits_before_task_scan(path):
+        if path.name == "task":
+            raise ProcessLookupError("process exited during RSS sampling")
+        return original_iterdir(path)
+
+    with patch.object(Path, "iterdir", process_exits_before_task_scan):
+        snapshot = sampler._linux_snapshot()
+
+    assert os.getpid() in snapshot
+
+    original_read_text = Path.read_text
+
+    def thread_exits_before_child_scan(path, *args, **kwargs):
+        if path.name == "children":
+            raise ProcessLookupError("thread exited during RSS sampling")
+        return original_read_text(path, *args, **kwargs)
+
+    with patch.object(Path, "read_text", thread_exits_before_child_scan):
+        snapshot = sampler._linux_snapshot()
+
+    assert os.getpid() in snapshot
+
+
 def test_service_measurement_contract():
     test_percentile_uses_nearest_rank_and_handles_empty_samples()
     test_metrics_aggregate_statuses_throughput_and_bounded_latency_samples()
@@ -172,6 +203,7 @@ def test_service_measurement_contract():
     test_client_abort_shuts_down_active_sockets_and_closes_connections()
     test_fixed_database_contains_the_declared_deterministic_working_set()
     test_process_tree_sampler_records_root_rss_on_supported_platforms()
+    test_linux_process_tree_sampler_tolerates_exiting_process_races()
 
 
 if __name__ == "__main__":

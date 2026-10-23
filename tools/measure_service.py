@@ -160,12 +160,12 @@ class ProcessTreeSampler:
             tasks_dir = process_dir / "task"
             try:
                 tasks = list(tasks_dir.iterdir())
-            except (FileNotFoundError, PermissionError):
+            except (FileNotFoundError, ProcessLookupError, PermissionError):
                 continue
             for task in tasks:
                 try:
                     child_text = (task / "children").read_text(encoding="ascii")
-                except (FileNotFoundError, PermissionError):
+                except (FileNotFoundError, ProcessLookupError, PermissionError):
                     continue
                 pending.extend(int(child) for child in child_text.split())
         return found
