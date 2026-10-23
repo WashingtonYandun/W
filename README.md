@@ -234,6 +234,9 @@ provisional RSS growth budget of the larger of 5% or 8 MiB between steady-load w
 Pull request CI runs three repetitions on Ubuntu. This fixed workload does not define a
 production SLO or qualify a network deployment.
 
+The [shared browser app example](examples/shared-browser-app/README.md) calls the same
+Wysna business-logic module from a native CLI and a WebAssembly browser interface.
+
 ---
 
 ## CLI & Tooling
