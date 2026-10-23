@@ -2,6 +2,7 @@
 from dataclasses import dataclass
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
+import tempfile
 import time
 
 from project.Manifest import WasiPreopen
@@ -10,6 +11,13 @@ from tooling.WasmModule import inspect_wasm, validate_wasi_command
 
 WASMTIME_VERSION = "50.0.1"
 _MAX_CAPTURE_BYTES = 1_048_576
+
+
+def _read_capped_output(path):
+    with Path(path).open("rb") as output_file:
+        content = output_file.read(_MAX_CAPTURE_BYTES + 1)
+    truncated = len(content) > _MAX_CAPTURE_BYTES
+    return content[:_MAX_CAPTURE_BYTES], truncated
 
 
 class WasiRuntimeError(RuntimeError):
@@ -58,6 +66,7 @@ class WasiRunner:
         config = wasmtime.Config()
         config.consume_fuel = True
         engine = wasmtime.Engine(config)
+        capture_directory = None
         try:
             module = wasmtime.Module.from_file(engine, str(module_path))
             store = wasmtime.Store(engine)
@@ -69,26 +78,12 @@ class WasiRunner:
             wasi.env = []
             wasi.inherit_stdin()
             if capture_output:
-                output_state = {
-                    "stdout": bytearray(), "stderr": bytearray(),
-                    "stdout_truncated": False, "stderr_truncated": False,
-                }
-
-                def capture(name):
-                    def write(chunk):
-                        data = bytes(chunk)
-                        output = output_state[name]
-                        available = max(0, _MAX_CAPTURE_BYTES - len(output))
-                        output.extend(data[:available])
-                        if len(data) > available:
-                            output_state[name + "_truncated"] = True
-                        return len(data)
-                    return write
-
-                wasi.stdout_custom = capture("stdout")
-                wasi.stderr_custom = capture("stderr")
+                capture_directory = tempfile.TemporaryDirectory(prefix="wysna-wasi-output-")
+                stdout_path = Path(capture_directory.name) / "stdout.bin"
+                stderr_path = Path(capture_directory.name) / "stderr.bin"
+                wasi.stdout_file = str(stdout_path)
+                wasi.stderr_file = str(stderr_path)
             else:
-                output_state = None
                 wasi.inherit_stdout()
                 wasi.inherit_stderr()
             for preopen in preopens:
@@ -118,14 +113,12 @@ class WasiRunner:
                 raise WasiRuntimeError(f"WASI guest trapped: {error}") from error
             elapsed_ms = (time.perf_counter() - started) * 1000.0
             remaining = store.get_fuel()
-            if output_state is None:
+            if capture_directory is None:
                 stdout = stderr = b""
                 stdout_truncated = stderr_truncated = False
             else:
-                stdout = bytes(output_state["stdout"])
-                stderr = bytes(output_state["stderr"])
-                stdout_truncated = output_state["stdout_truncated"]
-                stderr_truncated = output_state["stderr_truncated"]
+                stdout, stdout_truncated = _read_capped_output(stdout_path)
+                stderr, stderr_truncated = _read_capped_output(stderr_path)
             return WasiRunResult(exit_code, stdout, stderr, stdout_truncated,
                                  stderr_truncated, remaining, elapsed_ms)
         except WasiRuntimeError:
@@ -133,3 +126,6 @@ class WasiRunner:
         except (OSError, wasmtime.Trap, wasmtime.WasmtimeError,
                 KeyError, TypeError, ValueError) as error:
             raise WasiRuntimeError(f"cannot execute WASI module: {error}") from error
+        finally:
+            if capture_directory is not None:
+                capture_directory.cleanup()
