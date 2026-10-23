@@ -216,6 +216,24 @@ supported network deployment mode.
 See [docs/SERVICE_FOUNDATIONS.md](docs/SERVICE_FOUNDATIONS.md) for the worker contract and
 resource limits.
 
+To capture a repeatable local load and resident-memory report, install the service extra
+and run the campaign from a source checkout:
+
+```sh
+python3 -m pip install '.[service]'
+python3 tools/measure_service.py --warmup-seconds 60 --duration-seconds 600 \
+  --repetitions 3 --clients 4 --workers 4 \
+  --report .wysna_cache/service-load/report.json
+```
+
+The campaign builds the native example worker, seeds a deterministic 1,000-row SQLite
+dataset, alternates read-only health and count requests, and reports throughput, raw
+latency samples and percentiles, saturation responses, one-second process-tree RSS
+samples, and shutdown cleanup. It checks a
+provisional RSS growth budget of the larger of 5% or 8 MiB between steady-load windows.
+Pull request CI runs three repetitions on Ubuntu. This fixed workload does not define a
+production SLO or qualify a network deployment.
+
 ---
 
 ## CLI & Tooling

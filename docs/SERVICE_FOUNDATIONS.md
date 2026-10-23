@@ -96,6 +96,23 @@ transaction, returns `409` on a duplicate ID and `400` on invalid JSON or values
 adapter uses parameterized statements and obtains the database path from the host
 environment; it does not expose arbitrary SQL to requests.
 
+`tools/measure_service.py` builds this worker, seeds a deterministic 1,000-row SQLite
+dataset and alternates read-only `GET /health` and `GET /measurements` requests. It records
+warm-up and steady-state metadata, source hashes, toolchain details, raw latency samples,
+throughput, p50/p95/p99 latency, `503` saturation responses, one-second RSS samples across
+the service process tree, and whether observed child processes remain after shutdown.
+Linux uses `/proc`; macOS uses `ps`. RSS sampling may miss short peaks, and summing process
+RSS can count shared pages more than once. The service contract tests also run on macOS;
+the full PR campaign runs on Ubuntu and saves JSON as an artifact. It uses a 60-second
+warm-up, three 10-minute repetitions and at least 10,000 latency samples per repetition.
+It checks shutdown, the worker process bound, zero client errors, and the provisional
+SPEC-006 RSS growth budget (the larger of 5% or 8 MiB) between the first and last
+steady-load windows. Each repetition collects at least 10,000 latency observations and
+requires p99 to remain within the configured 15-second request budget; the sample floor
+is not a throughput SLO, and the request budget is not a latency target. Those
+measurements expose a repeatable baseline for this fixed workload; they are not an SLO,
+a representative application benchmark, or evidence for network deployment.
+
 ## IO, scheduling and failure boundaries
 
 - Each task owns a request context with deadline, cancellation state and resource
