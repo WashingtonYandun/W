@@ -210,6 +210,28 @@ jobs:
           --target web --output "$RUNNER_TEMP/wysna-browser/library.mjs"
       - name: Exercise the generated ESM and WebAssembly library
         run: node tests/browser_library_smoke.mjs "$RUNNER_TEMP/wysna-browser/library.mjs"
+      - name: Verify shared source across native and browser targets
+        run: |
+          python3 main.py project check --manifest examples/shared-browser-app/wysna.toml --target app
+          python3 main.py project check --manifest examples/shared-browser-app/wysna.toml --target web
+          python3 main.py project test --manifest examples/shared-browser-app/wysna.toml
+      - name: Build native CLI from shared Wysna source
+        run: >-
+          python3 main.py project build --manifest examples/shared-browser-app/wysna.toml
+          --target app --output "$RUNNER_TEMP/wysna-shared-app/quote"
+      - name: Build browser module from shared Wysna source
+        run: >-
+          python3 main.py project build --manifest examples/shared-browser-app/wysna.toml
+          --target web --output "$RUNNER_TEMP/wysna-shared-app/build/pricing.mjs"
+      - name: Compare native and WebAssembly results
+        run: |
+          native_output="$("$RUNNER_TEMP/wysna-shared-app/quote" 3 1299)"
+          browser_output="$(node examples/shared-browser-app/tests/shared_browser_app_smoke.mjs "$RUNNER_TEMP/wysna-shared-app/build/pricing.mjs")"
+          test "$native_output" = "$browser_output"
+      - name: Stage browser application assets
+        run: cp -R examples/shared-browser-app/web "$RUNNER_TEMP/wysna-shared-app/web"
+      - name: Open the shared application in headless Chrome
+        run: python3 examples/shared-browser-app/tests/browser_smoke.py "$RUNNER_TEMP/wysna-shared-app"
 
   sanitizers:
     name: Memory safety (${{ matrix.os }})

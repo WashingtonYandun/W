@@ -124,6 +124,30 @@ the official `emscripten-core/setup-emsdk` action pinned to SDK 5.0.1. Build
 provenance records the SDK version, imports/exports, ABI version, memory limit, and
 generated exports. Browser APIs and DOM access remain owned by the host application.
 
+## Shared native and browser application
+
+The shared browser app example keeps business logic in one Wysna module and calls it
+from both a native command and a browser interface. The browser interface owns HTML,
+input validation, and presentation; the Wysna module owns the calculation. CI builds
+both targets and compares the native and WebAssembly results for the same input.
+
+Build the CLI and WebAssembly library from the repository root:
+
+    python main.py project build --manifest examples/shared-browser-app/wysna.toml --target app --output examples/shared-browser-app/build/quote
+    python main.py project build --manifest examples/shared-browser-app/wysna.toml --target web --output examples/shared-browser-app/build/pricing.mjs
+
+Run the native command with a quantity and a unit price in cents:
+
+    examples/shared-browser-app/build/quote 3 1299
+
+Serve the example directory and open its web interface:
+
+    python3 -m http.server --directory examples/shared-browser-app 8000
+
+The shared module returns 3897 cents for that input in both environments. See
+[the complete example](../examples/shared-browser-app/README.md) for its browser UI
+and project manifest.
+
 Imports use existing Wysna syntax. Relative imports resolve inside the declared
 `sources.root`; tests outside that directory can import package modules through
 the same root. Declared dependencies use `pkg/<alias>/<module-path>`, for example:
