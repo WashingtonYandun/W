@@ -9,7 +9,13 @@ import threading
 import time
 
 import tools.measure_service as service_measurement
-from tools.measure_service import ClientMetrics, ProcessTreeSampler, _merge_metrics, _percentile
+from tools.measure_service import (
+    ClientMetrics,
+    ProcessTreeSampler,
+    _abort_client_connections,
+    _merge_metrics,
+    _percentile,
+)
 
 
 def test_percentile_uses_nearest_rank_and_handles_empty_samples():
@@ -97,6 +103,7 @@ def test_http_client_records_one_latency_sample_per_response():
     try:
         metrics = service_measurement._client_loop(
             "127.0.0.1", 0, gate, [1.0], threading.Barrier(1), 1.0, 10,
+            threading.Event(), (threading.Lock(), []),
         )
     finally:
         service_measurement.time = original_time
@@ -105,6 +112,24 @@ def test_http_client_records_one_latency_sample_per_response():
     assert metrics.requests == 2
     assert len(metrics.latencies_seconds) == metrics.requests
     assert metrics.endpoint_counts == {"/health": 1, "/measurements": 1}
+
+
+def test_client_abort_shuts_down_active_sockets_and_closes_connections():
+    events = []
+
+    class FakeSocket:
+        def shutdown(self, how):
+            events.append(("shutdown", how))
+
+    class FakeConnection:
+        sock = FakeSocket()
+
+        def close(self):
+            events.append(("close",))
+
+    _abort_client_connections([FakeConnection()])
+
+    assert events == [("shutdown", service_measurement.socket.SHUT_RDWR), ("close",)]
 
 
 def test_fixed_database_contains_the_declared_deterministic_working_set():
@@ -144,6 +169,7 @@ def test_service_measurement_contract():
     test_percentile_uses_nearest_rank_and_handles_empty_samples()
     test_metrics_aggregate_statuses_throughput_and_bounded_latency_samples()
     test_http_client_records_one_latency_sample_per_response()
+    test_client_abort_shuts_down_active_sockets_and_closes_connections()
     test_fixed_database_contains_the_declared_deterministic_working_set()
     test_process_tree_sampler_records_root_rss_on_supported_platforms()
 

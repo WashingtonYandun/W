@@ -16,6 +16,7 @@ from pathlib import Path
 import platform
 import queue
 import signal
+import socket
 import sqlite3
 import subprocess
 import sys
@@ -73,6 +74,17 @@ def _percentile(values: list[float], percentile: float) -> float | None:
 
 def _format_seconds(value: float | None) -> str:
     return "n/a" if value is None else f"{value:.4f}s"
+
+
+def _abort_client_connections(connections: list[http.client.HTTPConnection]) -> None:
+    for connection in connections:
+        active_socket = connection.sock
+        if active_socket is not None:
+            try:
+                active_socket.shutdown(socket.SHUT_RDWR)
+            except OSError:
+                pass
+        connection.close()
 
 
 class ProcessTreeSampler:
@@ -257,14 +269,19 @@ class ProcessTreeSampler:
 
 def _client_loop(host: str, port: int, start_gate: threading.Event,
                  deadline_holder: list[float], ready_barrier: threading.Barrier,
-                 timeout_seconds: float, latency_sample_limit: int) -> ClientMetrics:
+                 timeout_seconds: float, latency_sample_limit: int,
+                 stop_event: threading.Event,
+                 connection_registry: tuple[threading.Lock, list[http.client.HTTPConnection]]) -> ClientMetrics:
     metrics = ClientMetrics(latency_sample_limit=latency_sample_limit)
     connection = http.client.HTTPConnection(host, port, timeout=timeout_seconds)
+    registry_lock, connections = connection_registry
+    with registry_lock:
+        connections.append(connection)
     try:
         ready_barrier.wait(timeout=10)
         start_gate.wait()
         deadline = deadline_holder[0]
-        while time.monotonic() < deadline:
+        while not stop_event.is_set() and time.monotonic() < deadline:
             request_path = "/health" if metrics.requests % 2 == 0 else "/measurements"
             started = time.perf_counter()
             try:
@@ -297,6 +314,8 @@ def _client_loop(host: str, port: int, start_gate: threading.Event,
                 if response.will_close:
                     connection.close()
             except (OSError, http.client.HTTPException, TimeoutError) as error:
+                if stop_event.is_set():
+                    break
                 metrics.errors += 1
                 if len(metrics.examples) < 10:
                     metrics.examples.append(f"{type(error).__name__}: {error}")
@@ -310,6 +329,10 @@ def _client_loop(host: str, port: int, start_gate: threading.Event,
 def _run_clients(host: str, port: int, clients: int, duration_seconds: float,
                  timeout_seconds: float) -> tuple[float, float, list[ClientMetrics]]:
     gate = threading.Event()
+    stop_event = threading.Event()
+    registry_lock = threading.Lock()
+    connections: list[http.client.HTTPConnection] = []
+    connection_registry = (registry_lock, connections)
     deadline_holder: list[float] = []
     barrier = threading.Barrier(clients + 1)
     results: list[ClientMetrics | None] = [None] * clients
@@ -318,19 +341,31 @@ def _run_clients(host: str, port: int, clients: int, duration_seconds: float,
         results[index] = _client_loop(
             host, port, gate, deadline_holder, barrier, timeout_seconds,
             max(1, (MAX_LATENCY_SAMPLES + clients - 1) // clients),
+            stop_event, connection_registry,
         )
 
     threads = [threading.Thread(target=run, args=(index,), name=f"wysna-load-client-{index + 1}")
                for index in range(clients)]
     for thread in threads:
+        thread.daemon = True
         thread.start()
     barrier.wait(timeout=10)
     start_time = time.monotonic()
     deadline_holder.append(start_time + duration_seconds)
     gate.set()
+    join_deadline = deadline_holder[0] + timeout_seconds + 10
     for thread in threads:
-        thread.join(timeout=timeout_seconds + 10)
+        thread.join(timeout=max(0, join_deadline - time.monotonic()))
     unfinished = [thread.name for thread in threads if thread.is_alive()]
+    if unfinished:
+        stop_event.set()
+        with registry_lock:
+            active_connections = list(connections)
+        _abort_client_connections(active_connections)
+        abort_deadline = time.monotonic() + 5
+        for thread in threads:
+            thread.join(timeout=max(0, abort_deadline - time.monotonic()))
+        unfinished = [thread.name for thread in threads if thread.is_alive()]
     if unfinished:
         raise RuntimeError("load clients exceeded their request budget: " + ", ".join(unfinished))
     failed_clients = [index + 1 for index, result in enumerate(results) if result is None]
@@ -789,6 +824,32 @@ def main() -> int:
         report = measure(arguments)
     except Exception as error:
         print(f"service load measurement failed: {type(error).__name__}: {error}", file=sys.stderr)
+        failure_report = {
+            "schema_version": 1,
+            "passed": False,
+            "platform": platform.platform(),
+            "machine": platform.machine(),
+            "python": platform.python_version(),
+            "commit": subprocess.run(
+                ["git", "-C", str(ROOT), "rev-parse", "HEAD"],
+                capture_output=True, text=True,
+            ).stdout.strip() or "unknown",
+            "failure": {"type": type(error).__name__, "message": str(error)},
+            "workload": {
+                "repetitions": arguments.repetitions,
+                "warmup_seconds_per_repetition": arguments.warmup_seconds,
+                "steady_seconds_per_repetition": arguments.duration_seconds,
+                "clients": arguments.clients,
+                "workers": arguments.workers,
+                "queue_size": arguments.queue_size,
+                "request_timeout_ms": arguments.request_timeout_ms,
+            },
+            "interpretation": "The campaign failed before producing complete performance measurements.",
+        }
+        arguments.report.parent.mkdir(parents=True, exist_ok=True)
+        temporary_report = arguments.report.with_suffix(arguments.report.suffix + ".tmp")
+        temporary_report.write_text(json.dumps(failure_report, indent=2) + "\n", encoding="utf-8")
+        temporary_report.replace(arguments.report)
         return 1
     arguments.report.parent.mkdir(parents=True, exist_ok=True)
     temporary_report = arguments.report.with_suffix(arguments.report.suffix + ".tmp")

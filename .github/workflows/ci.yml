@@ -183,7 +183,7 @@ jobs:
         with:
           name: service-load-rss-campaign
           path: .wysna_cache/ci-artifacts/service-load.json
-          if-no-files-found: ignore
+          if-no-files-found: error
 
   sanitizers:
     name: Memory safety (${{ matrix.os }})
