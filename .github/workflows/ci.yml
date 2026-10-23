@@ -131,6 +131,8 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y libsqlite3-dev
       - name: Verify the loopback service and SQLite worker pilot
         run: python3 -m tests.unit.test_service_pilot
+      - name: Verify service load measurement contracts
+        run: python3 -m tests.unit.test_service_measurement
       - name: Verify SQLite FFI against C with sanitizers and persisted data
         run: python3 tools/validate_sqlite_ffi.py --sanitize --report .wysna_cache/ci-artifacts/sqlite-ffi.json
       - name: Verify atomic CSV imports, rollback and process memory against C
@@ -152,6 +154,36 @@ jobs:
             .wysna_cache/compiler*.c
             tests/differential/failures/
             tests/fuzz/failures/
+
+  service-load-campaign:
+    name: Service load and RSS campaign (Ubuntu)
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      CC: clang
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install SQLite development files
+        run: sudo apt-get update && sudo apt-get install -y libsqlite3-dev
+      - name: Install the optional service adapter
+        run: python -m pip install -e '.[service]'
+      - name: Run three sustained service repetitions
+        run: >-
+          python3 tools/measure_service.py --warmup-seconds 60 --duration-seconds 600
+          --repetitions 3 --clients 4 --saturation-clients 48 --saturation-seconds 1
+          --workers 4 --queue-size 32 --minimum-latency-samples 10000
+          --rss-growth-budget-percent 5 --rss-growth-budget-bytes 8388608
+          --report .wysna_cache/ci-artifacts/service-load.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: service-load-rss-campaign
+          path: .wysna_cache/ci-artifacts/service-load.json
+          if-no-files-found: error
 
   sanitizers:
     name: Memory safety (${{ matrix.os }})
