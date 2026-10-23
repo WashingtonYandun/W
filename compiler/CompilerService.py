@@ -153,6 +153,12 @@ class CompilerService:
         from mir.Lowering import Lowering
         return Lowering(checked._interner, checked.source.file).lower(self.lower_hir(checked))
 
+    def export_mir(self, checked):
+        """Export verified interchange without exposing the checked type arena."""
+        self._validate(checked)
+        from mir.Exchange import export_module
+        return export_module(self.lower_mir(checked), checked._interner)
+
     def emit_c(self, checked, backend='hir', *, target_profile=None):
         self._validate(checked)
         browser_library = target_profile == 'browser-library'

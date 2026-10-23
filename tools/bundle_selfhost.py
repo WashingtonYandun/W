@@ -20,6 +20,7 @@ MODULE_ORDER = [
     "07_parser_decl.wysna",
     "08_checker.wysna",
     "08_semantics.wysna",
+    "08_mir.wysna",
     "09_main.wysna",
 ]
 

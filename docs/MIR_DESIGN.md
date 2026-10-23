@@ -1,6 +1,67 @@
-# Wysna Seed MIR: Verified Intermediate Representation
+# Wysna MIR: Verified Intermediate Representation
 
-Wysna Seed's default native pipeline is checked AST → typed and verified HIR → verified MIR → C99 → system compiler. `wysna emit-c` and `wysna build` use this pipeline; `--backend=ast` selects the secondary AST emitter. Wysna Compiler is an independent self-hosted implementation with a direct C99 emitter and does not currently use Seed's HIR/MIR pipeline. `wysna mir path.wysna` prints verified MIR as JSON.
+Wysna Seed's default native pipeline is checked AST → typed and verified HIR → verified MIR → C99 → system compiler. `wysna emit-c` and `wysna build` use this pipeline; `--backend=ast` selects the secondary AST emitter. Wysna Compiler has its own frontend, a direct C99 route, and an experimental scalar MIR producer. `wysna mir path.wysna` prints a session-local debug dump. `wysna emit-mir` produces the self-contained, versioned interchange described below.
+
+## Interchange and the Compiler scalar profile
+
+```sh
+wysna emit-mir --implementation=seed scalar.wysna -o seed.mir.json
+wysna emit-mir --implementation=compiler scalar.wysna -o compiler.mir.json
+```
+
+The default implementation is `seed`. Both commands produce `wysna.mir` schema 1,
+semantic revision `0.5.0`, runtime ABI 2, and a complete type arena. The importer in
+`mir/Exchange.py` reconstructs an independent arena and verifies the module before
+`mir/CCodeGen.py` can emit C99. The two producers need equivalent behavior; their
+temporary identities and operation sequences need not be identical. Files are
+published atomically after verification. Source-file destinations are rejected.
+
+Compiler's `scalar-v1` profile checks source with its own semantic checker, builds
+typed slots and operations in `selfhost/src/08_mir.wysna`, verifies them, then
+serializes the interchange. A prebuilt binary can run without Seed:
+
+```sh
+.wysna_cache/stage2 --emit-mir scalar.wysna > compiler.mir.json
+```
+
+The `wysna` wrapper uses Python for bootstrap orchestration and independent IR
+verification. This is an incremental Compiler migration; distribution without
+Python and a Compiler MIR-to-C99 consumer are future work. Native `build` and
+`--backend=selfhost` retain their existing paths.
+
+The supported source profile contains:
+
+- Single-file command programs; `int`, finite `float`, `bool`, and `unit` values.
+- Non-generic functions, typed parameters, explicit returns and tail expressions,
+  forward/direct calls, immutable local bindings, and scalar top-level bindings.
+- Scalar arithmetic, comparisons, equality, unary negation and `not`, plus
+  `print`, `eprint`, `int`, and `float` calls. Arguments evaluate left to right.
+- Signed int64 wrapping at runtime, division/remainder checks with source paths,
+  and the `INT64_MIN / -1` and remainder semantics of the runtime.
+- Implicit `main()` when the file contains only declarations, and explicit entry
+  calls. Other top-level statements suppress implicit entry invocation as in Seed.
+
+For example, both producers accept:
+
+```wysna
+fn add(x: int, y: int) -> int { x + y }
+let total = add(10, 20)
+print(total)
+```
+
+Imports, shared global reads inside functions, mutable bindings, branches/loops,
+short-circuit boolean operators, strings/collections, error channels, closures,
+generics, nominal types, FFI, and library exports are outside this profile.
+Unsupported syntax is rejected by the profile guard with `W2013` before semantic
+checking or artifact publication. Source inside the profile retains the semantic
+checker's diagnostics. Numeric literals outside
+signed int64 or finite binary64 produce `W0002`. The normal C99 route has its own
+broader measured coverage.
+
+`tests/unit/test_selfhost_mir.py` compares both producers' executable results,
+evaluation order, scalar boundaries and runtime locations. It also checks semantic
+rejection, unsupported features, stage1/stage2 IR determinism, and corrupted
+interchange rejection. The three-stage bootstrap checks the compiler itself.
 
 ## Representation
 
