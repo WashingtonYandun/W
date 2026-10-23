@@ -81,9 +81,12 @@ def _run_source(source, selfhost, directory):
     compile_flags, link_flags = NativeToolchain._curl_flags()
     results = []
     for engine in ("interpreter", "ast", "hir", "selfhost"):
+        engine_compile_flags = compile_flags if engine != "interpreter" else ()
+        if engine == "selfhost":
+            engine_compile_flags = (*engine_compile_flags, "-DWYSNA_HAS_HTTP=1")
         results.append(run_engine(engine, source, "http-contract", selfhost,
                                   Path(directory) / engine,
-                                  extra_compile_flags=compile_flags if engine != "interpreter" else (),
+                                  extra_compile_flags=engine_compile_flags,
                                   extra_link_flags=link_flags if engine != "interpreter" else ()))
     return results
 
