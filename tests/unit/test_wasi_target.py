@@ -55,6 +55,10 @@ profile = "wasi-command"
 entry = "src/process.wysna"
 profile = "wasi-command"
 
+[targets.http]
+entry = "src/http.wysna"
+profile = "wasi-command"
+
 [targets.loop]
 entry = "src/loop.wysna"
 profile = "wasi-command"
@@ -104,6 +108,10 @@ fn main() -> unit {
 }
 ''', encoding="utf-8")
         (project_root / "src" / "process.wysna").write_text('''import "std/process"
+
+fn main() -> unit { print("unavailable") }
+''', encoding="utf-8")
+        (project_root / "src" / "http.wysna").write_text('''import "std/http"
 
 fn main() -> unit { print("unavailable") }
 ''', encoding="utf-8")
@@ -182,7 +190,7 @@ fn main() -> unit {
         _assert((project_root / "data" / "input.txt").read_text(encoding="utf-8") == "fixture\n",
                 "read-only preopen changed the host file")
 
-        for target_name in ("no-files", "process"):
+        for target_name in ("no-files", "process", "http"):
             result = _invoke(project_root, "project", "build", "--manifest",
                              str(project_root / "wysna.toml"), "--target", target_name,
                              "--output-format=json-v1", "-o", str(project_root / "build" / target_name))

@@ -8,12 +8,18 @@ from project.Targets import target_spec
 def validate_checked_target(checked, target):
     """Reject source capabilities unavailable to a target before its toolchain runs."""
     spec = target_spec(target.profile)
-    if target.profile != "wasi-command":
-        return spec
-
     repository_root = Path(__file__).resolve().parents[1]
     standard_library = (repository_root / "stdlib").resolve()
     module_paths = {Path(path).resolve() for path in checked.modules}
+    http_module = (standard_library / "http.wysna").resolve()
+    if target.profile == "wasi-command" and http_module in module_paths:
+        raise WysnaError(
+            "the wasi-command profile does not support std/http; use a native-cli target",
+            file=checked.source.file, code="W2013", stage="target",
+        )
+    if target.profile != "wasi-command":
+        return spec
+
     process_module = (standard_library / "process.wysna").resolve()
     file_modules = {
         (standard_library / "files.wysna").resolve(),

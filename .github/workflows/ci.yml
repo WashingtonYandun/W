@@ -92,6 +92,16 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
+      - name: Install libcurl development files on Linux
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libcurl4-openssl-dev
+      - name: Install libcurl development files on macOS
+        if: runner.os == 'macOS'
+        run: |
+          brew install curl
+          echo "$(brew --prefix curl)/bin" >> "$GITHUB_PATH"
+      - name: Install the optional interpreter HTTP adapter
+        run: python -m pip install -e '.[http]'
       - name: Verify CI harness failure contracts
         run: |
           python3 -m tests.unit.test_ci_harness
@@ -107,6 +117,7 @@ jobs:
           python3 -m tests.unit.test_distribution_contract
           python3 -m tests.unit.test_audit_findings
           python3 -m tests.unit.test_standard_toolkit
+          python3 -m tests.unit.test_http_client
       - name: Verify runtime, examples and direct selfhost negatives across four engines
         run: python3 tools/ci_conformance.py --profile=${{ inputs.profile || 'release' }}
       - name: Verify full conformance and SHA256 bootstrap
@@ -156,6 +167,16 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
+      - name: Install libcurl development files on Linux
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libcurl4-openssl-dev
+      - name: Install libcurl development files on macOS
+        if: runner.os == 'macOS'
+        run: |
+          brew install curl
+          echo "$(brew --prefix curl)/bin" >> "$GITHUB_PATH"
+      - name: Install the optional interpreter HTTP adapter
+        run: python -m pip install -e '.[http]'
       - name: Verify the full acyclic runtime and example corpus with ASan and UBSan
         # Linux also enables LSan; Darwin does not support leak detection.
         run: python3 tools/ci_conformance.py --sanitize
@@ -169,6 +190,7 @@ jobs:
           WYSNA_SANITIZE=1 python3 -m tests.unit.test_audit_findings
           WYSNA_SANITIZE=1 python3 -m tests.unit.test_foundations
           WYSNA_SANITIZE=1 python3 -m tests.unit.test_standard_toolkit
+          WYSNA_SANITIZE=1 python3 -m tests.unit.test_http_client
           python3 -m tests.unit.test_phase_a
           python3 -m tests.unit.test_ownership_control_flow
           python3 -m tests.unit.test_f03_ownership

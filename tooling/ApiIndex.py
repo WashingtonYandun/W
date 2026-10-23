@@ -63,14 +63,28 @@ def _leading_documentation(lines, line_number):
 
 
 def _availability(module_id):
-    if module_id == "std/process" or module_id.startswith("std/process/"):
+    if module_id == "std/http" or module_id.startswith("std/http/"):
         wasm = "unavailable"
+        native = "requires-libcurl"
+        interpreter = "requires-pycurl-extra"
+        selfhost = "requires-libcurl"
+    elif module_id == "std/process" or module_id.startswith("std/process/"):
+        wasm = "unavailable"
+        native = "supported"
+        interpreter = "supported"
+        selfhost = "unknown"
     elif module_id in ("std/fs", "std/files"):
         wasm = "requires-declared-preopens"
+        native = "supported"
+        interpreter = "supported"
+        selfhost = "unknown"
     else:
         wasm = "supported"
-    return {"interpreter": "supported", "native": "supported",
-            "selfhost": "unknown", "wasm": wasm}
+        native = "supported"
+        interpreter = "supported"
+        selfhost = "unknown"
+    return {"interpreter": interpreter, "native": native,
+            "selfhost": selfhost, "wasm": wasm}
 
 
 def _function_record(node, module_id, owner, lines, *, public=True, kind="function"):
@@ -313,9 +327,20 @@ def run_capabilities_command(argv):
             "profiles": ["native-cli", "wasi-command", "c99-source"],
             "targets": ["native", "wasm32-wasip1"],
             "runtimes": {"wasi-command": "wasmtime==50.0.1"},
-            "capabilities": {"wasi-command": ["stdio", "arguments", "clock", "random",
-                                                   "manifest-declared-preopens"]},
-            "limitations": ["WASI Preview 1 does not provide networking, child processes, or native FFI",
+            "capabilities": {
+                "native-cli": ["stdio", "filesystem", "environment", "processes", "network", "native-ffi"],
+                "wasi-command": ["stdio", "arguments", "clock", "random",
+                                 "manifest-declared-preopens"],
+            },
+            "requirements": {
+                "std/http": {
+                    "interpreter": "install wysna[http] with libcurl 8.3.0 or newer",
+                    "native": "install libcurl 8.3.0 or newer development files and expose curl-config on PATH",
+                    "wasi-command": "unavailable",
+                },
+            },
+            "limitations": ["native-cli capabilities describe host access and are not a sandbox",
+                            "WASI Preview 1 does not provide networking, child processes, or native FFI",
                             "project dependencies are local paths only",
                             "project lockfiles do not claim bit-for-bit binary reproducibility"],
         }

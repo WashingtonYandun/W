@@ -189,9 +189,11 @@ Wysna provides a focused, high-performance standard library:
 | **`std/environment`** | Program arguments and environment lookup | `arguments()`, `get()` |
 | **`std/time`** | Host wall-clock access | `unix_seconds()` |
 | **`std/process`** | Direct child-process execution with a timeout | `run(executable, arguments, timeout_ms)` |
+| **`std/http`** | Synchronous bounded HTTP/HTTPS requests with verified TLS | `request()`, `get()`, `post_json()`, `response_json()` |
 | **`std/test`** | Minimal project-test assertions | `expect()`, `expect_equal_int()`, `expect_equal_text()` |
 
 See [docs/STDLIB.md](docs/STDLIB.md) for full API reference and examples.
+The HTTP example is [examples/http_json_client.wysna](examples/http_json_client.wysna).
 
 ---
 

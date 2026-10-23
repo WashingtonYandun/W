@@ -159,6 +159,7 @@ class CompilerService:
             started = time.perf_counter()
             generator = CCodeGen(file=checked.source.file)
             source = generator.generate(self._linked_ast(checked))
+            source = self._enable_http_runtime(source)
             emitted = (time.perf_counter() - started) * 1000
             return EmissionResult(source, generator.telemetry.to_dict(),
                                   {'hir': 0.0, 'mir': 0.0, 'c_emit': emitted, 'codegen': emitted})
@@ -170,9 +171,19 @@ class CompilerService:
         lowered = time.perf_counter()
         generator = HirCCodeGen(checked._interner, file_path=checked.source.file)
         source = generator.generate(module)
+        source = self._enable_http_runtime(source)
         emitted = time.perf_counter()
         return EmissionResult(source, generator.telemetry.to_dict(),
                               {'hir': (lowered - started) * 1000,
                                'mir': generator.phase_ms['mir'],
                                'c_emit': generator.phase_ms['c_emit'],
                                'codegen': (emitted - lowered) * 1000})
+
+    @staticmethod
+    def _enable_http_runtime(source):
+        if 'wysna_host_http_request' not in source or 'WYSNA_HAS_HTTP' in source:
+            return source
+        include = '#include "runtime/wysna_runtime.h"'
+        if include in source:
+            return source.replace(include, '#define WYSNA_HAS_HTTP 1\n' + include, 1)
+        return '#define WYSNA_HAS_HTTP 1\n' + source

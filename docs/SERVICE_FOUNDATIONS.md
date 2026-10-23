@@ -1,8 +1,9 @@
 # Service foundations and acceptance contracts
 
-The synchronous toolkit supports bounded file tools. It does not provide an HTTP
-server, scheduler, asynchronous sockets or cancellation. These are separate APIs,
-not capabilities implied by native compilation or automatic resource release.
+The synchronous toolkit supports bounded file tools and an HTTP/HTTPS client. It
+does not provide an HTTP server, scheduler, asynchronous sockets or cancellation.
+The HTTP client is not a network sandbox; host permissions and deployment isolation
+remain outside its contract.
 
 ## Implemented resource boundary
 
@@ -34,6 +35,23 @@ independent `json` implementation using exact decimal parsing and last-value dup
 semantics. Its corpus includes malformed inputs, surrogate policy, depth limits and
 custom byte/node budgets. Any HTTP integration must retain explicit response-size and
 JSON parsing budgets.
+
+## HTTP client pilot
+
+`std/http` is synchronous and uses libcurl in native output and PycURL in the
+interpreter. Certificate and hostname verification stay enabled. Requests have a
+30-second total timeout and a 5-second connection ceiling; request/response bodies
+are limited to 1 MiB and each header block to 32 KiB/100 fields. The caller may
+lower the timeout and response limit. Redirects, retries and streaming are off.
+HTTP error statuses remain ordinary responses. Both adapters require libcurl 8.3.0
+or newer; native output also requires development files, while interpreted programs
+require the optional `http` extra. The minimum version avoids a historical
+unbounded-response-header issue in older libcurl releases.
+
+The interpreter and native adapters share the public limits and status/error
+contract. Their underlying host libraries can still differ by version and platform;
+the integration corpus exercises both with a loopback fixture. This pilot is not
+evidence of a production server, an SLO, or an enforced network capability.
 
 ## IO, scheduling and failure boundaries
 
