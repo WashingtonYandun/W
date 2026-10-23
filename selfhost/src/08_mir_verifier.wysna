@@ -1,0 +1,169 @@
+fn mir_verify_runtime(operation: MirOperation, slots: list[MirSlot]) -> bool {
+    let name = operation.name
+    let returned = slots[operation.result].type_id
+    if name == "wysna_builtin_print" or name == "wysna_builtin_eprint" { return returned == 1 }
+    if len(operation.args) == 1 {
+        let type_ = slots[operation.args[0]].type_id
+        if name == "wysna_neg" { return type_ == returned and (type_ == 3 or type_ == 4) }
+        if name == "wysna_not" { return type_ == 2 and returned == 2 }
+        if name == "wysna_builtin_int" { return type_ >= 2 and type_ <= 4 and returned == 3 }
+        if name == "wysna_builtin_float" { return type_ >= 2 and type_ <= 4 and returned == 4 }
+        return false
+    }
+    if len(operation.args) != 2 { return false }
+    let first = slots[operation.args[0]].type_id
+    let second = slots[operation.args[1]].type_id
+    if first != second { return false }
+    if name == "wysna_equal" or name == "wysna_not_equal" { return returned == 2 }
+    if first != 3 and first != 4 { return false }
+    if name == "wysna_lt" or name == "wysna_le" or name == "wysna_gt" or name == "wysna_ge" { return returned == 2 }
+    if name == "wysna_mod_at" { return first == 3 and returned == 3 }
+    return returned == first and (name == "wysna_add" or name == "wysna_sub" or name == "wysna_mul" or name == "wysna_div_at")
+}
+
+# Validate structure before indexed access, then solve definite initialization and cleanup.
+fn mir_verify_shape(function: MirFunction) {
+    if function.return_type < 1 or function.return_type > 4 or len(function.blocks) == 0 { report_error_at("W9999", function.source, "invalid MIR function signature or entry") }
+    let mut parameters: list[bool] = []
+    for slot in function.slots {
+        if slot.type_id < 1 or slot.type_id > 4 { report_error_at("W9999", function.source, "invalid scalar MIR slot type") }
+        parameters.append(false)
+    }
+    for parameter in function.params {
+        if parameter < 0 or parameter >= len(function.slots) { report_error_at("W9999", function.source, "invalid MIR parameter") }
+        if parameters[parameter] { report_error_at("W9999", function.source, "duplicate MIR parameter") }
+        parameters[parameter] = true
+    }
+    for i in 0..len(function.slots) {
+        if parameters[i] != function.slots[i].parameter { report_error_at("W9999", function.source, "invalid MIR parameter ownership") }
+    }
+    for block in function.blocks {
+        for operation in block.operations {
+            for arg in operation.args {
+                if arg < 0 or arg >= len(function.slots) { report_error_at("W9999", operation.source, "invalid MIR operand") }
+            }
+            if operation.opcode == "release" {
+                if operation.result != -1 or len(operation.args) != 1 { report_error_at("W9999", operation.source, "invalid MIR release shape") }
+                let slot = function.slots[operation.args[0]]
+                if slot.parameter or slot.type_id != 1 { report_error_at("W9999", operation.source, "invalid scalar MIR release") }
+            } else {
+                let result = operation.result
+                if result < 0 or result >= len(function.slots) { report_error_at("W9999", operation.source, "invalid MIR result") }
+                if function.slots[result].parameter { report_error_at("W9999", operation.source, "MIR overwrites borrowed storage") }
+                let type_ = function.slots[result].type_id
+                let mut valid = false
+                if operation.opcode == "const" { valid = len(operation.args) == 0 and operation.value.type_id == type_ }
+                elif operation.opcode == "clone" or operation.opcode == "store" {
+                    valid = len(operation.args) == 1
+                    if valid {
+                        let argument = operation.args[0]
+                        valid = function.slots[argument].type_id == type_
+                        if operation.opcode == "store" { valid = valid and not function.slots[argument].parameter and argument != result }
+                    }
+                } elif operation.opcode == "runtime" { valid = mir_verify_runtime(operation, function.slots) }
+                elif operation.opcode == "call" {
+                    for callee in mir_functions {
+                        if callee.name == operation.name and len(callee.params) == len(operation.args) and callee.return_type == type_ {
+                            valid = true
+                            for i in 0..len(callee.params) {
+                                if callee.slots[callee.params[i]].type_id != function.slots[operation.args[i]].type_id { valid = false }
+                            }
+                        }
+                    }
+                }
+                if not valid { report_error_at("W9999", operation.source, "invalid typed scalar MIR operation") }
+            }
+        }
+        let term = block.terminator
+        let mut arity = -1
+        if term.kind == "goto" { arity = 1 }
+        elif term.kind == "branch" { arity = 2 }
+        elif term.kind == "return" or term.kind == "unreachable" { arity = 0 }
+        if arity < 0 or len(term.targets) != arity { report_error_at("W9999", term.source, "invalid MIR terminator") }
+        for target in term.targets {
+            if target < 0 or target >= len(function.blocks) { report_error_at("W9999", term.source, "invalid MIR branch target") }
+        }
+        if term.kind == "branch" or term.kind == "return" {
+            if term.value < 0 or term.value >= len(function.slots) { report_error_at("W9999", term.source, "invalid MIR terminator value") }
+            let slot = function.slots[term.value]
+            if term.kind == "branch" and slot.type_id != 2 { report_error_at("W9999", term.source, "MIR branch requires bool") }
+            if term.kind == "return" and (slot.type_id != function.return_type or slot.parameter) { report_error_at("W9999", term.source, "invalid MIR return type or ownership") }
+        } elif term.value != -1 { report_error_at("W9999", term.source, "unexpected MIR terminator value") }
+    }
+}
+
+fn mir_verify_flow(function: MirFunction) {
+    let mut initial: list[bool] = []
+    let mut empty: list[bool] = []
+    for slot in function.slots { initial.append(slot.parameter) empty.append(false) }
+    let mut states: list[MirState] = []
+    for block in function.blocks { states.append(MirState { seen: false, defined: empty, live: empty }) }
+    states[0] = MirState { seen: true, defined: initial, live: empty }
+    let mut work: list[int] = [0]
+    let mut cursor = 0
+    while cursor < len(work) {
+        let index = work[cursor]
+        cursor = cursor + 1
+        let mut defined = states[index].defined
+        let mut live = states[index].live
+        let block = function.blocks[index]
+        for operation in block.operations {
+            if operation.opcode == "release" {
+                defined[operation.args[0]] = false
+                live[operation.args[0]] = false
+            } else {
+                for arg in operation.args {
+                    if not defined[arg] { report_error_at("W9999", operation.source, "uninitialized or consumed MIR operand") }
+                }
+                if operation.opcode == "store" {
+                    defined[operation.args[0]] = false
+                    live[operation.args[0]] = false
+                }
+                defined[operation.result] = true
+                live[operation.result] = function.slots[operation.result].type_id == 1
+            }
+        }
+        let term = block.terminator
+        if term.kind == "return" or term.kind == "branch" {
+            if not defined[term.value] { report_error_at("W9999", term.source, "uninitialized MIR terminator value") }
+        }
+        if term.kind == "return" {
+            live[term.value] = false
+            for owned in live { if owned { report_error_at("W9999", term.source, "MIR return leaks owned storage") } }
+        }
+        for target in term.targets {
+            let previous = states[target]
+            let mut next_defined = defined
+            let mut next_live = live
+            let mut changed = not previous.seen
+            if previous.seen {
+                for i in 0..len(defined) {
+                    next_defined[i] = previous.defined[i] and defined[i]
+                    next_live[i] = previous.live[i] or live[i]
+                    if next_defined[i] != previous.defined[i] or next_live[i] != previous.live[i] { changed = true }
+                }
+            }
+            if changed {
+                states[target] = MirState { seen: true, defined: next_defined, live: next_live }
+                work.append(target)
+            }
+        }
+    }
+}
+
+fn mir_verify() {
+    let mut names: list[str] = []
+    let mut entry = false
+    # Validate every signature first so call validation cannot index malformed callees.
+    for function in mir_functions {
+        for name in names { if name == function.name { report_error_at("W9999", function.source, "duplicate MIR function") } }
+        names.append(function.name)
+        if function.name == "wysna_program" { entry = true }
+        for parameter in function.params {
+            if parameter < 0 or parameter >= len(function.slots) { report_error_at("W9999", function.source, "invalid MIR parameter") }
+        }
+    }
+    if not entry { report_error_at("W9999", at_tok(), "missing MIR program entry") }
+    for function in mir_functions { mir_verify_shape(function) }
+    for function in mir_functions { mir_verify_flow(function) }
+}

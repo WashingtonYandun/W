@@ -21,6 +21,8 @@ MODULE_ORDER = [
     "08_checker.wysna",
     "08_semantics.wysna",
     "08_mir.wysna",
+    "08_mir_lowering.wysna",
+    "08_mir_verifier.wysna",
     "09_main.wysna",
 ]
 
