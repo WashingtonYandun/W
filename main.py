@@ -13,7 +13,14 @@ from formatter.Formatter import Formatter
 from compiler.CompilerService import CompilerService
 from compiler.NativeToolchain import NativeCompilationError, NativeToolchain
 from error.Error import WysnaError
-from tooling.ToolResult import diagnostic_from_error, diagnostic_record, tool_result, write_tool_result
+from tooling.ToolResult import (
+    artifact_file,
+    artifact_inline,
+    diagnostic_from_error,
+    diagnostic_record,
+    tool_result,
+    write_tool_result,
+)
 
 from common.Version import WYSNA_VERSION
 from common.Platform import cache_lock, compiler_command, executable_name, peak_rss_kb
@@ -23,13 +30,25 @@ def get_repo_root() -> str:
     return os.path.dirname(os.path.realpath(__file__))
 
 
+def _bounded_tool_output(value: str, limit: int = 8192) -> str:
+    """Keep subprocess diagnostics useful without embedding unbounded output."""
+    if len(value) <= limit:
+        return value
+    suffix = "\n[tool output truncated]"
+    return value[:limit - len(suffix)] + suffix
+
+
 def _write_json_v1(command, status, exit_code, *, errors=(), source_by_file=None,
-                   extra_diagnostics=()):
+                   extra_diagnostics=(), artifacts=(), target=None):
     diagnostics = list(extra_diagnostics)
     for error in errors:
         nested = getattr(error, "diagnostics", (error,))
         diagnostics.extend(diagnostic_from_error(item, source_by_file) for item in nested)
-    write_tool_result(tool_result(command, status, exit_code, diagnostics=diagnostics), sys.stdout)
+    write_tool_result(
+        tool_result(command, status, exit_code, diagnostics=diagnostics,
+                    artifacts=artifacts, target=target),
+        sys.stdout,
+    )
 
 
 # Every input that can change the bytes of the stage-2 compiler binary. The hand-written
@@ -140,7 +159,19 @@ def run_pipeline(
     show_mir: bool = False,
     execution_context: Optional[ExecutionContext] = None,
     json_v1: bool = False,
+    tool_command: Optional[str] = None,
 ) -> int:
+    if tool_command is None:
+        if check_only:
+            tool_command = "check"
+        elif fmt_only:
+            tool_command = "fmt"
+        elif emit_c_path is not None:
+            tool_command = "emit-c"
+        elif build_bin_path is not None:
+            tool_command = "build"
+        else:
+            tool_command = "run"
     try:
         # Resolve legacy flags if passed explicitly
         if use_selfhost:
@@ -188,8 +219,21 @@ def run_pipeline(
             if fmt_write and file_name != "<stdin>":
                 with open(file_name, "w", encoding="utf-8") as f:
                     f.write(formatted)
+                if json_v1:
+                    artifact = artifact_file("formatted_source", "text/x-wysna", file_name)
             else:
-                print(formatted, end="")
+                if json_v1:
+                    artifact = artifact_inline("formatted_source", "text/x-wysna", formatted)
+                else:
+                    print(formatted, end="")
+            if json_v1:
+                _write_json_v1(
+                    tool_command,
+                    "ok",
+                    0,
+                    artifacts=[artifact],
+                    target={"profile": "wysna-source", "triple": None},
+                )
             return 0
 
         if not selfhost_direct:
@@ -205,7 +249,7 @@ def run_pipeline(
 
         if check_only:
             if json_v1:
-                _write_json_v1("check", "ok", 0)
+                _write_json_v1(tool_command, "ok", 0)
                 return 0
             if show_stats:
                 stat_obj = {
@@ -279,6 +323,15 @@ def run_pipeline(
                 with open(emit_c_path, "w", encoding="utf-8") as f:
                     f.write(c_code)
                 if build_bin_path is None:
+                    if json_v1:
+                        artifact = artifact_file("c_source", "text/x-c", emit_c_path)
+                        _write_json_v1(
+                            tool_command,
+                            "ok",
+                            0,
+                            artifacts=[artifact],
+                            target={"profile": "c99-source", "triple": None},
+                        )
                     report_codegen_stats()
                     return 0
 
@@ -286,6 +339,17 @@ def run_pipeline(
                 built = toolchain.build(c_code, build_bin_path, sanitize=sanitize,
                                         link_libraries=link_libraries)
                 c_compile_ms, link_ms = built.c_compile_ms, built.link_ms
+                if json_v1:
+                    artifact = artifact_file(
+                        "native_executable", "application/octet-stream", built.output_path,
+                    )
+                    _write_json_v1(
+                        tool_command,
+                        "ok",
+                        0,
+                        artifacts=[artifact],
+                        target={"profile": "native-cli", "triple": None},
+                    )
                 report_codegen_stats()
                 return 0
 
@@ -316,10 +380,11 @@ def run_pipeline(
     except NativeCompilationError as err:
         if json_v1:
             diagnostic = diagnostic_record(
-                "W5001", "toolchain", f"{err.phase} failed: {err.stderr}",
+                "W5001", "toolchain",
+                _bounded_tool_output(f"{err.phase} failed: {err.stderr}"),
                 filename=file_name,
             )
-            _write_json_v1("check", "toolchain_error", 3,
+            _write_json_v1(tool_command, "toolchain_error", 3,
                            extra_diagnostics=[diagnostic])
             return 3
         print(f"[{err.label}]\n{err.stderr}", file=sys.stderr)
@@ -327,7 +392,7 @@ def run_pipeline(
     except WysnaError as err:
         if json_v1:
             _write_json_v1(
-                "check", "diagnostic_error", 1, errors=[err],
+                tool_command, "diagnostic_error", 1, errors=[err],
                 source_by_file={file_name: source_code,
                                 os.path.abspath(file_name): source_code},
             )
@@ -340,10 +405,18 @@ def run_pipeline(
         return 1
     except Exception as exc:
         if json_v1:
+            if isinstance(exc, OSError):
+                diagnostic = diagnostic_record(
+                    "W5004", "filesystem", f"Unable to write requested output: {exc}",
+                    filename=file_name,
+                )
+                _write_json_v1(tool_command, "toolchain_error", 3,
+                               extra_diagnostics=[diagnostic])
+                return 3
             diagnostic = diagnostic_record(
                 "W9999", "internal", str(exc), filename=file_name,
             )
-            _write_json_v1("check", "internal_error", 4,
+            _write_json_v1(tool_command, "internal_error", 4,
                            extra_diagnostics=[diagnostic])
             return 4
         if json_diagnostics:
@@ -413,12 +486,12 @@ def print_help(prog: Optional[str] = None) -> None:
     print(f"  {prog} repl                                    # Start interactive REPL")
     print(f"  {prog} [run] [--stats] <file.wysna> [-- args...] # Execute Wysna source file")
     print(f"  {prog} check [--json|--output-format=json-v1] [--stats] <file.wysna>   # Static typecheck without execution")
-    print(f"  {prog} fmt [--write] <file.wysna>              # Canonical deterministic formatter")
+    print(f"  {prog} fmt [--write] [--output-format=json-v1] <file.wysna> # Canonical deterministic formatter")
     print(f"  {prog} ast [--json] <file.wysna>               # Emit canonical JSON AST (v0.1)")
     print(f"  {prog} mir <file.wysna>                        # Emit verified MIR as JSON")
     print(f"  {prog} tokens <file.wysna>                     # Emit lexical token stream")
-    print(f"  {prog} emit-c [--backend=hir|ast|selfhost] [--stats] <file.wysna> [-o <out.c>] # Transpile Wysna source to C99 (default: hir)")
-    print(f"  {prog} build [--backend=hir|ast|selfhost] [--stats] <file.wysna> [-o <bin>]    # Compile Wysna source to native binary (default: hir)")
+    print(f"  {prog} emit-c [--backend=hir|ast|selfhost] [--output-format=json-v1] <file.wysna> [-o <out.c>] # Transpile to C99")
+    print(f"  {prog} build [--backend=hir|ast|selfhost] [--output-format=json-v1] <file.wysna> [-o <bin>] # Compile native binary")
     print(f"  {prog} test [--differential [N]] [--fuzz [N]]            # Run conformance, differential, or fuzz suite")
     print(f"  {prog} bench [--update-baseline]                         # Run Seed/Compiler performance benchmark harness")
     print(f"  {prog} version                                           # Show compiler version")
@@ -654,12 +727,30 @@ def main(argv=None) -> None:
     prog_cmd = "wysna"
 
     if json_v1:
-        if subcmd != "check":
-            usage_error("--output-format=json-v1 is currently supported only by check")
-        if json_diagnostics or show_stats or show_ast or show_tokens or show_mir or fmt_only:
-            usage_error("--output-format=json-v1 cannot be combined with legacy JSON, stats, or output modes")
-        if emit_c_path is not None or build_bin_path is not None or sanitize or link_libraries:
-            usage_error("--output-format=json-v1 supports check-only invocations")
+        supported_commands = ("check", "fmt", "emit-c", "build")
+        if subcmd not in supported_commands:
+            usage_error("--output-format=json-v1 is supported only by check, fmt, emit-c, and build")
+        if json_diagnostics or show_stats or show_ast or show_tokens or show_mir:
+            usage_error("--output-format=json-v1 cannot be combined with legacy JSON, stats, or diagnostic output modes")
+        if subcmd == "check":
+            if (not check_only or fmt_only or fmt_write or emit_c_path is not None
+                    or build_bin_path is not None):
+                usage_error("check --output-format=json-v1 supports type checking only")
+            if sanitize or link_libraries:
+                usage_error("check --output-format=json-v1 does not accept build options")
+        elif subcmd == "fmt":
+            if not fmt_only or check_only or emit_c_path is not None or build_bin_path is not None:
+                usage_error("fmt --output-format=json-v1 supports formatting only")
+            if sanitize or link_libraries or backend != "hir":
+                usage_error("fmt --output-format=json-v1 does not accept backend or build options")
+        elif subcmd == "emit-c":
+            if check_only or fmt_only or fmt_write or build_bin_path is not None:
+                usage_error("emit-c --output-format=json-v1 supports C generation only")
+            if sanitize or link_libraries:
+                usage_error("emit-c --output-format=json-v1 does not accept build options")
+        elif subcmd == "build":
+            if check_only or fmt_only or fmt_write or emit_c_path is not None:
+                usage_error("build --output-format=json-v1 supports native compilation only")
 
     if file_to_run:
         if file_to_run.endswith(".w"):
@@ -682,6 +773,17 @@ def main(argv=None) -> None:
         elif subcmd == "build" and build_bin_path is None:
             build_bin_path = _strip_src_ext(file_to_run) if file_to_run.endswith(".wysna") else file_to_run + ".bin"
 
+        if json_v1 and subcmd in ("emit-c", "build"):
+            output_path = emit_c_path if subcmd == "emit-c" else build_bin_path
+            canonical_output = os.path.normcase(os.path.realpath(output_path))
+            canonical_source = os.path.normcase(os.path.realpath(file_to_run))
+            try:
+                same_file = os.path.samefile(output_path, file_to_run)
+            except OSError:
+                same_file = False
+            if canonical_output == canonical_source or same_file:
+                usage_error("the output path must not overwrite the source file")
+
         try:
             with open(file_to_run, "r", encoding="utf-8", newline="" if json_v1 else None) as f:
                 source = f.read()
@@ -692,7 +794,7 @@ def main(argv=None) -> None:
                     filename=file_to_run,
                 )
                 write_tool_result(
-                    tool_result("check", "toolchain_error", 3,
+                    tool_result(command_for_output, "toolchain_error", 3,
                                 diagnostics=[diagnostic]),
                     sys.stdout,
                 )
@@ -720,6 +822,7 @@ def main(argv=None) -> None:
             link_libraries=link_libraries,
             execution_context=ExecutionContext.for_program(prog_cmd, program_args),
             json_v1=json_v1,
+            tool_command=command_for_output,
         )
         sys.exit(code)
 
@@ -730,11 +833,11 @@ def main(argv=None) -> None:
         usage_error("program arguments require a source file")
     if subcmd is None or subcmd == "repl":
         if json_v1:
-            usage_error("--output-format=json-v1 requires the check command and a source file")
+            usage_error("--output-format=json-v1 requires a supported command and a source file")
         repl(show_tokens=show_tokens, show_ast=show_ast)
         return
     if json_v1:
-        usage_error("check requires a source file")
+        usage_error(f"{subcmd} requires a source file")
     print(f"{prog_cmd} {subcmd}: no input file given", file=sys.stderr)
     print(f"usage: {prog_cmd} {subcmd} <file.wysna> [options]", file=sys.stderr)
     print(f"       {prog_cmd} repl        # start the interactive REPL", file=sys.stderr)

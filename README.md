@@ -197,6 +197,7 @@ See [docs/STDLIB.md](docs/STDLIB.md) for full API reference and examples.
 wysna run <file.wysna> [-- args...]    # Execute with program arguments
 wysna check <file.wysna>               # Parse and type-check without code execution
 wysna check --output-format=json-v1 <file.wysna>  # Emit a versioned machine-readable result
+wysna fmt --output-format=json-v1 <file.wysna>    # Return formatted source as a JSON artifact
 wysna build <file.wysna> -o <bin>      # Compile to native standalone executable
 wysna emit-c <file.wysna> -o <out.c>   # Generate human-readable portable C99 code
 wysna fmt <file.wysna>                 # Format source while preserving comments and layout
@@ -204,6 +205,11 @@ wysna lsp                              # Launch Language Server Protocol daemon 
 wysna test                             # Run full test suite across all 4 execution engines
 wysna bench                            # Run self-hosted performance benchmarks
 ```
+
+`check`, `fmt`, `emit-c`, and `build` also accept `--output-format=json-v1`. The
+formatter returns inline source content; code and binary generation report artifact
+paths and SHA-256 hashes. The default text output and legacy `--json` format remain
+unchanged when the option is omitted.
 
 Arguments after `--` are available through `args()`. The interpreter uses `"wysna"` as
 `args()[0]`; a native executable receives the operating system's argument vector.
