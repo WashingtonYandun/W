@@ -14,6 +14,7 @@ class EmissionResult:
     source: str
     telemetry: dict
     timing_ms: dict
+    abi_exports: tuple = ()
 
 
 class CompilerService:
@@ -152,9 +153,13 @@ class CompilerService:
         from mir.Lowering import Lowering
         return Lowering(checked._interner, checked.source.file).lower(self.lower_hir(checked))
 
-    def emit_c(self, checked, backend='hir'):
+    def emit_c(self, checked, backend='hir', *, target_profile=None):
         self._validate(checked)
+        browser_library = target_profile == 'browser-library'
         if backend == 'ast':
+            if browser_library:
+                raise WysnaError('browser-library requires verified HIR and MIR emission',
+                                 file=checked.source.file, code='W2013', stage='target')
             from codegen.CCodeGen import CCodeGen
             started = time.perf_counter()
             generator = CCodeGen(file=checked.source.file)
@@ -170,14 +175,15 @@ class CompilerService:
         module = self.lower_hir(checked)
         lowered = time.perf_counter()
         generator = HirCCodeGen(checked._interner, file_path=checked.source.file)
-        source = generator.generate(module)
+        source = generator.generate(module, library_mode=browser_library)
         source = self._enable_http_runtime(source)
         emitted = time.perf_counter()
         return EmissionResult(source, generator.telemetry.to_dict(),
                               {'hir': (lowered - started) * 1000,
                                'mir': generator.phase_ms['mir'],
                                'c_emit': generator.phase_ms['c_emit'],
-                               'codegen': (emitted - lowered) * 1000})
+                               'codegen': (emitted - lowered) * 1000},
+                              tuple(getattr(generator, 'abi_exports', ())))
 
     @staticmethod
     def _enable_http_runtime(source):

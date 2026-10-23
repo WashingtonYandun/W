@@ -367,7 +367,7 @@ class HirBuilder:
             is_fallible=is_fallible,
             err_type_name=err_type_name,
             is_method=False,
-            is_public=True,
+            is_public=bool(getattr(decl, "is_exported", False)),
             span=self._span(decl)
         )
 

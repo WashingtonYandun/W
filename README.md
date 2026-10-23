@@ -271,6 +271,12 @@ requires explicit manifest preopens; child processes, networking, and native C F
 are not available to this profile. See [Wysna Projects](docs/PROJECTS.md) for SDK
 installation, limits, and manifest configuration.
 
+The `browser-library` profile builds an importable JavaScript facade and WebAssembly
+module with Emscripten 5.0.1. Its generated ABI exposes only top-level, non-fallible
+`pub fn` operations using `int`, `float`, `bool`, `str`, and `unit`; `int` maps to JavaScript
+`BigInt`, and strings cross as owned UTF-8 buffers. `WVal`, runtime pointers, host
+filesystem, networking, and process APIs stay outside this browser interface.
+
 `check`, `fmt`, `emit-c`, and `build` also accept `--output-format=json-v1`. The
 formatter returns inline source content; code and binary generation report artifact
 paths and SHA-256 hashes. The default text output and legacy `--json` format remain

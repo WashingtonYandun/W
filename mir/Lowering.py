@@ -230,6 +230,15 @@ class Lowering:
         self.begin(name, declaration.return_type_id, self.source(declaration))
         self.current_class = owner
         self.fallible, self.err_type = declaration.is_fallible, declaration.err_type_name
+        source_file = getattr(declaration.span, 'file_path', None)
+        if (owner is None and declaration.is_public and source_file == self.file):
+            self.module.exports.append({
+                'name': declaration.name,
+                'function': name,
+                'params': tuple(parameter.type_id for parameter in declaration.params),
+                'return_type': declaration.return_type_id,
+                'fallible': declaration.is_fallible,
+            })
         if owner:
             self.receiver = self.slot(owner.type_id, 'v_self', ownership='borrowed', parameter=True)
         for index, parameter in enumerate(declaration.params):
