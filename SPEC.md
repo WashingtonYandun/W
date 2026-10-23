@@ -523,6 +523,8 @@ fn compile(source: str) {
        - `W4003`: Runtime execution error
      - **`W5xxx` — Host Toolchain Diagnostics:**
        - `W5001`: C compiler command unavailable or invalid. This is an environment error, not a source type error or compiler invariant failure.
+       - `W5002`: Invalid command usage or option.
+       - `W5003`: Source file could not be read.
    - `wysna check --json <file.wysnaysna>` outputs deterministic machine-readable JSON:
    ```json
    {
@@ -540,7 +542,43 @@ fn compile(source: str) {
      }
    }
    ```
-3. **Stable AST Representation (`wysna ast file.wysna --json`):**
+3. **Versioned Tool Result (`wysna check --output-format=json-v1`):**
+   - The opt-in v1 protocol emits exactly one JSON document on stdout. The legacy
+     `--json` format remains unchanged and cannot be combined with v1.
+   - Initial command coverage is `check`. Unsupported commands and incompatible flags
+     produce a `usage_error` envelope instead of silently falling back to legacy output.
+   - The envelope has `schema_version`, `command`, `status`, `invocation_id`, tool and
+     process exit codes, execution metadata, toolchain and target metadata, diagnostics,
+     artifacts, and optional telemetry.
+   - A diagnostic uses stable code, severity, stage, message, primary span, related
+     locations, typed data, and fixes. The primary span contains the exact source hash
+     and UTF-8 byte offsets when its source and position are known. Existing point-only
+     diagnostics use a zero-width range; unavailable locations are `null`.
+   - File read failures use `W5003`; usage failures use `W5002`. Successful checks have
+     `status: "ok"` and empty diagnostics. Type and syntax failures use
+     `status: "diagnostic_error"`.
+
+   ```text
+   wysna check --output-format=json-v1 src/main.wysna
+   ```
+
+   ```json
+   {
+     "schema_version": "wysna.tool-result/1",
+     "command": "check",
+     "status": "ok",
+     "invocation_id": "generated-unique-id",
+     "tool_exit_code": 0,
+     "process_exit_code": 0,
+     "execution": null,
+     "toolchain": {"compiler": "0.5.0"},
+     "target": {"profile": "native-cli", "triple": null},
+     "diagnostics": [],
+     "artifacts": [],
+     "telemetry": null
+   }
+   ```
+4. **Stable AST Representation (`wysna ast file.wysna --json`):**
    - Emits a standardized JSON AST containing `"wysna_ast_version": "0.1"` for reliable agentic code analysis.
 
 ---

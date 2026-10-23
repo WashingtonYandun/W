@@ -196,6 +196,7 @@ See [docs/STDLIB.md](docs/STDLIB.md) for full API reference and examples.
 ```text
 wysna run <file.wysna> [-- args...]    # Execute with program arguments
 wysna check <file.wysna>               # Parse and type-check without code execution
+wysna check --output-format=json-v1 <file.wysna>  # Emit a versioned machine-readable result
 wysna build <file.wysna> -o <bin>      # Compile to native standalone executable
 wysna emit-c <file.wysna> -o <out.c>   # Generate human-readable portable C99 code
 wysna fmt <file.wysna>                 # Format source while preserving comments and layout
