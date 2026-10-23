@@ -2,6 +2,7 @@
 from collections import deque
 import re
 from checker.TypeInterner import TYPE_BOOL, TYPE_INT, TYPE_UNIT, TYPE_NONE, TYPE_FLOAT, TYPE_STR
+from checker.TypeRelations import TypeRelations
 from error.Error import WysnaError
 from mir.Nodes import EFFECTS, Place
 
@@ -40,13 +41,14 @@ CONSUMING = {'wysna_ok': (0,), 'wysna_err': (0,), 'wysna_enum_payload': (0,),
 class Verifier:
     def __init__(self, interner):
         self.interner = interner
+        self.relations = TypeRelations(interner)
 
     def fail(self, message, source=None):
         raise WysnaError(message, file=getattr(source, 'file', '<mir>'), line=getattr(source, 'line', 1),
                      col=getattr(source, 'col', 1), code='W9999', stage='mir-verification')
 
     def compatible(self, source, target):
-        return self.interner.is_assignable(source, target)
+        return self.relations.is_assignable(source, target)
 
     def verify(self, module):
         if module.arena_id != self.interner.arena_id:
@@ -137,7 +139,7 @@ class Verifier:
                     result.type_id == (TYPE_BOOL if comparison else types[0]))
         elif name in ('wysna_equal', 'wysna_not_equal'):
             require(result.type_id == TYPE_BOOL and
-                    self.interner.equality_compatible(types[0], types[1]))
+                    self.relations.equality_compatible(types[0], types[1]))
         elif name == 'wysna_make_range':
             require(types == [TYPE_INT, TYPE_INT] and list_of(TYPE_INT) and
                     isinstance(operation.data.get('inclusive'), bool))

@@ -27,10 +27,11 @@ from checker.WysnaType import (
     InterfaceType, ClassFieldInfo, ClassMethodInfo, ClassType,
     ResultType, ErrorUnionType, FunctionType, ModuleType, AnyType,
     TypeParamType, GenericStructTemplate, GenericFnTemplate, GenericEnumTemplate,
-    is_assignable, is_error_channel_assignable
 )
 from checker.SymbolTable import Scope, Symbol, create_global_scope
 from checker.TypeInterner import TypeInterner
+from checker.TypeRelations import TypeRelations
+from checker.Generics import GenericDefinitionChecker, Instantiator
 from error.Error import TypeError
 from checker.LayoutGraph import LayoutGraph, build_layout_graph_from_declarations
 
@@ -104,7 +105,9 @@ def _mangle_type_static(t: WysnaType) -> str:
         members = "__".join(_mangle_type_static(member) for member in t.alternatives)
         return f"errunion_{len(t.alternatives)}__{members}"
     if isinstance(t, TypeParamType):
-        return t.name
+        if t.owner is None:
+            return t.name
+        return f"typeparam__{len(t.owner)}_{t.owner}__{t.name}"
     safe_str = str(t).replace("[", "__").replace("]", "").replace(", ", "__").replace(" ", "_")
     return f"{len(safe_str)}_{safe_str}"
 
@@ -197,6 +200,7 @@ class TypeChecker:
         from compiler.CompilationSession import CompilationSession
         self.session = session or CompilationSession()
         self.interner: TypeInterner = self.session.interner
+        self._type_relations = TypeRelations(self.interner)
         self.monomorphized_oop_decls = []
         self.generic_struct_templates: Dict[str, GenericStructTemplate] = {}
         self.generic_fn_templates: Dict[str, GenericFnTemplate] = {}
@@ -215,6 +219,7 @@ class TypeChecker:
         # consult this binding before treating a name as a declared type.
         self._active_type_subst: Optional[Dict[str, WysnaType]] = None
         self.telemetry: MonomorphizationTelemetry = MonomorphizationTelemetry()
+        self._checking_generic_definition = None
 
         # Canonical built-in Option[T] template
         opt_decl = EnumDecl(
@@ -237,6 +242,13 @@ class TypeChecker:
             type_params=[TypeParam(name="T"), TypeParam(name="E")]
         )
         self.generic_enum_templates["Result"] = GenericEnumTemplate("Result", [TypeParam(name="T"), TypeParam(name="E")], res_decl)
+        self.instantiator = Instantiator(self)
+
+    @property
+    def type_relations(self) -> TypeRelations:
+        if self._type_relations.interner is not self.interner:
+            self._type_relations = TypeRelations(self.interner)
+        return self._type_relations
 
     def check(self, program: Program) -> None:
         self.session.check_program(program, self)
@@ -264,6 +276,10 @@ class TypeChecker:
         templates = list(self.generic_struct_templates.values())
         templates.extend(self.generic_fn_templates.values())
         templates.extend(self.generic_enum_templates.values())
+        templates.extend(
+            template for template in self.global_scope.types.values()
+            if isinstance(template, GenericOopTemplate)
+        )
         for template in templates:
             for parameter in template.type_params:
                 constraint = getattr(parameter, "constraint", None)
@@ -271,6 +287,7 @@ class TypeChecker:
                     self._resolve_constraint_interface(constraint, parameter.line, parameter.col)
 
         # Pass 2: Typecheck bodies & statements
+        GenericDefinitionChecker(self).check_all()
         self._pass2_check_program(program)
 
         # Filter out uninstantiated generic templates and insert monomorphized declarations
@@ -610,7 +627,7 @@ class TypeChecker:
                     if base_m.is_public and not minfo.is_public:
                         raise TypeError(f"Public method '{mname}' cannot become private", file=self.file,
                                         line=stmt.line, col=stmt.col, code="W3002")
-                    if minfo.fn_type.params != base_m.fn_type.params or not is_assignable(minfo.fn_type.ret, base_m.fn_type.ret):
+                    if minfo.fn_type.params != base_m.fn_type.params or not self.type_relations.is_assignable(minfo.fn_type.ret, base_m.fn_type.ret):
                         raise TypeError(
                             message=f"Method '{mname}' in class '{stmt.name}' has incompatible override signature with superclass '{base_m.owner_class}'",
                             line=stmt.line,
@@ -643,7 +660,7 @@ class TypeChecker:
                             file=self.file,
                             code="W3003"
                         )
-                    if impl_info.fn_type.params != req_sig.params or not is_assignable(impl_info.fn_type.ret, req_sig.ret):
+                    if impl_info.fn_type.params != req_sig.params or not self.type_relations.is_assignable(impl_info.fn_type.ret, req_sig.ret):
                         raise TypeError(
                             message=f"Method '{req_name}' in class '{stmt.name}' does not match signature required by interface '{intf.name}'",
                             line=stmt.line,
@@ -660,6 +677,18 @@ class TypeChecker:
     def _pass2_check_program(self, program: Program) -> None:
         for stmt in program.body:
             self._check_stmt(stmt)
+
+    def _clone_generic_definition(self, template, substitutions):
+        declaration = clone_ast(template.ast_decl)
+        declaration.type_params = []
+        declaration.return_type = self._substitute_type_node(declaration.return_type, substitutions)
+        declaration.params = [
+            Param(parameter.name, self._substitute_type_node(parameter.type_ann, substitutions),
+                  line=parameter.line, col=parameter.col)
+            for parameter in declaration.params
+        ]
+        self._substitute_ast_types(declaration.body, substitutions)
+        return declaration
 
     def _check_stmt(self, stmt: Stmt) -> None:
         if isinstance(stmt, (EnumDecl, StructDecl, InterfaceDecl, ImportDecl)):
@@ -680,7 +709,7 @@ class TypeChecker:
 
         elif isinstance(stmt, WhileStmt):
             cond_t = self._check_expr(stmt.condition)
-            if cond_t != BoolType:
+            if not self._require_boolean(cond_t, stmt.condition, "While loop condition"):
                 raise TypeError(
                     message=f"While loop condition must be bool, found '{cond_t}'",
                     line=stmt.condition.line,
@@ -707,7 +736,7 @@ class TypeChecker:
                     file=self.file,
                     code="W1004"
                 )
-            if not is_assignable(val_t, self.current_fn_ret_type):
+            if not self.type_relations.is_assignable(val_t, self.current_fn_ret_type):
                 raise TypeError(
                     message=f"Return type mismatch: expected '{self.current_fn_ret_type}', found '{val_t}'",
                     line=stmt.line,
@@ -740,6 +769,17 @@ class TypeChecker:
 
         elif isinstance(stmt, ExprStmt):
             self._check_expr(stmt.expr, is_statement_context=True)
+
+    def _require_boolean(self, type_, node, description: str) -> bool:
+        if type_ == BoolType:
+            return True
+        if isinstance(type_, TypeParamType) and self._checking_generic_definition:
+            self.type_relations.record_requirement(
+                "boolean", type_, description, file=self.file,
+                line=getattr(node, "line", 1), col=getattr(node, "col", 1)
+            )
+            return True
+        return False
 
     def _check_constructor_rules(self, stmt: ClassDecl, cls_type: ClassType, m: MethodDecl) -> None:
         # 1. Constructor return type check: init cannot return non-unit
@@ -790,7 +830,7 @@ class TypeChecker:
                         self._check_constructor_rules(stmt, cls_type, m)
                     self._mark_tail_result_lift(m.body.tail_expr, fn_type.ret)
                     if not is_unit_ret and not self._block_has_return(m.body):
-                        if body_ret is not None and is_assignable(body_ret, fn_type.ret):
+                        if body_ret is not None and self.type_relations.is_assignable(body_ret, fn_type.ret):
                             pass
                         else:
                             raise TypeError(
@@ -815,7 +855,19 @@ class TypeChecker:
                     or not isinstance(stmt.return_type, NamedType) or stmt.return_type.name not in allowed | {"unit"}):
                 raise TypeError("C FFI accepts only scalar and opaque ABI types", file=self.file,
                                 line=stmt.line, col=stmt.col, code="W2001")
+            for p in stmt.params:
+                if getattr(p, "type_ann", None) is not None:
+                    self._resolve_type_node(p.type_ann)
+            if getattr(stmt, "return_type", None) is not None:
+                self._resolve_type_node(stmt.return_type)
             return
+
+        for p in stmt.params:
+            if getattr(p, "type_ann", None) is not None:
+                self._resolve_type_node(p.type_ann)
+        if getattr(stmt, "return_type", None) is not None:
+            self._resolve_type_node(stmt.return_type)
+
         sym = self.global_scope.lookup_symbol(stmt.name)
         assert sym is not None and isinstance(sym.type, FunctionType)
         fn_type: FunctionType = sym.type
@@ -845,7 +897,7 @@ class TypeChecker:
 
             # If function expects a return value other than unit, verify return presence
             if not is_unit_ret and not self._block_has_return(stmt.body):
-                if body_ret is not None and is_assignable(body_ret, fn_type.ret):
+                if body_ret is not None and self.type_relations.is_assignable(body_ret, fn_type.ret):
                     pass  # Tail expression satisfies return
                 else:
                     raise TypeError(
@@ -926,7 +978,7 @@ class TypeChecker:
                 )
             for i, (a_expr, p_type) in enumerate(zip(args, expected_params)):
                 a_type = self._check_expr(a_expr)
-                if not is_assignable(a_type, p_type):
+                if not self.type_relations.is_assignable(a_type, p_type):
                     raise TypeError(
                         message=f"Constructor argument {i + 1} type mismatch: expected '{p_type}', found '{a_type}'",
                         line=a_expr.line,
@@ -1018,7 +1070,7 @@ class TypeChecker:
             self.expected_type = old_expected
 
         if expected_type is not None:
-            if not is_assignable(init_type, expected_type):
+            if not self.type_relations.is_assignable(init_type, expected_type):
                 raise TypeError(
                     message=f"Type mismatch: cannot assign value of type '{init_type}' to variable '{stmt.name}' of type '{expected_type}'",
                     line=stmt.line,
@@ -1106,7 +1158,7 @@ class TypeChecker:
                 for arm in expr.arms:
                     self._mark_tail_result_lift(arm.body.tail_expr, target)
             source = self.interner.get_entry(expr.inferred_type_id)
-            if source.tag == 'result' and not self.interner.is_error_channel_assignable(
+            if source.tag == 'result' and not self.type_relations.is_error_channel_assignable(
                     source.data[1], self.interner.intern(target.err)):
                 raise TypeError("Incompatible error channel in unit result tail", file=self.file,
                                 line=expr.line, col=expr.col, code="W2004")
@@ -1123,7 +1175,7 @@ class TypeChecker:
             source_ok, source_error = source_entry.data
             target_ok, target_error = target_entry.data
             same_ok = source_ok == target_ok or self.interner.get_entry(source_ok).tag == "any" or self.interner.get_entry(target_ok).tag == "any"
-            same_error = self.interner.is_error_channel_assignable(source_error, target_error)
+            same_error = self.type_relations.is_error_channel_assignable(source_error, target_error)
             if same_ok and same_error:
                 return
         if self.interner.get_entry(target_id).tag == "result" and expr.inferred_type_id != target_id:
@@ -1137,7 +1189,7 @@ class TypeChecker:
             actual = self._check_expr(expr)
         finally:
             self.expected_type = previous
-        if expected is not None and is_assignable(actual, expected):
+        if expected is not None and self.type_relations.is_assignable(actual, expected):
             self._mark_result_lift(expr, expected, force=True)
             return expected
         return actual
@@ -1170,6 +1222,7 @@ class TypeChecker:
             raise TypeError("Bound method values require an explicit lambda adapter", file=self.file, line=expr.line, col=expr.col, code="W2013")
         expr.inferred_type = inferred_type
         expr.inferred_type_id = self.interner.from_type(inferred_type)
+        expr.session_arena_id = self.interner.arena_id
         return inferred_type
 
     def _check_expr_impl(self, expr: Expr, is_statement_context: bool = False) -> WysnaType:
@@ -1225,7 +1278,8 @@ class TypeChecker:
                 if expr.name in var_names:
                     if tmpl.name == "Option" and expr.name in ("None", "none"):
                         return NoneType
-                    concrete_args = [TypeParamType(p.name if hasattr(p, "name") else str(p)) for p in tmpl.type_params]
+                    concrete_args = [TypeParamType(p.name if hasattr(p, "name") else str(p), owner=tmpl.name)
+                                     for p in tmpl.type_params]
                     return self._monomorphize_enum(tmpl, concrete_args, expr.line, expr.col)
             raise TypeError(
                 message=f"Unknown identifier '{expr.name}'",
@@ -1238,6 +1292,10 @@ class TypeChecker:
         if isinstance(expr, UnaryExpr):
             operand_t = self._check_expr(expr.operand)
             if expr.op == "-":
+                if isinstance(operand_t, TypeParamType) and self._checking_generic_definition:
+                    self.type_relations.record_operation(expr.op, (operand_t,), file=self.file,
+                                                         line=expr.line, col=expr.col)
+                    return operand_t
                 if operand_t in (IntType, FloatType):
                     return operand_t
                 raise TypeError(
@@ -1248,6 +1306,10 @@ class TypeChecker:
                     code="W2001"
                 )
             if expr.op == "not":
+                if isinstance(operand_t, TypeParamType) and self._checking_generic_definition:
+                    self.type_relations.record_operation(expr.op, (operand_t,), file=self.file,
+                                                         line=expr.line, col=expr.col)
+                    return BoolType
                 if operand_t == BoolType:
                     return BoolType
                 raise TypeError(
@@ -1262,6 +1324,15 @@ class TypeChecker:
             lhs_t = self._check_expr(expr.left)
             rhs_t = self._check_expr(expr.right)
             op = expr.op
+
+            if (self._checking_generic_definition and
+                    (isinstance(lhs_t, TypeParamType) or isinstance(rhs_t, TypeParamType)) and
+                    op not in ("==", "!=")):
+                self.type_relations.record_operation(op, (lhs_t, rhs_t), file=self.file,
+                                                     line=expr.line, col=expr.col)
+                if op in ("and", "or", "<", "<=", ">", ">="):
+                    return BoolType
+                return lhs_t if isinstance(lhs_t, TypeParamType) else rhs_t
 
             if op == "+":
                 if lhs_t == IntType and rhs_t == IntType:
@@ -1305,7 +1376,7 @@ class TypeChecker:
             if op in ("==", "!="):
                 left_id = self.interner.from_type(lhs_t)
                 right_id = self.interner.from_type(rhs_t)
-                if not self.interner.equality_compatible(left_id, right_id):
+                if not self.type_relations.equality_compatible(left_id, right_id):
                     raise TypeError(
                         message=f"Cannot compare equality of different types '{lhs_t}' and '{rhs_t}'",
                         line=expr.line,
@@ -1371,7 +1442,7 @@ class TypeChecker:
                     code="W2006"
                 )
             rhs_t = self._check_payload(expr.right, opt_inner)
-            if not is_assignable(rhs_t, opt_inner):
+            if not self.type_relations.is_assignable(rhs_t, opt_inner):
                 raise TypeError(
                     message=f"Right operand of '??' type mismatch: expected '{opt_inner}', found '{rhs_t}'",
                     line=expr.line,
@@ -1411,7 +1482,7 @@ class TypeChecker:
                         code="W2006"
                     )
                 cur_err = self.current_fn_ret_type.err if isinstance(self.current_fn_ret_type, ResultType) else self.current_fn_ret_type.type_args[1]
-                if not is_error_channel_assignable(res_err, cur_err):
+                if not self.type_relations.is_error_channel_assignable(res_err, cur_err):
                     raise TypeError(
                         message=f"Error type mismatch in '?' propagation: '{res_err}' is not covered by declared '{cur_err}'",
                         line=expr.line,
@@ -1475,7 +1546,7 @@ class TypeChecker:
 
             if not self._block_diverges(expr.handler):
                 actual_handler_t = tail_t if tail_t is not None else UnitType
-                if not is_assignable(actual_handler_t, unwrapped_t):
+                if not self.type_relations.is_assignable(actual_handler_t, unwrapped_t):
                     raise TypeError(
                         message=f"'else' handler must diverge (return/break/continue) or evaluate to '{unwrapped_t}', found '{actual_handler_t}'",
                         line=expr.line,
@@ -1558,7 +1629,7 @@ class TypeChecker:
                         file=self.file,
                         code="W3001"
                     )
-                if not is_assignable(val_t, sym.type):
+                if not self.type_relations.is_assignable(val_t, sym.type):
                     raise TypeError(
                         message=f"Type mismatch: cannot assign value of type '{val_t}' to variable '{sym.name}' of type '{sym.type}'",
                         line=expr.line,
@@ -1569,6 +1640,7 @@ class TypeChecker:
                 self._mark_result_lift(expr.value, sym.type, force=True)
                 expr.target.inferred_type = sym.type
                 expr.target.inferred_type_id = self.interner.from_type(sym.type)
+                expr.target.session_arena_id = self.interner.arena_id
                 return sym.type
 
             if isinstance(expr.target, IndexExpr):
@@ -1593,7 +1665,7 @@ class TypeChecker:
                             file=self.file,
                             code="W2001"
                         )
-                    if not is_assignable(val_t, obj_t.element):
+                    if not self.type_relations.is_assignable(val_t, obj_t.element):
                         raise TypeError(
                             message=f"Cannot assign '{val_t}' to list of '{obj_t.element}'",
                             line=expr.line,
@@ -1604,10 +1676,11 @@ class TypeChecker:
                     self._mark_result_lift(expr.value, obj_t.element, force=True)
                     expr.target.inferred_type = obj_t.element
                     expr.target.inferred_type_id = self.interner.from_type(obj_t.element)
+                    expr.target.session_arena_id = self.interner.arena_id
                     return obj_t.element
 
                 if isinstance(obj_t, DictType):
-                    if not is_assignable(idx_t, obj_t.key):
+                    if not self.type_relations.is_assignable(idx_t, obj_t.key):
                         raise TypeError(
                             message=f"Dict key type mismatch: expected '{obj_t.key}', found '{idx_t}'",
                             line=expr.target.index.line,
@@ -1615,7 +1688,7 @@ class TypeChecker:
                             file=self.file,
                             code="W2001"
                         )
-                    if not is_assignable(val_t, obj_t.value):
+                    if not self.type_relations.is_assignable(val_t, obj_t.value):
                         raise TypeError(
                             message=f"Dict value type mismatch: expected '{obj_t.value}', found '{val_t}'",
                             line=expr.line,
@@ -1626,6 +1699,7 @@ class TypeChecker:
                     self._mark_result_lift(expr.value, obj_t.value, force=True)
                     expr.target.inferred_type = obj_t.value
                     expr.target.inferred_type_id = self.interner.from_type(obj_t.value)
+                    expr.target.session_arena_id = self.interner.arena_id
                     return obj_t.value
 
                 raise TypeError(
@@ -1657,7 +1731,7 @@ class TypeChecker:
                             file=self.file,
                             code="W3002"
                         )
-                    if not is_assignable(val_t, f_info.type):
+                    if not self.type_relations.is_assignable(val_t, f_info.type):
                         raise TypeError(
                             message=f"Type mismatch on field '{expr.target.property}': expected '{f_info.type}', found '{val_t}'",
                             line=expr.line,
@@ -1668,6 +1742,7 @@ class TypeChecker:
                     self._mark_result_lift(expr.value, f_info.type, force=True)
                     expr.target.inferred_type = f_info.type
                     expr.target.inferred_type_id = self.interner.from_type(f_info.type)
+                    expr.target.session_arena_id = self.interner.arena_id
                     return f_info.type
 
                 sym = self._find_value_root_symbol(expr.target.object)
@@ -1696,7 +1771,7 @@ class TypeChecker:
                         code="W3002"
                     )
                 field_t = obj_t.fields[expr.target.property]
-                if not is_assignable(val_t, field_t):
+                if not self.type_relations.is_assignable(val_t, field_t):
                     raise TypeError(
                         message=f"Type mismatch on field '{expr.target.property}': expected '{field_t}', found '{val_t}'",
                         line=expr.line,
@@ -1707,6 +1782,7 @@ class TypeChecker:
                 self._mark_result_lift(expr.value, field_t, force=True)
                 expr.target.inferred_type = field_t
                 expr.target.inferred_type_id = self.interner.from_type(field_t)
+                expr.target.session_arena_id = self.interner.arena_id
                 return field_t
 
             raise TypeError(
@@ -1754,7 +1830,8 @@ class TypeChecker:
                     if isinstance(ctx_t, EnumType) and getattr(ctx_t, "template_name", None) == tmpl.name and ctx_t.type_args:
                         concrete_args = list(ctx_t.type_args)
                     else:
-                        concrete_args = [TypeParamType(p.name if hasattr(p, "name") else str(p)) for p in tmpl.type_params]
+                        concrete_args = [TypeParamType(p.name if hasattr(p, "name") else str(p), owner=tmpl.name)
+                                         for p in tmpl.type_params]
                     enum_t = self._monomorphize_enum(tmpl, concrete_args, expr.line, expr.col)
                     expr.object.name = enum_t.name
                     return enum_t
@@ -1807,6 +1884,22 @@ class TypeChecker:
                     return obj_t.methods[expr.property]
                 raise TypeError(
                     message=f"Interface '{obj_t.name}' has no method '{expr.property}'",
+                    line=expr.line,
+                    col=expr.col,
+                    file=self.file,
+                    code="W3002"
+                )
+
+            if isinstance(obj_t, TypeParamType):
+                constraint = obj_t.constraint
+                if isinstance(constraint, InterfaceType) and expr.property in constraint.methods:
+                    self.type_relations.record_requirement(
+                        "interface_member", obj_t, (constraint.name, expr.property),
+                        file=self.file, line=expr.line, col=expr.col
+                    )
+                    return constraint.methods[expr.property]
+                raise TypeError(
+                    message=f"Generic type parameter '{obj_t.name}' has no declared member '{expr.property}'",
                     line=expr.line,
                     col=expr.col,
                     file=self.file,
@@ -1896,7 +1989,7 @@ class TypeChecker:
                     )
                 return StrType
             if isinstance(obj_t, DictType):
-                if not is_assignable(idx_t, obj_t.key):
+                if not self.type_relations.is_assignable(idx_t, obj_t.key):
                     raise TypeError(
                         message=f"Dict key type mismatch: expected '{obj_t.key}', found '{idx_t}'",
                         line=expr.index.line,
@@ -2317,7 +2410,7 @@ class TypeChecker:
                         )
                     for i, (a_expr, p_type) in enumerate(zip(expr.args, expected_payloads)):
                         a_type = self._check_expr(a_expr)
-                        if not is_assignable(a_type, p_type):
+                        if not self.type_relations.is_assignable(a_type, p_type):
                             raise TypeError(
                                 message=f"Argument {i + 1} type mismatch: expected '{p_type}', found '{a_type}'",
                                 line=a_expr.line,
@@ -2470,7 +2563,7 @@ class TypeChecker:
 
             for i, (a_expr, p_type) in enumerate(zip(expr.args, callee_t.params)):
                 a_type = self._check_payload(a_expr, p_type)
-                if not is_assignable(a_type, p_type):
+                if not self.type_relations.is_assignable(a_type, p_type):
                     raise TypeError(
                         message=f"Argument {i + 1} type mismatch: expected '{p_type}', found '{a_type}'",
                         line=a_expr.line,
@@ -2569,7 +2662,7 @@ class TypeChecker:
                     )
                 expected_f_type = struct_t.fields[f.name]
                 actual_f_type = self._check_expr(f.value)
-                if not is_assignable(actual_f_type, expected_f_type):
+                if not self.type_relations.is_assignable(actual_f_type, expected_f_type):
                     raise TypeError(
                         message=f"Field '{f.name}' type mismatch: expected '{expected_f_type}', found '{actual_f_type}'",
                         line=f.line,
@@ -2587,16 +2680,16 @@ class TypeChecker:
             elem_types = [self._check_payload(e, context.element if context else None) for e in expr.elements]
             common_t = elem_types[0]
             for t in elem_types[1:]:
-                if is_assignable(t, common_t):
+                if self.type_relations.is_assignable(t, common_t):
                     continue
-                if is_assignable(common_t, t):
+                if self.type_relations.is_assignable(common_t, t):
                     common_t = t
                     continue
                 found_super: Optional[WysnaType] = None
                 if isinstance(common_t, ClassType) and isinstance(t, ClassType):
                     curr = common_t.superclass
                     while curr is not None:
-                        if is_assignable(t, curr):
+                        if self.type_relations.is_assignable(t, curr):
                             found_super = curr
                             break
                         curr = curr.superclass
@@ -2641,7 +2734,7 @@ class TypeChecker:
                         file=self.file,
                         code="W2010"
                     )
-                if not is_assignable(kt, first_key_t):
+                if not self.type_relations.is_assignable(kt, first_key_t):
                     raise TypeError(
                         message=f"Dict keys must be homogeneous: found '{kt}' and '{first_key_t}'",
                         line=entry.key.line,
@@ -2649,7 +2742,7 @@ class TypeChecker:
                         file=self.file,
                         code="W2001"
                     )
-                if not is_assignable(vt, first_val_t):
+                if not self.type_relations.is_assignable(vt, first_val_t):
                     raise TypeError(
                         message=f"Dict values must be homogeneous: found '{vt}' and '{first_val_t}'",
                         line=entry.value.line,
@@ -2662,7 +2755,7 @@ class TypeChecker:
 
         if isinstance(expr, IfExpr):
             cond_t = self._check_expr(expr.condition)
-            if cond_t != BoolType:
+            if not self._require_boolean(cond_t, expr.condition, "Condition of 'if'"):
                 raise TypeError(
                     message=f"Condition of 'if' must be bool, found '{cond_t}'",
                     line=expr.condition.line,
@@ -2674,10 +2767,10 @@ class TypeChecker:
 
             for elif_b in expr.elif_branches:
                 e_cond_t = self._check_expr(elif_b.condition)
-                if e_cond_t != BoolType:
+                if not self._require_boolean(e_cond_t, elif_b.condition, "Condition of 'elif'"):
                     raise TypeError(message=f"Condition of 'elif' must be bool, found '{e_cond_t}'", line=elif_b.condition.line, col=elif_b.condition.col, file=self.file, code="W2001")
                 e_then_t = self._check_block(elif_b.body, is_statement_context=is_statement_context) or UnitType
-                if not is_statement_context and not is_assignable(e_then_t, then_t):
+                if not is_statement_context and not self.type_relations.is_assignable(e_then_t, then_t):
                     raise TypeError(
                         message=f"Incompatible types in 'elif' branch: '{e_then_t}' vs '{then_t}'",
                         line=elif_b.line,
@@ -2688,7 +2781,7 @@ class TypeChecker:
 
             if expr.else_branch is not None:
                 else_t = self._check_block(expr.else_branch, is_statement_context=is_statement_context) or UnitType
-                if not is_statement_context and not is_assignable(else_t, then_t):
+                if not is_statement_context and not self.type_relations.is_assignable(else_t, then_t):
                     raise TypeError(
                         message=f"Incompatible types in 'if' expression branches: '{else_t}' vs '{then_t}'",
                         line=expr.else_branch.line,
@@ -2759,6 +2852,7 @@ class TypeChecker:
                         col=arm.pattern.col
                     )
                 arm.pattern.inferred_type_id = self.interner.intern(subject_t)
+                arm.pattern.session_arena_id = self.interner.arena_id
                 arm_bindings: Dict[str, WysnaType] = {}
 
                 if isinstance(arm.pattern, WildcardPattern):
@@ -2779,7 +2873,7 @@ class TypeChecker:
                         covered_variants.add("None")
                     else:
                         lit_t = self._check_expr(arm.pattern.literal)
-                        if not is_assignable(lit_t, subject_t):
+                        if not self.type_relations.is_assignable(lit_t, subject_t):
                             raise TypeError(
                                 message=f"Literal pattern type '{lit_t}' incompatible with subject '{subject_t}'",
                                 line=arm.line,
@@ -2831,7 +2925,7 @@ class TypeChecker:
                     self.current_scope = guard_scope
                     try:
                         g_t = self._check_expr(arm.guard)
-                        if g_t != BoolType:
+                        if not self._require_boolean(g_t, arm.guard, "Match guard"):
                             raise TypeError(
                                 message=f"Match guard must be bool, found '{g_t}'",
                                 line=arm.guard.line,
@@ -2878,7 +2972,7 @@ class TypeChecker:
             if arm_types:
                 first_t = arm_types[0]
                 for at in arm_types[1:]:
-                    if not is_assignable(at, first_t):
+                    if not self.type_relations.is_assignable(at, first_t):
                         raise TypeError(
                             message=f"Incompatible return types in match arms: '{at}' vs '{first_t}'",
                             line=expr.line,
@@ -2952,6 +3046,7 @@ class TypeChecker:
 
     def _bind_pattern_type(self, pattern: Pattern, expected_type: WysnaType, bindings: Dict[str, WysnaType], line: int, col: int) -> None:
         pattern.inferred_type_id = self.interner.intern(expected_type)
+        pattern.session_arena_id = self.interner.arena_id
         if isinstance(pattern, IdentifierPattern):
             if pattern.name in bindings:
                 raise TypeError(message=f"Duplicate pattern binding '{pattern.name}'",
@@ -2990,7 +3085,7 @@ class TypeChecker:
                 self._bind_pattern_type(child, child_type, bindings, line, col)
         elif isinstance(pattern, LiteralPattern):
             lit_t = self._check_expr(pattern.literal)
-            if not is_assignable(lit_t, expected_type):
+            if not self.type_relations.is_assignable(lit_t, expected_type):
                 raise TypeError(
                     message=f"Literal pattern type '{lit_t}' incompatible with '{expected_type}'",
                     line=line,
@@ -3016,7 +3111,7 @@ class TypeChecker:
             name = parameter.name if hasattr(parameter, "name") else str(parameter)
             bound = bindings.get(name)
             if bound is None or isinstance(bound, AnyType):
-                arguments.append(TypeParamType(name))
+                arguments.append(TypeParamType(name, owner=template.name))
             else:
                 arguments.append(bound)
         return arguments
@@ -3026,9 +3121,10 @@ class TypeChecker:
 
     def _type_to_type_node(self, t: WysnaType) -> TypeNode:
         node = self._type_to_type_node_impl(t)
-        if isinstance(t, (StructType, EnumType, ClassType, InterfaceType)) and self.current_scope.lookup_type(t.name) is not t:
+        if isinstance(t, (StructType, EnumType, ClassType, InterfaceType, TypeParamType)) and self.current_scope.lookup_type(getattr(t, "name", "")) is not t:
             node.session_resolved_type = t
-            node.session_arena_id = self.interner.arena_id
+        node.resolved_type_id = self.interner.from_type(t)
+        node.session_arena_id = self.interner.arena_id
         return node
 
     def _type_to_type_node_impl(self, t: WysnaType) -> TypeNode:
@@ -3285,7 +3381,7 @@ class TypeChecker:
             return True
         if isinstance(declared, (GenericStructTemplate, GenericEnumTemplate, GenericFnTemplate)):
             return True
-        return is_assignable(arg_type, declared)
+        return self.type_relations.is_assignable(arg_type, declared)
     def _resolve_constraint_interface(self, constraint: TypeNode, line: int, col: int) -> InterfaceType:
         if not isinstance(constraint, NamedType):
             raise TypeError("Generic constraints must name an interface", line=line,
@@ -3301,6 +3397,11 @@ class TypeChecker:
             return
         c_name = constraint.name if isinstance(constraint, NamedType) else str(constraint)
         c_type = self._resolve_constraint_interface(constraint, line, col)
+        if isinstance(type_arg, TypeParamType) and self._checking_generic_definition:
+            self.type_relations.record_requirement(
+                "constraint", type_arg, c_name, file=self.file, line=line, col=col
+            )
+            return
         if isinstance(c_type, InterfaceType):
             if isinstance(type_arg, ClassType):
                 if not type_arg.implements_interface(c_name):
@@ -3405,7 +3506,10 @@ class TypeChecker:
                 code="W2011"
             )
 
-    def _monomorphize_struct(
+    def _monomorphize_struct(self, template, concrete_args, line, col):
+        return self.instantiator.structure(template, concrete_args, line, col)
+
+    def _monomorphize_struct_impl(
         self,
         template: GenericStructTemplate,
         concrete_args: List[WysnaType],
@@ -3526,13 +3630,21 @@ class TypeChecker:
             return struct_t
         except Exception:
             entry.state = SpecializationState.FAILED
+            self.monomorphized_structs.pop(key, None)
+            if concrete_decl in self.monomorphized_struct_decls:
+                self.monomorphized_struct_decls.remove(concrete_decl)
+            self.global_scope.types.pop(mangled, None)
+            self.global_scope.symbols.pop(mangled, None)
             raise
         finally:
             self._monomorphize_depth -= 1
             self._instantiation_stack.pop()
             self._active_type_subst = previous_subst
 
-    def _monomorphize_fn(
+    def _monomorphize_fn(self, template, concrete_args, line, col):
+        return self.instantiator.function(template, concrete_args, line, col)
+
+    def _monomorphize_fn_impl(
         self,
         template: GenericFnTemplate,
         concrete_args: List[WysnaType],
@@ -3624,12 +3736,19 @@ class TypeChecker:
             return fn_sym
         except Exception:
             entry.state = SpecializationState.FAILED
+            self.monomorphized_fns.pop(key, None)
+            if cloned_fn in self.monomorphized_fn_decls:
+                self.monomorphized_fn_decls.remove(cloned_fn)
+            self.global_scope.symbols.pop(mangled, None)
             raise
         finally:
             self._monomorphize_depth -= 1
             self._instantiation_stack.pop()
 
-    def _monomorphize_enum(
+    def _monomorphize_enum(self, template, concrete_args, line, col):
+        return self.instantiator.enumeration(template, concrete_args, line, col)
+
+    def _monomorphize_enum_impl(
         self,
         template: GenericEnumTemplate,
         concrete_args: List[WysnaType],
@@ -3734,6 +3853,10 @@ class TypeChecker:
             return enum_t
         except Exception:
             entry.state = SpecializationState.FAILED
+            self.monomorphized_enums.pop(key, None)
+            if concrete_decl in self.monomorphized_enum_decls:
+                self.monomorphized_enum_decls.remove(concrete_decl)
+            self.global_scope.types.pop(mangled, None)
             raise
         finally:
             self._monomorphize_depth -= 1
@@ -3772,6 +3895,7 @@ class TypeChecker:
                 resolved = self._resolve_type_node_impl(node)
         if node is not None:
             node.resolved_type_id = self.interner.from_type(resolved)
+            node.session_arena_id = self.interner.arena_id
         return resolved
 
     def _lookup_type_name(self, name):
@@ -3890,10 +4014,7 @@ class TypeChecker:
 
         if isinstance(node, AstResultType):
             ok_t = self._resolve_type_node(node.ok_type)
-            if isinstance(node.err_type, AstErrorUnionType):
-                err_t = self._resolve_error_union_node(node.err_type)
-            else:
-                err_t = self._resolve_type_node(node.err_type)
+            err_t = self._resolve_type_node(node.err_type)
             return ResultType(ok_t, err_t)
 
         # Type substitution in the canonical Result[T, E] enum can place the
@@ -3933,4 +4054,6 @@ class TypeChecker:
         if len(union.alternatives) < 2:
             raise TypeError("An error union must contain at least two distinct alternatives",
                             line=node.line, col=node.col, file=self.file, code="W2001")
+        node.resolved_type_id = self.interner.from_type(union)
+        node.session_arena_id = self.interner.arena_id
         return union
