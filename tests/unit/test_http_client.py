@@ -12,6 +12,7 @@ import time
 
 from main import ensure_selfhost_compiler_binary
 from compiler.CompilerService import CompilerService
+from compiler.NativeToolchain import NativeToolchain
 from tests.engine_harness import run_engine
 
 
@@ -77,10 +78,13 @@ def _start_server(handler, *, tls=False, certificate=None, key=None):
 
 
 def _run_source(source, selfhost, directory):
+    compile_flags, link_flags = NativeToolchain._curl_flags()
     results = []
     for engine in ("interpreter", "ast", "hir", "selfhost"):
         results.append(run_engine(engine, source, "http-contract", selfhost,
-                                  Path(directory) / engine))
+                                  Path(directory) / engine,
+                                  extra_compile_flags=compile_flags if engine != "interpreter" else (),
+                                  extra_link_flags=link_flags if engine != "interpreter" else ()))
     return results
 
 
