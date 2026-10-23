@@ -3,6 +3,7 @@ struct Token {
     val: str,
     line: int,
     col: int,
+    file: str,
 }
 
 struct ExprRes {
@@ -50,6 +51,7 @@ let mut g_scope_stack: list[CleanupScope] = []
 let mut g_aux_id: int = 0
 let mut g_cur_err_type: str = ""
 let mut g_in_path: str = ""
+let mut g_diag_file: str = ""
 
 
 let mut g_borrowed_vars: list[str] = []
@@ -118,8 +120,20 @@ struct SemConstructor { name: str, payloads: list[int] }
 let mut sem_patterns: list[SemPattern] = []
 let mut sem_last_pattern = -1
 fn report_error(code: str, line: int, col: int, msg: str) -> unit {
-    eprint("[" + code + "] " + g_in_path + ":" + str(line) + ":" + str(col) + " - " + msg)
+    let mut file = g_diag_file
+    if file == "" { file = g_in_path }
+    eprint("[" + code + "] " + file + ":" + str(line) + ":" + str(col) + " - " + msg)
     exit(1)
+}
+
+fn report_error_at(code: str, token: Token, msg: str) -> unit {
+    g_diag_file = token.file
+    report_error(code, token.line, token.col, msg)
+}
+
+fn report_error_at_location(code: str, file: str, line: int, col: int, msg: str) -> unit {
+    g_diag_file = file
+    report_error(code, line, col, msg)
 }
 
 fn is_alpha(c: int) -> bool {
@@ -255,7 +269,8 @@ fn keyword_kind(word: str) -> str {
     return "IDENT"
 }
 
-fn tokenize(src: str) -> list[Token] {
+fn tokenize(src: str, file: str) -> list[Token] {
+    g_diag_file = file
     let mut tokens: list[Token] = []
     let n = len(src)
     let mut i = 0
@@ -268,7 +283,7 @@ fn tokenize(src: str) -> list[Token] {
         let code = ord(ch)
         if code == 10 or code == 13 {
             if paren_depth == 0 and bracket_depth == 0 and len(tokens) > 0 and line_terminates_statement(tokens[len(tokens) - 1].kind) {
-                tokens.append(Token { kind: "NEWLINE", val: "\n", line: line, col: col })
+                tokens.append(Token { kind: "NEWLINE", val: "\n", line: line, col: col, file: file })
             }
             line = line + 1
             col = 1
@@ -293,7 +308,7 @@ fn tokenize(src: str) -> list[Token] {
             }
             let word = slice(src, start, i)
             let k = keyword_kind(word)
-            tokens.append(Token { kind: k, val: word, line: line, col: start_col })
+            tokens.append(Token { kind: k, val: word, line: line, col: start_col, file: file })
         } elif is_digit(code) {
             let start_col = col
             let mut is_flt = false
@@ -341,9 +356,9 @@ fn tokenize(src: str) -> list[Token] {
                 report_error("W0002", line, start_col, "malformed float literal: trailing dot")
             }
             if is_flt {
-                tokens.append(Token { kind: "FLOAT", val: clean_num, line: line, col: start_col })
+                tokens.append(Token { kind: "FLOAT", val: clean_num, line: line, col: start_col, file: file })
             } else {
-                tokens.append(Token { kind: "INT", val: clean_num, line: line, col: start_col })
+                tokens.append(Token { kind: "INT", val: clean_num, line: line, col: start_col, file: file })
             }
         } elif ch == "." and i + 1 < n and is_digit(ord(src[i + 1])) {
             report_error("W0002", line, col, "malformed float literal: leading dot")
@@ -424,7 +439,7 @@ fn tokenize(src: str) -> list[Token] {
             }
             i = i + 1
             col = col + 1
-            tokens.append(Token { kind: "STR", val: s_val, line: start_line, col: start_col })
+            tokens.append(Token { kind: "STR", val: s_val, line: start_line, col: start_col, file: file })
         } else {
             let start_col = col
             let mut two = ""
@@ -436,39 +451,39 @@ fn tokenize(src: str) -> list[Token] {
                 three = slice(src, i, i + 3)
             }
             if three == "..=" {
-                tokens.append(Token { kind: "DOT_DOT_EQ", val: "..=", line: line, col: start_col })
+                tokens.append(Token { kind: "DOT_DOT_EQ", val: "..=", line: line, col: start_col, file: file })
                 i = i + 3
                 col = col + 3
             } elif two == "==" {
-                tokens.append(Token { kind: "EQ", val: "==", line: line, col: start_col })
+                tokens.append(Token { kind: "EQ", val: "==", line: line, col: start_col, file: file })
                 i = i + 2
                 col = col + 2
             } elif two == "!=" {
-                tokens.append(Token { kind: "NEQ", val: "!=", line: line, col: start_col })
+                tokens.append(Token { kind: "NEQ", val: "!=", line: line, col: start_col, file: file })
                 i = i + 2
                 col = col + 2
             } elif two == "<=" {
-                tokens.append(Token { kind: "LTE", val: "<=", line: line, col: start_col })
+                tokens.append(Token { kind: "LTE", val: "<=", line: line, col: start_col, file: file })
                 i = i + 2
                 col = col + 2
             } elif two == ">=" {
-                tokens.append(Token { kind: "GTE", val: ">=", line: line, col: start_col })
+                tokens.append(Token { kind: "GTE", val: ">=", line: line, col: start_col, file: file })
                 i = i + 2
                 col = col + 2
             } elif two == "->" {
-                tokens.append(Token { kind: "ARROW", val: "->", line: line, col: start_col })
+                tokens.append(Token { kind: "ARROW", val: "->", line: line, col: start_col, file: file })
                 i = i + 2
                 col = col + 2
             } elif two == "=>" {
-                tokens.append(Token { kind: "FAT_ARROW", val: "=>", line: line, col: start_col })
+                tokens.append(Token { kind: "FAT_ARROW", val: "=>", line: line, col: start_col, file: file })
                 i = i + 2
                 col = col + 2
             } elif two == ".." {
-                tokens.append(Token { kind: "DOT_DOT", val: "..", line: line, col: start_col })
+                tokens.append(Token { kind: "DOT_DOT", val: "..", line: line, col: start_col, file: file })
                 i = i + 2
                 col = col + 2
             } elif two == "??" {
-                tokens.append(Token { kind: "QQ", val: "??", line: line, col: start_col })
+                tokens.append(Token { kind: "QQ", val: "??", line: line, col: start_col, file: file })
                 i = i + 2
                 col = col + 2
             } else {
@@ -518,7 +533,7 @@ fn tokenize(src: str) -> list[Token] {
                 if kind == "OP" {
                     report_error("W0001", line, start_col, "unexpected character '" + ch + "'")
                 }
-                tokens.append(Token { kind: kind, val: ch, line: line, col: start_col })
+                tokens.append(Token { kind: kind, val: ch, line: line, col: start_col, file: file })
                 if kind == "LPAREN" { paren_depth = paren_depth + 1
                 } elif kind == "RPAREN" { if paren_depth > 0 { paren_depth = paren_depth - 1 }
                 } elif kind == "LBRACKET" { bracket_depth = bracket_depth + 1
@@ -528,11 +543,12 @@ fn tokenize(src: str) -> list[Token] {
             }
         }
     }
-    tokens.append(Token { kind: "EOF", val: "", line: line, col: col })
+    tokens.append(Token { kind: "EOF", val: "", line: line, col: col, file: file })
     return tokens
 }
 
 fn at_tok() -> Token {
+    g_diag_file = g_tokens[g_pos].file
     return g_tokens[g_pos]
 }
 
@@ -588,9 +604,9 @@ fn expect_kind(k: str) -> Token {
     let tok = at_tok()
     if tok.kind != k {
         if k == "RBRACE" or k == "RBRACKET" {
-            report_error("W0006", tok.line, tok.col, "expected '" + k + "', found '" + tok.val + "'")
+            report_error_at("W0006", tok, "expected '" + k + "', found '" + tok.val + "'")
         } else {
-            report_error("W0001", tok.line, tok.col, "expected '" + k + "', found '" + tok.val + "'")
+            report_error_at("W0001", tok, "expected '" + k + "', found '" + tok.val + "'")
         }
     }
     advance_tok()
@@ -662,6 +678,7 @@ fn module_stdlib_path(requested: str) -> str {
 }
 fn module_expand(src: str, path: str, entry: bool) -> int {
     let canonical = module_normalize(path)
+    g_diag_file = canonical
     for i in 0..len(module_paths) {
         if module_paths[i] == canonical {
             if module_states[i] == 1 { report_error("W1003", 1, 1, "circular import: " + canonical) }
@@ -673,10 +690,10 @@ fn module_expand(src: str, path: str, entry: bool) -> int {
     module_states.append(1)
     let mut names: list[str] = []
     let mut exports: list[str] = []
-    let tokens = tokenize(src)
+    let tokens = tokenize(src, canonical)
     for token in tokens {
         if token.kind == "IDENT" {
-            if (len(token.val) >= 8 and slice(token.val, 0, 8) == "__wysna_") or (len(token.val) >= 7 and slice(token.val, 0, 7) == "_WYSNA_") { report_error("W1002", token.line, token.col, "reserved compiler namespace") }
+            if (len(token.val) >= 8 and slice(token.val, 0, 8) == "__wysna_") or (len(token.val) >= 7 and slice(token.val, 0, 7) == "_WYSNA_") { report_error_at("W1002", token, "reserved compiler namespace") }
         }
     }
     let mut depth = 0
@@ -705,6 +722,7 @@ fn module_expand(src: str, path: str, entry: bool) -> int {
     let mut position = 0
     while position < len(tokens) - 1 {
         let token = tokens[position]
+        g_diag_file = token.file
         if token.kind == "IMPORT" {
             let public_import = position > 0 and tokens[position - 1].kind == "PUB"
             if public_import and len(body) > 0 and body[len(body) - 1].kind == "PUB" { body.pop() }
@@ -714,13 +732,13 @@ fn module_expand(src: str, path: str, entry: bool) -> int {
             let mut content = read_file(resolved) else err { "" }
             if content == "" {
                 resolved = module_normalize(requested)
-                content = read_file(resolved) else err { report_error("W1003", token.line, token.col, "module not found: " + requested) "" }
+                content = read_file(resolved) else err { report_error_at("W1003", token, "module not found: " + requested) "" }
             }
             let dependency = module_expand(content, resolved, false)
             let mut alias = extract_module_ns(requested)
             position = position + 2
             if tokens[position].kind == "AS" { alias = tokens[position + 1].val position = position + 2 }
-            if module_contains(aliases, alias) or module_contains(names, alias) { report_error("W1002", token.line, token.col, "duplicate module alias") }
+            if module_contains(aliases, alias) or module_contains(names, alias) { report_error_at("W1002", token, "duplicate module alias") }
             aliases.append(alias)
             dependencies.append(dependency)
             module_import_owners.append(index)
@@ -738,6 +756,7 @@ fn module_expand(src: str, path: str, entry: bool) -> int {
     let mut parentheses = 0
     while position < len(body) {
         let token = body[position]
+        g_diag_file = token.file
         let mut consumed = false
         if token.kind == "IDENT" {
             for i in 0..len(aliases) {
@@ -750,12 +769,12 @@ fn module_expand(src: str, path: str, entry: bool) -> int {
                     }
                     if nested_target >= 0 and position + 4 < len(body) and body[position + 3].kind == "DOT" {
                         let nested_member = body[position + 4]
-                        if not module_contains(module_public_names[nested_target], nested_member.val) { report_error("W1001", nested_member.line, nested_member.col, "member is not exported: " + nested_member.val) }
-                        module_output.append(Token { kind: "IDENT", val: module_name(nested_target, nested_member.val), line: token.line, col: token.col })
+                        if not module_contains(module_public_names[nested_target], nested_member.val) { report_error_at("W1001", nested_member, "member is not exported: " + nested_member.val) }
+                        module_output.append(Token { kind: "IDENT", val: module_name(nested_target, nested_member.val), line: token.line, col: token.col, file: token.file })
                         position = position + 5
                     } else {
-                        if not module_contains(module_public_names[dependency], member.val) { report_error("W1001", member.line, member.col, "member is not exported: " + member.val) }
-                        module_output.append(Token { kind: "IDENT", val: module_name(dependency, member.val), line: token.line, col: token.col })
+                        if not module_contains(module_public_names[dependency], member.val) { report_error_at("W1001", member, "member is not exported: " + member.val) }
+                        module_output.append(Token { kind: "IDENT", val: module_name(dependency, member.val), line: token.line, col: token.col, file: token.file })
                         position = position + 3
                     }
                     consumed = true
@@ -769,7 +788,7 @@ fn module_expand(src: str, path: str, entry: bool) -> int {
                     if position > 0 and (body[position - 1].kind == "LET" or body[position - 1].kind == "MUT") { field = false }
                 }
                 if braces > 0 and position > 0 and body[position - 1].kind == "FN" { field = true }
-                if not field { module_output.append(Token { kind: token.kind, val: module_name(index, token.val), line: token.line, col: token.col }) consumed = true position = position + 1 }
+                if not field { module_output.append(Token { kind: token.kind, val: module_name(index, token.val), line: token.line, col: token.col, file: token.file }) consumed = true position = position + 1 }
             }
         }
         if not consumed { module_output.append(token) position = position + 1 }
@@ -798,7 +817,7 @@ fn module_tokens(src: str, path: str) -> list[Token] {
     module_import_public = empty_public
     module_output = empty_tokens
     module_expand(src, path, true)
-    module_output.append(Token { kind: "EOF", val: "", line: 1, col: 1 })
+    module_output.append(Token { kind: "EOF", val: "", line: 1, col: 1, file: module_normalize(path) })
     return module_output
 }
 fn new_temp() -> str {
@@ -1353,7 +1372,7 @@ fn projection_is_mutated() -> bool {
 }
 
 
-fn emit_call(callee: ExprRes, args_c: list[str], collection: bool, line: int, col: int) -> ExprRes {
+fn emit_call(callee: ExprRes, args_c: list[str], collection: bool, file: str, line: int, col: int) -> ExprRes {
     if len(callee.val) >= 6 and slice(callee.val, 0, 6) == "enum::" {
         let marker = slice(callee.val, 6, len(callee.val))
         let mut separator = -1
@@ -1446,7 +1465,7 @@ fn emit_call(callee: ExprRes, args_c: list[str], collection: bool, line: int, co
             return bind_call("wysna_list_append(" + recv_lref + ", " + args_c[0] + ")")
         }
         if collection and method == "pop" {
-            return bind_call("wysna_list_pop_at(" + recv_lref + ", " + escape_c_str(g_in_path) + ", " + str(line) + ", " + str(col) + ")")
+            return bind_call("wysna_list_pop_at(" + recv_lref + ", " + escape_c_str(file) + ", " + str(line) + ", " + str(col) + ")")
         }
         if collection and method == "clear" {
             return bind_call("wysna_list_clear(" + recv_lref + ")")
@@ -2198,7 +2217,7 @@ fn parse_expr(min_prec: int, allow_struct: bool) -> ExprRes {
                     }
                 }
                 expect_kind("RPAREN")
-                left = emit_call(left, args_c, collection, call_tok.line, call_tok.col)
+                left = emit_call(left, args_c, collection, call_tok.file, call_tok.line, call_tok.col)
             } elif check_kind("DOT") {
                 let projection_position = g_pos + 1
                 advance_tok()
@@ -2247,7 +2266,7 @@ fn parse_expr(min_prec: int, allow_struct: bool) -> ExprRes {
                 if mutated {
                     idx_r = ExprRes { val: snapshot_value(idx_r.val), lref: idx_r.lref }
                 }
-                let source_args = escape_c_str(g_in_path) + ", " + str(bracket_tok.line) + ", " + str(bracket_tok.col)
+                let source_args = escape_c_str(bracket_tok.file) + ", " + str(bracket_tok.line) + ", " + str(bracket_tok.col)
                 let index_lref = "wysna_index_ref_at(" + clean_lref(left.lref) + ", " + idx_r.val + ", " + source_args + ")"
                 if mutated {
                     left = ExprRes { val: "wysna_index_get_at(" + left.val + ", " + idx_r.val + ", " + source_args + ")", lref: index_lref }
@@ -2403,9 +2422,9 @@ fn parse_expr(min_prec: int, allow_struct: bool) -> ExprRes {
             } elif op_tok.kind == "STAR" {
                 left = ExprRes { val: "wysna_mul(" + left.val + ", " + right.val + ")", lref: "" }
             } elif op_tok.kind == "SLASH" {
-                left = ExprRes { val: "wysna_div_at(" + left.val + ", " + right.val + ", " + escape_c_str(g_in_path) + ", " + str(op_tok.line) + ", " + str(op_tok.col) + ")", lref: "" }
+                left = ExprRes { val: "wysna_div_at(" + left.val + ", " + right.val + ", " + escape_c_str(op_tok.file) + ", " + str(op_tok.line) + ", " + str(op_tok.col) + ")", lref: "" }
             } elif op_tok.kind == "PERCENT" {
-                left = ExprRes { val: "wysna_mod_at(" + left.val + ", " + right.val + ", " + escape_c_str(g_in_path) + ", " + str(op_tok.line) + ", " + str(op_tok.col) + ")", lref: "" }
+                left = ExprRes { val: "wysna_mod_at(" + left.val + ", " + right.val + ", " + escape_c_str(op_tok.file) + ", " + str(op_tok.line) + ", " + str(op_tok.col) + ")", lref: "" }
             } elif op_tok.kind == "LT" {
                 left = ExprRes { val: "wysna_lt(" + left.val + ", " + right.val + ")", lref: "" }
             } elif op_tok.kind == "LTE" {
@@ -2431,7 +2450,7 @@ fn parse_lambda() -> ExprRes {
     let token = expect_kind("PIPE")
     let mut index = -1
     for i in 0..len(sem_lambdas) { if sem_lambdas[i].position == g_pos { index = i } }
-    if index < 0 { report_error("W9999", token.line, token.col, "missing checked closure") }
+    if index < 0 { report_error_at("W9999", token, "missing checked closure") }
     let lambda = sem_lambdas[index]
     while not check_kind("PIPE") {
         expect_kind("IDENT")
@@ -3016,8 +3035,14 @@ fn parse_import_decl() -> unit {
         return
     }
     g_modules.append(ns)
-    let mod_src = read_file(path_tok.val) else err {
+    let mut module_path = module_normalize(module_directory(path_tok.file) + path_tok.val)
+    if len(path_tok.val) >= 4 and slice(path_tok.val, 0, 4) == "std/" { module_path = module_stdlib_path(path_tok.val) }
+    let mut mod_src = read_file(module_path) else err {
         ""
+    }
+    if mod_src == "" and module_path != path_tok.val {
+        module_path = module_normalize(path_tok.val)
+        mod_src = read_file(module_path) else err { "" }
     }
     if mod_src == "" {
         return
@@ -3025,7 +3050,7 @@ fn parse_import_decl() -> unit {
     let saved_tokens = g_tokens
     let saved_pos = g_pos
     let saved_ns = g_ns
-    g_tokens = tokenize(mod_src)
+    g_tokens = tokenize(mod_src, module_path)
     g_pos = 0
     g_ns = ns
     while not is_eof() {
@@ -3322,64 +3347,59 @@ fn compile_source(src: str) -> str {
 
 fn check_delimiters(tokens: list[Token]) -> unit {
     let mut delim_kinds: list[str] = []
-    let mut delim_lines: list[int] = []
-    let mut delim_cols: list[int] = []
+    let mut delim_tokens: list[Token] = []
     for tok in tokens {
         let k = tok.kind
         if k == "LPAREN" or k == "LBRACE" or k == "LBRACKET" {
             delim_kinds.append(k)
-            delim_lines.append(tok.line)
-            delim_cols.append(tok.col)
+            delim_tokens.append(tok)
         } elif k == "RPAREN" {
             let dl = len(delim_kinds)
             if dl == 0 {
-                report_error("W0001", tok.line, tok.col, "unexpected ')'")
+                report_error_at("W0001", tok, "unexpected ')'")
             }
             let top = delim_kinds[dl - 1]
             if top != "LPAREN" {
-                report_error("W0001", tok.line, tok.col, "mismatched delimiter ')'")
+                report_error_at("W0001", tok, "mismatched delimiter ')'")
             }
             delim_kinds.pop()
-            delim_lines.pop()
-            delim_cols.pop()
+            delim_tokens.pop()
         } elif k == "RBRACKET" {
             let dl = len(delim_kinds)
             if dl == 0 {
-                report_error("W0006", tok.line, tok.col, "unexpected ']'")
+                report_error_at("W0006", tok, "unexpected ']'")
             }
             let top = delim_kinds[dl - 1]
             if top != "LBRACKET" {
-                report_error("W0006", tok.line, tok.col, "mismatched delimiter ']'")
+                report_error_at("W0006", tok, "mismatched delimiter ']'")
             }
             delim_kinds.pop()
-            delim_lines.pop()
-            delim_cols.pop()
+            delim_tokens.pop()
         } elif k == "RBRACE" {
             let dl = len(delim_kinds)
             if dl == 0 {
-                report_error("W0006", tok.line, tok.col, "unexpected '}'")
+                report_error_at("W0006", tok, "unexpected '}'")
             }
             let top = delim_kinds[dl - 1]
             if top == "LPAREN" {
-                report_error("W0006", tok.line, tok.col, "expected ')' before '}'")
+                report_error_at("W0006", tok, "expected ')' before '}'")
             }
             if top != "LBRACE" {
-                report_error("W0006", tok.line, tok.col, "mismatched delimiter '}'")
+                report_error_at("W0006", tok, "mismatched delimiter '}'")
             }
             delim_kinds.pop()
-            delim_lines.pop()
-            delim_cols.pop()
+            delim_tokens.pop()
         }
     }
     if len(delim_kinds) > 0 {
         let top_idx = len(delim_kinds) - 1
         let top_k = delim_kinds[top_idx]
         if top_k == "LBRACE" {
-            report_error("W0006", delim_lines[top_idx], delim_cols[top_idx], "unclosed delimiter '{'")
+            report_error_at("W0006", delim_tokens[top_idx], "unclosed delimiter '{'")
         } elif top_k == "LPAREN" {
-            report_error("W0006", delim_lines[top_idx], delim_cols[top_idx], "unclosed delimiter '('")
+            report_error_at("W0006", delim_tokens[top_idx], "unclosed delimiter '('")
         } elif top_k == "LBRACKET" {
-            report_error("W0006", delim_lines[top_idx], delim_cols[top_idx], "unclosed delimiter '['")
+            report_error_at("W0006", delim_tokens[top_idx], "unclosed delimiter '['")
         }
     }
 }
@@ -3394,7 +3414,11 @@ fn check_source(src: str, in_path: str) -> unit {
     check_delimiters(tokens)
     sem_validate(tokens)
 }
-fn sem_at() -> Token { return sem_tokens[sem_pos] }
+fn sem_at() -> Token {
+    let token = sem_tokens[sem_pos]
+    g_diag_file = token.file
+    return token
+}
 fn sem_is(kind: str) -> bool { return sem_at().kind == kind }
 fn sem_take() -> Token {
     let token = sem_at()
@@ -3418,7 +3442,7 @@ fn sem_skip_newlines_before_branch() {
     if not branch { sem_pos = saved }
 }
 fn sem_error(code: str, message: str) {
-    report_error(code, sem_at().line, sem_at().col, message)
+    report_error_at(code, sem_at(), message)
 }
 fn sem_expect(kind: str) -> Token {
     if not sem_is(kind) { sem_error("W0006", "expected " + kind) }
@@ -3684,7 +3708,7 @@ fn sem_collect_function(owner: str, visible: bool) {
     if sem_match("LBRACKET") {
         while not sem_is("RBRACKET") {
             let parameter = sem_expect("IDENT")
-            for previous in type_params { if previous == parameter.val { report_error("W2001", parameter.line, parameter.col, "duplicate generic type parameter") } }
+            for previous in type_params { if previous == parameter.val { report_error_at("W2001", parameter, "duplicate generic type parameter") } }
             type_params.append(parameter.val)
             let mut constraint = ""
             if sem_match("COLON") { constraint = sem_expect("IDENT").val }
@@ -3729,7 +3753,7 @@ fn sem_collect_record(kind: str) {
         let mut parameter_index = 0
         while not sem_is("RBRACKET") {
             let parameter = sem_expect("IDENT")
-            if parameter_index >= len(type_params) or type_params[parameter_index] != parameter.val { report_error("W0006", parameter.line, parameter.col, "generic parameter list changed during collection") }
+            if parameter_index >= len(type_params) or type_params[parameter_index] != parameter.val { report_error_at("W0006", parameter, "generic parameter list changed during collection") }
             if sem_match("COLON") { sem_expect("IDENT") }
             parameter_index = parameter_index + 1
             if not sem_match("COMMA") { break }
@@ -4362,8 +4386,10 @@ fn sem_expression(minimum: int, allow_struct: bool) -> SemValue {
         while sem_is("NEWLINE") { sem_take() }
         if not sem_is("ELSE") or not (sem_tokens[sem_pos + 1].kind == "LBRACE" or sem_tokens[sem_pos + 1].kind == "IDENT" and sem_tokens[sem_pos + 2].kind == "LBRACE") { sem_pos = saved }
         let call_position = sem_pos + sem_token_offset
-        let call_line = sem_at().line
-        let call_col = sem_at().col
+        let call_token = sem_at()
+        let call_line = call_token.line
+        let call_col = call_token.col
+        let call_file = call_token.file
         if sem_match("LPAREN") {
             if left.root == "#collection" { sem_collection_call_positions.append(call_position) }
             if sem_kind(left.type_id) == "function" and left.root != "#method" and left.root != "#collection" and not (len(left.root) >= 3 and slice(left.root, 0, 3) == "fn:") { sem_indirect_positions.append(call_position) }
@@ -4392,7 +4418,7 @@ fn sem_expression(minimum: int, allow_struct: bool) -> SemValue {
             if len(left.root) >= 3 and slice(left.root, 0, 3) == "fn:" {
                 let function_index = sem_function(slice(left.root, 3, len(left.root)))
                 if function_index >= 0 and len(sem_functions[function_index].type_params) > 0 {
-                    sem_check_generic_constraints(function_index, args, call_line, call_col)
+                    sem_check_generic_constraints(function_index, args, call_file, call_line, call_col)
                 }
             }
             let actual = sem_check_call(left.type_id, args, statement)
@@ -4771,7 +4797,7 @@ fn sem_match_expression(statement: bool) -> SemValue {
         let bare_pattern = pattern_kind == "IDENT" or pattern_kind == "INT" or pattern_kind == "STR" or pattern_kind == "TRUE" or pattern_kind == "FALSE" or pattern_kind == "NONE"
         let following = sem_tokens[pattern_start + 1]
         if bare_pattern and following.kind == "LBRACE" {
-            report_error("W0001", following.line, following.col, "expected '=>' after match pattern")
+            report_error_at("W0001", following, "expected '=>' after match pattern")
         }
     }
     let subject = sem_expression(0, false).type_id
@@ -4983,7 +5009,7 @@ fn sem_check_function(function: SemFunction) {
     sem_type_params = previous_type_params
     sem_active_constraints = previous_constraints
 }
-fn sem_check_generic_constraints(function_index: int, args: list[int], line: int, col: int) {
+fn sem_check_generic_constraints(function_index: int, args: list[int], file: str, line: int, col: int) {
     let function = sem_functions[function_index]
     let signature = sem_types[function.type_id]
     let empty_names: list[str] = []
@@ -4995,7 +5021,7 @@ fn sem_check_generic_constraints(function_index: int, args: list[int], line: int
         for parameter in function.type_params {
             for i in 0..len(sem_unify_names) {
                 if sem_unify_names[i] == parameter and sem_kind(sem_unify_types[i]) != "typeparam" and sem_contains_type_parameter(sem_unify_types[i], parameter) {
-                    report_error("W2011", line, col, "structural generic expansion cycle detected: " + function.name)
+                    report_error_at_location("W2011", file, line, col, "structural generic expansion cycle detected: " + function.name)
                 }
             }
         }
@@ -5005,7 +5031,7 @@ fn sem_check_generic_constraints(function_index: int, args: list[int], line: int
         if constraint != "" {
             let mut concrete = -1
             for j in 0..len(sem_unify_names) { if sem_unify_names[j] == function.type_params[i] { concrete = sem_unify_types[j] } }
-            if concrete < 0 or not sem_assignable(concrete, sem_named(constraint)) { report_error("W2001", line, col, "generic constraint not satisfied: " + constraint) }
+            if concrete < 0 or not sem_assignable(concrete, sem_named(constraint)) { report_error_at_location("W2001", file, line, col, "generic constraint not satisfied: " + constraint) }
         }
     }
 }
@@ -5101,37 +5127,37 @@ fn sem_reset(tokens: list[Token]) {
             if kind == "CLASS" { tag = "class" }
             if kind == "INTERFACE" { tag = "interface" }
             if kind == "ENUM" { tag = "enum" }
-            for type_ in sem_types { if type_.name == name { report_error("W1002", tokens[i + 1].line, tokens[i + 1].col, "duplicate type") } }
+            for type_ in sem_types { if type_.name == name { report_error_at("W1002", tokens[i + 1], "duplicate type") } }
             sem_intern(tag, name, empty)
             if tokens[i + 2].kind == "LBRACKET" {
                 let mut params: list[str] = []
                 let mut position = i + 3
                 while position < len(tokens) and tokens[position].kind != "RBRACKET" {
                     let parameter = tokens[position]
-                    if parameter.kind != "IDENT" { report_error("W0006", parameter.line, parameter.col, "expected generic type parameter") }
+                    if parameter.kind != "IDENT" { report_error_at("W0006", parameter, "expected generic type parameter") }
                     params.append(parameter.val)
                     position = position + 1
                     if position < len(tokens) and tokens[position].kind == "COLON" {
                         position = position + 1
-                        if position >= len(tokens) or tokens[position].kind != "IDENT" { report_error("W0006", tokens[position - 1].line, tokens[position - 1].col, "expected generic constraint") }
+                        if position >= len(tokens) or tokens[position].kind != "IDENT" { report_error_at("W0006", tokens[position - 1], "expected generic constraint") }
                         position = position + 1
                     }
                     if position < len(tokens) and tokens[position].kind == "COMMA" { position = position + 1 }
-                    elif position < len(tokens) and tokens[position].kind != "RBRACKET" { report_error("W0006", tokens[position].line, tokens[position].col, "expected ',' in generic parameters") }
+                    elif position < len(tokens) and tokens[position].kind != "RBRACKET" { report_error_at("W0006", tokens[position], "expected ',' in generic parameters") }
                 }
-                if len(params) == 0 { report_error("W2001", tokens[i + 2].line, tokens[i + 2].col, "generic declaration requires a type parameter") }
+                if len(params) == 0 { report_error_at("W2001", tokens[i + 2], "generic declaration requires a type parameter") }
                 sem_generic_types.append(SemGenericType { name: name, kind: tag, params: params })
             }
         }
     }
 }
 fn sem_validate(tokens: list[Token]) {
-    let mut surrounded: list[Token] = [Token { kind: "LBRACE", val: "{", line: 1, col: 1 }]
+    let mut surrounded: list[Token] = [Token { kind: "LBRACE", val: "{", line: 1, col: 1, file: tokens[0].file }]
     for token in tokens {
         if token.kind != "EOF" { surrounded.append(token) }
     }
-    surrounded.append(Token { kind: "RBRACE", val: "}", line: 1, col: 1 })
-    surrounded.append(Token { kind: "EOF", val: "", line: 1, col: 1 })
+    surrounded.append(Token { kind: "RBRACE", val: "}", line: 1, col: 1, file: tokens[len(tokens) - 1].file })
+    surrounded.append(Token { kind: "EOF", val: "", line: 1, col: 1, file: tokens[len(tokens) - 1].file })
     sem_reset(surrounded)
     sem_pos = 1
     while true {
@@ -5188,10 +5214,10 @@ fn sem_validate(tokens: list[Token]) {
                 while not sem_is("LBRACE") and not sem_is("EOF") { sem_take() }
                 let end = sem_skip_block()
                 let saved_tokens = sem_tokens
-                let mut block: list[Token] = [Token { kind: "LBRACE", val: "{", line: sem_tokens[beginning].line, col: 1 }]
+                let mut block: list[Token] = [Token { kind: "LBRACE", val: "{", line: sem_tokens[beginning].line, col: 1, file: sem_tokens[beginning].file }]
                 for i in beginning..end { block.append(sem_tokens[i]) }
-                block.append(Token { kind: "RBRACE", val: "}", line: 1, col: 1 })
-                block.append(Token { kind: "EOF", val: "", line: 1, col: 1 })
+                block.append(Token { kind: "RBRACE", val: "}", line: 1, col: 1, file: sem_tokens[end - 1].file })
+                block.append(Token { kind: "EOF", val: "", line: 1, col: 1, file: sem_tokens[end - 1].file })
                 let previous_offset = sem_token_offset
                 sem_token_offset = sem_token_offset + beginning - 1
                 sem_tokens = block

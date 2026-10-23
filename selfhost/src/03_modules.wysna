@@ -59,6 +59,7 @@ fn module_stdlib_path(requested: str) -> str {
 }
 fn module_expand(src: str, path: str, entry: bool) -> int {
     let canonical = module_normalize(path)
+    g_diag_file = canonical
     for i in 0..len(module_paths) {
         if module_paths[i] == canonical {
             if module_states[i] == 1 { report_error("W1003", 1, 1, "circular import: " + canonical) }
@@ -70,10 +71,10 @@ fn module_expand(src: str, path: str, entry: bool) -> int {
     module_states.append(1)
     let mut names: list[str] = []
     let mut exports: list[str] = []
-    let tokens = tokenize(src)
+    let tokens = tokenize(src, canonical)
     for token in tokens {
         if token.kind == "IDENT" {
-            if (len(token.val) >= 8 and slice(token.val, 0, 8) == "__wysna_") or (len(token.val) >= 7 and slice(token.val, 0, 7) == "_WYSNA_") { report_error("W1002", token.line, token.col, "reserved compiler namespace") }
+            if (len(token.val) >= 8 and slice(token.val, 0, 8) == "__wysna_") or (len(token.val) >= 7 and slice(token.val, 0, 7) == "_WYSNA_") { report_error_at("W1002", token, "reserved compiler namespace") }
         }
     }
     let mut depth = 0
@@ -102,6 +103,7 @@ fn module_expand(src: str, path: str, entry: bool) -> int {
     let mut position = 0
     while position < len(tokens) - 1 {
         let token = tokens[position]
+        g_diag_file = token.file
         if token.kind == "IMPORT" {
             let public_import = position > 0 and tokens[position - 1].kind == "PUB"
             if public_import and len(body) > 0 and body[len(body) - 1].kind == "PUB" { body.pop() }
@@ -111,13 +113,13 @@ fn module_expand(src: str, path: str, entry: bool) -> int {
             let mut content = read_file(resolved) else err { "" }
             if content == "" {
                 resolved = module_normalize(requested)
-                content = read_file(resolved) else err { report_error("W1003", token.line, token.col, "module not found: " + requested) "" }
+                content = read_file(resolved) else err { report_error_at("W1003", token, "module not found: " + requested) "" }
             }
             let dependency = module_expand(content, resolved, false)
             let mut alias = extract_module_ns(requested)
             position = position + 2
             if tokens[position].kind == "AS" { alias = tokens[position + 1].val position = position + 2 }
-            if module_contains(aliases, alias) or module_contains(names, alias) { report_error("W1002", token.line, token.col, "duplicate module alias") }
+            if module_contains(aliases, alias) or module_contains(names, alias) { report_error_at("W1002", token, "duplicate module alias") }
             aliases.append(alias)
             dependencies.append(dependency)
             module_import_owners.append(index)
@@ -135,6 +137,7 @@ fn module_expand(src: str, path: str, entry: bool) -> int {
     let mut parentheses = 0
     while position < len(body) {
         let token = body[position]
+        g_diag_file = token.file
         let mut consumed = false
         if token.kind == "IDENT" {
             for i in 0..len(aliases) {
@@ -147,12 +150,12 @@ fn module_expand(src: str, path: str, entry: bool) -> int {
                     }
                     if nested_target >= 0 and position + 4 < len(body) and body[position + 3].kind == "DOT" {
                         let nested_member = body[position + 4]
-                        if not module_contains(module_public_names[nested_target], nested_member.val) { report_error("W1001", nested_member.line, nested_member.col, "member is not exported: " + nested_member.val) }
-                        module_output.append(Token { kind: "IDENT", val: module_name(nested_target, nested_member.val), line: token.line, col: token.col })
+                        if not module_contains(module_public_names[nested_target], nested_member.val) { report_error_at("W1001", nested_member, "member is not exported: " + nested_member.val) }
+                        module_output.append(Token { kind: "IDENT", val: module_name(nested_target, nested_member.val), line: token.line, col: token.col, file: token.file })
                         position = position + 5
                     } else {
-                        if not module_contains(module_public_names[dependency], member.val) { report_error("W1001", member.line, member.col, "member is not exported: " + member.val) }
-                        module_output.append(Token { kind: "IDENT", val: module_name(dependency, member.val), line: token.line, col: token.col })
+                        if not module_contains(module_public_names[dependency], member.val) { report_error_at("W1001", member, "member is not exported: " + member.val) }
+                        module_output.append(Token { kind: "IDENT", val: module_name(dependency, member.val), line: token.line, col: token.col, file: token.file })
                         position = position + 3
                     }
                     consumed = true
@@ -166,7 +169,7 @@ fn module_expand(src: str, path: str, entry: bool) -> int {
                     if position > 0 and (body[position - 1].kind == "LET" or body[position - 1].kind == "MUT") { field = false }
                 }
                 if braces > 0 and position > 0 and body[position - 1].kind == "FN" { field = true }
-                if not field { module_output.append(Token { kind: token.kind, val: module_name(index, token.val), line: token.line, col: token.col }) consumed = true position = position + 1 }
+                if not field { module_output.append(Token { kind: token.kind, val: module_name(index, token.val), line: token.line, col: token.col, file: token.file }) consumed = true position = position + 1 }
             }
         }
         if not consumed { module_output.append(token) position = position + 1 }
@@ -195,6 +198,6 @@ fn module_tokens(src: str, path: str) -> list[Token] {
     module_import_public = empty_public
     module_output = empty_tokens
     module_expand(src, path, true)
-    module_output.append(Token { kind: "EOF", val: "", line: 1, col: 1 })
+    module_output.append(Token { kind: "EOF", val: "", line: 1, col: 1, file: module_normalize(path) })
     return module_output
 }

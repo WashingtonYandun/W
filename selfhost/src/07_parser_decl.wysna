@@ -513,8 +513,14 @@ fn parse_import_decl() -> unit {
         return
     }
     g_modules.append(ns)
-    let mod_src = read_file(path_tok.val) else err {
+    let mut module_path = module_normalize(module_directory(path_tok.file) + path_tok.val)
+    if len(path_tok.val) >= 4 and slice(path_tok.val, 0, 4) == "std/" { module_path = module_stdlib_path(path_tok.val) }
+    let mut mod_src = read_file(module_path) else err {
         ""
+    }
+    if mod_src == "" and module_path != path_tok.val {
+        module_path = module_normalize(path_tok.val)
+        mod_src = read_file(module_path) else err { "" }
     }
     if mod_src == "" {
         return
@@ -522,7 +528,7 @@ fn parse_import_decl() -> unit {
     let saved_tokens = g_tokens
     let saved_pos = g_pos
     let saved_ns = g_ns
-    g_tokens = tokenize(mod_src)
+    g_tokens = tokenize(mod_src, module_path)
     g_pos = 0
     g_ns = ns
     while not is_eof() {

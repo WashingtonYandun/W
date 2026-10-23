@@ -3,6 +3,7 @@ struct Token {
     val: str,
     line: int,
     col: int,
+    file: str,
 }
 
 struct ExprRes {
@@ -50,6 +51,7 @@ let mut g_scope_stack: list[CleanupScope] = []
 let mut g_aux_id: int = 0
 let mut g_cur_err_type: str = ""
 let mut g_in_path: str = ""
+let mut g_diag_file: str = ""
 
 
 let mut g_borrowed_vars: list[str] = []
