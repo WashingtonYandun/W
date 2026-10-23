@@ -1,6 +1,3 @@
-Warning: truncated output (original token count: 11369)
-Total output lines: 1105
-
 import json
 import os
 import subprocess
@@ -335,7 +332,510 @@ def run_pipeline(
                         "peak_rss_kb": peak_rss_kb(),
                     }
                 }
-                print(json.dumps(stat_obj,…5369 tokens truncated…")
+                print(json.dumps(stat_obj, indent=2))
+            elif json_diagnostics:
+                print(json.dumps({"status": "ok", "file": file_name, "diagnostics": []}, indent=2))
+            else:
+                print(f"[OK] Check passed for {file_name}")
+            return 0
+
+        # 4. C99 Code Generation / Native Build
+        if emit_c_path is not None or build_bin_path is not None:
+            repo_root = get_repo_root()
+            toolchain = NativeToolchain(repo_root)
+            codegen_telemetry = None
+            phase_ms = {}
+            hir_ms = None
+            if backend == "selfhost" and file_name != "<stdin>":
+                selfhost_bin = ensure_selfhost_compiler_binary(repo_root)
+                emission = toolchain.emit_selfhost(selfhost_bin, file_name)
+                c_code, codegen_ms = emission.source, emission.codegen_ms
+            else:
+                emission = service.emit_c(checked, backend="ast" if backend == "ast" else "hir")
+                c_code = emission.source
+                codegen_telemetry = dict(emission.telemetry)
+                phase_ms = emission.timing_ms if backend != "ast" else {}
+                hir_ms = phase_ms.get("hir")
+                codegen_ms = emission.timing_ms["codegen"]
+
+            c_compile_ms = link_ms = 0.0
+            def report_codegen_stats():
+                if not show_stats:
+                    return
+                stat_obj = {
+                    "status": "ok",
+                    "file": file_name,
+                    "telemetry": {
+                        "monomorphization": dict(checked.telemetry) if checked is not None else None,
+                        "codegen": codegen_telemetry,
+                        "timing_ms": {
+                            "lex": round(lex_ms, 2),
+                            "parse": round(parse_ms, 2),
+                            "check": round(check_ms, 2),
+                            "hir": round(hir_ms, 2) if hir_ms is not None else None,
+                            "codegen": round(codegen_ms, 2),
+                            "mir": round(phase_ms.get('mir', 0), 2),
+                            "c_emit": round(phase_ms.get('c_emit', 0), 2),
+                            "c_compile": round(c_compile_ms, 2),
+                            "link": round(link_ms, 2),
+                            "total": round((time.perf_counter() - t_start) * 1000.0, 2),
+                        },
+                        "peak_rss_kb": peak_rss_kb(),
+                    }
+                }
+                print(json.dumps(stat_obj, indent=2), file=sys.stderr)
+
+            if emit_c_path is not None:
+                with open(emit_c_path, "w", encoding="utf-8") as f:
+                    f.write(c_code)
+                if build_bin_path is None:
+                    if json_v1:
+                        artifact = artifact_file("c_source", "text/x-c", emit_c_path)
+                        _write_json_v1(
+                            tool_command,
+                            "ok",
+                            0,
+                            artifacts=[artifact],
+                            target={"profile": "c99-source", "triple": None},
+                        )
+                    report_codegen_stats()
+                    return 0
+
+            if build_bin_path is not None:
+                built = toolchain.build(c_code, build_bin_path, sanitize=sanitize,
+                                        link_libraries=link_libraries)
+                c_compile_ms, link_ms = built.c_compile_ms, built.link_ms
+                if json_v1:
+                    artifact = artifact_file(
+                        "native_executable", "application/octet-stream", built.output_path,
+                    )
+                    _write_json_v1(
+                        tool_command,
+                        "ok",
+                        0,
+                        artifacts=[artifact],
+                        target={"profile": "native-cli", "triple": None},
+                    )
+                report_codegen_stats()
+                return 0
+
+        # 5. Runtime Interpretation
+        if show_stats:
+            print(json.dumps({
+                "status": "ok",
+                "file": file_name,
+                "telemetry": {
+                    "monomorphization": dict(checked.telemetry),
+                    "timing_ms": {
+                        "lex": round(lex_ms, 2),
+                        "parse": round(parse_ms, 2),
+                        "check": round(check_ms, 2),
+                        "total": round((time.perf_counter() - t_start) * 1000.0, 2),
+                    },
+                    "peak_rss_kb": peak_rss_kb(),
+                }
+            }, indent=2), file=sys.stderr)
+        res = service.interpret(checked, foreign_libraries=link_libraries,
+                                execution_context=execution_context)
+
+        if not isinstance(res, WysnaUnit) and file_name == "<stdin>":
+            print(res)
+
+        if report_state is not None:
+            _set_run_report(
+                report_state,
+                "ok",
+                0,
+                0,
+                execution={"kind": "application_exit", "exit_code": 0, "signal": None},
+            )
+
+        return 0
+
+    except _ApplicationExit as termination:
+        code = termination.code
+        if report_state is None:
+            raise SystemExit(code)
+        if not 0 <= code <= 255:
+            diagnostic = diagnostic_record(
+                "W5002", "execution",
+                "Application exit code is outside the portable range 0..255.",
+                filename=file_name,
+            )
+            _set_run_report(
+                report_state,
+                "execution_error",
+                5,
+                5,
+                execution={
+                    "kind": "application_exit",
+                    "exit_code": code,
+                    "signal": None,
+                    "data": {"portable_range": [0, 255]},
+                },
+                diagnostics=[diagnostic],
+            )
+            return 5
+        _set_run_report(
+            report_state,
+            "ok",
+            0,
+            code,
+            execution={"kind": "application_exit", "exit_code": code, "signal": None},
+        )
+        return code
+
+    except NativeCompilationError as err:
+        if report_state is not None:
+            diagnostic = diagnostic_record(
+                "W5001", "toolchain",
+                _bounded_tool_output(f"{err.phase} failed: {err.stderr}"),
+                filename=file_name,
+            )
+            _set_run_report(report_state, "toolchain_error", 3, 3,
+                            diagnostics=[diagnostic])
+            print(f"[{err.label}]\n{err.stderr}", file=sys.stderr)
+            return 3
+        if json_v1:
+            diagnostic = diagnostic_record(
+                "W5001", "toolchain",
+                _bounded_tool_output(f"{err.phase} failed: {err.stderr}"),
+                filename=file_name,
+            )
+            _write_json_v1(tool_command, "toolchain_error", 3,
+                           extra_diagnostics=[diagnostic])
+            return 3
+        print(f"[{err.label}]\n{err.stderr}", file=sys.stderr)
+        return 1
+    except WysnaError as err:
+        if report_state is not None:
+            span_cache = {}
+            source_by_file = _sources_for_diagnostics(
+                file_name, source_code, locals().get("service"))
+            diagnostics = [
+                diagnostic_from_error(item, source_by_file, span_cache=span_cache)
+                for item in getattr(err, "diagnostics", (err,))
+            ]
+            _set_run_report(report_state, "diagnostic_error", 1, 1,
+                            diagnostics=diagnostics)
+            for diagnostic in getattr(err, "diagnostics", (err,)):
+                print(str(diagnostic), file=sys.stderr)
+            return 1
+        if json_v1:
+            _write_json_v1(
+                tool_command, "diagnostic_error", 1, errors=[err],
+                source_by_file=_sources_for_diagnostics(
+                    file_name, source_code, locals().get("service")),
+            )
+            return 1
+        if json_diagnostics:
+            print(json.dumps(err.to_dict(), indent=2))
+        else:
+            for diagnostic in getattr(err, 'diagnostics', (err,)):
+                print(str(diagnostic), file=sys.stderr)
+        return 1
+    except Exception as exc:
+        if report_state is not None:
+            if isinstance(exc, OSError):
+                diagnostic = diagnostic_record(
+                    "W5004", "filesystem", f"Unable to access a requested file: {exc}",
+                    filename=file_name,
+                )
+                _set_run_report(report_state, "toolchain_error", 3, 3,
+                                diagnostics=[diagnostic])
+                print(f"[Filesystem Error] {exc}", file=sys.stderr)
+                return 3
+            diagnostic = diagnostic_record(
+                "W9999", "internal", str(exc), filename=file_name,
+            )
+            _set_run_report(report_state, "internal_error", 4, 4,
+                            diagnostics=[diagnostic])
+            print(f"[Internal Error] {exc}", file=sys.stderr)
+            return 4
+        if json_v1:
+            if isinstance(exc, OSError):
+                diagnostic = diagnostic_record(
+                    "W5004", "filesystem", f"Unable to write requested output: {exc}",
+                    filename=file_name,
+                )
+                _write_json_v1(tool_command, "toolchain_error", 3,
+                               extra_diagnostics=[diagnostic])
+                return 3
+            diagnostic = diagnostic_record(
+                "W9999", "internal", str(exc), filename=file_name,
+            )
+            _write_json_v1(tool_command, "internal_error", 4,
+                           extra_diagnostics=[diagnostic])
+            return 4
+        if json_diagnostics:
+            err_dict = {
+                "code": "W9999",
+                "severity": "error",
+                "stage": "internal",
+                "message": str(exc),
+                "file": file_name,
+                "line": 1,
+                "column": 1,
+                "span": {
+                    "file": file_name,
+                    "line": 1,
+                    "column": 1,
+                },
+            }
+            print(json.dumps(err_dict, indent=2))
+        else:
+            print(f"[Internal Error] {exc}", file=sys.stderr)
+        return 1
+
+
+def repl(show_tokens: bool = False, show_ast: bool = False) -> None:
+    print("==================================================")
+    print(f"Wysna REPL v{WYSNA_VERSION} (Type 'exit' to quit)")
+    print("==================================================")
+
+    parser = Parser(file="<repl>")
+    checker = TypeChecker(file="<repl>")
+    interp = Interpreter(file="<repl>")
+
+    while True:
+        try:
+            line = input("wysna> ")
+        except (EOFError, KeyboardInterrupt):
+            print("\nExiting.")
+            break
+
+        line = line.strip()
+        if not line:
+            continue
+        if line == "exit":
+            break
+
+        try:
+            ast = parser.parse(line)
+            if show_ast:
+                print(json.dumps(ast.to_dict(), indent=2))
+
+            checker.check(ast)
+            res = interp.interpret(ast)
+            if not isinstance(res, WysnaUnit):
+                print(res)
+        except WysnaError as err:
+            print(str(err))
+        except Exception as exc:
+            print(f"Error: {exc}")
+
+
+def print_help(prog: Optional[str] = None) -> None:
+    if prog is None:
+        prog = "wysna"
+    print(f"Wysna Language Compiler & Toolchain v{WYSNA_VERSION}")
+    print("Usage:")
+    print(f"  {prog} lsp                                       # LSP over stdio")
+    print(f"  {prog} service serve --worker <bin> --database <db> # Local bounded HTTP/JSON pilot")
+    print(f"  {prog} repl                                    # Start interactive REPL")
+    print(f"  {prog} [run] [--stats] [--report-json <path>] [--invocation-id <id>] <file.wysna> [-- args...] # Execute Wysna source file")
+    print(f"  {prog} check [--json|--output-format=json-v1] [--stats] <file.wysna>   # Static typecheck without execution")
+    print(f"  {prog} fmt [--write] [--output-format=json-v1] <file.wysna> # Canonical deterministic formatter")
+    print(f"  {prog} ast [--json] <file.wysna>               # Emit canonical JSON AST (v0.1)")
+    print(f"  {prog} mir <file.wysna>                        # Emit verified MIR as JSON")
+    print(f"  {prog} tokens <file.wysna>                     # Emit lexical token stream")
+    print(f"  {prog} emit-c [--backend=hir|ast|selfhost] [--output-format=json-v1] <file.wysna> [-o <out.c>] # Transpile to C99")
+    print(f"  {prog} build [--backend=hir|ast|selfhost] [--output-format=json-v1] <file.wysna> [-o <bin>] # Compile native binary")
+    print(f"  {prog} test [--differential [N]] [--fuzz [N]]            # Run conformance, differential, or fuzz suite")
+    print(f"  {prog} bench [--update-baseline]                         # Run Seed/Compiler performance benchmark harness")
+    print(f"  {prog} version                                           # Show compiler version")
+
+
+def main(argv=None) -> None:
+    prog = "wysna"
+    args = list(sys.argv[1:] if argv is None else argv)
+    cli_args = args[:args.index("--")] if "--" in args else args
+    json_v1 = "--output-format=json-v1" in cli_args
+    report_json_path = None
+    requested_invocation_id = None
+    command_for_output = args[0] if args and args[0] in (
+        "run", "check", "fmt", "ast", "mir", "tokens", "emit-c", "build",
+        "test", "bench", "version", "repl",
+    ) else "run"
+
+    def usage_error(message: str) -> None:
+        if json_v1 and report_json_path is None:
+            diagnostic = diagnostic_record("W5002", "usage", message)
+            write_tool_result(
+                tool_result(command_for_output, "usage_error", 2,
+                            diagnostics=[diagnostic]),
+                sys.stdout,
+            )
+            raise SystemExit(2)
+        print(f"{prog}: {message}", file=sys.stderr)
+        print(f"Try '{prog} --help' for usage.", file=sys.stderr)
+        raise SystemExit(2)
+
+    if args and args[0] == "project":
+        from tooling.ProjectCLI import run_project_command
+        raise SystemExit(run_project_command(args[1:]))
+    if args and args[0] == "service":
+        from tooling.ServiceCLI import run_service_command
+        raise SystemExit(run_service_command(args[1:]))
+    if args and args[0] == "api":
+        from tooling.ApiIndex import run_api_command
+        raise SystemExit(run_api_command(args[1:]))
+    if args and args[0] == "capabilities":
+        from tooling.ApiIndex import run_capabilities_command
+        raise SystemExit(run_capabilities_command(args[1:]))
+    if args == ["lsp"]:
+        from tooling.LanguageServer import serve
+        serve()
+        return
+    show_tokens = False
+    show_ast = False
+    check_only = False
+    json_diagnostics = False
+    show_stats = False
+    fmt_only = False
+    fmt_write = False
+    backend = "hir"
+    use_selfhost = False
+    use_hir = None
+    emit_c_path: Optional[str] = None
+    build_bin_path: Optional[str] = None
+    show_mir = False
+    subcmd: Optional[str] = None
+    file_to_run: Optional[str] = None
+    sanitize = False
+    link_libraries = []
+
+    if args and args[0] in ("run", "check", "fmt", "ast", "mir", "tokens", "emit-c", "build", "test", "bench", "version", "repl"):
+        subcmd = args[0]
+        command_for_output = subcmd
+        args = args[1:]
+        if subcmd == "bench":
+            if any(arg not in ("--update-baseline", "--help", "-h") for arg in args):
+                usage_error("bench accepts only --update-baseline")
+            if args in (["--help"], ["-h"]):
+                print_help()
+                return
+            if not os.path.isfile(os.path.join(get_repo_root(), "bench", "run_bench.py")):
+                print(f"{prog} bench requires a source checkout", file=sys.stderr)
+                sys.exit(1)
+            update_baseline = "--update-baseline" in args
+            repo_root = get_repo_root()
+            selfhost_bin = ensure_selfhost_compiler_binary(repo_root)
+            from bench.run_bench import run_benchmark_suite
+            ok = run_benchmark_suite(repo_root, selfhost_bin, update_baseline=update_baseline)
+            sys.exit(0 if ok else 1)
+        elif subcmd == "test":
+            if args in (["--help"], ["-h"]):
+                print_help()
+                return
+            if not os.path.isdir(os.path.join(get_repo_root(), "tests", "unit")):
+                print(f"{prog} test requires a source checkout", file=sys.stderr)
+                sys.exit(1)
+            if args and args[0] == "--differential":
+                gen_count = 25
+                base_seed = 1000
+                idx = 1
+                count_seen = False
+                seed_seen = False
+                while idx < len(args):
+                    if args[idx] == "--seed" and not seed_seen and idx + 1 < len(args) and args[idx + 1].isdigit():
+                        base_seed = int(args[idx + 1])
+                        seed_seen = True
+                        idx += 2
+                    elif args[idx].isdigit() and not count_seen:
+                        gen_count = int(args[idx])
+                        count_seen = True
+                        idx += 1
+                    else:
+                        usage_error(f"invalid test option '{args[idx]}'")
+                repo_root = get_repo_root()
+                selfhost_bin = ensure_selfhost_compiler_binary(repo_root)
+                from tests.differential.differential_test import run_differential_suite
+                ok = run_differential_suite(repo_root, selfhost_bin, generated_count=gen_count, base_seed=base_seed)
+                sys.exit(0 if ok else 1)
+            elif args and args[0] == "--fuzz":
+                fuzz_count = 200
+                base_seed = 9000
+                idx = 1
+                count_seen = False
+                seed_seen = False
+                while idx < len(args):
+                    if args[idx] == "--seed" and not seed_seen and idx + 1 < len(args) and args[idx + 1].isdigit():
+                        base_seed = int(args[idx + 1])
+                        seed_seen = True
+                        idx += 2
+                    elif args[idx].isdigit() and not count_seen:
+                        fuzz_count = int(args[idx])
+                        count_seen = True
+                        idx += 1
+                    else:
+                        usage_error(f"invalid test option '{args[idx]}'")
+                repo_root = get_repo_root()
+                from tests.differential.differential_test import run_fuzz_suite
+                ok = run_fuzz_suite(fuzz_count=fuzz_count, base_seed=base_seed, repo_root=repo_root)
+                sys.exit(0 if ok else 1)
+            else:
+                if any(arg not in ("--sanitize", "-s") for arg in args):
+                    usage_error(f"invalid test option '{next(arg for arg in args if arg not in ('--sanitize', '-s'))}'")
+                if args and ("--sanitize" in args or "-s" in args):
+                    os.environ["WYSNA_SANITIZE"] = "1"
+                from run_conformance import run_suite
+                run_suite()
+                return
+        elif subcmd == "version":
+            print(f"Wysna Language Compiler v{WYSNA_VERSION} (Wysna Seed + Wysna Compiler Self-Hosted C99)")
+            return
+        elif subcmd == "check":
+            check_only = True
+        elif subcmd == "fmt":
+            fmt_only = True
+        elif subcmd == "ast":
+            show_ast = True
+        elif subcmd == "mir":
+            show_mir = True
+        elif subcmd == "tokens":
+            show_tokens = True
+
+    program_args = []
+    if "--" in args:
+        separator = args.index("--")
+        if subcmd not in (None, "run"):
+            usage_error("program arguments after -- are supported only by run")
+        if separator == 0:
+            usage_error("a source file must appear before --")
+        program_args = args[separator + 1:]
+        args = args[:separator]
+
+    i = 0
+    while i < len(args):
+        arg = args[i]
+        if arg in ("--tokens", "-t"):
+            show_tokens = True
+        elif arg == "--ast":
+            if subcmd == "ast":
+                show_ast = True
+            else:
+                backend = "ast"
+                use_hir = False
+        elif arg in ("--check", "-c"):
+            check_only = True
+        elif arg == "--json":
+            json_diagnostics = True
+        elif arg == "--output-format=json-v1":
+            json_v1 = True
+        elif arg == "--report-json":
+            if report_json_path is not None:
+                usage_error("--report-json may be specified only once")
+            i += 1
+            if i >= len(args) or not args[i] or args[i].startswith("-"):
+                usage_error("--report-json requires a file path")
+            report_json_path = args[i]
+        elif arg == "--invocation-id":
+            if requested_invocation_id is not None:
+                usage_error("--invocation-id may be specified only once")
+            i += 1
+            if i >= len(args) or args[i].startswith("-"):
+                usage_error("--invocation-id requires a value")
             requested_invocation_id = args[i]
         elif arg in ("--stats", "--metrics"):
             show_stats = True
