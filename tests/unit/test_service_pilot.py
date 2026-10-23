@@ -279,15 +279,21 @@ def test_sqlite_worker_runs_through_the_bounded_http_host():
             status, body = _http_request(
                 endpoint + "/measurements", method="POST", body=b"\xff",
             )
-            assert (status, body) == (400, {"error": "request_body_must_be_utf8"})
+            assert (status, body) == (
+                400, {"error": "request_body_must_be_utf8", "status": 400},
+            ), f"unexpected invalid UTF-8 response: {(status, body)!r}"
             status, body = _http_request(
                 endpoint + "/measurements",
                 method="POST",
                 body=b"x" * (1_048_576 + 1),
             )
-            assert (status, body) == (413, {"error": "request_body_too_large"})
+            assert (status, body) == (
+                413, {"error": "request_body_too_large", "status": 413},
+            ), f"unexpected oversized request response: {(status, body)!r}"
             status, body = _http_request(endpoint + "/health", method="TRACE")
-            assert (status, body) == (405, {"error": "method_not_allowed"})
+            assert (status, body) == (
+                405, {"error": "method_not_allowed", "status": 405},
+            ), f"unexpected unsupported method response: {(status, body)!r}"
         finally:
             _stop_service(server)
 
@@ -318,7 +324,9 @@ def test_http_host_maps_invalid_worker_responses_to_json_errors():
         )
         try:
             status, body = _http_request(endpoint + "/invalid")
-            assert (status, body) == (502, {"error": "worker_failed"})
+            assert (status, body) == (
+                502, {"error": "worker_failed", "status": 502},
+            ), f"unexpected malformed worker response: {(status, body)!r}"
             status, body = _http_request(endpoint + "/healthy")
             assert (status, body) == (200, {"ok": True})
 
