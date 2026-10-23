@@ -525,6 +525,7 @@ fn compile(source: str) {
        - `W5001`: C compiler command unavailable or invalid. This is an environment error, not a source type error or compiler invariant failure.
        - `W5002`: Invalid command usage or option.
        - `W5003`: Source file could not be read.
+       - `W5004`: Requested output artifact could not be written or read back.
    - `wysna check --json <file.wysnaysna>` outputs deterministic machine-readable JSON:
    ```json
    {
@@ -542,24 +543,36 @@ fn compile(source: str) {
      }
    }
    ```
-3. **Versioned Tool Result (`wysna check --output-format=json-v1`):**
+3. **Versioned Tool Result (`--output-format=json-v1`):**
    - The opt-in v1 protocol emits exactly one JSON document on stdout. The legacy
      `--json` format remains unchanged and cannot be combined with v1.
-   - Initial command coverage is `check`. Unsupported commands and incompatible flags
-     produce a `usage_error` envelope instead of silently falling back to legacy output.
+   - `check`, `fmt`, `emit-c`, and `build` support v1. Unsupported commands and
+     incompatible flags produce a `usage_error` envelope instead of silently falling
+     back to legacy output.
    - The envelope has `schema_version`, `command`, `status`, `invocation_id`, tool and
      process exit codes, execution metadata, toolchain and target metadata, diagnostics,
      artifacts, and optional telemetry.
+   - Successful `fmt` returns formatted source inline unless `--write` was requested;
+     `emit-c` and `build` return the path and SHA-256 of the artifact they created.
+     An artifact path must not overwrite its source file. Failed commands never list an
+     existing output file as a newly produced artifact.
+   - Native compiler/linker stderr is capped at 8,192 characters in a diagnostic and
+     marked with `[tool output truncated]` when the cap is reached. Captured subprocess
+     stdout is not mixed into the control stream.
    - A diagnostic uses stable code, severity, stage, message, primary span, related
      locations, typed data, and fixes. The primary span contains the exact source hash
      and UTF-8 byte offsets when its source and position are known. Existing point-only
      diagnostics use a zero-width range; unavailable locations are `null`.
-   - File read failures use `W5003`; usage failures use `W5002`. Successful checks have
-     `status: "ok"` and empty diagnostics. Type and syntax failures use
+   - File read failures use `W5003`, output artifact failures use `W5004`, and usage
+     failures use `W5002`. Successful commands have `status: "ok"` and empty diagnostics.
+     Type and syntax failures use
      `status: "diagnostic_error"`.
 
    ```text
    wysna check --output-format=json-v1 src/main.wysna
+   wysna fmt --output-format=json-v1 src/main.wysna
+   wysna emit-c --output-format=json-v1 src/main.wysna -o build/main.c
+   wysna build --output-format=json-v1 src/main.wysna -o build/main
    ```
 
    ```json

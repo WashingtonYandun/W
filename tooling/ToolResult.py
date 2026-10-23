@@ -112,7 +112,34 @@ def diagnostic_record(code, stage, message, *, severity="error", filename=None,
     }
 
 
-def tool_result(command, status, exit_code, *, diagnostics=None, invocation_id=None):
+def artifact_inline(kind, media_type, content):
+    """Describe a UTF-8 text artifact embedded in the result envelope."""
+    encoded = content.encode("utf-8")
+    return {
+        "kind": kind,
+        "media_type": media_type,
+        "content": content,
+        "sha256": hashlib.sha256(encoded).hexdigest(),
+    }
+
+
+def artifact_file(kind, media_type, path):
+    """Describe a completed file artifact using the bytes actually written."""
+    path = os.fspath(path)
+    digest = hashlib.sha256()
+    with open(path, "rb") as artifact:
+        for chunk in iter(lambda: artifact.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return {
+        "kind": kind,
+        "media_type": media_type,
+        "path": path,
+        "sha256": digest.hexdigest(),
+    }
+
+
+def tool_result(command, status, exit_code, *, diagnostics=None, artifacts=None,
+                invocation_id=None, target=None):
     """Build the stable v1 envelope; process_exit_code mirrors tool_exit_code."""
     return {
         "schema_version": SCHEMA_VERSION,
@@ -123,9 +150,9 @@ def tool_result(command, status, exit_code, *, diagnostics=None, invocation_id=N
         "process_exit_code": exit_code,
         "execution": None,
         "toolchain": {"compiler": WYSNA_VERSION},
-        "target": {"profile": "native-cli", "triple": None},
+        "target": target or {"profile": "native-cli", "triple": None},
         "diagnostics": diagnostics or [],
-        "artifacts": [],
+        "artifacts": artifacts or [],
         "telemetry": None,
     }
 

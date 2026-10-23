@@ -101,3 +101,111 @@ def test_run_passes_json_v1_looking_argument_after_separator(tmp_path):
     assert result.returncode == 0
     assert result.stdout == "--output-format=json-v1\n"
     assert result.stderr == ""
+
+
+def test_fmt_json_v1_returns_inline_formatted_source_and_hash(tmp_path):
+    source = tmp_path / "format.wysna"
+    source.write_text("fn main() -> unit { print(42) }\n", encoding="utf-8")
+
+    result = run_cli("fmt", "--output-format=json-v1", source)
+
+    payload = json.loads(result.stdout)
+    artifact = payload["artifacts"][0]
+    content = artifact["content"]
+    assert result.returncode == 0
+    assert result.stderr == ""
+    assert result.stdout.count("\n") == 1
+    assert payload["command"] == "fmt"
+    assert payload["status"] == "ok"
+    assert artifact["kind"] == "formatted_source"
+    assert artifact["media_type"] == "text/x-wysna"
+    assert artifact["sha256"] == hashlib.sha256(content.encode("utf-8")).hexdigest()
+    assert source.read_text(encoding="utf-8") == "fn main() -> unit { print(42) }\n"
+
+
+def test_fmt_json_v1_write_reports_the_file_snapshot(tmp_path):
+    source = tmp_path / "format.wysna"
+    source.write_text("fn main() -> unit { print(42) }\n", encoding="utf-8")
+
+    result = run_cli("fmt", "--write", "--output-format=json-v1", source)
+
+    payload = json.loads(result.stdout)
+    artifact = payload["artifacts"][0]
+    formatted_bytes = source.read_bytes()
+    assert result.returncode == 0
+    assert result.stderr == ""
+    assert payload["command"] == "fmt"
+    assert artifact["path"] == str(source)
+    assert artifact["sha256"] == hashlib.sha256(formatted_bytes).hexdigest()
+    assert "content" not in artifact
+
+
+def test_emit_c_json_v1_reports_created_c_artifact(tmp_path):
+    source = tmp_path / "emit.wysna"
+    output = tmp_path / "build" / "emit.c"
+    source.write_text("fn main() -> unit { print(42) }\n", encoding="utf-8")
+    output.parent.mkdir()
+
+    result = run_cli("emit-c", "--output-format=json-v1", source, "-o", output)
+
+    payload = json.loads(result.stdout)
+    artifact = payload["artifacts"][0]
+    assert result.returncode == 0
+    assert result.stderr == ""
+    assert payload["command"] == "emit-c"
+    assert payload["status"] == "ok"
+    assert artifact["kind"] == "c_source"
+    assert artifact["media_type"] == "text/x-c"
+    assert artifact["path"] == str(output)
+    assert artifact["sha256"] == hashlib.sha256(output.read_bytes()).hexdigest()
+
+
+def test_build_json_v1_reports_native_binary_artifact(tmp_path):
+    source = tmp_path / "build.wysna"
+    output = tmp_path / "build" / "app"
+    source.write_text("fn main() -> unit { print(42) }\n", encoding="utf-8")
+    output.parent.mkdir()
+
+    result = run_cli("build", "--output-format=json-v1", source, "-o", output)
+
+    payload = json.loads(result.stdout)
+    artifact = payload["artifacts"][0]
+    assert result.returncode == 0
+    assert result.stderr == ""
+    assert payload["command"] == "build"
+    assert payload["status"] == "ok"
+    assert artifact["kind"] == "native_executable"
+    assert artifact["media_type"] == "application/octet-stream"
+    assert artifact["sha256"] == hashlib.sha256(Path(artifact["path"]).read_bytes()).hexdigest()
+
+
+def test_codegen_json_v1_rejects_source_overwrite(tmp_path):
+    source = tmp_path / "source.wysna"
+    original = b"fn main() -> unit { print(42) }\n"
+    source.write_bytes(original)
+
+    result = run_cli("emit-c", "--output-format=json-v1", source, "-o", source)
+
+    payload = json.loads(result.stdout)
+    assert result.returncode == 2
+    assert result.stderr == ""
+    assert payload["command"] == "emit-c"
+    assert payload["status"] == "usage_error"
+    assert payload["diagnostics"][0]["code"] == "W5002"
+    assert source.read_bytes() == original
+
+
+def test_json_v1_reports_output_artifact_failures(tmp_path):
+    source = tmp_path / "source.wysna"
+    source.write_text("fn main() -> unit { print(42) }\n", encoding="utf-8")
+    output = tmp_path / "missing-directory" / "program.c"
+
+    result = run_cli("emit-c", "--output-format=json-v1", source, "-o", output)
+
+    payload = json.loads(result.stdout)
+    assert result.returncode == 3
+    assert result.stderr == ""
+    assert payload["command"] == "emit-c"
+    assert payload["status"] == "toolchain_error"
+    assert payload["diagnostics"][0]["code"] == "W5004"
+    assert payload["artifacts"] == []
