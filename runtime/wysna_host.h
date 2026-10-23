@@ -913,6 +913,7 @@ static int64_t wysna_host_http_request(void* url_handle, void* method_handle,
     WYSNA_CURL_SET(CURLOPT_CONNECTTIMEOUT_MS, (long)(timeout_ms < 5000 ? timeout_ms : 5000));
     WYSNA_CURL_SET(CURLOPT_NOSIGNAL, 1L);
     WYSNA_CURL_SET(CURLOPT_NETRC, (long)CURL_NETRC_IGNORED);
+    WYSNA_CURL_SET(CURLOPT_HTTP_VERSION, (long)CURL_HTTP_VERSION_1_1);
 #if LIBCURL_VERSION_NUM >= 0x075500
     WYSNA_CURL_SET(CURLOPT_PROTOCOLS_STR, "http,https");
 #else
