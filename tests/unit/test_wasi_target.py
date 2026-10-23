@@ -152,7 +152,14 @@ fn main() -> unit {
         wasi_run = _invoke(project_root, "project", "run", "--manifest",
                            str(project_root / "wysna.toml"), "--target", "wasi",
                            "--report-json", str(report_path), "--", "proof")
-        _assert(wasi_run.returncode == 0, "WASI execution failed: " + wasi_run.stderr)
+        if not report_path.is_file():
+            report_detail = "run report was not written"
+        else:
+            report_detail = report_path.read_text(encoding="utf-8")
+        _assert(wasi_run.returncode == 0,
+                f"WASI execution failed (exit={wasi_run.returncode}, "
+                f"stdout={wasi_run.stdout!r}, stderr={wasi_run.stderr!r}, "
+                f"report={report_detail})")
         run_report = json.loads(report_path.read_text(encoding="utf-8"))
         _assert(run_report["execution"]["kind"] == "wasm", "WASI execution evidence is missing")
         _assert(run_report["execution"]["fuel_remaining"] < 100_000_000,
