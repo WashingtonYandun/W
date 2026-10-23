@@ -11,6 +11,7 @@ import sys
 import tempfile
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 from urllib.error import HTTPError
 from urllib.parse import urlsplit
 from urllib.request import ProxyHandler, Request, build_opener
@@ -169,7 +170,7 @@ def _http_request(url, method="GET", body=None):
         return error.code, json.loads(error.read().decode("utf-8"))
 
 
-def _start_service(worker, database, *, request_timeout_ms=5000):
+def _start_service(worker, database, *, request_timeout_ms=5000, workers=1, queue_size=2):
     server = subprocess.Popen(
         [
             sys.executable,
@@ -185,9 +186,9 @@ def _start_service(worker, database, *, request_timeout_ms=5000):
             "--port",
             "0",
             "--workers",
-            "1",
+            str(workers),
             "--queue-size",
-            "2",
+            str(queue_size),
             "--request-timeout-ms",
             str(request_timeout_ms),
         ],
@@ -357,12 +358,61 @@ def test_http_host_maps_invalid_worker_responses_to_json_errors():
             _stop_service(server)
 
 
+def test_http_host_returns_service_busy_when_worker_queue_is_full():
+    if os.name == "nt":
+        return
+    try:
+        import aiohttp  # noqa: F401
+    except ImportError as error:
+        raise AssertionError("service integration requires the wysna[service] extra") from error
+
+    with tempfile.TemporaryDirectory(prefix="wysna-service-saturation-") as directory:
+        worker = Path(directory) / "worker"
+        worker.write_text(
+            "#!/usr/bin/env python3\n"
+            "import json, pathlib, sys, time\n"
+            "request = json.load(open(sys.argv[1], encoding='utf-8'))\n"
+            "if request['path'] == '/slow':\n"
+            "    pathlib.Path('worker-started').write_text('started', encoding='utf-8')\n"
+            "    time.sleep(0.5)\n"
+            "print('{\\\"status\\\":200,\\\"body\\\":{\\\"ok\\\":true}}')\n",
+            encoding="utf-8",
+        )
+        worker.chmod(0o700)
+        server, endpoint = _start_service(
+            worker,
+            Path(directory) / "measurements.sqlite",
+            request_timeout_ms=3000,
+            workers=1,
+            queue_size=1,
+        )
+        try:
+            with ThreadPoolExecutor(max_workers=3) as executor:
+                active = executor.submit(_http_request, endpoint + "/slow")
+                marker = Path(directory) / "worker-started"
+                deadline = time.monotonic() + 3
+                while not marker.exists() and time.monotonic() < deadline:
+                    time.sleep(0.01)
+                assert marker.exists(), "the slow worker did not start"
+
+                queued = executor.submit(_http_request, endpoint + "/slow")
+                time.sleep(0.05)
+                rejected = _http_request(endpoint + "/slow")
+
+                assert rejected == (503, {"error": "service_busy", "status": 503})
+                assert active.result(timeout=5) == (200, {"ok": True})
+                assert queued.result(timeout=5) == (200, {"ok": True})
+        finally:
+            _stop_service(server)
+
+
 def test_service_pilot_contract():
     test_service_config_and_worker_response_contract()
     test_worker_supervisor_has_a_bounded_queue()
     test_worker_supervisor_kills_failed_timed_out_and_oversized_workers()
     test_sqlite_worker_runs_through_the_bounded_http_host()
     test_http_host_maps_invalid_worker_responses_to_json_errors()
+    test_http_host_returns_service_busy_when_worker_queue_is_full()
 
 
 if __name__ == "__main__":
