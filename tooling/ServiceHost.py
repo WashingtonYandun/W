@@ -481,6 +481,8 @@ async def serve(config: ServiceConfig) -> None:
         auto_decompress=False,
         # aiohttp 3.14.4+ applies this while waiting for the initial request too.
         keepalive_timeout=DEFAULT_KEEPALIVE_TIMEOUT_SECONDS,
+        # Do not retain sockets to drain bodies after a rejected or timed-out request.
+        lingering_time=0,
         access_log=None,
     )
     runner = web.ServerRunner(
