@@ -1,4 +1,8 @@
-fn sem_at() -> Token { return sem_tokens[sem_pos] }
+fn sem_at() -> Token {
+    let token = sem_tokens[sem_pos]
+    g_diag_file = token.file
+    return token
+}
 fn sem_is(kind: str) -> bool { return sem_at().kind == kind }
 fn sem_take() -> Token {
     let token = sem_at()
@@ -22,7 +26,7 @@ fn sem_skip_newlines_before_branch() {
     if not branch { sem_pos = saved }
 }
 fn sem_error(code: str, message: str) {
-    report_error(code, sem_at().line, sem_at().col, message)
+    report_error_at(code, sem_at(), message)
 }
 fn sem_expect(kind: str) -> Token {
     if not sem_is(kind) { sem_error("W0006", "expected " + kind) }
@@ -288,7 +292,7 @@ fn sem_collect_function(owner: str, visible: bool) {
     if sem_match("LBRACKET") {
         while not sem_is("RBRACKET") {
             let parameter = sem_expect("IDENT")
-            for previous in type_params { if previous == parameter.val { report_error("W2001", parameter.line, parameter.col, "duplicate generic type parameter") } }
+            for previous in type_params { if previous == parameter.val { report_error_at("W2001", parameter, "duplicate generic type parameter") } }
             type_params.append(parameter.val)
             let mut constraint = ""
             if sem_match("COLON") { constraint = sem_expect("IDENT").val }
@@ -333,7 +337,7 @@ fn sem_collect_record(kind: str) {
         let mut parameter_index = 0
         while not sem_is("RBRACKET") {
             let parameter = sem_expect("IDENT")
-            if parameter_index >= len(type_params) or type_params[parameter_index] != parameter.val { report_error("W0006", parameter.line, parameter.col, "generic parameter list changed during collection") }
+            if parameter_index >= len(type_params) or type_params[parameter_index] != parameter.val { report_error_at("W0006", parameter, "generic parameter list changed during collection") }
             if sem_match("COLON") { sem_expect("IDENT") }
             parameter_index = parameter_index + 1
             if not sem_match("COMMA") { break }
@@ -966,8 +970,10 @@ fn sem_expression(minimum: int, allow_struct: bool) -> SemValue {
         while sem_is("NEWLINE") { sem_take() }
         if not sem_is("ELSE") or not (sem_tokens[sem_pos + 1].kind == "LBRACE" or sem_tokens[sem_pos + 1].kind == "IDENT" and sem_tokens[sem_pos + 2].kind == "LBRACE") { sem_pos = saved }
         let call_position = sem_pos + sem_token_offset
-        let call_line = sem_at().line
-        let call_col = sem_at().col
+        let call_token = sem_at()
+        let call_line = call_token.line
+        let call_col = call_token.col
+        let call_file = call_token.file
         if sem_match("LPAREN") {
             if left.root == "#collection" { sem_collection_call_positions.append(call_position) }
             if sem_kind(left.type_id) == "function" and left.root != "#method" and left.root != "#collection" and not (len(left.root) >= 3 and slice(left.root, 0, 3) == "fn:") { sem_indirect_positions.append(call_position) }
@@ -996,7 +1002,7 @@ fn sem_expression(minimum: int, allow_struct: bool) -> SemValue {
             if len(left.root) >= 3 and slice(left.root, 0, 3) == "fn:" {
                 let function_index = sem_function(slice(left.root, 3, len(left.root)))
                 if function_index >= 0 and len(sem_functions[function_index].type_params) > 0 {
-                    sem_check_generic_constraints(function_index, args, call_line, call_col)
+                    sem_check_generic_constraints(function_index, args, call_file, call_line, call_col)
                 }
             }
             let actual = sem_check_call(left.type_id, args, statement)
@@ -1375,7 +1381,7 @@ fn sem_match_expression(statement: bool) -> SemValue {
         let bare_pattern = pattern_kind == "IDENT" or pattern_kind == "INT" or pattern_kind == "STR" or pattern_kind == "TRUE" or pattern_kind == "FALSE" or pattern_kind == "NONE"
         let following = sem_tokens[pattern_start + 1]
         if bare_pattern and following.kind == "LBRACE" {
-            report_error("W0001", following.line, following.col, "expected '=>' after match pattern")
+            report_error_at("W0001", following, "expected '=>' after match pattern")
         }
     }
     let subject = sem_expression(0, false).type_id
@@ -1587,7 +1593,7 @@ fn sem_check_function(function: SemFunction) {
     sem_type_params = previous_type_params
     sem_active_constraints = previous_constraints
 }
-fn sem_check_generic_constraints(function_index: int, args: list[int], line: int, col: int) {
+fn sem_check_generic_constraints(function_index: int, args: list[int], file: str, line: int, col: int) {
     let function = sem_functions[function_index]
     let signature = sem_types[function.type_id]
     let empty_names: list[str] = []
@@ -1599,7 +1605,7 @@ fn sem_check_generic_constraints(function_index: int, args: list[int], line: int
         for parameter in function.type_params {
             for i in 0..len(sem_unify_names) {
                 if sem_unify_names[i] == parameter and sem_kind(sem_unify_types[i]) != "typeparam" and sem_contains_type_parameter(sem_unify_types[i], parameter) {
-                    report_error("W2011", line, col, "structural generic expansion cycle detected: " + function.name)
+                    report_error_at_location("W2011", file, line, col, "structural generic expansion cycle detected: " + function.name)
                 }
             }
         }
@@ -1609,7 +1615,7 @@ fn sem_check_generic_constraints(function_index: int, args: list[int], line: int
         if constraint != "" {
             let mut concrete = -1
             for j in 0..len(sem_unify_names) { if sem_unify_names[j] == function.type_params[i] { concrete = sem_unify_types[j] } }
-            if concrete < 0 or not sem_assignable(concrete, sem_named(constraint)) { report_error("W2001", line, col, "generic constraint not satisfied: " + constraint) }
+            if concrete < 0 or not sem_assignable(concrete, sem_named(constraint)) { report_error_at_location("W2001", file, line, col, "generic constraint not satisfied: " + constraint) }
         }
     }
 }
@@ -1705,37 +1711,37 @@ fn sem_reset(tokens: list[Token]) {
             if kind == "CLASS" { tag = "class" }
             if kind == "INTERFACE" { tag = "interface" }
             if kind == "ENUM" { tag = "enum" }
-            for type_ in sem_types { if type_.name == name { report_error("W1002", tokens[i + 1].line, tokens[i + 1].col, "duplicate type") } }
+            for type_ in sem_types { if type_.name == name { report_error_at("W1002", tokens[i + 1], "duplicate type") } }
             sem_intern(tag, name, empty)
             if tokens[i + 2].kind == "LBRACKET" {
                 let mut params: list[str] = []
                 let mut position = i + 3
                 while position < len(tokens) and tokens[position].kind != "RBRACKET" {
                     let parameter = tokens[position]
-                    if parameter.kind != "IDENT" { report_error("W0006", parameter.line, parameter.col, "expected generic type parameter") }
+                    if parameter.kind != "IDENT" { report_error_at("W0006", parameter, "expected generic type parameter") }
                     params.append(parameter.val)
                     position = position + 1
                     if position < len(tokens) and tokens[position].kind == "COLON" {
                         position = position + 1
-                        if position >= len(tokens) or tokens[position].kind != "IDENT" { report_error("W0006", tokens[position - 1].line, tokens[position - 1].col, "expected generic constraint") }
+                        if position >= len(tokens) or tokens[position].kind != "IDENT" { report_error_at("W0006", tokens[position - 1], "expected generic constraint") }
                         position = position + 1
                     }
                     if position < len(tokens) and tokens[position].kind == "COMMA" { position = position + 1 }
-                    elif position < len(tokens) and tokens[position].kind != "RBRACKET" { report_error("W0006", tokens[position].line, tokens[position].col, "expected ',' in generic parameters") }
+                    elif position < len(tokens) and tokens[position].kind != "RBRACKET" { report_error_at("W0006", tokens[position], "expected ',' in generic parameters") }
                 }
-                if len(params) == 0 { report_error("W2001", tokens[i + 2].line, tokens[i + 2].col, "generic declaration requires a type parameter") }
+                if len(params) == 0 { report_error_at("W2001", tokens[i + 2], "generic declaration requires a type parameter") }
                 sem_generic_types.append(SemGenericType { name: name, kind: tag, params: params })
             }
         }
     }
 }
 fn sem_validate(tokens: list[Token]) {
-    let mut surrounded: list[Token] = [Token { kind: "LBRACE", val: "{", line: 1, col: 1 }]
+    let mut surrounded: list[Token] = [Token { kind: "LBRACE", val: "{", line: 1, col: 1, file: tokens[0].file }]
     for token in tokens {
         if token.kind != "EOF" { surrounded.append(token) }
     }
-    surrounded.append(Token { kind: "RBRACE", val: "}", line: 1, col: 1 })
-    surrounded.append(Token { kind: "EOF", val: "", line: 1, col: 1 })
+    surrounded.append(Token { kind: "RBRACE", val: "}", line: 1, col: 1, file: tokens[len(tokens) - 1].file })
+    surrounded.append(Token { kind: "EOF", val: "", line: 1, col: 1, file: tokens[len(tokens) - 1].file })
     sem_reset(surrounded)
     sem_pos = 1
     while true {
@@ -1792,10 +1798,10 @@ fn sem_validate(tokens: list[Token]) {
                 while not sem_is("LBRACE") and not sem_is("EOF") { sem_take() }
                 let end = sem_skip_block()
                 let saved_tokens = sem_tokens
-                let mut block: list[Token] = [Token { kind: "LBRACE", val: "{", line: sem_tokens[beginning].line, col: 1 }]
+                let mut block: list[Token] = [Token { kind: "LBRACE", val: "{", line: sem_tokens[beginning].line, col: 1, file: sem_tokens[beginning].file }]
                 for i in beginning..end { block.append(sem_tokens[i]) }
-                block.append(Token { kind: "RBRACE", val: "}", line: 1, col: 1 })
-                block.append(Token { kind: "EOF", val: "", line: 1, col: 1 })
+                block.append(Token { kind: "RBRACE", val: "}", line: 1, col: 1, file: sem_tokens[end - 1].file })
+                block.append(Token { kind: "EOF", val: "", line: 1, col: 1, file: sem_tokens[end - 1].file })
                 let previous_offset = sem_token_offset
                 sem_token_offset = sem_token_offset + beginning - 1
                 sem_tokens = block

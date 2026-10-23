@@ -45,7 +45,7 @@ fn projection_is_mutated() -> bool {
 }
 
 
-fn emit_call(callee: ExprRes, args_c: list[str], collection: bool, line: int, col: int) -> ExprRes {
+fn emit_call(callee: ExprRes, args_c: list[str], collection: bool, file: str, line: int, col: int) -> ExprRes {
     if len(callee.val) >= 6 and slice(callee.val, 0, 6) == "enum::" {
         let marker = slice(callee.val, 6, len(callee.val))
         let mut separator = -1
@@ -138,7 +138,7 @@ fn emit_call(callee: ExprRes, args_c: list[str], collection: bool, line: int, co
             return bind_call("wysna_list_append(" + recv_lref + ", " + args_c[0] + ")")
         }
         if collection and method == "pop" {
-            return bind_call("wysna_list_pop_at(" + recv_lref + ", " + escape_c_str(g_in_path) + ", " + str(line) + ", " + str(col) + ")")
+            return bind_call("wysna_list_pop_at(" + recv_lref + ", " + escape_c_str(file) + ", " + str(line) + ", " + str(col) + ")")
         }
         if collection and method == "clear" {
             return bind_call("wysna_list_clear(" + recv_lref + ")")
@@ -890,7 +890,7 @@ fn parse_expr(min_prec: int, allow_struct: bool) -> ExprRes {
                     }
                 }
                 expect_kind("RPAREN")
-                left = emit_call(left, args_c, collection, call_tok.line, call_tok.col)
+                left = emit_call(left, args_c, collection, call_tok.file, call_tok.line, call_tok.col)
             } elif check_kind("DOT") {
                 let projection_position = g_pos + 1
                 advance_tok()
@@ -939,7 +939,7 @@ fn parse_expr(min_prec: int, allow_struct: bool) -> ExprRes {
                 if mutated {
                     idx_r = ExprRes { val: snapshot_value(idx_r.val), lref: idx_r.lref }
                 }
-                let source_args = escape_c_str(g_in_path) + ", " + str(bracket_tok.line) + ", " + str(bracket_tok.col)
+                let source_args = escape_c_str(bracket_tok.file) + ", " + str(bracket_tok.line) + ", " + str(bracket_tok.col)
                 let index_lref = "wysna_index_ref_at(" + clean_lref(left.lref) + ", " + idx_r.val + ", " + source_args + ")"
                 if mutated {
                     left = ExprRes { val: "wysna_index_get_at(" + left.val + ", " + idx_r.val + ", " + source_args + ")", lref: index_lref }
@@ -1095,9 +1095,9 @@ fn parse_expr(min_prec: int, allow_struct: bool) -> ExprRes {
             } elif op_tok.kind == "STAR" {
                 left = ExprRes { val: "wysna_mul(" + left.val + ", " + right.val + ")", lref: "" }
             } elif op_tok.kind == "SLASH" {
-                left = ExprRes { val: "wysna_div_at(" + left.val + ", " + right.val + ", " + escape_c_str(g_in_path) + ", " + str(op_tok.line) + ", " + str(op_tok.col) + ")", lref: "" }
+                left = ExprRes { val: "wysna_div_at(" + left.val + ", " + right.val + ", " + escape_c_str(op_tok.file) + ", " + str(op_tok.line) + ", " + str(op_tok.col) + ")", lref: "" }
             } elif op_tok.kind == "PERCENT" {
-                left = ExprRes { val: "wysna_mod_at(" + left.val + ", " + right.val + ", " + escape_c_str(g_in_path) + ", " + str(op_tok.line) + ", " + str(op_tok.col) + ")", lref: "" }
+                left = ExprRes { val: "wysna_mod_at(" + left.val + ", " + right.val + ", " + escape_c_str(op_tok.file) + ", " + str(op_tok.line) + ", " + str(op_tok.col) + ")", lref: "" }
             } elif op_tok.kind == "LT" {
                 left = ExprRes { val: "wysna_lt(" + left.val + ", " + right.val + ")", lref: "" }
             } elif op_tok.kind == "LTE" {
@@ -1123,7 +1123,7 @@ fn parse_lambda() -> ExprRes {
     let token = expect_kind("PIPE")
     let mut index = -1
     for i in 0..len(sem_lambdas) { if sem_lambdas[i].position == g_pos { index = i } }
-    if index < 0 { report_error("W9999", token.line, token.col, "missing checked closure") }
+    if index < 0 { report_error_at("W9999", token, "missing checked closure") }
     let lambda = sem_lambdas[index]
     while not check_kind("PIPE") {
         expect_kind("IDENT")

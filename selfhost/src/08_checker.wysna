@@ -122,64 +122,59 @@ fn compile_source(src: str) -> str {
 
 fn check_delimiters(tokens: list[Token]) -> unit {
     let mut delim_kinds: list[str] = []
-    let mut delim_lines: list[int] = []
-    let mut delim_cols: list[int] = []
+    let mut delim_tokens: list[Token] = []
     for tok in tokens {
         let k = tok.kind
         if k == "LPAREN" or k == "LBRACE" or k == "LBRACKET" {
             delim_kinds.append(k)
-            delim_lines.append(tok.line)
-            delim_cols.append(tok.col)
+            delim_tokens.append(tok)
         } elif k == "RPAREN" {
             let dl = len(delim_kinds)
             if dl == 0 {
-                report_error("W0001", tok.line, tok.col, "unexpected ')'")
+                report_error_at("W0001", tok, "unexpected ')'")
             }
             let top = delim_kinds[dl - 1]
             if top != "LPAREN" {
-                report_error("W0001", tok.line, tok.col, "mismatched delimiter ')'")
+                report_error_at("W0001", tok, "mismatched delimiter ')'")
             }
             delim_kinds.pop()
-            delim_lines.pop()
-            delim_cols.pop()
+            delim_tokens.pop()
         } elif k == "RBRACKET" {
             let dl = len(delim_kinds)
             if dl == 0 {
-                report_error("W0006", tok.line, tok.col, "unexpected ']'")
+                report_error_at("W0006", tok, "unexpected ']'")
             }
             let top = delim_kinds[dl - 1]
             if top != "LBRACKET" {
-                report_error("W0006", tok.line, tok.col, "mismatched delimiter ']'")
+                report_error_at("W0006", tok, "mismatched delimiter ']'")
             }
             delim_kinds.pop()
-            delim_lines.pop()
-            delim_cols.pop()
+            delim_tokens.pop()
         } elif k == "RBRACE" {
             let dl = len(delim_kinds)
             if dl == 0 {
-                report_error("W0006", tok.line, tok.col, "unexpected '}'")
+                report_error_at("W0006", tok, "unexpected '}'")
             }
             let top = delim_kinds[dl - 1]
             if top == "LPAREN" {
-                report_error("W0006", tok.line, tok.col, "expected ')' before '}'")
+                report_error_at("W0006", tok, "expected ')' before '}'")
             }
             if top != "LBRACE" {
-                report_error("W0006", tok.line, tok.col, "mismatched delimiter '}'")
+                report_error_at("W0006", tok, "mismatched delimiter '}'")
             }
             delim_kinds.pop()
-            delim_lines.pop()
-            delim_cols.pop()
+            delim_tokens.pop()
         }
     }
     if len(delim_kinds) > 0 {
         let top_idx = len(delim_kinds) - 1
         let top_k = delim_kinds[top_idx]
         if top_k == "LBRACE" {
-            report_error("W0006", delim_lines[top_idx], delim_cols[top_idx], "unclosed delimiter '{'")
+            report_error_at("W0006", delim_tokens[top_idx], "unclosed delimiter '{'")
         } elif top_k == "LPAREN" {
-            report_error("W0006", delim_lines[top_idx], delim_cols[top_idx], "unclosed delimiter '('")
+            report_error_at("W0006", delim_tokens[top_idx], "unclosed delimiter '('")
         } elif top_k == "LBRACKET" {
-            report_error("W0006", delim_lines[top_idx], delim_cols[top_idx], "unclosed delimiter '['")
+            report_error_at("W0006", delim_tokens[top_idx], "unclosed delimiter '['")
         }
     }
 }

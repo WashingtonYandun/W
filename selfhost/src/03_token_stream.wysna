@@ -1,5 +1,6 @@
 
 fn at_tok() -> Token {
+    g_diag_file = g_tokens[g_pos].file
     return g_tokens[g_pos]
 }
 
@@ -55,9 +56,9 @@ fn expect_kind(k: str) -> Token {
     let tok = at_tok()
     if tok.kind != k {
         if k == "RBRACE" or k == "RBRACKET" {
-            report_error("W0006", tok.line, tok.col, "expected '" + k + "', found '" + tok.val + "'")
+            report_error_at("W0006", tok, "expected '" + k + "', found '" + tok.val + "'")
         } else {
-            report_error("W0001", tok.line, tok.col, "expected '" + k + "', found '" + tok.val + "'")
+            report_error_at("W0001", tok, "expected '" + k + "', found '" + tok.val + "'")
         }
     }
     advance_tok()
