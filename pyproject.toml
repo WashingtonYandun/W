@@ -16,7 +16,7 @@ keywords = ["compiler", "programming-language", "self-hosting", "c99", "static-t
 dependencies = []
 
 [project.optional-dependencies]
-wasi = ["wasmtime==50.0.0"]
+wasi = ["wasmtime==50.0.1"]
 
 [project.scripts]
 wysna = "main:main"

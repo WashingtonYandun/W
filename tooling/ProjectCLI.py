@@ -214,7 +214,7 @@ def _run_build(resolver, target_name, output, json_mode):
             "wasi_sdk_path": built.sdk_path,
             "wasi_sdk_compiler": built.compiler_path,
             "wasi_sdk_compiler_version": built.compiler_version,
-            "wasi_runtime": "wasmtime==50.0.0",
+            "wasi_runtime": "wasmtime==50.0.1",
             "wasi_imports": list(built.imports),
             "wasm_exports": list(built.exports),
         }
@@ -356,7 +356,7 @@ def _run_wasi_program(resolver, target, entry, program_args, report_path=None):
         _write_output_bytes(sys.stderr, result.stderr)
         execution = {
             "kind": "wasm",
-            "runtime": "wasmtime==50.0.0",
+            "runtime": "wasmtime==50.0.1",
             "exit_code": result.exit_code,
             "signal": None,
             "fuel_remaining": result.fuel_remaining,

@@ -8,7 +8,7 @@ from project.Manifest import WasiPreopen
 from tooling.WasmModule import inspect_wasm, validate_wasi_command
 
 
-WASMTIME_VERSION = "50.0.0"
+WASMTIME_VERSION = "50.0.1"
 _MAX_CAPTURE_BYTES = 1_048_576
 
 

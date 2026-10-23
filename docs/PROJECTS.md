@@ -53,7 +53,7 @@ install hooks, plugins, or registry lookups.
 The `wasi-command` profile builds a `wasm32-wasip1` command from Seed-generated C99.
 The CI compatibility baseline uses [wasi-sdk 34](https://github.com/WebAssembly/wasi-sdk/releases/tag/wasi-sdk-34)
 and verifies its release archive checksum; set `WASI_SDK_PATH` to a compatible SDK installation.
-Running the artifact requires [Wasmtime 50.0.0](https://github.com/bytecodealliance/wasmtime/releases/tag/v50.0.0).
+Running the artifact requires the [Wasmtime Python binding 50.0.1](https://pypi.org/project/wasmtime/50.0.1/).
 Install the optional runner dependency with
 `python -m pip install -e ".[wasi]"` in a checkout, or install the published package
 with its `wasi` extra. WASI commands receive only their declared arguments, no inherited

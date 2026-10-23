@@ -312,7 +312,7 @@ def run_capabilities_command(argv):
                                                                           "api", "capabilities"]},
             "profiles": ["native-cli", "wasi-command", "c99-source"],
             "targets": ["native", "wasm32-wasip1"],
-            "runtimes": {"wasi-command": "wasmtime==50.0.0"},
+            "runtimes": {"wasi-command": "wasmtime==50.0.1"},
             "capabilities": {"wasi-command": ["stdio", "arguments", "clock", "random",
                                                    "manifest-declared-preopens"]},
             "limitations": ["WASI Preview 1 does not provide networking, child processes, or native FFI",
