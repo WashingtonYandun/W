@@ -11,6 +11,12 @@ import threading
 import time
 
 from common.Version import WYSNA_VERSION
+from compiler.BrowserLibraryToolchain import (
+    EMSCRIPTEN_VERSION,
+    EMSCRIPTEN_RUNTIME_METHODS,
+    BrowserLibraryCompilationError,
+    BrowserLibraryToolchain,
+)
 from compiler.CompilerService import CompilerService
 from compiler.NativeToolchain import NativeCompilationError, NativeToolchain
 from compiler.WasiToolchain import WasiCompilationError, WasiToolchain
@@ -159,10 +165,16 @@ def _run_build(resolver, target_name, output, json_mode):
     try:
         checked = service.check_file(entry)
         spec = validate_checked_target(checked, target)
-        c_source = service.emit_c(checked).source
+        emission = service.emit_c(checked, target_profile=target.profile)
+        c_source = emission.source
         destination.parent.mkdir(parents=True, exist_ok=True)
         if target.profile == "wasi-command":
             built = WasiToolchain(Path(__file__).resolve().parents[1]).build(c_source, destination)
+        elif target.profile == "browser-library":
+            built = BrowserLibraryToolchain(Path(__file__).resolve().parents[1]).build(
+                c_source, destination, emission.abi_exports,
+                memory_limit_mb=target.memory_limit_mb,
+            )
         else:
             built = NativeToolchain(Path(__file__).resolve().parents[1]).build(c_source, destination)
     except ToolchainError as error:
@@ -186,6 +198,13 @@ def _run_build(resolver, target_name, output, json_mode):
                          target=_target_metadata(target), json_mode=True)
         print(str(error), file=sys.stderr)
         return 3
+    except BrowserLibraryCompilationError as error:
+        diagnostic = diagnostic_record("W5005", "browser-toolchain", str(error))
+        if json_mode:
+            return _emit("project.build", "toolchain_error", 3, diagnostics=[diagnostic],
+                         target=_target_metadata(target), json_mode=True)
+        print(str(error), file=sys.stderr)
+        return 3
     except NativeCompilationError as error:
         diagnostic = diagnostic_record("W5004", "native-toolchain", str(error))
         if json_mode:
@@ -193,9 +212,16 @@ def _run_build(resolver, target_name, output, json_mode):
                          target=_target_metadata(target), json_mode=True)
         print(error.stderr or str(error), file=sys.stderr)
         return 3
-    artifact = artifact_file(spec.artifact_kind.value,
-                             "application/wasm" if target.profile == "wasi-command"
-                             else "application/octet-stream", built.output_path)
+    if target.profile == "browser-library":
+        artifacts = [
+            artifact_file("browser_library", "text/javascript", built.artifacts[0]),
+            artifact_file("browser_runtime_module", "text/javascript", built.artifacts[1]),
+            artifact_file("wasm_module", "application/wasm", built.artifacts[2]),
+        ]
+    else:
+        artifacts = [artifact_file(spec.artifact_kind.value,
+                                   "application/wasm" if target.profile == "wasi-command"
+                                   else "application/octet-stream", built.output_path)]
     source_hashes = []
     for source_path, source_text in service.source_texts().items():
         path = Path(source_path).resolve()
@@ -222,6 +248,19 @@ def _run_build(resolver, target_name, output, json_mode):
         }
         build_flags = ["--target=wasm32-wasip1", "-std=c99", "-O2",
                        f"-Wl,-z,stack-size={WASI_STACK_SIZE_BYTES}", "-Wl,--stack-first"]
+    elif target.profile == "browser-library":
+        compiler_metadata = {
+            "emscripten_compiler": built.compiler_path,
+            "emscripten_compiler_version": built.compiler_version,
+            "emscripten_sdk_version": EMSCRIPTEN_VERSION,
+            "wasm_imports": list(built.wasm_imports),
+            "wasm_exports": list(built.wasm_exports),
+        }
+        build_flags = ["--target=wasm32-unknown-emscripten", "-std=c99", "-O2",
+                       "-sMODULARIZE=1", "-sEXPORT_ES6=1", "-sWASM_BIGINT=1",
+                       "-sALLOW_MEMORY_GROWTH=1",
+                       "-sEXPORTED_RUNTIME_METHODS=" + ",".join(EMSCRIPTEN_RUNTIME_METHODS),
+                       "-sFILESYSTEM=0"]
     else:
         from common.Platform import compiler_command
         compiler_metadata = {"c_compiler_command": compiler_command()}
@@ -251,13 +290,24 @@ def _run_build(resolver, target_name, output, json_mode):
                              for item in target.preopens],
             },
         })
+    elif target.profile == "browser-library":
+        provenance.update({
+            "target_spec": {"triple": spec.triple, "artifact_kind": spec.artifact_kind.value},
+            "compiler": compiler_metadata,
+            "capabilities": list(spec.capabilities),
+            "browser": {
+                "abi_version": 1,
+                "memory_limit_bytes": built.memory_limit_bytes,
+                "exports": list(emission.abi_exports),
+            },
+        })
     else:
         provenance["c_compiler_command"] = compiler_command()
     provenance_artifact = artifact_inline("build_provenance", "application/json",
                                            json.dumps(provenance, ensure_ascii=False,
                                                       sort_keys=True, separators=(",", ":")))
     if json_mode:
-        return _emit("project.build", "ok", 0, artifacts=[artifact, provenance_artifact],
+        return _emit("project.build", "ok", 0, artifacts=artifacts + [provenance_artifact],
                      target=_target_metadata(target), json_mode=True)
     print(f"[OK] Built {manifest.name} -> {built.output_path}")
     return 0
@@ -379,6 +429,8 @@ def _run_program(resolver, target_name, entry_override, program_args, report_pat
     target = manifest.targets.get(target_name)
     if target is None:
         raise ManifestError(f"unknown target '{target_name}'")
+    if target.profile == "browser-library":
+        raise ManifestError("browser-library targets cannot be run as command-line programs")
     entry = _entry_path(manifest, target_name, entry_override)
     if target.profile == "wasi-command":
         return _run_wasi_program(resolver, target, entry, program_args, report_path)

@@ -27,6 +27,7 @@ class WasmModuleError(ValueError):
 class WasmModuleInfo:
     imports: tuple
     exports: tuple
+    memories: tuple = ()
 
 
 class _Reader:
@@ -72,13 +73,30 @@ class _Reader:
         if flags & 1:
             self.uleb()
 
+    def memory_limits(self):
+        flags = self.uleb()
+        if flags & ~7:
+            raise WasmModuleError("invalid WebAssembly memory limits flags")
+        minimum = self.uleb()
+        maximum = self.uleb() if flags & 1 else None
+        if maximum is not None and maximum < minimum:
+            raise WasmModuleError("WebAssembly memory maximum is smaller than its minimum")
+        if flags & 2 and maximum is None:
+            raise WasmModuleError("shared WebAssembly memory must declare a maximum")
+        return {
+            "minimum_pages": minimum,
+            "maximum_pages": maximum,
+            "shared": bool(flags & 2),
+            "memory64": bool(flags & 4),
+        }
+
     def require_end(self):
         if self.position != self.end:
             raise WasmModuleError("invalid trailing bytes in WebAssembly section")
 
 
 def inspect_wasm(path):
-    """Read only the import and export sections needed for target policy checks."""
+    """Read import, export, and memory sections needed for target policy checks."""
     path = Path(path)
     try:
         data = path.read_bytes()
@@ -87,7 +105,7 @@ def inspect_wasm(path):
     if not data.startswith(_MAGIC):
         raise WasmModuleError("output is not a WebAssembly 1.0 core module")
     reader = _Reader(data, len(_MAGIC))
-    imports, exports = [], []
+    imports, exports, memories = [], [], []
     seen_sections = set()
     while reader.position < reader.end:
         section_id = reader.byte()
@@ -95,9 +113,9 @@ def inspect_wasm(path):
         section_end = reader.position + section_size
         if section_end > reader.end:
             raise WasmModuleError("truncated WebAssembly section payload")
-        if section_id in (2, 7):
+        if section_id in (2, 5, 7):
             if section_id in seen_sections:
-                raise WasmModuleError("duplicate WebAssembly import or export section")
+                raise WasmModuleError("duplicate WebAssembly import, memory, or export section")
             seen_sections.add(section_id)
             section = _Reader(data, reader.position, section_end)
             count = section.uleb()
@@ -116,7 +134,13 @@ def inspect_wasm(path):
                         section.skip_limits()
                         kind_name = "table"
                     elif kind == 2:
-                        section.skip_limits()
+                        limits = section.memory_limits()
+                        memories.append({
+                            "imported": True,
+                            "module": module_name,
+                            "name": import_name,
+                            **limits,
+                        })
                         kind_name = "memory"
                     elif kind == 3:
                         section.byte()
@@ -129,6 +153,8 @@ def inspect_wasm(path):
                     else:
                         raise WasmModuleError(f"unknown WebAssembly import kind {kind}")
                     imports.append({"module": module_name, "name": import_name, "kind": kind_name})
+                elif section_id == 5:
+                    memories.append({"imported": False, **section.memory_limits()})
                 else:
                     exports.append(section.string())
                     section.byte()
@@ -138,7 +164,7 @@ def inspect_wasm(path):
         reader.position = section_end
     if len(set(exports)) != len(exports):
         raise WasmModuleError("duplicate WebAssembly export names")
-    return WasmModuleInfo(tuple(imports), tuple(exports))
+    return WasmModuleInfo(tuple(imports), tuple(exports), tuple(memories))
 
 
 def validate_wasi_command(info):

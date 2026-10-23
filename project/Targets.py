@@ -26,6 +26,10 @@ TARGET_SPECS = {
         "wasi-command", "wasm32-wasip1", ArtifactKind.WASM_MODULE, ".wasm",
         ("stdio", "arguments", "clock", "random", "manifest-declared-preopens"),
     ),
+    "browser-library": TargetSpec(
+        "browser-library", "wasm32-unknown-emscripten", ArtifactKind.WASM_MODULE, ".mjs",
+        ("linear-memory", "generated-utf8-abi", "bigint-int64"),
+    ),
 }
 
 

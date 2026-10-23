@@ -133,6 +133,8 @@ jobs:
         run: python3 -m tests.unit.test_service_pilot
       - name: Verify service load measurement contracts
         run: python3 -m tests.unit.test_service_measurement
+      - name: Verify the browser-library ABI contract
+        run: python3 -m tests.unit.test_browser_library
       - name: Verify SQLite FFI against C with sanitizers and persisted data
         run: python3 tools/validate_sqlite_ffi.py --sanitize --report .wysna_cache/ci-artifacts/sqlite-ffi.json
       - name: Verify atomic CSV imports, rollback and process memory against C
@@ -184,6 +186,30 @@ jobs:
           name: service-load-rss-campaign
           path: .wysna_cache/ci-artifacts/service-load.json
           if-no-files-found: error
+
+  browser-library:
+    name: Browser library (Emscripten 5.0.1)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - uses: emscripten-core/setup-emsdk@4528d102f7230f0e7b276855c01ea1159be0e984
+        with:
+          version: 5.0.1
+          actions-cache-folder: emsdk-cache
+      - name: Install Wysna from the checkout
+        run: python -m pip install -e .
+      - name: Verify the browser-library ABI contract
+        run: python3 -m tests.unit.test_browser_library
+      - name: Build the browser-library example
+        run: >-
+          python3 main.py project build --manifest examples/browser-library/wysna.toml
+          --target web --output "$RUNNER_TEMP/wysna-browser/library.mjs"
+      - name: Exercise the generated ESM and WebAssembly library
+        run: node tests/browser_library_smoke.mjs "$RUNNER_TEMP/wysna-browser/library.mjs"
 
   sanitizers:
     name: Memory safety (${{ matrix.os }})

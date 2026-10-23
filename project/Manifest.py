@@ -148,9 +148,9 @@ class ProjectManifest:
                   f"targets.{target_name}")
             entry = _safe_relative_path(raw_target.get("entry"), f"targets.{target_name}.entry")
             profile = _required_string(raw_target.get("profile"), f"targets.{target_name}.profile")
-            if profile not in ("native-cli", "wasi-command"):
+            if profile not in ("native-cli", "wasi-command", "browser-library"):
                 raise ManifestError(
-                    f"targets.{target_name}.profile must be 'native-cli' or 'wasi-command' in manifest version 1"
+                    f"targets.{target_name}.profile must be 'native-cli', 'wasi-command', or 'browser-library' in manifest version 1"
                 )
             raw_preopens = raw_target.get("preopens", [])
             if not isinstance(raw_preopens, list):
@@ -178,10 +178,15 @@ class ProjectManifest:
             if (isinstance(memory_limit_mb, bool) or not isinstance(memory_limit_mb, int)
                     or not 8 <= memory_limit_mb <= 1024):
                 raise ManifestError(f"targets.{target_name}.memory_limit_mb must be between 8 and 1024")
-            wasi_settings = {"preopens", "fuel", "memory_limit_mb"}.intersection(raw_target)
-            if profile == "native-cli" and wasi_settings:
+            wasi_settings = {"preopens", "fuel"}.intersection(raw_target)
+            memory_setting = "memory_limit_mb" in raw_target
+            if profile == "native-cli" and (wasi_settings or memory_setting):
                 raise ManifestError(
-                    f"targets.{target_name} WASI resource settings require profile = 'wasi-command'"
+                    f"targets.{target_name} resource settings require a WASM target profile"
+                )
+            if profile == "browser-library" and wasi_settings:
+                raise ManifestError(
+                    f"targets.{target_name} preopens and fuel require profile = 'wasi-command'"
                 )
             entry_path = _contained_path(root, entry, f"targets.{target_name}.entry", require_exists=True)
             if not entry_path.is_file() or entry_path.suffix != ".wysna":

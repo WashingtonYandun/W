@@ -35,6 +35,11 @@ fuel = 100000000
 memory_limit_mb = 128
 preopens = [{ path = "data", access = "read-only" }]
 
+[targets.web]
+entry = "src/library.wysna"
+profile = "browser-library"
+memory_limit_mb = 128
+
 [dependencies.stats]
 path = "vendor/stats"
 
@@ -65,12 +70,59 @@ raise these values within manifest validation limits. Child processes, networkin
 native C FFI, browser execution, and WASIp2 are outside this profile.
 Wysna reserves a 1 MiB guest stack and places it before static data so stack overflow
 traps instead of overwriting global state. The stack consumes part of the configured
-linear-memory limit.
+linear-memory limit. Browser execution is a separate target profile.
 
 Target checks reject unsupported imports and capabilities before invoking the SDK.
 WASI build provenance includes the target triple, artifact kind, compiler identity,
 module imports/exports, configured capabilities, fuel, memory and stack limits, and
 preopens.
+
+## Browser library
+
+The `browser-library` profile uses Seed-generated C99 and Emscripten 5.0.1 to produce
+three files: the public ES module facade (`web.mjs`), its Emscripten loader
+(`web.runtime.mjs`), and the WebAssembly module (`web.runtime.wasm`). Import the public
+facade from a browser application or Node.js; it creates isolated instances and keeps
+the loader object and linear-memory pointers private.
+
+Only top-level, non-fallible `pub fn` declarations become operations. Parameters may be `int`,
+`float`, `bool`, or `str`; results may also be `unit`. JavaScript integers must be
+signed 64-bit `BigInt` values. Strings use explicit-length UTF-8 buffers, preserve
+embedded NUL bytes, and are copied at the ABI boundary. Generated bindings own and
+free those buffers, read the current memory view after growth, reject reentrant calls,
+and invalidate an instance after a WebAssembly trap. Calls after destruction fail.
+The default maximum linear memory is 128 MiB; set `memory_limit_mb` from 8 to 1024 in
+the target manifest to change it.
+
+The initial profile rejects top-level initialization and host APIs such as files,
+environment access, time, processes, HTTP, native FFI, and console output. It does not
+auto-call a Wysna `main` function. Composite values can cross as JSON encoded in `str`
+when the application chooses that contract. `project run` does not execute this
+library profile; import the generated facade in the host instead.
+
+```wysna
+pub fn add(left: int, right: int) -> int {
+    return left + right
+}
+
+pub fn greet(name: str) -> str {
+    return "Hello, " + name
+}
+```
+
+```js
+import { createWysna } from "./build/web.mjs";
+
+const library = await createWysna();
+const total = library.exports.add(41n, 1n);
+const greeting = library.exports.greet("Washo");
+library.destroy();
+```
+
+Emscripten is an explicit build dependency and is not downloaded by Wysna. CI uses
+the official `emscripten-core/setup-emsdk` action pinned to SDK 5.0.1. Build
+provenance records the SDK version, imports/exports, ABI version, memory limit, and
+generated exports. Browser APIs and DOM access remain owned by the host application.
 
 Imports use existing Wysna syntax. Relative imports resolve inside the declared
 `sources.root`; tests outside that directory can import package modules through
