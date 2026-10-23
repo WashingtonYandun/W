@@ -16,9 +16,12 @@ semantic revision `0.5.0`, runtime ABI 2, and a complete type arena. The importe
 temporary identities and operation sequences need not be identical. Files are
 published atomically after verification. Source-file destinations are rejected.
 
-Compiler's `scalar-v1` profile checks source with its own semantic checker, builds
-typed slots and operations in `selfhost/src/08_mir.wysna`, verifies them, then
-serializes the interchange. A prebuilt binary can run without Seed:
+Compiler's `scalar-cfg-v1` profile checks source with its own semantic checker,
+builds typed slots, operations and basic blocks, verifies them, then serializes
+the interchange. The implementation separates the model and serialization
+(`08_mir.wysna`), lowering (`08_mir_lowering.wysna`), and independent structure
+and dataflow verification (`08_mir_verifier.wysna`) under `selfhost/src/`.
+A prebuilt binary can run without Seed:
 
 ```sh
 .wysna_cache/stage2 --emit-mir scalar.wysna > compiler.mir.json
@@ -33,9 +36,12 @@ The supported source profile contains:
 
 - Single-file command programs; `int`, finite `float`, `bool`, and `unit` values.
 - Non-generic functions, typed parameters, explicit returns and tail expressions,
-  forward/direct calls, immutable local bindings, and scalar top-level bindings.
+  forward/direct calls, immutable and mutable local bindings, and command-local
+  top-level bindings. Assignment expressions preserve left-to-right snapshots.
 - Scalar arithmetic, comparisons, equality, unary negation and `not`, plus
   `print`, `eprint`, `int`, and `float` calls. Arguments evaluate left to right.
+- `if`/`elif`/`else` statements and expressions, `while`, nested loops, `break`,
+  `continue`, early returns, lexical scopes, and short-circuit `and`/`or`.
 - Signed int64 wrapping at runtime, division/remainder checks with source paths,
   and the `INT64_MIN / -1` and remainder semantics of the runtime.
 - Implicit `main()` when the file contains only declarations, and explicit entry
@@ -49,9 +55,10 @@ let total = add(10, 20)
 print(total)
 ```
 
-Imports, shared global reads inside functions, mutable bindings, branches/loops,
-short-circuit boolean operators, strings/collections, error channels, closures,
-generics, nominal types, FFI, and library exports are outside this profile.
+Imports, shared global reads inside functions, `for`/ranges, strings/collections,
+error channels, closures, generics, nominal types, FFI, and library exports are
+outside this profile. Statements after a terminating path, terminating conditions,
+and expressions with unreachable operands remain explicit profile limits.
 Unsupported syntax is rejected by the profile guard with `W2013` before semantic
 checking or artifact publication. Source inside the profile retains the semantic
 checker's diagnostics. Numeric literals outside
@@ -59,7 +66,10 @@ signed int64 or finite binary64 produce `W0002`. The normal C99 route has its ow
 broader measured coverage.
 
 `tests/unit/test_selfhost_mir.py` compares both producers' executable results,
-evaluation order, scalar boundaries and runtime locations. It also checks semantic
+evaluation order, CFG joins/backedges, loop transfers, cleanup, scalar boundaries
+and runtime locations. A native fault-injection harness also checks the independent
+Compiler verifier against malformed targets, conditions, parameters, operations,
+uninitialized joins, consumed operands and owned-value leaks. It also checks semantic
 rejection, unsupported features, stage1/stage2 IR determinism, and corrupted
 interchange rejection. The three-stage bootstrap checks the compiler itself.
 

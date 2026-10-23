@@ -95,6 +95,119 @@ class CompilerMirTests(unittest.TestCase):
                                      (seed_result.returncode, seed_result.stdout, seed_result.stderr))
                     self.assertEqual(compiler_result.stdout, expected)
 
+    def test_control_flow_execution_matches_seed(self):
+        cases = [
+            ("fn choose(x: int) -> int { if x < 0 { 1 } elif x == 0 { 2 } else { 3 } }\nprint(choose(-1), choose(0), choose(1))", "1 2 3\n"),
+            ("fn choose(x: bool) -> int { if x { return 7 } else { return 9 } }\nprint(choose(true), choose(false))", "7 9\n"),
+            ("fn choose(x: bool) -> int { if x { return 7 }\n10 }\nprint(choose(true), choose(false))", "7 10\n"),
+            ("let mut x = 1\nlet mut y = 0\nprint(x + (x = 2), x, y = x = 3, x, y)", "3 2 3 3 3\n"),
+            ("fn pair(a: int, b: int) { print(a, b) }\nlet mut x = 1\npair(x, x = 2)\nprint(x)", "1 2\n2\n"),
+            ("let mut x = 0\nwhile x < 5 { x = x + 1\nif x == 2 { continue }\nif x == 4 { break }\nprint(x) }\nprint(x)", "1\n3\n4\n"),
+            ("let mut i = 0\nlet mut total = 0\nwhile i < 3 { let mut j = 0\nwhile j < 4 { j = j + 1\nif j == 2 { continue }\nif j == 4 { break }\ntotal = total + 1 }\ni = i + 1 }\nprint(total)", "6\n"),
+            ("fn search() -> int { let mut i = 0\nwhile i < 5 { if i == 3 { return i }\ni = i + 1 }\nreturn -1 }\nprint(search())", "3\n"),
+            ("let mut b = false\nlet mut x = 1.0\nwhile not b { x = x + 1.5\nb = true }\nprint(b, x)", "true 2.5\n"),
+            ("fn yes() -> bool { print(1) true }\nprint(false and yes(), true or yes(), true and yes(), false or yes())", "1\n1\nfalse true true true\n"),
+            ("let mut x = 0\nprint(false and ((x = 1) == 1), true or ((x = 2) == 2), x)\nprint(true and ((x = 3) == 3), x)", "false true 0\ntrue 3\n"),
+            ("print(false and (1 / 0 == 0), true or (1 / 0 == 0))", "false true\n"),
+            ("let x = 10\nif true { let x = 20\nprint(x) }\nprint(x)\nwhile false { print(99) }", "20\n10\n"),
+            ("fn work() { let value = print(1)\nlet mut i = 0\nwhile i < 3 { let local = print(i)\ni = i + 1\nif i == 1 { continue }\nif i == 3 { break } }\nvalue }\nwork()", "1\n0\n1\n2\n"),
+            ("fn check(x: bool) -> bool { let value = print(1)\nx }\nlet mut i = 0\nwhile check(i < 2) { i = i + 1 }\nprint(i)", "1\n1\n1\n2\n"),
+            ("fn choose(a: bool, b: bool) -> int { if a { if b { 1 } else { 2 } } else { 3 } }\nprint(choose(true, false), choose(false, true))", "2 3\n"),
+        ]
+        with tempfile.TemporaryDirectory(prefix="wysna-cfg-parity-") as temporary:
+            root = Path(temporary)
+            source = root / "program.wysna"
+            output = root / "module.json"
+            for code, expected in cases:
+                with self.subTest(source=code):
+                    source.write_text(code + "\n", encoding="utf-8")
+                    compiled = self.compile_ir(source, output)
+                    self.assertEqual(compiled.returncode, 0, compiled.stderr)
+                    compiler_result = self.execute_ir(output.read_text(), root, "compiler")
+                    seed_result = self.execute_ir(self.seed_ir(source), root, "seed")
+                    self.assertEqual((compiler_result.returncode, compiler_result.stdout, compiler_result.stderr),
+                                     (seed_result.returncode, seed_result.stdout, seed_result.stderr))
+                    self.assertEqual(compiler_result.stdout, expected)
+
+    def test_native_cfg_verifier_rejects_corruption(self):
+        from tools.bundle_selfhost import MODULE_ORDER
+        driver = r'''
+let cli = args()
+let payload = emit_scalar_mir("fn choose(flag: bool) -> int { let output = print(8)\nlet chosen = if flag { 2 } else { 3 }\nchosen }\nprint(choose(true))", "verifier.wysna")
+let fault = cli[1]
+if fault == "target" { mir_functions[0].blocks[0].terminator.targets[0] = 999 }
+if fault == "condition" {
+    for i in 0..len(mir_functions[0].slots) {
+        if mir_functions[0].slots[i].type_id == 1 { mir_functions[0].blocks[0].terminator.value = i break }
+    }
+}
+if fault == "parameter" { mir_functions[0].params.append(0) }
+if fault == "opcode" { mir_functions[0].blocks[0].operations[0].opcode = "invalid" }
+if fault == "terminator" { mir_functions[0].blocks[0].terminator.kind = "" }
+if fault == "join" {
+    # Each arm ends by moving its escaped value to the common result slot.
+    mir_functions[0].blocks[1].operations.pop()
+}
+if fault == "leak" {
+    for i in 0..len(mir_functions[0].blocks) {
+        let mut operations: list[MirOperation] = []
+        for operation in mir_functions[0].blocks[i].operations {
+            if operation.opcode != "release" { operations.append(operation) }
+        }
+        mir_functions[0].blocks[i].operations = operations
+    }
+}
+if fault == "consumed" {
+    for i in 0..len(mir_functions[0].blocks) {
+        if mir_functions[0].blocks[i].terminator.kind == "return" {
+            let block = mir_functions[0].blocks[i]
+            let mut moved = -1
+            for operation in block.operations { if operation.opcode == "store" { moved = operation.args[0] } }
+            let returned = block.terminator.value
+            mir_functions[0].blocks[i].operations.append(MirOperation { opcode: "clone", result: returned, args: [moved], name: "", value: mir_literal_unit(), source: block.terminator.source })
+        }
+    }
+}
+if fault == "backedge" or fault == "live_backedge" {
+    let ignored = emit_scalar_mir("let mut i = 0\nwhile i < 2 { i = i + 1 }\nprint(i)", "loop.wysna")
+    let function = mir_functions[0]
+    let source = function.source
+    let slot = len(function.slots)
+    if fault == "backedge" {
+        mir_functions[0].slots.append(MirSlot { type_id: 3, name: "", parameter: false, origin: -1 })
+        let binding = function.blocks[0].operations[1].result
+        mir_functions[0].blocks[2].operations.append(MirOperation { opcode: "store", result: slot, args: [binding], name: "", value: mir_literal_unit(), source: source })
+    } else {
+        mir_functions[0].slots.append(MirSlot { type_id: 1, name: "", parameter: false, origin: -1 })
+        let operands: list[int] = []
+        mir_functions[0].blocks[2].operations.append(MirOperation { opcode: "const", result: slot, args: operands, name: "", value: mir_literal_unit(), source: source })
+    }
+}
+mir_verify()
+print("verified")
+'''
+        modules = [(ROOT / "selfhost/src" / name).read_text() for name in MODULE_ORDER if name != "09_main.wysna"]
+        service = CompilerService()
+        checked = service.check("".join(modules) + driver, "mir-verifier-test.wysna")
+        generated = service.emit_c(checked, backend="ast").source
+        with tempfile.TemporaryDirectory(prefix="wysna-cfg-verifier-") as temporary:
+            root = Path(temporary)
+            c_path = root / "verifier.c"
+            binary = root / executable_name("verifier")
+            c_path.write_text(generated, encoding="utf-8")
+            built = subprocess.run(compiler_command() + ["-std=c99", "-O0", f"-I{ROOT}", str(c_path), "-lm", "-o", str(binary)],
+                                   capture_output=True, text=True, timeout=120)
+            self.assertEqual(built.returncode, 0, built.stderr)
+            for fault in ("valid", "target", "condition", "parameter", "opcode", "terminator", "join", "leak", "consumed", "backedge", "live_backedge"):
+                with self.subTest(fault=fault):
+                    result = subprocess.run([str(binary), fault], capture_output=True, text=True, timeout=15)
+                    if fault == "valid":
+                        self.assertEqual(result.returncode, 0, result.stderr)
+                        self.assertEqual(result.stdout, "verified\n")
+                    else:
+                        self.assertNotEqual(result.returncode, 0)
+                        self.assertIn("[W9999]", result.stderr)
+
     def test_runtime_checks_keep_source_locations(self):
         with tempfile.TemporaryDirectory(prefix="wysna-mir-runtime-") as temporary:
             root = Path(temporary)
@@ -140,13 +253,11 @@ class CompilerMirTests(unittest.TestCase):
     def test_unsupported_features_are_explicit(self):
         cases = [
             'print("text")',
-            "let mut value = 1\nvalue = 2\nprint(value)",
-            "fn choose(x: bool) -> int { if x { 1 } else { 2 } }\nprint(choose(true))",
+            "for i in 0..3 { print(i) }",
             "fn identity[T](x: T) -> T { x }\nprint(identity(2))",
             "struct Box { value: int }\nlet box = Box { value: 1 }\nprint(box.value)",
             "let global = 3\nfn read() -> int { global }\nprint(read())",
             'fn fail() -> int ! str { return Err("error") }',
-            "print(true and false)",
             "let values = [1, 2]\nprint(len(values))",
             "let increment = |x: int| { x + 1 }\nprint(increment(2))",
             'extern "C" fn native(x: int) -> int\nprint(1)',
@@ -161,7 +272,7 @@ class CompilerMirTests(unittest.TestCase):
                     compiled = self.compile_ir(source, output)
                     self.assertNotEqual(compiled.returncode, 0)
                     self.assertIn("[W2013]", compiled.stderr)
-                    self.assertIn("scalar-v1", compiled.stderr)
+                    self.assertIn("scalar-cfg-v1", compiled.stderr)
                     self.assertFalse(output.exists())
             source.write_text('import "missing.wysna"\n', encoding="utf-8")
             imported = self.compile_ir(source, output)
@@ -198,10 +309,35 @@ class CompilerMirTests(unittest.TestCase):
                 with self.assertRaises(WysnaError):
                     import_module(json.dumps(payload))
 
+    def test_exchange_rejects_corrupted_control_flow(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = root / "branch.wysna"
+            output = root / "module.json"
+            source.write_text("fn choose(flag: bool) -> int { if flag { 2 } else { 3 } }\nprint(choose(true))\n")
+            result = self.compile_ir(source, output)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            original = json.loads(output.read_text())
+            for fault in ("target", "condition", "terminator", "join"):
+                with self.subTest(fault=fault):
+                    bad = deepcopy(original)
+                    function = bad["module"]["functions"][0]
+                    branch = function["blocks"][0]["terminator"]
+                    if fault == "target":
+                        branch["targets"] = {"$tuple": [999, 2]}
+                    elif fault == "condition":
+                        branch["value"] = next(slot["id"] for slot in function["slots"] if slot["type_id"] == 3)
+                    elif fault == "terminator":
+                        branch["kind"] = ""
+                    else:
+                        function["blocks"][1]["operations"].pop()
+                    with self.assertRaises(WysnaError):
+                        import_module(json.dumps(bad))
+
     def test_bootstrap_stages_emit_identical_ir(self):
         with tempfile.TemporaryDirectory() as temporary:
             source = Path(temporary) / "same.wysna"
-            source.write_text("fn add(x: int) -> int { x + 2 }\nprint(add(3))\n")
+            source.write_text("fn add(x: int) -> int { let mut y = x\nwhile y < 3 { y = y + 1 }\nif y == 3 { y + 2 } else { y } }\nprint(add(1))\n")
             outputs = []
             for stage in ("stage1", "stage2"):
                 output = Path(temporary) / (stage + ".json")

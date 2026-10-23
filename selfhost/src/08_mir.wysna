@@ -1,16 +1,24 @@
-# Scalar MIR is structured data. C emission remains a separate consumer.
+# Backend-independent scalar CFG and ownership data.
 struct MirLiteral { type_id: int, integer: int, floating: float, boolean: bool }
-struct MirSlot { type_id: int, name: str, parameter: bool }
+struct MirSlot { type_id: int, name: str, parameter: bool, origin: int }
 struct MirOperation { opcode: str, result: int, args: list[int], name: str, value: MirLiteral, source: Token }
-struct MirFunction { name: str, return_type: int, slots: list[MirSlot], operations: list[MirOperation], params: list[int], returned: int, source: Token }
-struct MirBinding { name: str, slot: int }
+struct MirTerminator { kind: str, targets: list[int], value: int, source: Token }
+struct MirBlock { operations: list[MirOperation], terminator: MirTerminator }
+struct MirFunction { name: str, return_type: int, slots: list[MirSlot], blocks: list[MirBlock], params: list[int], source: Token }
+struct MirBinding { name: str, slot: int, mutable: bool }
+struct MirScope { slots: list[int] }
+struct MirLoop { after: int, header: int, depth: int }
+struct MirState { seen: bool, defined: list[bool], live: list[bool] }
 
 let mut mir_functions: list[MirFunction] = []
 let mut mir_slots: list[MirSlot] = []
-let mut mir_operations: list[MirOperation] = []
+let mut mir_blocks: list[MirBlock] = []
 let mut mir_params: list[int] = []
 let mut mir_bindings: list[MirBinding] = []
-let mut mir_returned = -1
+let mut mir_scopes: list[MirScope] = []
+let mut mir_loops: list[MirLoop] = []
+let mut mir_current = -1
+let mut mir_return_type = 1
 
 fn mir_literal_unit() -> MirLiteral { return MirLiteral { type_id: 1, integer: 0, floating: 0.0, boolean: false } }
 fn mir_literal_bool(value: bool) -> MirLiteral { return MirLiteral { type_id: 2, integer: 0, floating: 0.0, boolean: value } }
@@ -18,7 +26,7 @@ fn mir_literal_int(value: int) -> MirLiteral { return MirLiteral { type_id: 3, i
 fn mir_literal_float(value: float) -> MirLiteral { return MirLiteral { type_id: 4, integer: 0, floating: value, boolean: false } }
 
 fn mir_unsupported(token: Token, feature: str) {
-    report_error_at("W2013", token, "Compiler MIR scalar-v1 does not support " + feature)
+    report_error_at("W2013", token, "Compiler MIR scalar-cfg-v1 does not support " + feature)
 }
 
 fn mir_expect(kind: str) -> Token {
@@ -36,34 +44,118 @@ fn mir_type(type_id: int, source: Token) -> int {
     return 0
 }
 
-fn mir_begin() {
-    let slots: list[MirSlot] = []
+fn mir_new_block(source: Token) -> int {
     let operations: list[MirOperation] = []
-    let params: list[int] = []
-    let bindings: list[MirBinding] = []
-    mir_slots = slots
-    mir_operations = operations
-    mir_params = params
-    mir_bindings = bindings
-    mir_returned = -1
+    let targets: list[int] = []
+    let terminator = MirTerminator { kind: "", targets: targets, value: -1, source: source }
+    let id = len(mir_blocks)
+    mir_blocks.append(MirBlock { operations: operations, terminator: terminator })
+    return id
 }
 
-fn mir_slot(type_id: int, name: str, parameter: bool) -> int {
+fn mir_push_scope() {
+    let slots: list[int] = []
+    mir_scopes.append(MirScope { slots: slots })
+}
+
+fn mir_begin(source: Token, returned: int) {
+    let slots: list[MirSlot] = []
+    let blocks: list[MirBlock] = []
+    let params: list[int] = []
+    let bindings: list[MirBinding] = []
+    let scopes: list[MirScope] = []
+    let loops: list[MirLoop] = []
+    mir_slots = slots
+    mir_blocks = blocks
+    mir_params = params
+    mir_bindings = bindings
+    mir_scopes = scopes
+    mir_loops = loops
+    mir_return_type = returned
+    mir_push_scope()
+    mir_current = mir_new_block(source)
+}
+
+fn mir_raw_slot(type_id: int, name: str, parameter: bool) -> int {
     let id = len(mir_slots)
-    mir_slots.append(MirSlot { type_id: type_id, name: name, parameter: parameter })
+    mir_slots.append(MirSlot { type_id: type_id, name: name, parameter: parameter, origin: -1 })
     if parameter { mir_params.append(id) }
     return id
 }
 
+fn mir_track(id: int) {
+    if mir_slots[id].type_id == 1 and not mir_slots[id].parameter {
+        mir_scopes[len(mir_scopes) - 1].slots.append(id)
+    }
+}
+
+fn mir_slot(type_id: int, name: str, parameter: bool) -> int {
+    let id = mir_raw_slot(type_id, name, parameter)
+    mir_track(id)
+    return id
+}
+
+fn mir_append(operation: MirOperation) {
+    if mir_current < 0 { report_error_at("W9999", operation.source, "MIR emission requires a live block") }
+    mir_blocks[mir_current].operations.append(operation)
+}
+
 fn mir_op(opcode: str, type_id: int, args_: list[int], name: str, value: MirLiteral, source: Token) -> int {
     let id = mir_slot(type_id, "", false)
-    mir_operations.append(MirOperation { opcode: opcode, result: id, args: args_, name: name, value: value, source: source })
+    mir_append(MirOperation { opcode: opcode, result: id, args: args_, name: name, value: value, source: source })
     return id
+}
+
+fn mir_store(destination: int, value: int, source: Token) {
+    mir_append(MirOperation { opcode: "store", result: destination, args: [value], name: "", value: mir_literal_unit(), source: source })
 }
 
 fn mir_constant(value: MirLiteral, type_id: int, source: Token) -> int {
     let empty: list[int] = []
     return mir_op("const", type_id, empty, "", value, source)
+}
+
+fn mir_release(id: int, source: Token) {
+    if mir_slots[id].type_id == 1 and not mir_slots[id].parameter {
+        mir_append(MirOperation { opcode: "release", result: -1, args: [id], name: "", value: mir_literal_unit(), source: source })
+    }
+}
+
+fn mir_cleanup(depth: int, source: Token) {
+    let mut scope = len(mir_scopes) - 1
+    while scope >= depth {
+        let slots = mir_scopes[scope].slots
+        let mut index = len(slots) - 1
+        while index >= 0 { mir_release(slots[index], source) index = index - 1 }
+        scope = scope - 1
+    }
+}
+
+fn mir_terminate(kind: str, targets: list[int], value: int, source: Token) {
+    if mir_current < 0 { report_error_at("W9999", source, "MIR block already terminated") }
+    mir_blocks[mir_current].terminator = MirTerminator { kind: kind, targets: targets, value: value, source: source }
+    mir_current = -1
+}
+
+fn mir_jump(target: int, source: Token) { mir_terminate("goto", [target], -1, source) }
+
+fn mir_return(value: int, source: Token) {
+    if mir_current < 0 { return }
+    let escaped = mir_raw_slot(mir_return_type, "", false)
+    mir_store(escaped, value, source)
+    mir_cleanup(0, source)
+    let targets: list[int] = []
+    mir_terminate("return", targets, escaped, source)
+}
+
+fn mir_finish(name: str, source: Token) {
+    let targets: list[int] = []
+    for i in 0..len(mir_blocks) {
+        if mir_blocks[i].terminator.kind == "" {
+            mir_blocks[i].terminator = MirTerminator { kind: "unreachable", targets: targets, value: -1, source: source }
+        }
+    }
+    mir_functions.append(MirFunction { name: name, return_type: mir_return_type, slots: mir_slots, blocks: mir_blocks, params: mir_params, source: source })
 }
 
 fn mir_integer(text: str, negative: bool, source: Token) -> int {
@@ -81,241 +173,6 @@ fn mir_integer(text: str, negative: bool, source: Token) -> int {
     if too_large { report_error_at("W0002", source, "integer literal is outside signed int64 range") }
     let number = int(if negative { "-" + digits } else { digits })
     return mir_constant(mir_literal_int(number), 3, source)
-}
-
-fn mir_lookup(name: str, source: Token) -> int {
-    let mut index = len(mir_bindings) - 1
-    while index >= 0 {
-        if mir_bindings[index].name == name {
-            let slot = mir_bindings[index].slot
-            return mir_op("clone", mir_slots[slot].type_id, [slot], "", mir_literal_unit(), source)
-        }
-        index = index - 1
-    }
-    mir_unsupported(source, "global values or function values: " + name)
-    return -1
-}
-
-fn mir_call(name: str, source: Token) -> int {
-    mir_expect("LPAREN")
-    let mut arguments: list[int] = []
-    while not check_kind("RPAREN") {
-        arguments.append(mir_expression(0))
-        if not match_kind("COMMA") { break }
-        if check_kind("RPAREN") { break }
-    }
-    mir_expect("RPAREN")
-    if name == "print" or name == "eprint" {
-        return mir_op("runtime", 1, arguments, "wysna_builtin_" + name, mir_literal_unit(), source)
-    }
-    if name == "int" or name == "float" {
-        let returned = if name == "int" { 3 } else { 4 }
-        return mir_op("runtime", returned, arguments, "wysna_builtin_" + name, mir_literal_unit(), source)
-    }
-    for binding in mir_bindings { if binding.name == name { mir_unsupported(source, "indirect calls") } }
-    let index = sem_function(name)
-    if index < 0 { mir_unsupported(source, "builtin call " + name) }
-    let function = sem_functions[index]
-    if len(function.type_params) > 0 or function.body < 0 { mir_unsupported(source, "generic or foreign calls") }
-    let signature = sem_types[function.type_id].args
-    let returned = mir_type(signature[len(signature) - 1], source)
-    return mir_op("call", returned, arguments, "wysna_fn_" + name, mir_literal_unit(), source)
-}
-
-fn mir_primary() -> int {
-    let token = advance_tok()
-    if token.kind == "INT" { return mir_integer(token.val, false, token) }
-    if token.kind == "FLOAT" {
-        let number = float(token.val)
-        if str(number) == "inf" { report_error_at("W0002", token, "float literal is outside finite binary64 range") }
-        return mir_constant(mir_literal_float(number), 4, token)
-    }
-    if token.kind == "TRUE" or token.kind == "FALSE" {
-        return mir_constant(mir_literal_bool(token.kind == "TRUE"), 2, token)
-    }
-    if token.kind == "IDENT" {
-        if check_kind("LPAREN") { return mir_call(token.val, token) }
-        return mir_lookup(token.val, token)
-    }
-    if token.kind == "MINUS" or token.kind == "NOT" {
-        if token.kind == "MINUS" and check_kind("INT") { return mir_integer(advance_tok().val, true, token) }
-        let operand = mir_expression(9)
-        let name = if token.kind == "MINUS" { "wysna_neg" } else { "wysna_not" }
-        return mir_op("runtime", mir_slots[operand].type_id, [operand], name, mir_literal_unit(), token)
-    }
-    if token.kind == "LPAREN" {
-        let value = mir_expression(0)
-        mir_expect("RPAREN")
-        return value
-    }
-    mir_unsupported(token, "expression " + token.kind)
-    return -1
-}
-
-fn mir_binary_name(kind: str) -> str {
-    if kind == "PLUS" { return "wysna_add" }
-    if kind == "MINUS" { return "wysna_sub" }
-    if kind == "STAR" { return "wysna_mul" }
-    if kind == "SLASH" { return "wysna_div_at" }
-    if kind == "PERCENT" { return "wysna_mod_at" }
-    if kind == "EQ" { return "wysna_equal" }
-    if kind == "NEQ" { return "wysna_not_equal" }
-    if kind == "LT" { return "wysna_lt" }
-    if kind == "LTE" { return "wysna_le" }
-    if kind == "GT" { return "wysna_gt" }
-    if kind == "GTE" { return "wysna_ge" }
-    return ""
-}
-
-fn mir_expression(precedence: int) -> int {
-    let mut left = mir_primary()
-    while true {
-        let token = at_tok()
-        let next = op_precedence(token.kind)
-        if next <= precedence { break }
-        let name = mir_binary_name(token.kind)
-        if name == "" { mir_unsupported(token, "operator " + token.kind) }
-        advance_tok()
-        let right = mir_expression(next)
-        let mut returned = mir_slots[left].type_id
-        if next == 6 { returned = 2 }
-        left = mir_op("runtime", returned, [left, right], name, mir_literal_unit(), token)
-    }
-    return left
-}
-
-fn mir_statement() -> int {
-    if mir_returned >= 0 { mir_unsupported(at_tok(), "statements after return") }
-    if match_kind("LET") {
-        if check_kind("MUT") { mir_unsupported(at_tok(), "mutable bindings") }
-        let name = mir_expect("IDENT")
-        if match_kind("COLON") {
-            let type_ = mir_expect("IDENT")
-            if type_.val != "int" and type_.val != "float" and type_.val != "bool" and type_.val != "unit" { mir_unsupported(type_, "type annotation " + type_.val) }
-        }
-        mir_expect("ASSIGN")
-        let value = mir_expression(0)
-        mir_bindings.append(MirBinding { name: name.val, slot: value })
-        return -1
-    }
-    if match_kind("RETURN") {
-        if expression_starter(at_tok().kind) { mir_returned = mir_expression(0) }
-        else { mir_returned = mir_constant(mir_literal_unit(), 1, at_tok()) }
-        return -1
-    }
-    return mir_expression(0)
-}
-
-fn mir_finish(name: str, returned_type: int, tail: int, source: Token) {
-    if mir_returned < 0 {
-        if returned_type == 1 { mir_returned = mir_constant(mir_literal_unit(), 1, source) }
-        else {
-            if tail < 0 { report_error_at("W9999", source, "MIR function is missing its checked return value") }
-            mir_returned = tail
-        }
-    }
-    for i in 0..len(mir_slots) {
-        if i != mir_returned and mir_slots[i].type_id == 1 and not mir_slots[i].parameter {
-            mir_operations.append(MirOperation { opcode: "release", result: -1, args: [i], name: "", value: mir_literal_unit(), source: source })
-        }
-    }
-    mir_functions.append(MirFunction { name: name, return_type: returned_type, slots: mir_slots, operations: mir_operations, params: mir_params, returned: mir_returned, source: source })
-}
-
-fn mir_lower_function(function: SemFunction) {
-    let source = g_tokens[function.body - 1]
-    if len(function.type_params) > 0 { mir_unsupported(source, "generic functions") }
-    mir_begin()
-    let signature = sem_types[function.type_id].args
-    let returned = mir_type(signature[len(signature) - 1], source)
-    for i in 0..len(function.params) {
-        let slot = mir_slot(mir_type(signature[i], source), "v_arg" + str(i), true)
-        mir_bindings.append(MirBinding { name: function.params[i], slot: slot })
-    }
-    g_pos = function.body - 1
-    mir_expect("LBRACE")
-    let mut tail = -1
-    while true {
-        skip_statement_separators()
-        if check_kind("RBRACE") { break }
-        tail = mir_statement()
-    }
-    mir_expect("RBRACE")
-    mir_finish("wysna_fn_" + function.name, returned, tail, source)
-}
-
-fn mir_verify_runtime(operation: MirOperation, slots: list[MirSlot]) -> bool {
-    let name = operation.name
-    let returned = slots[operation.result].type_id
-    if name == "wysna_builtin_print" or name == "wysna_builtin_eprint" { return returned == 1 }
-    if len(operation.args) == 1 {
-        let type_ = slots[operation.args[0]].type_id
-        if name == "wysna_neg" { return type_ == returned and (type_ == 3 or type_ == 4) }
-        if name == "wysna_not" { return type_ == 2 and returned == 2 }
-        if name == "wysna_builtin_int" { return type_ >= 2 and type_ <= 4 and returned == 3 }
-        if name == "wysna_builtin_float" { return type_ >= 2 and type_ <= 4 and returned == 4 }
-        return false
-    }
-    if len(operation.args) != 2 { return false }
-    let first = slots[operation.args[0]].type_id
-    let second = slots[operation.args[1]].type_id
-    if first != second { return false }
-    if name == "wysna_equal" or name == "wysna_not_equal" { return returned == 2 }
-    if first != 3 and first != 4 { return false }
-    if name == "wysna_lt" or name == "wysna_le" or name == "wysna_gt" or name == "wysna_ge" { return returned == 2 }
-    if name == "wysna_mod_at" { return first == 3 and returned == 3 }
-    return returned == first and (name == "wysna_add" or name == "wysna_sub" or name == "wysna_mul" or name == "wysna_div_at")
-}
-
-fn mir_verify() {
-    for function in mir_functions {
-        let mut defined: list[bool] = []
-        for slot in function.slots {
-            if slot.type_id < 1 or slot.type_id > 4 { report_error_at("W9999", function.source, "invalid scalar MIR slot type") }
-            defined.append(slot.parameter)
-        }
-        for operation in function.operations {
-            for arg in operation.args {
-                if arg < 0 or arg >= len(defined) { report_error_at("W9999", operation.source, "invalid MIR operand") }
-                if not defined[arg] { report_error_at("W9999", operation.source, "uninitialized MIR operand") }
-            }
-            if operation.opcode == "release" {
-                if len(operation.args) != 1 or function.slots[operation.args[0]].parameter or function.slots[operation.args[0]].type_id != 1 { report_error_at("W9999", operation.source, "invalid scalar MIR release") }
-                defined[operation.args[0]] = false
-            } else {
-                let result = operation.result
-                if result < 0 or result >= len(defined) { report_error_at("W9999", operation.source, "invalid MIR result") }
-                if defined[result] or function.slots[result].parameter { report_error_at("W9999", operation.source, "MIR overwrites initialized storage") }
-                let type_ = function.slots[result].type_id
-                let mut valid = false
-                if operation.opcode == "const" {
-                    let literal_type = operation.value.type_id
-                    valid = len(operation.args) == 0 and literal_type == type_
-                } elif operation.opcode == "clone" {
-                    valid = len(operation.args) == 1
-                    if valid { valid = type_ == function.slots[operation.args[0]].type_id }
-                } elif operation.opcode == "runtime" { valid = mir_verify_runtime(operation, function.slots) }
-                elif operation.opcode == "call" {
-                    for callee in mir_functions {
-                        if callee.name == operation.name and len(callee.params) == len(operation.args) and callee.return_type == type_ {
-                            valid = true
-                            for i in 0..len(callee.params) {
-                                if callee.slots[callee.params[i]].type_id != function.slots[operation.args[i]].type_id { valid = false }
-                            }
-                        }
-                    }
-                }
-                if not valid { report_error_at("W9999", operation.source, "invalid typed scalar MIR operation") }
-                defined[result] = true
-            }
-        }
-        let returned = function.returned
-        if returned < 0 or returned >= len(defined) { report_error_at("W9999", function.source, "missing MIR return") }
-        if not defined[returned] or function.slots[returned].parameter or function.slots[returned].type_id != function.return_type { report_error_at("W9999", function.source, "invalid MIR return type or ownership") }
-        for i in 0..len(defined) {
-            if i != returned and defined[i] and function.slots[i].type_id == 1 and not function.slots[i].parameter { report_error_at("W9999", function.source, "MIR return leaks owned storage") }
-        }
-    }
 }
 
 fn mir_quote(text: str) -> str {
@@ -355,15 +212,17 @@ fn mir_operation_json(operation: MirOperation) -> str {
     let mut data = "{}"
     let mut effect = "call"
     let mut result = str(operation.result)
+    let mut moves: list[int] = []
     if operation.opcode == "const" { effect = "pure" data = "{\"value\":" + mir_literal_json(operation.value) + "}" }
     elif operation.opcode == "clone" { effect = "retain" }
+    elif operation.opcode == "store" { effect = "move" moves = [0] }
     elif operation.opcode == "release" { effect = "release" result = "null" }
     else {
         data = "{\"name\":" + mir_quote(operation.name)
         if operation.name == "wysna_div_at" or operation.name == "wysna_mod_at" { data = data + ",\"source\":true" }
         data = data + "}"
     }
-    return "{\"$type\":\"Operation\",\"opcode\":" + mir_quote(operation.opcode) + ",\"result\":" + result + ",\"args\":" + mir_ids(operation.args, true) + ",\"data\":" + data + ",\"moves\":{\"$tuple\":[]},\"effect\":" + mir_quote(effect) + ",\"source\":" + mir_source_json(operation.source) + "}"
+    return "{\"$type\":\"Operation\",\"opcode\":" + mir_quote(operation.opcode) + ",\"result\":" + result + ",\"args\":" + mir_ids(operation.args, true) + ",\"data\":" + data + ",\"moves\":" + mir_ids(moves, true) + ",\"effect\":" + mir_quote(effect) + ",\"source\":" + mir_source_json(operation.source) + "}"
 }
 
 fn mir_function_json(function: MirFunction) -> str {
@@ -379,16 +238,22 @@ fn mir_function_json(function: MirFunction) -> str {
         slots = slots + "{\"$type\":\"Slot\",\"id\":" + str(i) + ",\"type_id\":" + str(slot.type_id) + ",\"name\":" + mir_quote(slot.name) + ",\"storage\":" + mir_quote(storage) + ",\"ownership\":" + mir_quote(ownership) + ",\"parameter\":" + str(slot.parameter) + "}"
     }
     slots = slots + "]"
-    let mut operations = "["
-    for i in 0..len(function.operations) {
-        if i > 0 { operations = operations + "," }
-        operations = operations + mir_operation_json(function.operations[i])
+    let mut blocks = "["
+    for i in 0..len(function.blocks) {
+        if i > 0 { blocks = blocks + "," }
+        let block = function.blocks[i]
+        let mut operations = "["
+        for j in 0..len(block.operations) {
+            if j > 0 { operations = operations + "," }
+            operations = operations + mir_operation_json(block.operations[j])
+        }
+        operations = operations + "]"
+        let terminator = block.terminator
+        let value = if terminator.value < 0 { "null" } else { str(terminator.value) }
+        let term = "{\"$type\":\"Terminator\",\"kind\":" + mir_quote(terminator.kind) + ",\"targets\":" + mir_ids(terminator.targets, true) + ",\"value\":" + value + ",\"source\":" + mir_source_json(terminator.source) + "}"
+        blocks = blocks + "{\"$type\":\"BasicBlock\",\"id\":" + str(i) + ",\"operations\":" + operations + ",\"terminator\":" + term + "}"
     }
-    operations = operations + "]"
-    let source = mir_source_json(function.source)
-    let term = "{\"$type\":\"Terminator\",\"kind\":\"return\",\"targets\":{\"$tuple\":[]},\"value\":" + str(function.returned) + ",\"source\":" + source + "}"
-    let block = "{\"$type\":\"BasicBlock\",\"id\":0,\"operations\":" + operations + ",\"terminator\":" + term + "}"
-    return "{\"$type\":\"Function\",\"name\":" + mir_quote(function.name) + ",\"return_type\":" + str(function.return_type) + ",\"slots\":" + slots + ",\"blocks\":[" + block + "],\"params\":" + mir_ids(function.params, false) + ",\"source\":" + source + "}"
+    return "{\"$type\":\"Function\",\"name\":" + mir_quote(function.name) + ",\"return_type\":" + str(function.return_type) + ",\"slots\":" + slots + ",\"blocks\":" + blocks + "],\"params\":" + mir_ids(function.params, false) + ",\"source\":" + mir_source_json(function.source) + "}"
 }
 
 fn mir_arena_json() -> str {
@@ -406,64 +271,4 @@ fn mir_arena_json() -> str {
         capabilities = capabilities + "{\"needs_retain\":" + retain + ",\"needs_release\":" + retain + ",\"is_value\":true,\"is_reference\":false,\"is_copyable\":true,\"has_identity\":false,\"is_comparable\":true,\"is_valid_dict_key\":" + key + "}"
     }
     return "{\"version\":1,\"entries\":" + entries + "],\"capabilities\":" + capabilities + "],\"structs\":{},\"enums\":{},\"interfaces\":{},\"classes\":{}}"
-}
-
-fn emit_scalar_mir(src: str, file: str) -> str {
-    let tokens = tokenize(src, file)
-    let unsupported: list[str] = ["STR", "NONE", "MUT", "IF", "ELIF", "ELSE", "MATCH", "WHILE", "FOR", "BREAK", "CONTINUE", "LBRACKET", "STRUCT", "ENUM", "CLASS", "INTERFACE", "EXTERN", "NEW", "THIS", "SUPER", "QUESTION", "BANG", "PIPE", "AND", "OR", "DOT", "QQ"]
-    for token in tokens {
-        if token.kind == "IMPORT" { mir_unsupported(token, "imports") }
-        for kind in unsupported { if token.kind == kind { mir_unsupported(token, "syntax " + kind) } }
-    }
-    check_source(src, file)
-    g_tokens = tokens
-    let empty: list[MirFunction] = []
-    mir_functions = empty
-    for function in sem_functions {
-        if function.body < 0 { mir_unsupported(tokens[0], "foreign declarations") }
-        mir_lower_function(function)
-    }
-    mir_begin()
-    g_pos = 0
-    let mut has_statements = false
-    let mut explicit_entry = -1
-    while true {
-        skip_statement_separators()
-        if is_eof() { break }
-        match_kind("PUB")
-        if match_kind("FN") {
-            let name = mir_expect("IDENT").val
-            let function = sem_functions[sem_function(name)]
-            g_pos = function.end - 1
-        } else {
-            has_statements = true
-            let value = mir_statement()
-            explicit_entry = -1
-            if value >= 0 and len(mir_operations) > 0 {
-                let last = mir_operations[len(mir_operations) - 1]
-                if last.result == value and last.opcode == "call" and last.name == "wysna_fn_main" { explicit_entry = value }
-            }
-        }
-    }
-    let source = tokens[0]
-    let mut returned_type = 1
-    if not has_statements and sem_function("main") >= 0 {
-        let function = sem_functions[sem_function("main")]
-        let signature = sem_types[function.type_id].args
-        returned_type = mir_type(signature[len(signature) - 1], source)
-        let args_: list[int] = []
-        mir_returned = mir_op("call", returned_type, args_, "wysna_fn_main", mir_literal_unit(), source)
-    } elif explicit_entry >= 0 {
-        mir_returned = explicit_entry
-        returned_type = mir_slots[explicit_entry].type_id
-    }
-    mir_finish("wysna_program", returned_type, -1, source)
-    mir_verify()
-    let mut functions = "["
-    for i in 0..len(mir_functions) {
-        if i > 0 { functions = functions + "," }
-        functions = functions + mir_function_json(mir_functions[i])
-    }
-    let module = "{\"$type\":\"Module\",\"file\":" + mir_quote(file) + ",\"arena_id\":\"compiler-scalar-v1\",\"functions\":" + functions + "],\"globals\":[],\"layouts\":{},\"virtual_slots\":[],\"externs\":{},\"exports\":[],\"library_mode\":false,\"enum_count\":0}"
-    return "{\"format\":\"wysna.mir\",\"schema_version\":1,\"semantic_revision\":\"0.5.0\",\"runtime_abi_version\":2,\"type_arena\":" + mir_arena_json() + ",\"module\":" + module + "}\n"
 }
