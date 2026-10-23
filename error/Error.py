@@ -45,6 +45,8 @@ DIAGNOSTIC_CODES: Dict[str, str] = {
     "W4003": "Runtime execution error",
     # W5xxx — Host Toolchain
     "W5001": "C compiler command unavailable or invalid",
+    "W5002": "Invalid command usage or option",
+    "W5003": "Source file could not be read",
 }
 
 LEGACY_CODE_MAP: Dict[str, str] = {
