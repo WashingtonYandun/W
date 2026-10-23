@@ -122,9 +122,44 @@ typedef struct WStringLiteral {
     WStringBuf buffer;
     struct WStringLiteral* next;
 } WStringLiteral;
-static WStringLiteral* wysna_g_string_literals = NULL;
+
+/*
+ * Every generated program owns one explicit runtime context. For WebAssembly,
+ * the context is stored in the module's linear memory and is therefore isolated
+ * for each runtime instance. The compatibility macros keep the runtime ABI and
+ * the existing internal call sites stable while state moves behind the context.
+ */
+typedef struct WysnaRuntimeContext {
+    WStringLiteral* string_literals;
 #ifdef W_STRING_METRICS
-static uint64_t wysna_g_string_scan_steps = 0;
+    uint64_t string_scan_steps;
+#endif
+    const char* source_file;
+    int32_t source_line;
+    int32_t source_col;
+    int64_t alloc_count;
+    int64_t free_count;
+    int64_t retain_count;
+    int64_t release_count;
+    int64_t live_objects;
+    int64_t cow_detach_list;
+    int64_t cow_detach_dict;
+    int64_t cow_detach_struct;
+    int64_t cow_copied_slots;
+    int64_t cow_copied_bytes;
+    int64_t cow_alloc_count;
+    int64_t cow_allocated_bytes;
+    int argc;
+    char** argv;
+#ifdef _WIN32
+    bool argv_allocated;
+#endif
+} WysnaRuntimeContext;
+
+static WysnaRuntimeContext wysna_runtime_context = {0};
+#define wysna_g_string_literals (wysna_runtime_context.string_literals)
+#ifdef W_STRING_METRICS
+#define wysna_g_string_scan_steps (wysna_runtime_context.string_scan_steps)
 #define W_STRING_SCAN_STEP() (++wysna_g_string_scan_steps)
 #else
 #define W_STRING_SCAN_STEP() ((void)0)
@@ -173,9 +208,9 @@ static inline bool wysna_value_is_error_type(WVal value, const char* kind, const
 typedef WVal (*WInvoke)(WVal environment, int32_t argc, const WVal* argv);
 
 /* Native runtime failures retain the source operation that last entered Wysna. */
-static const char* wysna_g_source_file = NULL;
-static int32_t wysna_g_source_line = 0;
-static int32_t wysna_g_source_col = 0;
+#define wysna_g_source_file (wysna_runtime_context.source_file)
+#define wysna_g_source_line (wysna_runtime_context.source_line)
+#define wysna_g_source_col (wysna_runtime_context.source_col)
 
 static inline void wysna_runtime_set_position(const char* file, int32_t line, int32_t col) {
     wysna_g_source_file = file;
@@ -222,20 +257,20 @@ struct WBoxBuf {
 };
 
 /* Deterministic RC & Memory Instrumentation Counters (v0.1.3) */
-static int64_t wysna_g_alloc_count = 0;
-static int64_t wysna_g_free_count = 0;
-static int64_t wysna_g_retain_count = 0;
-static int64_t wysna_g_release_count = 0;
-static int64_t wysna_g_live_objects = 0;
+#define wysna_g_alloc_count (wysna_runtime_context.alloc_count)
+#define wysna_g_free_count (wysna_runtime_context.free_count)
+#define wysna_g_retain_count (wysna_runtime_context.retain_count)
+#define wysna_g_release_count (wysna_runtime_context.release_count)
+#define wysna_g_live_objects (wysna_runtime_context.live_objects)
 
 /* Copy-on-Write (CoW) Detach Telemetry Counters (B02) */
-static int64_t wysna_g_cow_detach_list = 0;
-static int64_t wysna_g_cow_detach_dict = 0;
-static int64_t wysna_g_cow_detach_struct = 0;
-static int64_t wysna_g_cow_copied_slots = 0;
-static int64_t wysna_g_cow_copied_bytes = 0;
-static int64_t wysna_g_cow_alloc_count = 0;
-static int64_t wysna_g_cow_allocated_bytes = 0;
+#define wysna_g_cow_detach_list (wysna_runtime_context.cow_detach_list)
+#define wysna_g_cow_detach_dict (wysna_runtime_context.cow_detach_dict)
+#define wysna_g_cow_detach_struct (wysna_runtime_context.cow_detach_struct)
+#define wysna_g_cow_copied_slots (wysna_runtime_context.cow_copied_slots)
+#define wysna_g_cow_copied_bytes (wysna_runtime_context.cow_copied_bytes)
+#define wysna_g_cow_alloc_count (wysna_runtime_context.cow_alloc_count)
+#define wysna_g_cow_allocated_bytes (wysna_runtime_context.cow_allocated_bytes)
 
 static inline void wysna_cow_reset_stats(void) {
     wysna_g_cow_detach_list = 0;
@@ -299,10 +334,10 @@ static inline void* wysna_realloc_safe(void* old_ptr, size_t new_size) {
     return ptr;
 }
 
-static int wysna_g_argc = 0;
-static char** wysna_g_argv = NULL;
+#define wysna_g_argc (wysna_runtime_context.argc)
+#define wysna_g_argv (wysna_runtime_context.argv)
 #ifdef _WIN32
-static bool wysna_g_argv_allocated = false;
+#define wysna_g_argv_allocated (wysna_runtime_context.argv_allocated)
 #endif
 
 static inline void wysna_runtime_cleanup(void) {

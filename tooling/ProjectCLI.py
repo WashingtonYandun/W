@@ -6,16 +6,21 @@ import os
 from pathlib import Path
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 
 from common.Version import WYSNA_VERSION
 from compiler.CompilerService import CompilerService
 from compiler.NativeToolchain import NativeCompilationError, NativeToolchain
+from compiler.WasiToolchain import WasiCompilationError, WasiToolchain
 from error.Error import ToolchainError, WysnaError
 from project.Manifest import ManifestError
 from project.Resolver import ProjectResolver
+from project.Targets import target_spec
 from runtime.ExecutionContext import ExecutionContext
+from runtime.WasiRunner import WasiRunner, WasiRuntimeError
+from tooling.TargetValidation import validate_checked_target
 from tooling.ToolResult import (
     artifact_file,
     diagnostic_from_error,
@@ -106,6 +111,11 @@ def _emit(command, status, code, *, diagnostics=(), artifacts=(), target=None, j
     return code
 
 
+def _target_metadata(target):
+    spec = target_spec(target.profile)
+    return {"profile": spec.profile, "triple": spec.triple}
+
+
 def _check_frozen(resolver, frozen):
     if frozen:
         resolver.verify_lock()
@@ -119,16 +129,17 @@ def _run_check(resolver, target_name, json_mode):
     service = CompilerService(project_root=manifest.root, project_resolver=resolver)
     try:
         checked = service.check_file(manifest.root / target.entry)
+        validate_checked_target(checked, target)
     except WysnaError as error:
         diagnostic = diagnostic_from_error(error, service.source_texts())
         if json_mode:
             return _emit("project.check", "diagnostic_error", 1, diagnostics=[diagnostic],
-                         target={"profile": target.profile, "triple": None}, json_mode=True)
+                         target=_target_metadata(target), json_mode=True)
         print(str(error), file=sys.stderr)
         return 1
     if json_mode:
         return _emit("project.check", "ok", 0,
-                     target={"profile": target.profile, "triple": None}, json_mode=True)
+                     target=_target_metadata(target), json_mode=True)
     print(f"[OK] Project check passed: {manifest.name} ({len(checked.modules)} modules)")
     return 0
 
@@ -144,34 +155,47 @@ def _run_build(resolver, target_name, output, json_mode):
         destination = Path.cwd() / destination
     if destination.resolve() in _protected_project_paths(resolver):
         raise ManifestError("build output must not overwrite a source, manifest, or lockfile")
-    destination.parent.mkdir(parents=True, exist_ok=True)
     service = CompilerService(project_root=manifest.root, project_resolver=resolver)
     try:
         checked = service.check_file(entry)
+        spec = validate_checked_target(checked, target)
         c_source = service.emit_c(checked).source
-        built = NativeToolchain(Path(__file__).resolve().parents[1]).build(c_source, destination)
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        if target.profile == "wasi-command":
+            built = WasiToolchain(Path(__file__).resolve().parents[1]).build(c_source, destination)
+        else:
+            built = NativeToolchain(Path(__file__).resolve().parents[1]).build(c_source, destination)
     except ToolchainError as error:
         diagnostic = diagnostic_from_error(error, service.source_texts())
         if json_mode:
             return _emit("project.build", "toolchain_error", 3, diagnostics=[diagnostic],
-                         target={"profile": target.profile, "triple": None}, json_mode=True)
+                         target=_target_metadata(target), json_mode=True)
         print(str(error), file=sys.stderr)
         return 3
     except WysnaError as error:
         diagnostic = diagnostic_from_error(error, service.source_texts())
         if json_mode:
             return _emit("project.build", "diagnostic_error", 1, diagnostics=[diagnostic],
-                         target={"profile": target.profile, "triple": None}, json_mode=True)
+                         target=_target_metadata(target), json_mode=True)
         print(str(error), file=sys.stderr)
         return 1
+    except WasiCompilationError as error:
+        diagnostic = diagnostic_record("W5001", "wasi-toolchain", str(error))
+        if json_mode:
+            return _emit("project.build", "toolchain_error", 3, diagnostics=[diagnostic],
+                         target=_target_metadata(target), json_mode=True)
+        print(str(error), file=sys.stderr)
+        return 3
     except NativeCompilationError as error:
         diagnostic = diagnostic_record("W5004", "native-toolchain", str(error))
         if json_mode:
             return _emit("project.build", "toolchain_error", 3, diagnostics=[diagnostic],
-                         target={"profile": target.profile, "triple": None}, json_mode=True)
+                         target=_target_metadata(target), json_mode=True)
         print(error.stderr or str(error), file=sys.stderr)
         return 3
-    artifact = artifact_file("native_executable", "application/octet-stream", built.output_path)
+    artifact = artifact_file(spec.artifact_kind.value,
+                             "application/wasm" if target.profile == "wasi-command"
+                             else "application/octet-stream", built.output_path)
     source_hashes = []
     for source_path, source_text in service.source_texts().items():
         path = Path(source_path).resolve()
@@ -184,8 +208,21 @@ def _run_build(resolver, target_name, output, json_mode):
     source_hashes.sort(key=lambda item: item["path"])
     lock_path = resolver.lock_path()
     lock_hash = hashlib.sha256(lock_path.read_bytes()).hexdigest() if lock_path.is_file() else None
-    from common.Platform import compiler_command
     from tooling.ToolResult import artifact_inline
+    if target.profile == "wasi-command":
+        compiler_metadata = {
+            "wasi_sdk_path": built.sdk_path,
+            "wasi_sdk_compiler": built.compiler_path,
+            "wasi_sdk_compiler_version": built.compiler_version,
+            "wasi_runtime": "wasmtime==50.0.0",
+            "wasi_imports": list(built.imports),
+            "wasm_exports": list(built.exports),
+        }
+        build_flags = ["--target=wasm32-wasip1", "-std=c99", "-O2"]
+    else:
+        from common.Platform import compiler_command
+        compiler_metadata = {"c_compiler_command": compiler_command()}
+        build_flags = ["-std=c99", "-O2"]
     provenance = {
         "schema_version": "wysna.build-provenance/1",
         "project": {"name": manifest.name, "version": manifest.version},
@@ -194,17 +231,30 @@ def _run_build(resolver, target_name, output, json_mode):
         "stdlib_version": WYSNA_VERSION,
         "runtime_abi": 2,
         "target": target.profile,
-        "flags": ["-std=c99", "-O2"],
-        "c_compiler_command": compiler_command(),
+        "flags": build_flags,
         "lock_sha256": lock_hash,
         "sources": source_hashes,
     }
+    if target.profile == "wasi-command":
+        provenance.update({
+            "target_spec": {"triple": spec.triple, "artifact_kind": spec.artifact_kind.value},
+            "compiler": compiler_metadata,
+            "capabilities": list(spec.capabilities),
+            "wasi": {
+                "fuel": target.fuel,
+                "memory_limit_bytes": target.memory_limit_mb * 1024 * 1024,
+                "preopens": [{"path": item.path, "access": item.access}
+                             for item in target.preopens],
+            },
+        })
+    else:
+        provenance["c_compiler_command"] = compiler_command()
     provenance_artifact = artifact_inline("build_provenance", "application/json",
                                            json.dumps(provenance, ensure_ascii=False,
                                                       sort_keys=True, separators=(",", ":")))
     if json_mode:
         return _emit("project.build", "ok", 0, artifacts=[artifact, provenance_artifact],
-                     target={"profile": target.profile, "triple": None}, json_mode=True)
+                     target=_target_metadata(target), json_mode=True)
     print(f"[OK] Built {manifest.name} -> {built.output_path}")
     return 0
 
@@ -230,9 +280,104 @@ def _entry_path(manifest, target_name, override):
     return path
 
 
+def _write_output_bytes(stream, content):
+    binary_stream = getattr(stream, "buffer", None)
+    if binary_stream is None:
+        stream.write(content.decode("utf-8", errors="replace"))
+    else:
+        binary_stream.write(content)
+    stream.flush()
+
+
+def _run_wasi_program(resolver, target, entry, program_args, report_path=None):
+    manifest = resolver.manifest
+    if report_path:
+        report = Path(report_path).expanduser().resolve()
+        if report in _protected_project_paths(resolver):
+            print("wysna: run report path must not overwrite a source, manifest, or lockfile",
+                  file=sys.stderr)
+            return 2
+        pending = tool_result("project.run", "pending", None, process_exit_code=None,
+                              target=_target_metadata(target))
+        invocation_id = pending["invocation_id"]
+        try:
+            write_tool_result_atomic(pending, report_path)
+        except OSError as error:
+            print(f"wysna: cannot initialize run report '{report_path}': {error}", file=sys.stderr)
+            return 3
+    else:
+        invocation_id = None
+
+    def finish(status, tool_exit_code, process_exit_code, *, execution=None, diagnostics=()):
+        if not report_path:
+            return process_exit_code
+        result = tool_result("project.run", status, tool_exit_code,
+                             process_exit_code=process_exit_code, execution=execution,
+                             diagnostics=list(diagnostics), invocation_id=invocation_id,
+                             target=_target_metadata(target))
+        try:
+            write_tool_result_atomic(result, report_path)
+        except OSError as error:
+            print(f"wysna: unable to finalize run report: {error}", file=sys.stderr)
+            return 3
+        return process_exit_code
+
+    service = CompilerService(project_root=manifest.root, project_resolver=resolver)
+    try:
+        checked = service.check_file(entry)
+        validate_checked_target(checked, target)
+        c_source = service.emit_c(checked).source
+        with tempfile.TemporaryDirectory(prefix="wysna-wasi-run-") as temporary:
+            wasm_path = Path(temporary) / "program.wasm"
+            WasiToolchain(Path(__file__).resolve().parents[1]).build(c_source, wasm_path)
+            result = WasiRunner().run(
+                wasm_path, project_root=manifest.root, arguments=program_args,
+                preopens=target.preopens, fuel=target.fuel,
+                memory_limit_mb=target.memory_limit_mb, capture_output=bool(report_path),
+            )
+    except WysnaError as error:
+        diagnostic = diagnostic_from_error(error, service.source_texts())
+        if not report_path:
+            print(str(error), file=sys.stderr)
+        return finish("diagnostic_error", 1, 1, diagnostics=[diagnostic])
+    except WasiCompilationError as error:
+        diagnostic = diagnostic_record("W5001", "wasi-toolchain", str(error))
+        if not report_path:
+            print(str(error), file=sys.stderr)
+        return finish("toolchain_error", 3, 3, diagnostics=[diagnostic])
+    except WasiRuntimeError as error:
+        diagnostic = diagnostic_record("W4003", "wasi-runtime", str(error), filename=str(entry))
+        if not report_path:
+            print(str(error), file=sys.stderr)
+        return finish("execution_error", 5, 5, diagnostics=[diagnostic])
+
+    if report_path:
+        _write_output_bytes(sys.stdout, result.stdout)
+        _write_output_bytes(sys.stderr, result.stderr)
+        execution = {
+            "kind": "wasm",
+            "runtime": "wasmtime==50.0.0",
+            "exit_code": result.exit_code,
+            "signal": None,
+            "fuel_remaining": result.fuel_remaining,
+            "elapsed_ms": round(result.elapsed_ms, 3),
+            "stdout_sha256": hashlib.sha256(result.stdout).hexdigest(),
+            "stderr_sha256": hashlib.sha256(result.stderr).hexdigest(),
+            "stdout_truncated": result.stdout_truncated,
+            "stderr_truncated": result.stderr_truncated,
+        }
+        return finish("ok", 0, result.exit_code, execution=execution)
+    return result.exit_code
+
+
 def _run_program(resolver, target_name, entry_override, program_args, report_path=None):
     manifest = resolver.manifest
+    target = manifest.targets.get(target_name)
+    if target is None:
+        raise ManifestError(f"unknown target '{target_name}'")
     entry = _entry_path(manifest, target_name, entry_override)
+    if target.profile == "wasi-command":
+        return _run_wasi_program(resolver, target, entry, program_args, report_path)
     try:
         source = entry.read_bytes().decode("utf-8")
     except (OSError, UnicodeError) as error:

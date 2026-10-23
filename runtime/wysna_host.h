@@ -21,6 +21,8 @@
 #include <io.h>
 #include <direct.h>
 #include <wchar.h>
+#elif defined(__wasi__)
+#include <unistd.h>
 #else
 #include <fcntl.h>
 #include <signal.h>
@@ -44,12 +46,21 @@ typedef struct WysnaHostEntry {
     size_t capacity;
     struct WysnaHostEntry* next;
 } WysnaHostEntry;
-static WysnaHostEntry* wysna_host_entries = NULL;
-static uintptr_t wysna_host_next_id = 1;
-static bool wysna_host_initialized = false;
+/* Host resources and diagnostics share the lifetime of the owning runtime instance. */
+typedef struct WysnaHostContext {
+    WysnaHostEntry* entries;
+    uintptr_t next_id;
+    bool initialized;
+    int64_t error_code;
+    int64_t error_domain;
+} WysnaHostContext;
+static WysnaHostContext wysna_host_context = {NULL, 1, false, 0, 0};
+#define wysna_host_entries (wysna_host_context.entries)
+#define wysna_host_next_id (wysna_host_context.next_id)
+#define wysna_host_initialized (wysna_host_context.initialized)
+#define wysna_host_error_code (wysna_host_context.error_code)
+#define wysna_host_error_domain (wysna_host_context.error_domain)
 /* Error codes are captured immediately, before cleanup can overwrite errno. */
-static int64_t wysna_host_error_code = 0;
-static int64_t wysna_host_error_domain = 0; /* 0 none, 1 errno, 2 Win32 */
 static int64_t wysna_host_last_error(void) { return wysna_host_error_code; }
 static int64_t wysna_host_last_error_domain(void) { return wysna_host_error_domain; }
 static int64_t wysna_host_errno(int code) {
@@ -243,6 +254,7 @@ static int64_t wysna_host_fs(void* first, void* second, int64_t operation) {
     free(path); free(other); return result;
 }
 
+#if !defined(__wasi__)
 static int wysna_host_process_utf8_valid(const unsigned char* data, size_t length) {
     size_t offset = 0;
     while (offset < length) {
@@ -582,4 +594,5 @@ static int64_t wysna_host_process_run(void* executable_handle, void* arguments_h
     return wysna_host_process_error(EIO);
 }
 #endif
+#endif /* !__wasi__ */
 #endif

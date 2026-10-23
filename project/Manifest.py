@@ -63,10 +63,20 @@ class ProjectTest:
 
 
 @dataclass(frozen=True)
+class WasiPreopen:
+    path: str
+    access: str
+    host_path: Path
+
+
+@dataclass(frozen=True)
 class Target:
     name: str
     entry: str
     profile: str
+    preopens: tuple = ()
+    fuel: int = 100_000_000
+    memory_limit_mb: int = 128
 
 
 @dataclass(frozen=True)
@@ -134,15 +144,50 @@ class ProjectManifest:
         for target_name, raw_target in raw_targets.items():
             if not _NAME.fullmatch(target_name):
                 raise ManifestError(f"invalid target name '{target_name}'")
-            _keys(raw_target, {"entry", "profile"}, f"targets.{target_name}")
+            _keys(raw_target, {"entry", "profile", "preopens", "fuel", "memory_limit_mb"},
+                  f"targets.{target_name}")
             entry = _safe_relative_path(raw_target.get("entry"), f"targets.{target_name}.entry")
             profile = _required_string(raw_target.get("profile"), f"targets.{target_name}.profile")
-            if profile != "native-cli":
-                raise ManifestError(f"targets.{target_name}.profile must be 'native-cli' in manifest version 1")
+            if profile not in ("native-cli", "wasi-command"):
+                raise ManifestError(
+                    f"targets.{target_name}.profile must be 'native-cli' or 'wasi-command' in manifest version 1"
+                )
+            raw_preopens = raw_target.get("preopens", [])
+            if not isinstance(raw_preopens, list):
+                raise ManifestError(f"targets.{target_name}.preopens must be an array of tables")
+            preopens = []
+            seen_preopens = set()
+            for index, raw_preopen in enumerate(raw_preopens):
+                label = f"targets.{target_name}.preopens[{index}]"
+                _keys(raw_preopen, {"path", "access"}, label)
+                relative = _safe_relative_path(raw_preopen.get("path"), f"{label}.path")
+                access = _required_string(raw_preopen.get("access"), f"{label}.access")
+                if access not in ("read-only", "read-write"):
+                    raise ManifestError(f"{label}.access must be 'read-only' or 'read-write'")
+                if relative in seen_preopens:
+                    raise ManifestError(f"{label}.path duplicates another preopen")
+                seen_preopens.add(relative)
+                preopen_path = _contained_path(root, relative, f"{label}.path", require_exists=True)
+                if not preopen_path.is_dir():
+                    raise ManifestError(f"{label}.path must name an existing directory")
+                preopens.append(WasiPreopen(relative, access, preopen_path))
+            fuel = raw_target.get("fuel", 100_000_000)
+            if isinstance(fuel, bool) or not isinstance(fuel, int) or not 1_000 <= fuel <= 10_000_000_000:
+                raise ManifestError(f"targets.{target_name}.fuel must be between 1000 and 10000000000")
+            memory_limit_mb = raw_target.get("memory_limit_mb", 128)
+            if (isinstance(memory_limit_mb, bool) or not isinstance(memory_limit_mb, int)
+                    or not 8 <= memory_limit_mb <= 1024):
+                raise ManifestError(f"targets.{target_name}.memory_limit_mb must be between 8 and 1024")
+            wasi_settings = {"preopens", "fuel", "memory_limit_mb"}.intersection(raw_target)
+            if profile == "native-cli" and wasi_settings:
+                raise ManifestError(
+                    f"targets.{target_name} WASI resource settings require profile = 'wasi-command'"
+                )
             entry_path = _contained_path(root, entry, f"targets.{target_name}.entry", require_exists=True)
             if not entry_path.is_file() or entry_path.suffix != ".wysna":
                 raise ManifestError(f"targets.{target_name}.entry must name an existing .wysna source file")
-            targets[target_name] = Target(target_name, entry, profile)
+            targets[target_name] = Target(target_name, entry, profile, tuple(preopens), fuel,
+                                          memory_limit_mb)
 
         raw_dependencies = data.get("dependencies", {})
         if not isinstance(raw_dependencies, dict):

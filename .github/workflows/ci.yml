@@ -318,3 +318,26 @@ jobs:
           name: windows-installer-reports
           path: dist/windows-reports/
           if-no-files-found: warn
+
+  wasi-command:
+    name: WASI command target (wasm32-wasip1)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Download and verify wasi-sdk 34
+        run: |
+          archive="$RUNNER_TEMP/wasi-sdk-34.0-x86_64-linux.tar.gz"
+          curl --fail --location --silent --show-error \
+            "https://github.com/WebAssembly/wasi-sdk/releases/download/wasi-sdk-34/wasi-sdk-34.0-x86_64-linux.tar.gz" \
+            --output "$archive"
+          echo "b761e3a0721dbae9c09a0059e5fdb2bf917d1b4a8a7b430fb3b5aafb0984b2c4  $archive" | sha256sum --check
+          tar -xzf "$archive" -C "$RUNNER_TEMP"
+          echo "WASI_SDK_PATH=$RUNNER_TEMP/wasi-sdk-34.0-x86_64-linux" >> "$GITHUB_ENV"
+      - name: Install the pinned Wasmtime runner
+        run: python -m pip install -e ".[wasi]"
+      - name: Build, inspect, compare and execute the WASI command fixture
+        run: python -m tests.unit.test_wasi_target

@@ -224,6 +224,12 @@ the manifest and dependency hashes without downloading packages. See
 [`examples/automation`](examples/automation) for a command runner that passes
 arguments directly to a child executable without invoking a shell.
 
+Project manifests also support a bounded `wasi-command` profile that builds
+`wasm32-wasip1` modules and runs them in isolated Wasmtime instances. Filesystem access
+requires explicit manifest preopens; child processes, networking, and native C FFI
+are not available to this profile. See [Wysna Projects](docs/PROJECTS.md) for SDK
+installation, limits, and manifest configuration.
+
 `check`, `fmt`, `emit-c`, and `build` also accept `--output-format=json-v1`. The
 formatter returns inline source content; code and binary generation report artifact
 paths and SHA-256 hashes. The default text output and legacy `--json` format remain

@@ -15,6 +15,9 @@ authors = [
 keywords = ["compiler", "programming-language", "self-hosting", "c99", "static-typing", "copy-on-write", "wysna"]
 dependencies = []
 
+[project.optional-dependencies]
+wasi = ["wasmtime==50.0.0"]
+
 [project.scripts]
 wysna = "main:main"
 
