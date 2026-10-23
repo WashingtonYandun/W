@@ -126,6 +126,10 @@ def test_http_client_contract_across_four_engines():
                 _Handler, tls=True, certificate=str(certificate), key=str(key),
             )
             try:
+                example = (ROOT / "examples/http_json_client.wysna").read_text(encoding="utf-8")
+                CompilerService(project_root=ROOT).check(
+                    example, file="examples/http_json_client.wysna",
+                )
                 source = f'''import "std/buffer"
 import "std/http"
 import "std/json"
