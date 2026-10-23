@@ -87,7 +87,14 @@ class Interpreter:
             elif isinstance(stmt, FnDecl):
                 if hasattr(stmt, "extern_abi"):
                     from runtime.ForeignAbi import bind_foreign
-                    self.global_env.declare(stmt.name, WysnaNativeFunction(stmt.name, bind_foreign(stmt, getattr(self, "foreign_libraries", ()))))
+                    self.global_env.declare(
+                        stmt.name,
+                        WysnaNativeFunction(
+                            stmt.name,
+                            bind_foreign(stmt, getattr(self, "foreign_libraries", ()),
+                                         execution_context=self.execution_context),
+                        ),
+                    )
                     continue
                 self.global_env.declare(
                     stmt.name,

@@ -223,6 +223,8 @@ def run_pipeline(
     json_v1: bool = False,
     tool_command: Optional[str] = None,
     report_state=None,
+    project_root=None,
+    project_resolver=None,
 ) -> int:
     if tool_command is None:
         if check_only:
@@ -268,7 +270,8 @@ def run_pipeline(
                 return 0
 
         if not selfhost_direct:
-            service = CompilerService()
+            service = CompilerService(project_root=project_root,
+                                      project_resolver=project_resolver)
             parsed = service.parse(source_code, file_name, recover=check_only)
             ast = parsed.program if show_ast or fmt_only else None
             lex_ms, parse_ms = parsed.timing_ms['lex'], parsed.timing_ms['parse']
@@ -667,6 +670,15 @@ def main(argv=None) -> None:
         print(f"Try '{prog} --help' for usage.", file=sys.stderr)
         raise SystemExit(2)
 
+    if args and args[0] == "project":
+        from tooling.ProjectCLI import run_project_command
+        raise SystemExit(run_project_command(args[1:]))
+    if args and args[0] == "api":
+        from tooling.ApiIndex import run_api_command
+        raise SystemExit(run_api_command(args[1:]))
+    if args and args[0] == "capabilities":
+        from tooling.ApiIndex import run_capabilities_command
+        raise SystemExit(run_capabilities_command(args[1:]))
     if args == ["lsp"]:
         from tooling.LanguageServer import serve
         serve()

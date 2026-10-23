@@ -1,6 +1,12 @@
 #ifndef WYSNA_RUNTIME_H
 #define WYSNA_RUNTIME_H
 
+#ifndef _WIN32
+#ifndef _POSIX_C_SOURCE
+#define _POSIX_C_SOURCE 200809L
+#endif
+#endif
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdint.h>
@@ -11,6 +17,7 @@
 #include <math.h>
 #include <errno.h>
 #include <ctype.h>
+#include <time.h>
 #include <stdarg.h>
 #ifdef _WIN32
 #ifndef WIN32_LEAN_AND_MEAN
@@ -2874,6 +2881,69 @@ static inline WVal wysna_builtin_args(void) {
         b->data[i] = wysna_copy_str(wysna_g_argv[i]);
     }
     WVal v; v.tag = W_LIST; v.as.list = b; return v;
+}
+
+static inline WVal wysna_builtin_env(WVal name) {
+    if (name.tag != W_STR || memchr(name.as.string.data, 0, name.as.string.length))
+        wysna_runtime_fail("W4003", "env() expects a valid environment variable name");
+    char* key = (char*)wysna_alloc_safe(name.as.string.length + 1);
+    memcpy(key, name.as.string.data, name.as.string.length);
+    key[name.as.string.length] = 0;
+#ifdef _WIN32
+    int key_length = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, key, -1, NULL, 0);
+    if (!key_length) { free(key); wysna_runtime_fail("W4003", "environment variable name is not valid UTF-8"); }
+    wchar_t* wide_key = (wchar_t*)wysna_alloc_safe((size_t)key_length * sizeof(wchar_t));
+    if (!MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, key, -1, wide_key, key_length)) {
+        free(key); free(wide_key); wysna_runtime_fail("W4003", "environment variable name conversion failed");
+    }
+    free(key);
+    SetLastError(ERROR_SUCCESS);
+    DWORD required = GetEnvironmentVariableW(wide_key, NULL, 0);
+    DWORD error = GetLastError();
+    if (required == 0 && error == ERROR_ENVVAR_NOT_FOUND) { free(wide_key); return wysna_none(); }
+    if (required == 0 && error == ERROR_SUCCESS) {
+        free(wide_key);
+        return wysna_enum_payload("Option", "Some", wysna_str(""));
+    }
+    if (required == 0 && error != ERROR_SUCCESS) {
+        free(wide_key); wysna_runtime_fail("W4003", "unable to read environment variable");
+    }
+    wchar_t* wide_value = (wchar_t*)wysna_alloc_safe((size_t)(required ? required : 1) * sizeof(wchar_t));
+    DWORD copied = required ? GetEnvironmentVariableW(wide_key, wide_value, required) : 0;
+    free(wide_key);
+    if (required && copied >= required) {
+        free(wide_value); wysna_runtime_fail("W4003", "environment variable changed while reading");
+    }
+    int value_length = WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS, wide_value, -1, NULL, 0, NULL, NULL);
+    if (!value_length) { free(wide_value); wysna_runtime_fail("W4003", "environment variable is not valid Unicode"); }
+    char* copy = (char*)wysna_alloc_safe((size_t)value_length);
+    if (!WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS, wide_value, -1, copy, value_length, NULL, NULL)) {
+        free(wide_value); free(copy); wysna_runtime_fail("W4003", "environment variable conversion failed");
+    }
+    free(wide_value);
+    return wysna_enum_payload("Option", "Some", wysna_owned_str_n(copy, (size_t)value_length - 1));
+#else
+    const char* value = getenv(key);
+    free(key);
+    if (!value) return wysna_none();
+    size_t length = strlen(value);
+    size_t offset = 0;
+    while (offset < length) {
+        size_t width;
+        if (!wysna_utf8_valid_codepoint_at_n(value, length, offset, &width, NULL))
+            wysna_runtime_fail("W4003", "environment variable is not valid UTF-8");
+        offset += width;
+    }
+    char* copy = (char*)wysna_alloc_safe(length + 1);
+    memcpy(copy, value, length + 1);
+    return wysna_enum_payload("Option", "Some", wysna_owned_str_n(copy, length));
+#endif
+}
+
+static inline WVal wysna_builtin_unix_time(void) {
+    time_t current = time(NULL);
+    if (current == (time_t)-1) wysna_runtime_fail("W4003", "unable to read the system clock");
+    return wysna_int((int64_t)current);
 }
 
 #if defined(__has_include)

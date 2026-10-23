@@ -17,8 +17,9 @@ class EmissionResult:
 
 
 class CompilerService:
-    def __init__(self, session=None, *, project_root=None, options=None):
-        self._session = session if session is not None else CompilationSession(project_root, options)
+    def __init__(self, session=None, *, project_root=None, options=None, project_resolver=None):
+        self._session = session if session is not None else CompilationSession(
+            project_root, options, project_resolver=project_resolver)
         self._parse_owner = object()
 
     def parse(self, source, file='<stdin>', *, recover=False, revision=None):

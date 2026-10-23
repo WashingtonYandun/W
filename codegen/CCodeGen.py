@@ -1063,12 +1063,16 @@ class CCodeGen:
                     "enumerate": "wysna_builtin_enumerate",
                     "dict_items": "wysna_builtin_dict_items",
                     "read_file": "wysna_builtin_read_file",
+                    "env": "wysna_builtin_env",
                 }
                 if fn_name in builtin_1 and len(arg_vals) == 1:
                     return self._bind_call(f"{builtin_1[fn_name]}({arg_vals[0]})", out)
 
                 if fn_name == "args" and len(arg_vals) == 0:
                     return self._bind_call("wysna_builtin_args()", out)
+
+                if fn_name == "unix_time" and len(arg_vals) == 0:
+                    return self._bind_call("wysna_builtin_unix_time()", out)
 
                 if fn_name == "exit" and len(arg_vals) == 1:
                     return self._bind_call(f"wysna_builtin_exit({arg_vals[0]})", out)
