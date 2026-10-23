@@ -705,6 +705,10 @@ static size_t wysna_http_write_headers(char* data, size_t size, size_t count, vo
     }
     size_t length = size * count;
     if (length >= 5 && memcmp(data, "HTTP/", 5) == 0) {
+        if (length > WYSNA_HTTP_MAX_HEADERS) {
+            transfer->error_kind = WYSNA_HTTP_LIMIT;
+            return 0;
+        }
         const char* status = memchr(data, ' ', length);
         if (!status || status + 4 > data + length || status[1] < '1' || status[1] > '5'
                 || status[2] < '0' || status[2] > '9' || status[3] < '0' || status[3] > '9') {
@@ -714,12 +718,19 @@ static size_t wysna_http_write_headers(char* data, size_t size, size_t count, vo
         transfer->status = (long)(status[1] - '0') * 100L
                          + (long)(status[2] - '0') * 10L + (long)(status[3] - '0');
         transfer->headers->length = 0;
-        transfer->header_bytes = 0;
+        transfer->header_bytes = length;
         transfer->header_fields = 0;
         return length;
     }
-    if (length == 2 && data[0] == '\r' && data[1] == '\n') return length;
-    if (length == 1 && data[0] == '\n') return length;
+    if ((length == 2 && data[0] == '\r' && data[1] == '\n')
+            || (length == 1 && data[0] == '\n')) {
+        if (length > WYSNA_HTTP_MAX_HEADERS - transfer->header_bytes) {
+            transfer->error_kind = WYSNA_HTTP_LIMIT;
+            return 0;
+        }
+        transfer->header_bytes += length;
+        return length;
+    }
     if (transfer->status < 100 || transfer->status > 599
             || transfer->header_fields >= WYSNA_HTTP_MAX_HEADER_FIELDS
             || length > WYSNA_HTTP_MAX_HEADERS - transfer->header_bytes) {

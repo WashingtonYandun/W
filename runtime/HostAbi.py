@@ -353,11 +353,18 @@ def http_request(url_handle, method_handle, request_headers_handle, request_body
     def receive_headers(line):
         nonlocal response_field_count, response_header_bytes, callback_error
         if line.startswith(b'HTTP/'):
+            if len(line) > _HTTP_MAX_HEADERS:
+                callback_error = _HTTP_LIMIT
+                return 0
             response_headers_output.clear()
             response_field_count = 0
-            response_header_bytes = 0
+            response_header_bytes = len(line)
             return len(line)
         if line in (b'\r\n', b'\n', b''):
+            if response_header_bytes + len(line) > _HTTP_MAX_HEADERS:
+                callback_error = _HTTP_LIMIT
+                return 0
+            response_header_bytes += len(line)
             return len(line)
         if (response_field_count >= _HTTP_MAX_HEADER_FIELDS
                 or response_header_bytes + len(line) > _HTTP_MAX_HEADERS):
