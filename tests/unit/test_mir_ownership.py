@@ -83,7 +83,10 @@ def test_parameter_optimization_rejects_invalid_input_before_rewriting():
 
 
 def test_result_release_uses_no_temporary_heap_for_leaves_or_shared_boxes():
-    source = r'''#include <stdlib.h>
+    source = r'''#ifndef _WIN32
+#define _POSIX_C_SOURCE 200809L
+#endif
+#include <stdlib.h>
 #include <assert.h>
 static size_t allocation_calls;
 static void* counted_malloc(size_t size) { allocation_calls++; return malloc(size); }
