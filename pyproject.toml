@@ -17,6 +17,7 @@ dependencies = []
 
 [project.optional-dependencies]
 wasi = ["wasmtime==50.0.1"]
+http = ["pycurl>=7.48,<8"]
 
 [project.scripts]
 wysna = "main:main"

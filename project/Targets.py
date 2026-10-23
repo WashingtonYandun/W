@@ -20,7 +20,7 @@ class TargetSpec:
 TARGET_SPECS = {
     "native-cli": TargetSpec(
         "native-cli", None, ArtifactKind.NATIVE_EXECUTABLE, "",
-        ("stdio", "filesystem", "environment", "processes", "native-ffi"),
+        ("stdio", "filesystem", "environment", "processes", "network", "native-ffi"),
     ),
     "wasi-command": TargetSpec(
         "wasi-command", "wasm32-wasip1", ArtifactKind.WASM_MODULE, ".wasm",

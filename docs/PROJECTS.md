@@ -123,7 +123,12 @@ lookup. `std/time` exposes Unix epoch seconds. `std/process.run` invokes an
 executable with a separate argument list, without invoking a shell implicitly,
 and enforces a timeout. Child stdout and stderr inherit the Wysna program's
 streams. See [`examples/automation`](../examples/automation) for a project that
-orchestrates a child command and has a user test entry.
+orchestrates a child command and has a user test entry. `std/http` adds a
+synchronous HTTP/HTTPS client with verified TLS, explicit timeouts and body/header
+limits; it returns redirects without following them and never retries automatically.
+The native CLI profile reports network as an available host capability, but it is
+not a network sandbox. See [`examples/http_json_client.wysna`](../examples/http_json_client.wysna)
+for a JSON endpoint call.
 
 `wysna api std/json --output-format=json-v1` returns public symbol signatures,
 error channels, documentation when present, and explicit `unknown` values for
