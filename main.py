@@ -7,6 +7,7 @@ from lexer.Lexer import Lexer
 from parser.Parser import Parser
 from checker.TypeChecker import TypeChecker
 from runtime.Interpreter import Interpreter
+from runtime.ExecutionContext import ExecutionContext
 from runtime.Values import WysnaUnit
 from formatter.Formatter import Formatter
 from compiler.CompilerService import CompilerService
@@ -127,6 +128,7 @@ def run_pipeline(
     show_stats: bool = False,
     link_libraries=(),
     show_mir: bool = False,
+    execution_context: Optional[ExecutionContext] = None,
 ) -> int:
     try:
         # Resolve legacy flags if passed explicitly
@@ -289,7 +291,8 @@ def run_pipeline(
                     "peak_rss_kb": peak_rss_kb(),
                 }
             }, indent=2), file=sys.stderr)
-        res = service.interpret(checked, foreign_libraries=link_libraries)
+        res = service.interpret(checked, foreign_libraries=link_libraries,
+                                execution_context=execution_context)
 
         if not isinstance(res, WysnaUnit) and file_name == "<stdin>":
             print(res)
@@ -372,7 +375,7 @@ def print_help(prog: Optional[str] = None) -> None:
     print("Usage:")
     print(f"  {prog} lsp                                       # LSP over stdio")
     print(f"  {prog} repl                                    # Start interactive REPL")
-    print(f"  {prog} [run] [--stats] <file.wysna>            # Execute Wysna source file (Seed interpreter)")
+    print(f"  {prog} [run] [--stats] <file.wysna> [-- args...] # Execute Wysna source file")
     print(f"  {prog} check [--json] [--stats] <file.wysna>   # Static typecheck without execution")
     print(f"  {prog} fmt [--write] <file.wysna>              # Canonical deterministic formatter")
     print(f"  {prog} ast [--json] <file.wysna>               # Emit canonical JSON AST (v0.1)")
@@ -385,9 +388,15 @@ def print_help(prog: Optional[str] = None) -> None:
     print(f"  {prog} version                                           # Show compiler version")
 
 
-def main() -> None:
+def main(argv=None) -> None:
     prog = "wysna"
-    args = sys.argv[1:]
+    args = list(sys.argv[1:] if argv is None else argv)
+
+    def usage_error(message: str) -> None:
+        print(f"{prog}: {message}", file=sys.stderr)
+        print(f"Try '{prog} --help' for usage.", file=sys.stderr)
+        raise SystemExit(2)
+
     if args == ["lsp"]:
         from tooling.LanguageServer import serve
         serve()
@@ -414,6 +423,11 @@ def main() -> None:
         subcmd = args[0]
         args = args[1:]
         if subcmd == "bench":
+            if any(arg not in ("--update-baseline", "--help", "-h") for arg in args):
+                usage_error("bench accepts only --update-baseline")
+            if args in (["--help"], ["-h"]):
+                print_help()
+                return
             if not os.path.isfile(os.path.join(get_repo_root(), "bench", "run_bench.py")):
                 print(f"{prog} bench requires a source checkout", file=sys.stderr)
                 sys.exit(1)
@@ -434,15 +448,19 @@ def main() -> None:
                 gen_count = 25
                 base_seed = 1000
                 idx = 1
+                count_seen = False
+                seed_seen = False
                 while idx < len(args):
-                    if args[idx] == "--seed" and idx + 1 < len(args) and args[idx + 1].isdigit():
+                    if args[idx] == "--seed" and not seed_seen and idx + 1 < len(args) and args[idx + 1].isdigit():
                         base_seed = int(args[idx + 1])
+                        seed_seen = True
                         idx += 2
-                    elif args[idx].isdigit():
+                    elif args[idx].isdigit() and not count_seen:
                         gen_count = int(args[idx])
+                        count_seen = True
                         idx += 1
                     else:
-                        idx += 1
+                        usage_error(f"invalid test option '{args[idx]}'")
                 repo_root = get_repo_root()
                 selfhost_bin = ensure_selfhost_compiler_binary(repo_root)
                 from tests.differential.differential_test import run_differential_suite
@@ -452,20 +470,26 @@ def main() -> None:
                 fuzz_count = 200
                 base_seed = 9000
                 idx = 1
+                count_seen = False
+                seed_seen = False
                 while idx < len(args):
-                    if args[idx] == "--seed" and idx + 1 < len(args) and args[idx + 1].isdigit():
+                    if args[idx] == "--seed" and not seed_seen and idx + 1 < len(args) and args[idx + 1].isdigit():
                         base_seed = int(args[idx + 1])
+                        seed_seen = True
                         idx += 2
-                    elif args[idx].isdigit():
+                    elif args[idx].isdigit() and not count_seen:
                         fuzz_count = int(args[idx])
+                        count_seen = True
                         idx += 1
                     else:
-                        idx += 1
+                        usage_error(f"invalid test option '{args[idx]}'")
                 repo_root = get_repo_root()
                 from tests.differential.differential_test import run_fuzz_suite
                 ok = run_fuzz_suite(fuzz_count=fuzz_count, base_seed=base_seed, repo_root=repo_root)
                 sys.exit(0 if ok else 1)
             else:
+                if any(arg not in ("--sanitize", "-s") for arg in args):
+                    usage_error(f"invalid test option '{next(arg for arg in args if arg not in ('--sanitize', '-s'))}'")
                 if args and ("--sanitize" in args or "-s" in args):
                     os.environ["WYSNA_SANITIZE"] = "1"
                 from run_conformance import run_suite
@@ -484,6 +508,16 @@ def main() -> None:
             show_mir = True
         elif subcmd == "tokens":
             show_tokens = True
+
+    program_args = []
+    if "--" in args:
+        separator = args.index("--")
+        if subcmd not in (None, "run"):
+            usage_error("program arguments after -- are supported only by run")
+        if separator == 0:
+            usage_error("a source file must appear before --")
+        program_args = args[separator + 1:]
+        args = args[:separator]
 
     i = 0
     while i < len(args):
@@ -520,40 +554,45 @@ def main() -> None:
             if b_val in ("hir", "ast", "selfhost"):
                 backend = b_val
             else:
-                print(f"Error: Unknown backend '{b_val}'. Valid backends: hir, ast, selfhost", file=sys.stderr)
-                sys.exit(1)
+                usage_error(f"Unknown backend '{b_val}'. Valid backends: hir, ast, selfhost")
         elif arg in ("--version", "-v"):
             print(f"Wysna Language Compiler v{WYSNA_VERSION} (Wysna Seed + Wysna Compiler Self-Hosted C99)")
             sys.exit(0)
         elif arg == "--emit-c":
             i += 1
-            if i < len(args):
-                emit_c_path = args[i]
+            if i >= len(args) or args[i].startswith("-"):
+                usage_error("--emit-c requires an output path")
+            emit_c_path = args[i]
         elif arg == "--build":
             i += 1
-            if i < len(args):
-                build_bin_path = args[i]
+            if i >= len(args) or args[i].startswith("-"):
+                usage_error("--build requires an output path")
+            build_bin_path = args[i]
         elif arg == "-o":
             i += 1
-            if i < len(args):
-                if subcmd == "emit-c":
-                    emit_c_path = args[i]
-                elif subcmd == "build":
-                    build_bin_path = args[i]
-                else:
-                    build_bin_path = args[i]
+            if i >= len(args) or args[i].startswith("-"):
+                usage_error("-o requires an output path")
+            if subcmd == "emit-c":
+                emit_c_path = args[i]
+            elif subcmd == "build":
+                build_bin_path = args[i]
+            else:
+                build_bin_path = args[i]
         elif arg == "--link-lib":
             i += 1
-            if i >= len(args):
-                print("--link-lib requires a library name or path", file=sys.stderr)
-                sys.exit(1)
+            if i >= len(args) or args[i].startswith("-"):
+                usage_error("--link-lib requires a library name or path")
             link_libraries.append(args[i])
         elif arg in ("--sanitize", "-s"):
             sanitize = True
         elif arg in ("--help", "-h"):
             print_help()
             sys.exit(0)
-        elif not arg.startswith("-"):
+        elif arg.startswith("-"):
+            usage_error(f"unrecognized option '{arg}'")
+        else:
+            if file_to_run is not None:
+                usage_error("only one source file may be specified")
             file_to_run = arg
         i += 1
 
@@ -603,12 +642,15 @@ def main() -> None:
             sanitize=sanitize,
             show_stats=show_stats,
             link_libraries=link_libraries,
+            execution_context=ExecutionContext.for_program(prog_cmd, program_args),
         )
         sys.exit(code)
 
     # No file argument. Dropping into the REPL silently made `w check` in a Makefile exit
     # 0 without checking anything, so the REPL now needs to be asked for explicitly and
     # every other subcommand is a usage error.
+    if program_args:
+        usage_error("program arguments require a source file")
     if subcmd is None or subcmd == "repl":
         repl(show_tokens=show_tokens, show_ast=show_ast)
         return

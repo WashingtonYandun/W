@@ -562,7 +562,7 @@ fn compile(source: str) {
 | `slice(x, a, b)` | `(str \| list[T], int, int) -> str \| list[T]` | Returns code-point substring or sub-list in `[a, b)`. Preserves the container kind; out-of-range bounds are clamped and an empty result is returned when `b <= a` |
 | `join_strings(parts, separator)` | `(list[str], str) -> str` | Joins strings with one result allocation and preserves NUL; O(output bytes + parts) |
 | `bytes(s)` | `(str) -> list[int]` | Returns raw UTF-8 unsigned bytes (`0..=255`) of `s` |
-| `args()` | `() -> list[str]` | Returns command-line arguments passed to the program |
+| `args()` | `() -> list[str]` | Returns the runner name followed by command-line arguments passed to the program |
 | `read_file(p)` | `(str) -> str ! IoError` | Reads a UTF-8 file from disk or returns `IoError` |
 | `write_file(p, c)` | `(str, str) -> unit ! IoError` | Writes UTF-8 content `c` to path `p` or returns `IoError` |
 
@@ -571,6 +571,12 @@ bool to a number produces 0 or 1. `float(str)` accepts ASCII decimals, signs, ex
 leading and trailing ASCII whitespace, and case-insensitive `nan`, `inf`, or `infinity`.
 It rejects Unicode digits, hexadecimal input, suffixes, and NUL with `W4003`; parsing does
 not depend on Python's grammar.
+
+For the interpreter, `wysna run <file.wysna> -- <args...>` makes `args()[0]` equal to
+`"wysna"` and places each value after `--` after it. Relative paths used by `read_file`
+and `write_file` are resolved from the process working directory that launched Wysna.
+Native binaries receive the operating system's argument vector, including its executable
+name in `args()[0]`.
 
 ### 11.2 Built-in Collection Methods
 * **`list[T]`:**

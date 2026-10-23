@@ -95,6 +95,7 @@ jobs:
       - name: Verify CI harness failure contracts
         run: |
           python3 -m tests.unit.test_ci_harness
+          python3 -m tests.unit.test_execution_context
           python3 -m tests.unit.test_hir_return_paths
           python3 -m tests.unit.test_f03_error_unions
           python3 -m tests.unit.test_compilation_session
