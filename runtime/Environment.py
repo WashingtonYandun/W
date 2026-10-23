@@ -3,6 +3,7 @@ import os
 import math
 import re
 import sys
+import time
 from typing import Any, Dict, List, Optional, Set, TextIO
 from error.Error import WysnaRuntimeError
 from runtime.Values import (
@@ -312,6 +313,17 @@ def create_global_environment(stdout: Optional[TextIO] = None,
     def args_fn(args_list: List[WysnaValue]) -> WysnaValue:
         return WysnaList(elements=[WysnaStr(a) for a in context.argv])
 
+    def env_fn(args_list: List[WysnaValue]) -> WysnaValue:
+        if len(args_list) != 1 or not isinstance(args_list[0], WysnaStr):
+            raise WysnaRuntimeError("env() expects one str variable name")
+        value = context.env.get(args_list[0].value)
+        return WysnaEnumValue("Option", "Some", [WysnaStr(value)]) if value is not None else WysnaNone()
+
+    def unix_time_fn(args_list: List[WysnaValue]) -> WysnaValue:
+        if args_list:
+            raise WysnaRuntimeError("unix_time() takes no arguments")
+        return WysnaInt(int(time.time()))
+
     def some_fn(args: List[WysnaValue]) -> WysnaValue:
         if len(args) != 1:
             raise WysnaRuntimeError("Some() takes exactly 1 argument")
@@ -353,6 +365,8 @@ def create_global_environment(stdout: Optional[TextIO] = None,
     env.declare("read_file", WysnaNativeFunction("read_file", read_file_fn), is_mut=False)
     env.declare("write_file", WysnaNativeFunction("write_file", write_file_fn), is_mut=False)
     env.declare("args", WysnaNativeFunction("args", args_fn), is_mut=False)
+    env.declare("env", WysnaNativeFunction("env", env_fn), is_mut=False)
+    env.declare("unix_time", WysnaNativeFunction("unix_time", unix_time_fn), is_mut=False)
 
     env.declare("weak", WysnaNativeFunction("weak", weak_fn), is_mut=False)
     env.declare("upgrade", WysnaNativeFunction("upgrade", upgrade_fn), is_mut=False)

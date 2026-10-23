@@ -58,6 +58,15 @@ Wysna distributes modules under `std/` imported via canonical paths such as `imp
 - `std/bytes`: UTF-8 codec operations.
   - `bytes.encode(text) -> list[int]`: encode UTF-8 string into byte values (0–255).
   - `bytes.decode(bytes) -> str ! Utf8Error`: decode byte values into validated UTF-8 string.
+- `std/environment`: runner arguments and environment lookup.
+  - `environment.arguments() -> list[str]`: return the runner-defined argument vector; interpreted file and project runs use `"wysna"` at index zero.
+  - `environment.get(name) -> str?`: read an environment variable, preserving the difference between an absent value and an empty string.
+- `std/time`: host wall-clock access.
+  - `time.unix_seconds() -> int`: return seconds since the Unix epoch.
+- `std/process`: bounded child-process execution.
+  - `process.run(executable, arguments, timeout_ms) -> int ! ProcessError`: invoke an executable directly with an argument vector and no implicit shell. Child stdout/stderr inherit the parent streams. The timeout is 1–600,000 ms; at most 256 arguments are accepted, each up to 1 MiB, with a 16 MiB total encoded-argument limit.
+- `std/test`: typed assertions for project test entries.
+  - `test.expect(condition, message)`, `expect_equal_int(actual, expected, message)`, and `expect_equal_text(actual, expected, message)` terminate the test process when an assertion fails.
 
 ## External Resources & Scopes
 
@@ -88,6 +97,11 @@ bytes; EOF returns an empty owned Bytes. A closed handle and an invalid read bou
 return recoverable errors. File.write checks both short writes and fflush failures;
 flush does not guarantee durable storage. Rename replaces a destination according
 to host rules and rejects cross-volume copy fallback; it is not a durability promise.
+
+`ProcessError` contains `operation`, `code`, and `domain`. `process.run` never
+implicitly invokes a shell; callers that need a shell must name it as the executable
+and pass the script as a normal argument. Child output is inherited instead of
+captured, and the process runner enforces a per-invocation timeout.
 
 The internal diagnostic ABI exposes `wysna_host_active_handles()` and
 `wysna_host_active_bytes()` for persistent workload tests. Handles include buffers,

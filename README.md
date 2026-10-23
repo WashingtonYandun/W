@@ -186,6 +186,10 @@ Wysna provides a focused, high-performance standard library:
 | **`std/path`** | Cross-platform path handling | `join()`, `dirname()`, `basename()` |
 | **`std/resources`** | Deterministic resource scopes | `Resource`, `acquire()`, `scope()`, `borrow()`, `close()` |
 | **`std/algorithms`** | Functional primitives | `map`, `fold`, `sort` |
+| **`std/environment`** | Program arguments and environment lookup | `arguments()`, `get()` |
+| **`std/time`** | Host wall-clock access | `unix_seconds()` |
+| **`std/process`** | Direct child-process execution with a timeout | `run(executable, arguments, timeout_ms)` |
+| **`std/test`** | Minimal project-test assertions | `expect()`, `expect_equal_int()`, `expect_equal_text()` |
 
 See [docs/STDLIB.md](docs/STDLIB.md) for full API reference and examples.
 
@@ -205,7 +209,20 @@ wysna fmt <file.wysna>                 # Format source while preserving comments
 wysna lsp                              # Launch Language Server Protocol daemon (stdio)
 wysna test                             # Run full test suite across all 4 execution engines
 wysna bench                            # Run self-hosted performance benchmarks
+wysna project check                    # Check the nearest wysna.toml project
+wysna project build -o build/app       # Build a declared project target
+wysna project run -- <args...>         # Run the declared project entry
+wysna project test --filter argv       # Run declared user test entries
+wysna project lock                    # Write or refresh wysna.lock explicitly
+wysna api std/json --output-format=json-v1  # Inspect standard-library symbols
+wysna capabilities --output-format=json-v1  # Inspect this installation's support
 ```
+
+Project commands use a strict `wysna.toml` manifest. Dependencies are local paths,
+`project lock` is the only command that writes `wysna.lock`, and `--frozen` checks
+the manifest and dependency hashes without downloading packages. See
+[`examples/automation`](examples/automation) for a command runner that passes
+arguments directly to a child executable without invoking a shell.
 
 `check`, `fmt`, `emit-c`, and `build` also accept `--output-format=json-v1`. The
 formatter returns inline source content; code and binary generation report artifact
@@ -235,6 +252,7 @@ Arguments after `--` are available through `args()`. The interpreter uses `"wysn
 - [HIR representation](docs/HIR_DESIGN.md) & [MIR representation](docs/MIR_DESIGN.md): intermediate forms and contracts.
 - [Ownership & lifetimes](docs/OWNERSHIP_LIFETIME.md): ARC, copy-on-write, weak references, and drop elaboration.
 - [Standard library reference](docs/STDLIB.md): complete API documentation for all standard modules.
+- [Project workflows](docs/PROJECTS.md): manifests, local dependencies, lockfiles, project commands, and user tests.
 - [Engine parity matrix](docs/ENGINE_PARITY_MATRIX.md): 4-engine test results and coverage.
 - [FFI & C interoperability](docs/FFI_VALIDATION.md): calling C functions and descriptor ABI.
 - [Known limits & boundaries](docs/KNOWN_LIMITS.md): current alpha constraints and guidelines.

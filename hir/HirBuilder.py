@@ -36,7 +36,7 @@ from hir.HirNodes import (
 
 BUILTIN_NAMES = {
     "weak", "upgrade", "print", "eprint", "len", "range", "ord", "chr", "slice", "str", "int", "float", "bool",
-    "join_strings", "bytes", "args", "exit", "enumerate", "dict_items", "read_file", "write_file",
+    "join_strings", "bytes", "args", "env", "unix_time", "exit", "enumerate", "dict_items", "read_file", "write_file",
 }
 
 

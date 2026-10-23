@@ -13,7 +13,7 @@ RUNTIME = {
     'wysna_unwrap_err', 'wysna_unwrap_success', 'wysna_enum_payload_owned', 'wysna_dict_get', 'wysna_dict_keys', 'wysna_dict_values',
     'wysna_builtin_print', 'wysna_builtin_eprint', 'wysna_builtin_len', 'wysna_builtin_str', 'wysna_builtin_int',
     'wysna_builtin_float', 'wysna_builtin_ord', 'wysna_builtin_chr', 'wysna_builtin_slice', 'wysna_builtin_bytes',
-    'wysna_builtin_args', 'wysna_builtin_exit', 'wysna_builtin_enumerate', 'wysna_builtin_dict_items',
+    'wysna_builtin_args', 'wysna_builtin_env', 'wysna_builtin_unix_time', 'wysna_builtin_exit', 'wysna_builtin_enumerate', 'wysna_builtin_dict_items',
     'wysna_builtin_read_file', 'wysna_builtin_write_file', 'wysna_builtin_join_strings', 'wysna_builtin_weak_owned',
     'wysna_builtin_upgrade',
 }
@@ -24,12 +24,12 @@ RUNTIME_ARITIES = {
                      'wysna_builtin_str', 'wysna_builtin_int', 'wysna_builtin_float', 'wysna_builtin_ord',
                      'wysna_builtin_chr', 'wysna_builtin_bytes', 'wysna_builtin_exit', 'wysna_builtin_enumerate',
                      'wysna_builtin_dict_items', 'wysna_builtin_read_file', 'wysna_builtin_weak_owned',
-                     'wysna_builtin_upgrade'), 1),
+                     'wysna_builtin_upgrade', 'wysna_builtin_env'), 1),
     **dict.fromkeys(('wysna_add', 'wysna_sub', 'wysna_mul', 'wysna_div_at', 'wysna_mod_at', 'wysna_lt', 'wysna_le',
                      'wysna_gt', 'wysna_ge', 'wysna_equal', 'wysna_not_equal', 'wysna_make_range',
                      'wysna_index_get_owned_at', 'wysna_dict_get', 'wysna_builtin_write_file',
                      'wysna_builtin_join_strings'), 2),
-    'wysna_builtin_slice': 3, 'wysna_builtin_args': 0, 'wysna_enum': 0, 'wysna_empty_weak': 0,
+    'wysna_builtin_slice': 3, 'wysna_builtin_args': 0, 'wysna_builtin_unix_time': 0, 'wysna_enum': 0, 'wysna_empty_weak': 0,
     'wysna_builtin_print': None, 'wysna_builtin_eprint': None,
 }
 assert set(RUNTIME_ARITIES) == RUNTIME, 'Every MIR runtime helper requires a signature'
@@ -158,6 +158,10 @@ class Verifier:
             require(types == [TYPE_STR] and list_of(TYPE_INT))
         elif name == 'wysna_builtin_args':
             require(list_of(TYPE_STR))
+        elif name == 'wysna_builtin_env':
+            require(types == [TYPE_STR] and returned.tag == 'optional' and returned.data == TYPE_STR)
+        elif name == 'wysna_builtin_unix_time':
+            require(result.type_id == TYPE_INT)
         elif name == 'wysna_builtin_exit':
             require(types == [TYPE_INT] and result.type_id == TYPE_UNIT)
         elif name == 'wysna_builtin_slice':
