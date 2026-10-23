@@ -6,7 +6,7 @@ fn run_compiler() -> unit ! IoError {
             exit(2)
         }
         let source = read_file(cli[2])?
-        let payload = emit_scalar_mir(source, cli[2])
+        let payload = emit_mir_module(source, cli[2])
         print(payload)
         return
     }

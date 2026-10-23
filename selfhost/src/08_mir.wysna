@@ -1,5 +1,5 @@
-# Backend-independent scalar CFG and ownership data.
-struct MirLiteral { type_id: int, integer: int, floating: float, boolean: bool }
+# Backend-independent typed CFG and ownership data.
+struct MirLiteral { type_id: int, integer: int, floating: float, boolean: bool, text: str }
 struct MirSlot { type_id: int, name: str, parameter: bool, origin: int }
 struct MirOperation { opcode: str, result: int, args: list[int], name: str, value: MirLiteral, source: Token }
 struct MirTerminator { kind: str, targets: list[int], value: int, source: Token }
@@ -20,13 +20,19 @@ let mut mir_loops: list[MirLoop] = []
 let mut mir_current = -1
 let mut mir_return_type = 1
 
-fn mir_literal_unit() -> MirLiteral { return MirLiteral { type_id: 1, integer: 0, floating: 0.0, boolean: false } }
-fn mir_literal_bool(value: bool) -> MirLiteral { return MirLiteral { type_id: 2, integer: 0, floating: 0.0, boolean: value } }
-fn mir_literal_int(value: int) -> MirLiteral { return MirLiteral { type_id: 3, integer: value, floating: 0.0, boolean: false } }
-fn mir_literal_float(value: float) -> MirLiteral { return MirLiteral { type_id: 4, integer: 0, floating: value, boolean: false } }
+fn mir_literal_unit() -> MirLiteral { return MirLiteral { type_id: 1, integer: 0, floating: 0.0, boolean: false, text: "" } }
+fn mir_literal_bool(value: bool) -> MirLiteral { return MirLiteral { type_id: 2, integer: 0, floating: 0.0, boolean: value, text: "" } }
+fn mir_literal_int(value: int) -> MirLiteral { return MirLiteral { type_id: 3, integer: value, floating: 0.0, boolean: false, text: "" } }
+fn mir_literal_float(value: float) -> MirLiteral { return MirLiteral { type_id: 4, integer: 0, floating: value, boolean: false, text: "" } }
+
+fn mir_literal_str(value: str) -> MirLiteral {
+    return MirLiteral { type_id: 5, integer: 0, floating: 0.0, boolean: false, text: value }
+}
+
+fn mir_value_storage(type_id: int) -> bool { return type_id == 1 or type_id == 5 }
 
 fn mir_unsupported(token: Token, feature: str) {
-    report_error_at("W2013", token, "Compiler MIR scalar-cfg-v1 does not support " + feature)
+    report_error_at("W2013", token, "Compiler MIR managed-cfg-v1 does not support " + feature)
 }
 
 fn mir_expect(kind: str) -> Token {
@@ -40,6 +46,7 @@ fn mir_type(type_id: int, source: Token) -> int {
     if kind == "bool" { return 2 }
     if kind == "int" { return 3 }
     if kind == "float" { return 4 }
+    if kind == "str" { return 5 }
     mir_unsupported(source, "type " + kind)
     return 0
 }
@@ -84,7 +91,7 @@ fn mir_raw_slot(type_id: int, name: str, parameter: bool) -> int {
 }
 
 fn mir_track(id: int) {
-    if mir_slots[id].type_id == 1 and not mir_slots[id].parameter {
+    if mir_value_storage(mir_slots[id].type_id) and not mir_slots[id].parameter {
         mir_scopes[len(mir_scopes) - 1].slots.append(id)
     }
 }
@@ -116,7 +123,7 @@ fn mir_constant(value: MirLiteral, type_id: int, source: Token) -> int {
 }
 
 fn mir_release(id: int, source: Token) {
-    if mir_slots[id].type_id == 1 and not mir_slots[id].parameter {
+    if mir_value_storage(mir_slots[id].type_id) and not mir_slots[id].parameter {
         mir_append(MirOperation { opcode: "release", result: -1, args: [id], name: "", value: mir_literal_unit(), source: source })
     }
 }
@@ -205,6 +212,7 @@ fn mir_literal_json(value: MirLiteral) -> str {
     if value.type_id == 1 { return "null" }
     if value.type_id == 2 { return str(value.boolean) }
     if value.type_id == 3 { return str(value.integer) }
+    if value.type_id == 5 { return mir_quote(value.text) }
     return str(value.floating)
 }
 
@@ -219,7 +227,7 @@ fn mir_operation_json(operation: MirOperation) -> str {
     elif operation.opcode == "release" { effect = "release" result = "null" }
     else {
         data = "{\"name\":" + mir_quote(operation.name)
-        if operation.name == "wysna_div_at" or operation.name == "wysna_mod_at" { data = data + ",\"source\":true" }
+        if operation.name == "wysna_div_at" or operation.name == "wysna_mod_at" or operation.name == "wysna_index_get_owned_at" { data = data + ",\"source\":true" }
         data = data + "}"
     }
     return "{\"$type\":\"Operation\",\"opcode\":" + mir_quote(operation.opcode) + ",\"result\":" + result + ",\"args\":" + mir_ids(operation.args, true) + ",\"data\":" + data + ",\"moves\":" + mir_ids(moves, true) + ",\"effect\":" + mir_quote(effect) + ",\"source\":" + mir_source_json(operation.source) + "}"
