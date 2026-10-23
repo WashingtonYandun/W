@@ -1,9 +1,11 @@
 # Service foundations and acceptance contracts
 
-The synchronous toolkit supports bounded file tools and an HTTP/HTTPS client. It
-does not provide an HTTP server, scheduler, asynchronous sockets or cancellation.
-The HTTP client is not a network sandbox; host permissions and deployment isolation
-remain outside its contract.
+The synchronous toolkit supports bounded file tools and an HTTP/HTTPS client. An
+experimental local JSON server now supervises isolated native Wysna worker processes.
+It is a pilot for application shape and failure boundaries, not a general-purpose
+production server. The runtime still has no language-level scheduler, asynchronous
+sockets or cancellation. The HTTP client and service host are not network or OS
+sandboxes; host permissions and deployment isolation remain outside their contracts.
 
 ## Implemented resource boundary
 
@@ -52,6 +54,47 @@ The interpreter and native adapters share the public limits and status/error
 contract. Their underlying host libraries can still differ by version and platform;
 the integration corpus exercises both with a loopback fixture. This pilot is not
 evidence of a production server, an SLO, or an enforced network capability.
+
+## Local service pilot
+
+`wysna service serve` uses the maintained `aiohttp` HTTP server adapter from the
+optional `wysna[service]` extra. It binds only to a literal loopback IP address.
+The adapter owns HTTP parsing; Wysna does not implement its own HTTP parser. Defaults
+are four isolated workers, a queue of 32 requests, 64 open connections, a 32-connection
+listen backlog, an 8 KiB request line, at most 100 headers, a 32 KiB aggregate header
+limit, a 320-byte maximum header line, 1 MiB request and response bodies, a 15-second
+request budget, a 5-second initial-request and keep-alive timeout, and a 10-second
+shutdown budget. The per-line limit ensures the maintained adapter cannot allocate
+unbounded header totals before the host checks the aggregate limit. Worker and queue
+counts can be lowered or raised only to fixed ceilings (8 workers and 32 queued
+requests). Saturation returns `503`.
+
+The host writes a bounded UTF-8 JSON envelope to a unique temporary directory,
+then starts a new native Wysna process for that one request. The worker reads the path
+from `args()[1]` and writes one JSON object to stdout with exactly `status` and `body`
+fields. The host caps stdout while it is being read, validates the response, and maps
+worker timeout, crash, malformed output, and output overflow to bounded HTTP errors.
+Each process receives only a small environment allowlist plus
+`WYSNA_SERVICE_DATABASE`; request headers forwarded to the worker are limited to
+`accept`, `content-type`, and `x-request-id`. A panic or failed transaction ends that
+process. The next request starts with a new process and does not reuse possibly damaged
+runtime state. SQLite commits are explicit and use a busy timeout.
+
+The adapter applies the five-second timeout to connections waiting for their initial
+request. The request budget then begins after the adapter has parsed the request line
+and headers, and covers body reading, queue wait, and worker execution. The HTTP adapter
+owns response writes; this pilot does not impose a total response-write deadline.
+Header count, individual field size, aggregate size, connection count and idle time are
+bounded by the adapter plus the host. The worker process has the current user's filesystem
+and OS privileges. The host provides process-failure isolation, not a security sandbox.
+It has no TLS, authentication, deployment controls, request streaming, or measured SLO.
+This pilot is for local development only and has no supported network deployment mode.
+
+The example worker in `examples/service/sqlite_worker.wysna` supports `GET /health`,
+`GET /measurements`, and `POST /measurements`. It inserts one measurement per SQLite
+transaction, returns `409` on a duplicate ID and `400` on invalid JSON or values. Its
+adapter uses parameterized statements and obtains the database path from the host
+environment; it does not expose arbitrary SQL to requests.
 
 ## IO, scheduling and failure boundaries
 

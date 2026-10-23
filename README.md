@@ -190,10 +190,31 @@ Wysna provides a focused, high-performance standard library:
 | **`std/time`** | Host wall-clock access | `unix_seconds()` |
 | **`std/process`** | Direct child-process execution with a timeout | `run(executable, arguments, timeout_ms)` |
 | **`std/http`** | Synchronous bounded HTTP/HTTPS requests with verified TLS | `request()`, `get()`, `post_json()`, `response_json()` |
+| **`wysna service serve`** | Experimental loopback JSON server with isolated native workers | Bounded workers and queue, input/output limits, SQLite pilot |
 | **`std/test`** | Minimal project-test assertions | `expect()`, `expect_equal_int()`, `expect_equal_text()` |
 
 See [docs/STDLIB.md](docs/STDLIB.md) for full API reference and examples.
 The HTTP example is [examples/http_json_client.wysna](examples/http_json_client.wysna).
+
+The local service pilot is experimental and listens on loopback only. Install its optional
+host adapter with `pip install 'wysna[service]'`. Build the SQLite worker from a source
+checkout and start it with:
+
+```sh
+wysna build examples/service/sqlite_worker.wysna -o build/sqlite_worker \
+  --link-lib examples/service/sqlite_adapter.c --link-lib sqlite3
+wysna service serve --worker build/sqlite_worker --database build/measurements.sqlite
+```
+
+The worker accepts one JSON request envelope from a unique temporary file and writes one
+JSON response to stdout. The supervisor starts a fresh native process per request, caps
+active workers, queued requests, input, output, and execution time, and discards a process
+after any failure. The sample exposes `GET /health`, `GET /measurements`, and
+`POST /measurements` with `{"id": 1, "value": 42}`. It is a local development pilot:
+it has no TLS or authentication, does not sandbox worker filesystem access, and has no
+supported network deployment mode.
+See [docs/SERVICE_FOUNDATIONS.md](docs/SERVICE_FOUNDATIONS.md) for the worker contract and
+resource limits.
 
 ---
 
