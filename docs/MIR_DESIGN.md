@@ -1,12 +1,12 @@
 # Wysna MIR: Verified Intermediate Representation
 
-Wysna Seed's default native pipeline is checked AST → typed and verified HIR → verified MIR → C99 → system compiler. `wysna emit-c` and `wysna build` use this pipeline; `--backend=ast` selects the secondary AST emitter. Wysna Compiler has its own frontend, a direct C99 route, and an experimental scalar MIR producer. `wysna mir path.wysna` prints a session-local debug dump. `wysna emit-mir` produces the self-contained, versioned interchange described below.
+Wysna Seed's default native pipeline is checked AST → typed and verified HIR → verified MIR → C99 → system compiler. `wysna emit-c` and `wysna build` use this pipeline; `--backend=ast` selects the secondary AST emitter. Wysna Compiler has its own frontend, a direct C99 route, and an experimental MIR producer. `wysna mir path.wysna` prints a session-local debug dump. `wysna emit-mir` produces the self-contained, versioned interchange described below.
 
-## Interchange and the Compiler scalar profile
+## Interchange and the Compiler managed profile
 
 ```sh
-wysna emit-mir --implementation=seed scalar.wysna -o seed.mir.json
-wysna emit-mir --implementation=compiler scalar.wysna -o compiler.mir.json
+wysna emit-mir --implementation=seed program.wysna -o seed.mir.json
+wysna emit-mir --implementation=compiler program.wysna -o compiler.mir.json
 ```
 
 The default implementation is `seed`. Both commands produce `wysna.mir` schema 1,
@@ -16,7 +16,7 @@ semantic revision `0.5.0`, runtime ABI 2, and a complete type arena. The importe
 temporary identities and operation sequences need not be identical. Files are
 published atomically after verification. Source-file destinations are rejected.
 
-Compiler's `scalar-cfg-v1` profile checks source with its own semantic checker,
+Compiler's `managed-cfg-v1` profile checks source with its own semantic checker,
 builds typed slots, operations and basic blocks, verifies them, then serializes
 the interchange. The implementation separates the model and serialization
 (`08_mir.wysna`), lowering (`08_mir_lowering.wysna`), and independent structure
@@ -24,7 +24,7 @@ and dataflow verification (`08_mir_verifier.wysna`) under `selfhost/src/`.
 A prebuilt binary can run without Seed:
 
 ```sh
-.wysna_cache/stage2 --emit-mir scalar.wysna > compiler.mir.json
+.wysna_cache/stage2 --emit-mir program.wysna > compiler.mir.json
 ```
 
 The `wysna` wrapper uses Python for bootstrap orchestration and independent IR
@@ -34,12 +34,16 @@ Python and a Compiler MIR-to-C99 consumer are future work. Native `build` and
 
 The supported source profile contains:
 
-- Single-file command programs; `int`, finite `float`, `bool`, and `unit` values.
+- Single-file command programs; `int`, finite `float`, `bool`, `unit`, and managed `str` values.
 - Non-generic functions, typed parameters, explicit returns and tail expressions,
   forward/direct calls, immutable and mutable local bindings, and command-local
   top-level bindings. Assignment expressions preserve left-to-right snapshots.
 - Scalar arithmetic, comparisons, equality, unary negation and `not`, plus
   `print`, `eprint`, `int`, and `float` calls. Arguments evaluate left to right.
+- String literals (including Unicode and embedded NUL), concatenation, equality,
+  indexing, `str`, `len`, `ord`, `chr`, and `slice`. String indices are codepoint
+  offsets; negative indices are rejected. Slice bounds retain the existing
+  clamping behavior.
 - `if`/`elif`/`else` statements and expressions, `while`, nested loops, `break`,
   `continue`, early returns, lexical scopes, and short-circuit `and`/`or`.
 - Signed int64 wrapping at runtime, division/remainder checks with source paths,
@@ -50,20 +54,28 @@ The supported source profile contains:
 For example, both producers accept:
 
 ```wysna
-fn add(x: int, y: int) -> int { x + y }
-let total = add(10, 20)
-print(total)
+fn label(prefix: str, value: int) -> str { prefix + str(value) }
+let message = label("total=", 30)
+print(message)
 ```
 
-Imports, shared global reads inside functions, `for`/ranges, strings/collections,
+Imports, shared global reads inside functions, `for`/ranges, collections,
 error channels, closures, generics, nominal types, FFI, and library exports are
 outside this profile. Statements after a terminating path, terminating conditions,
 and expressions with unreachable operands remain explicit profile limits.
-Unsupported syntax is rejected by the profile guard with `W2013` before semantic
-checking or artifact publication. Source inside the profile retains the semantic
+Unsupported constructs produce `W2013` at an explicit profile boundary before
+artifact publication. Guarded syntax is rejected before semantic checking;
+remaining feature checks happen during lowering. Source inside the profile retains the semantic
 checker's diagnostics. Numeric literals outside
 signed int64 or finite binary64 produce `W0002`. The normal C99 route has its own
 broader measured coverage.
+
+String parameters remain borrowed; reads clone them into owned slots, and stores
+move owned values. Lowering and verification share the storage classification for
+cleanup. Escaping string values are moved to protected slots before lexical
+cleanup on normal exits, returns, `break`, and `continue`. Compiler currently emits
+conservative parameter clones; Seed may remove read-only clones in its optimization
+pass. These operation sequences need not match when their lifetimes and results do.
 
 `tests/unit/test_selfhost_mir.py` compares both producers' executable results,
 evaluation order, CFG joins/backedges, loop transfers, cleanup, scalar boundaries
@@ -71,7 +83,9 @@ and runtime locations. A native fault-injection harness also checks the independ
 Compiler verifier against malformed targets, conditions, parameters, operations,
 uninitialized joins, consumed operands and owned-value leaks. It also checks semantic
 rejection, unsupported features, stage1/stage2 IR determinism, and corrupted
-interchange rejection. The three-stage bootstrap checks the compiler itself.
+interchange rejection. String parity cases run with ASan/UBSan and logical
+allocation checks; Linux also enables LeakSanitizer. The three-stage bootstrap
+checks the compiler itself.
 
 ## Representation
 

@@ -1,5 +1,5 @@
 
-# Lower checked scalar source to explicit control-flow and storage identities.
+# Lower checked source to explicit control-flow and storage identities.
 fn mir_lookup(name: str, source: Token) -> int {
     let mut index = len(mir_bindings) - 1
     while index >= 0 {
@@ -29,8 +29,10 @@ fn mir_call(name: str, source: Token) -> int {
     if name == "print" or name == "eprint" {
         return mir_op("runtime", 1, arguments, "wysna_builtin_" + name, mir_literal_unit(), source)
     }
-    if name == "int" or name == "float" {
-        let returned = if name == "int" { 3 } else { 4 }
+    if name == "int" or name == "float" or name == "str" or name == "len" or name == "ord" or name == "chr" or name == "slice" {
+        let mut returned = 5
+        if name == "int" or name == "len" or name == "ord" { returned = 3 }
+        elif name == "float" { returned = 4 }
         return mir_op("runtime", returned, arguments, "wysna_builtin_" + name, mir_literal_unit(), source)
     }
     for binding in mir_bindings { if binding.name == name { mir_unsupported(source, "indirect calls") } }
@@ -46,6 +48,7 @@ fn mir_call(name: str, source: Token) -> int {
 fn mir_primary() -> int {
     let token = advance_tok()
     if token.kind == "IF" { return mir_if(token) }
+    if token.kind == "STR" { return mir_constant(mir_literal_str(token.val), 5, token) }
     if token.kind == "INT" { return mir_integer(token.val, false, token) }
     if token.kind == "FLOAT" {
         let number = float(token.val)
@@ -120,6 +123,16 @@ fn mir_expression(precedence: int) -> int {
     let mut left = mir_primary()
     while true {
         let token = at_tok()
+        if token.kind == "LBRACKET" {
+            if mir_current < 0 { mir_unsupported(token, "unreachable indexing") }
+            advance_tok()
+            let index = mir_expression(0)
+            mir_expect("RBRACKET")
+            if mir_current < 0 { return -1 }
+            if mir_slots[left].type_id != 5 { mir_unsupported(token, "non-string indexing") }
+            left = mir_op("runtime", 5, [left, index], "wysna_index_get_owned_at", mir_literal_unit(), token)
+            continue
+        }
         let next = op_precedence(token.kind)
         if next <= precedence { break }
         if mir_current < 0 { mir_unsupported(token, "unreachable expression operands") }
@@ -241,7 +254,7 @@ fn mir_statement() -> int {
         let name = mir_expect("IDENT")
         if match_kind("COLON") {
             let type_ = mir_expect("IDENT")
-            if type_.val != "int" and type_.val != "float" and type_.val != "bool" and type_.val != "unit" { mir_unsupported(type_, "type annotation " + type_.val) }
+            if type_.val != "int" and type_.val != "float" and type_.val != "bool" and type_.val != "unit" and type_.val != "str" { mir_unsupported(type_, "type annotation " + type_.val) }
         }
         mir_expect("ASSIGN")
         let value = mir_expression(0)
@@ -292,9 +305,9 @@ fn mir_lower_function(function: SemFunction) {
     mir_finish("wysna_fn_" + function.name, source)
 }
 
-fn emit_scalar_mir(src: str, file: str) -> str {
+fn emit_mir_module(src: str, file: str) -> str {
     let tokens = tokenize(src, file)
-    let unsupported: list[str] = ["STR", "NONE", "MATCH", "FOR", "LBRACKET", "STRUCT", "ENUM", "CLASS", "INTERFACE", "EXTERN", "NEW", "THIS", "SUPER", "QUESTION", "BANG", "PIPE", "DOT", "QQ"]
+    let unsupported: list[str] = ["NONE", "MATCH", "FOR", "STRUCT", "ENUM", "CLASS", "INTERFACE", "EXTERN", "NEW", "THIS", "SUPER", "QUESTION", "BANG", "PIPE", "DOT", "QQ"]
     for token in tokens {
         if token.kind == "IMPORT" { mir_unsupported(token, "imports") }
         for kind in unsupported { if token.kind == kind { mir_unsupported(token, "syntax " + kind) } }
@@ -352,6 +365,6 @@ fn emit_scalar_mir(src: str, file: str) -> str {
         if i > 0 { functions = functions + "," }
         functions = functions + mir_function_json(mir_functions[i])
     }
-    let module = "{\"$type\":\"Module\",\"file\":" + mir_quote(file) + ",\"arena_id\":\"compiler-scalar-cfg-v1\",\"functions\":" + functions + "],\"globals\":[],\"layouts\":{},\"virtual_slots\":[],\"externs\":{},\"exports\":[],\"library_mode\":false,\"enum_count\":0}"
+    let module = "{\"$type\":\"Module\",\"file\":" + mir_quote(file) + ",\"arena_id\":\"compiler-managed-cfg-v1\",\"functions\":" + functions + "],\"globals\":[],\"layouts\":{},\"virtual_slots\":[],\"externs\":{},\"exports\":[],\"library_mode\":false,\"enum_count\":0}"
     return "{\"format\":\"wysna.mir\",\"schema_version\":1,\"semantic_revision\":\"0.5.0\",\"runtime_abi_version\":2,\"type_arena\":" + mir_arena_json() + ",\"module\":" + module + "}\n"
 }
