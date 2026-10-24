@@ -703,6 +703,16 @@ class Lowering:
             return
         children = self.pattern_children(pattern, value)
         for channel, index, child in children:
+            if channel in ('ok', 'err'):
+                # A compound pattern predicate may hide the original tag witness.
+                # Re-establish a direct guard before binding an owned payload.
+                witness = self.predicate('err', [value], pattern)
+                accepted, impossible = self.new_block(), self.new_block()
+                self.branch(witness, accepted if channel == 'err' else impossible,
+                            impossible if channel == 'err' else accepted)
+                self.current = impossible
+                self.terminate('unreachable', node=pattern)
+                self.current = accepted
             self.pattern_children_cache = children
             payload = self.payload(channel, index, child, value, pattern)
             self.bind_pattern(child, payload)

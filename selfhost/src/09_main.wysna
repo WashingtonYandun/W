@@ -17,8 +17,8 @@ fn run_compiler() -> unit ! IoError {
         out_path = cli[2]
     }
     let src = read_file(in_path)?
-    check_source(src, in_path)
-    let c_code = compile_source(src)
+    let checked = check_source(src, in_path)
+    let c_code = compile_source(checked)
     write_file(out_path, c_code)?
     print("[Wysna Compiler] Compiled", in_path, "->", out_path)
 }

@@ -450,6 +450,39 @@ class Verifier:
         # Definite initialization intersects at joins; potentially live ownership unions.
         initial = frozenset(function.params) | frozenset(self.global_slots)
         tests = {op.result: op for block in function.blocks for op in block.operations if op.opcode == 'test'}
+        definitions = {}
+        for block in function.blocks:
+            for operation in block.operations:
+                if operation.result is not None:
+                    definitions[operation.result] = definitions.get(operation.result, 0) + 1
+        channel_tests = {slot: proof for slot, proof in tests.items() if definitions.get(slot) == 1}
+
+        def forget(facts, value):
+            facts.discard(value)
+            facts.discard(('false', value))
+            for witness, proof in tests.items():
+                if value in proof.args:
+                    facts.discard(witness)
+                    facts.discard(('false', witness))
+
+        def channel_proven(operation, facts):
+            error = operation.data['name'] == 'wysna_unwrap_err'
+            for witness, proof in channel_tests.items():
+                if proof.args != operation.args:
+                    continue
+                kind = proof.data.get('kind')
+                if kind in ('err', 'failed'):
+                    truth = error
+                elif (kind == 'variant' and
+                      (proof.data.get('enum') or '').split('__', 1)[0] == 'Result' and
+                      proof.data.get('variant') in ('Ok', 'Err')):
+                    truth = (proof.data['variant'] == 'Err') == error
+                else:
+                    continue
+                if (witness if truth else ('false', witness)) in facts:
+                    return True
+            return False
+
         incoming = {0: (initial, frozenset(), frozenset())}
         pending = deque([0])
         while pending:
@@ -463,6 +496,11 @@ class Verifier:
                     reads.extend(place_reads)
                 if kind != 'release' and any(operand not in defined for operand in reads):
                     self.fail('MIR reads an uninitialized or consumed value: ' + str([operand for operand in reads if operand not in defined]), operation.source)
+                if (kind == 'runtime' and operation.data['name'] in
+                        ('wysna_unwrap_ok', 'wysna_unwrap_err', 'wysna_unwrap_success') and
+                        self.interner.get_entry(slots[operation.args[0]].type_id).tag == 'result' and
+                        not channel_proven(operation, facts)):
+                    self.fail('MIR payload lacks a dominating channel test', operation.source)
                 if kind == 'narrow':
                     witness = operation.data['witness']
                     proof = tests.get(witness)
@@ -475,13 +513,13 @@ class Verifier:
                         self.fail('MIR narrowing lacks a dominating successful type test', operation.source)
                 if kind == 'release':
                     defined.discard(reads[0]); live.discard(reads[0])
+                    forget(facts, reads[0])
                 for index in operation.moves:
                     source = operation.args[index]
                     defined.discard(source); live.discard(source)
                 if operation.result is not None:
                     result = operation.result
-                    facts.discard(result)
-                    facts.difference_update(witness for witness, proof in tests.items() if result in proof.args)
+                    forget(facts, result)
                     if operation.data.get('placeholder'):
                         defined.discard(result); live.discard(result)
                     else:
@@ -506,8 +544,10 @@ class Verifier:
                 if term.kind == 'branch':
                     if index == 0:
                         edge_facts.add(term.value)
+                        edge_facts.discard(('false', term.value))
                     else:
                         edge_facts.discard(term.value)
+                        edge_facts.add(('false', term.value))
                 outgoing = (frozenset(defined), frozenset(live), frozenset(edge_facts))
                 previous = incoming.get(target)
                 merged = outgoing if previous is None else (previous[0] & outgoing[0], previous[1] | outgoing[1], previous[2] & outgoing[2])
