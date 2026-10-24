@@ -1608,8 +1608,16 @@ class TypeChecker:
             return self._check_class_instantiation(class_t, expr.args, expr.line, expr.col)
 
         if isinstance(expr, AssignmentExpr):
-            # Target validation
-            val_t = self._check_expr(expr.value)
+            # Constructors on the RHS need the binding's existing type context.
+            old_expected = self.expected_type
+            if isinstance(expr.target, IdentExpr):
+                destination = self.current_scope.lookup_symbol(expr.target.name)
+                if destination is not None:
+                    self.expected_type = destination.type
+            try:
+                val_t = self._check_expr(expr.value)
+            finally:
+                self.expected_type = old_expected
 
             if isinstance(expr.target, IdentExpr):
                 sym = self.current_scope.lookup_symbol(expr.target.name)

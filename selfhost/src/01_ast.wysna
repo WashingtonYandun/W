@@ -63,8 +63,8 @@ struct SemVar { name: str, type_id: int, mutable: bool, depth: int }
 struct SemFunction { name: str, params: list[str], type_params: list[str], constraints: list[str], type_id: int, body: int, end: int, owner: str, visible: bool }
 struct SemField { owner: str, name: str, type_id: int, visible: bool }
 struct SemClass { name: str, parent: str, interfaces: list[str] }
-struct SemValue { type_id: int, root: str, writable: int, terminates: bool }
-struct SemFlow { type_id: int, terminates: bool }
+struct SemValue { type_id: int, root: str, writable: int, terminates: bool, choice: int }
+struct SemFlow { type_id: int, terminates: bool, choice: int }
 let mut sem_tokens: list[Token] = []
 let mut sem_pos = 0
 let mut sem_types: list[SemType] = []
@@ -119,3 +119,13 @@ struct SemPattern { name: str, children: list[int] }
 struct SemConstructor { name: str, payloads: list[int] }
 let mut sem_patterns: list[SemPattern] = []
 let mut sem_last_pattern = -1
+
+# Checked facts requested by the MIR producer; normal C99 checking does not record them.
+struct SemMirFact { position: int, type_id: int }
+let mut sem_record_mir = false
+let mut sem_mir_calls: list[SemMirFact] = []
+let mut sem_mir_bindings: list[SemMirFact] = []
+
+struct SemMirChoice { position: int, children: list[int] }
+let mut sem_mir_choices: list[SemMirChoice] = []
+let mut sem_mir_unit_choices: list[int] = []

@@ -262,7 +262,7 @@ fn sem_declare(name: str, type_id: int, mutable: bool) {
     sem_variables.append(SemVar { name: name, type_id: type_id, mutable: mutable, depth: sem_depth })
 }
 fn sem_value(type_id: int) -> SemValue {
-    return SemValue { type_id: type_id, root: "", writable: -1, terminates: false }
+    return SemValue { type_id: type_id, root: "", writable: -1, terminates: false, choice: -1 }
 }
 fn sem_mutable(root: str) {
     if len(root) >= 5 and slice(root, 0, 5) == "this:" { return }
@@ -644,7 +644,7 @@ fn sem_member(receiver: SemValue, name: str) -> SemValue {
             let method_index = sem_method(constraint, name)
             if method_index >= 0 {
                 let method = sem_functions[method_index]
-                return SemValue { type_id: method.type_id, root: "#method", writable: -1, terminates: false }
+                return SemValue { type_id: method.type_id, root: "#method", writable: -1, terminates: false, choice: -1 }
             }
         }
         sem_error("W3002", "unknown member on generic type parameter: " + name)
@@ -684,7 +684,7 @@ fn sem_member(receiver: SemValue, name: str) -> SemValue {
         elif name == "keys" and type_.kind == "dict" { args = [sem_wrap("list", type_.args[0])] }
         elif name == "values" and type_.kind == "dict" { args = [sem_wrap("list", type_.args[1])] }
         else { sem_error("W3002", "unknown collection method") }
-        return SemValue { type_id: sem_intern("function", "", args), root: "#collection", writable: -1, terminates: false }
+        return SemValue { type_id: sem_intern("function", "", args), root: "#collection", writable: -1, terminates: false, choice: -1 }
     }
     let field_index = sem_field(type_.name, name)
     if field_index >= 0 {
@@ -705,17 +705,31 @@ fn sem_member(receiver: SemValue, name: str) -> SemValue {
         if generic >= 0 and len(type_.args) == len(sem_generic_types[generic].params) {
             field_type = sem_substitute_type(field_type, sem_generic_types[generic].params, type_.args)
         }
-        return SemValue { type_id: field_type, root: root, writable: field_type, terminates: false }
+        return SemValue { type_id: field_type, root: root, writable: field_type, terminates: false, choice: -1 }
     }
     let method_index = sem_method(type_.name, name)
     if method_index >= 0 {
         let method = sem_functions[method_index]
         if not method.visible and method.owner != sem_owner + "." { sem_error("W3002", "private method access") }
-        return SemValue { type_id: method.type_id, root: "#method", writable: -1, terminates: false }
+        return SemValue { type_id: method.type_id, root: "#method", writable: -1, terminates: false, choice: -1 }
     }
     sem_error("W3002", "unknown member: " + name)
     return sem_value(sem_unit)
 }
+fn sem_group_is_tuple() -> bool {
+    let mut position = sem_pos
+    let mut depth = 0
+    while position < len(sem_tokens) {
+        let kind = sem_tokens[position].kind
+        if depth == 0 and kind == "RPAREN" { return false }
+        if depth == 0 and kind == "COMMA" { return true }
+        if kind == "LPAREN" or kind == "LBRACE" or kind == "LBRACKET" { depth = depth + 1 }
+        elif kind == "RPAREN" or kind == "RBRACE" or kind == "RBRACKET" { depth = depth - 1 }
+        position = position + 1
+    }
+    return false
+}
+
 fn sem_prefix(allow_struct: bool, statement: bool) -> SemValue {
     if sem_is("PIPE") { return sem_lambda() }
     if sem_match("INT") { return sem_value(sem_int) }
@@ -737,6 +751,7 @@ fn sem_prefix(allow_struct: bool, statement: bool) -> SemValue {
             let empty: list[int] = []
             return sem_value(sem_intern("tuple", "", empty))
         }
+        sem_statement_context = statement and not sem_group_is_tuple()
         let first = sem_expression(0, true)
         if sem_match("COMMA") {
             let mut types: list[int] = [first.type_id]
@@ -813,7 +828,7 @@ fn sem_prefix(allow_struct: bool, statement: bool) -> SemValue {
             for class_ in sem_classes { if class_.name == sem_owner { owner = class_.parent } }
             if owner == "" { sem_error("W1004", "super without base class") }
         }
-        return SemValue { type_id: sem_named(owner), root: "this", writable: -1, terminates: false }
+        return SemValue { type_id: sem_named(owner), root: "this", writable: -1, terminates: false, choice: -1 }
     }
     sem_match("NEW")
     let name = sem_expect("IDENT").val
@@ -821,7 +836,7 @@ fn sem_prefix(allow_struct: bool, statement: bool) -> SemValue {
     if variable >= 0 {
         let value = sem_variables[variable]
         if sem_capture_depth >= 0 and value.depth < sem_capture_depth and not module_contains(sem_capture_names, name) { sem_capture_names.append(name) }
-        return SemValue { type_id: value.type_id, root: name, writable: value.type_id, terminates: false }
+        return SemValue { type_id: value.type_id, root: name, writable: value.type_id, terminates: false, choice: -1 }
     }
     if name == "None" { return sem_value(sem_none) }
     if name == "Option" or name == "Result" {
@@ -860,7 +875,7 @@ fn sem_prefix(allow_struct: bool, statement: bool) -> SemValue {
             for part in target.args { specialized.append(sem_substitute_type(part, signature.type_params, arguments)) }
             type_id = sem_intern("function", "", specialized)
         }
-        return SemValue { type_id: type_id, root: "fn:" + name, writable: -1, terminates: false }
+        return SemValue { type_id: type_id, root: "fn:" + name, writable: -1, terminates: false, choice: -1 }
     }
     let generic_type = sem_generic_type(name)
     let mut selected_type = -1
@@ -1010,6 +1025,7 @@ fn sem_expression(minimum: int, allow_struct: bool) -> SemValue {
             if sem_expected >= 0 and sem_kind(sem_expected) == "result" and (result_kind == "ok" or result_kind == "err") and sem_assignable(actual, sem_expected) {
                 left = sem_value(sem_expected)
             } else { left = sem_value(actual) }
+            if sem_record_mir { sem_mir_calls.append(SemMirFact { position: call_position, type_id: left.type_id }) }
         } elif sem_match("DOT") {
             if sem_kind(left.type_id) == "class" { sem_class_projection_positions.append(call_position) }
             let name = sem_expect("IDENT").val
@@ -1020,12 +1036,12 @@ fn sem_expression(minimum: int, allow_struct: bool) -> SemValue {
             let type_ = sem_types[left.type_id]
             if type_.kind == "list" {
                 sem_require(index, sem_int, "W2001")
-                left = SemValue { type_id: type_.args[0], root: left.root, writable: type_.args[0], terminates: false }
+                left = SemValue { type_id: type_.args[0], root: left.root, writable: type_.args[0], terminates: false, choice: -1 }
             } elif type_.kind == "dict" {
                 # `d[k]` yields V and panics with W4002 when the key is absent; the
                 # optional form is `d.get(k)`. See SPEC 10.2.
                 sem_require(index, type_.args[0], "W2001")
-                left = SemValue { type_id: type_.args[1], root: left.root, writable: type_.args[1], terminates: false }
+                left = SemValue { type_id: type_.args[1], root: left.root, writable: type_.args[1], terminates: false, choice: -1 }
             } elif left.type_id == sem_str {
                 sem_require(index, sem_int, "W2001")
                 left = sem_value(sem_str)
@@ -1135,19 +1151,24 @@ fn sem_check_discarded_branch(type_id: int, statement: bool) {
     }
 }
 fn sem_if(statement: bool) -> SemValue {
+    let position = sem_pos + sem_token_offset
+    let mut children: list[int] = []
     sem_expect("IF")
     sem_require(sem_expression(0, false).type_id, sem_bool, "W2001")
     let initial = sem_initialized
     let first = sem_block(statement)
+    children.append(first.choice)
     sem_check_discarded_branch(first.type_id, statement)
     let mut initialized = sem_initialized
     let mut all_return = first.terminates
     let mut common = first.type_id
     sem_skip_newlines_before_branch()
     while sem_match("ELIF") {
+        children.append(sem_pos + sem_token_offset - 1)
         sem_initialized = initial
         sem_require(sem_expression(0, false).type_id, sem_bool, "W2001")
         let branch = sem_block(statement)
+        children.append(branch.choice)
         sem_check_discarded_branch(branch.type_id, statement)
         if not branch.terminates and not all_return and branch.type_id != common { if not statement { sem_error("W2001", "incompatible if branches") } common = sem_unit }
         if not branch.terminates {
@@ -1160,6 +1181,7 @@ fn sem_if(statement: bool) -> SemValue {
     sem_initialized = initial
     if sem_match("ELSE") {
         let branch = sem_block(statement)
+        children.append(branch.choice)
         sem_check_discarded_branch(branch.type_id, statement)
         if not branch.terminates {
             if not all_return and branch.type_id != common { if not statement { sem_error("W2001", "incompatible if branches") } common = sem_unit }
@@ -1175,7 +1197,8 @@ fn sem_if(statement: bool) -> SemValue {
     sem_initialized = initialized
     # A discarded expression can still contain an if as a binary/postfix operand.
     # Keep a common value type; incompatible discarded branches already yield unit.
-    return SemValue { type_id: common, root: "", writable: -1, terminates: all_return }
+    if sem_record_mir { sem_mir_choices.append(SemMirChoice { position: position, children: children }) }
+    return SemValue { type_id: common, root: "", writable: -1, terminates: all_return, choice: position }
 }
 fn sem_record_pattern(name: str, children: list[int]) -> str {
     sem_patterns.append(SemPattern { name: name, children: children })
@@ -1404,9 +1427,9 @@ fn sem_match_expression(statement: bool) -> SemValue {
         let mut guarded = false
         if sem_match("IF") { guarded = true sem_require(sem_expression(0, false).type_id, sem_bool, "W2001") }
         if not sem_match("FAT_ARROW") { sem_error("W0001", "expected '=>' after match pattern") }
-        let mut branch = SemFlow { type_id: sem_unit, terminates: false }
+        let mut branch = SemFlow { type_id: sem_unit, terminates: false, choice: -1 }
         if sem_is("LBRACE") { branch = sem_block(false) }
-        else { let value = sem_expression(0, true) branch = SemFlow { type_id: value.type_id, terminates: value.terminates } }
+        else { let value = sem_expression(0, true) branch = SemFlow { type_id: value.type_id, terminates: value.terminates, choice: -1 } }
         if not guarded {
             covered.append([pattern])
             if sem_patterns[pattern].name == "*" { wildcard = true }
@@ -1434,11 +1457,12 @@ fn sem_match_expression(statement: bool) -> SemValue {
     }
     sem_initialized = initialized
     if common < 0 { common = sem_unit }
-    return SemValue { type_id: common, root: "", writable: -1, terminates: all_return }
+    return SemValue { type_id: common, root: "", writable: -1, terminates: all_return, choice: -1 }
 }
 fn sem_let() {
     sem_expect("LET")
     let mutable = sem_match("MUT")
+    let name_position = sem_pos + sem_token_offset
     let name = sem_expect("IDENT").val
     let mut annotation = -1
     if sem_match("COLON") { annotation = sem_type() }
@@ -1455,16 +1479,19 @@ fn sem_let() {
         annotation = value
     } else { sem_require(value, annotation, "W2001") }
     sem_declare(name, annotation, mutable)
+    if sem_record_mir { sem_mir_bindings.append(SemMirFact { position: name_position, type_id: annotation }) }
 }
 fn sem_block(statement: bool) -> SemFlow {
     sem_expect("LBRACE")
     let saved_variables = sem_variables
     sem_depth = sem_depth + 1
+    let mut choice = -1
     let mut tail = sem_unit
     let mut terminates = false
     while true {
         sem_skip_separators()
         if sem_is("RBRACE") or sem_is("EOF") { break }
+        choice = -1
         if sem_is("LET") { sem_let() tail = sem_unit }
         elif sem_match("RETURN") {
             let previous = sem_expected
@@ -1520,13 +1547,14 @@ fn sem_block(statement: bool) -> SemFlow {
             sem_statement_context = statement or not sem_tail_expression()
             let expression = sem_expression(0, true)
             tail = expression.type_id
+            choice = expression.choice
             terminates = terminates or expression.terminates
         }
     }
     sem_expect("RBRACE")
     sem_depth = sem_depth - 1
     sem_variables = saved_variables
-    return SemFlow { type_id: tail, terminates: terminates }
+    return SemFlow { type_id: tail, terminates: terminates, choice: choice }
 }
 fn sem_unit_return(type_id: int) -> bool {
     if type_id == sem_unit { return true }
@@ -1579,7 +1607,10 @@ fn sem_check_function(function: SemFunction) {
         }
     }
     let flow = sem_block(sem_unit_return(sem_return))
-    if not flow.terminates { sem_require_tail(flow.type_id, sem_return) }
+    if not flow.terminates {
+        sem_require_tail(flow.type_id, sem_return)
+        if sem_record_mir and sem_kind(sem_return) == "result" and sem_unit_return(sem_return) { sem_mark_unit_choices(flow.choice) }
+    }
     sem_complete_constructor()
     sem_pos = previous_position
     sem_variables = variables
@@ -1678,6 +1709,12 @@ fn sem_reset(tokens: list[Token]) {
     sem_class_projection_positions = empty_ids
     sem_collection_call_positions = empty_ids
     sem_result_lift_positions = empty_ids
+    let empty_mir_facts: list[SemMirFact] = []
+    sem_mir_calls = empty_mir_facts
+    sem_mir_bindings = empty_mir_facts
+    let empty_mir_choices: list[SemMirChoice] = []
+    sem_mir_choices = empty_mir_choices
+    sem_mir_unit_choices = empty_ids
     sem_error_pattern_positions = empty_ids
     let empty_error_pattern_kinds: list[str] = []
     let empty_error_pattern_names: list[str] = []
@@ -1950,5 +1987,14 @@ fn sem_validate_inheritance() {
                 }
             }
         }
+    }
+}
+
+fn sem_mark_unit_choices(position: int) {
+    if position < 0 { return }
+    for previous in sem_mir_unit_choices { if previous == position { return } }
+    sem_mir_unit_choices.append(position)
+    for choice in sem_mir_choices {
+        if choice.position == position { for child in choice.children { sem_mark_unit_choices(child) } }
     }
 }

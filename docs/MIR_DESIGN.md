@@ -2,7 +2,7 @@
 
 Wysna Seed's default native pipeline is checked AST → typed and verified HIR → verified MIR → C99 → system compiler. `wysna emit-c` and `wysna build` use this pipeline; `--backend=ast` selects the secondary AST emitter. Wysna Compiler has its own frontend, a direct C99 route, and an experimental MIR producer. `wysna mir path.wysna` prints a session-local debug dump. `wysna emit-mir` produces the self-contained, versioned interchange described below.
 
-## Interchange and the Compiler managed profile
+## Interchange and the Compiler profile
 
 ```sh
 wysna emit-mir --implementation=seed program.wysna -o seed.mir.json
@@ -16,7 +16,7 @@ semantic revision `0.5.0`, runtime ABI 2, and a complete type arena. The importe
 temporary identities and operation sequences need not be identical. Files are
 published atomically after verification. Source-file destinations are rejected.
 
-Compiler's `managed-cfg-v1` profile checks source with its own semantic checker,
+Compiler's `result-cfg-v1` profile checks source with its own semantic checker,
 builds typed slots, operations and basic blocks, verifies them, then serializes
 the interchange. The implementation separates the model and serialization
 (`08_mir.wysna`), lowering (`08_mir_lowering.wysna`), and independent structure
@@ -44,6 +44,12 @@ The supported source profile contains:
   indexing, `str`, `len`, `ord`, `chr`, and `slice`. String indices are codepoint
   offsets; negative indices are rejected. Slice bounds retain the existing
   clamping behavior.
+- Basic results with scalar/string success values and `str` errors, spelled
+  `T ! str` or `Result[T, str]`. `Ok`/`Err` constructors require a concrete result
+  context. Checked success lifting works in bindings, arguments and returns.
+- Result propagation with `?` and `else` handlers, optionally binding the error.
+  Handlers may return, break or continue. Unit-result tails discard successful
+  payloads while preserving errors, including nested conditional tails.
 - `if`/`elif`/`else` statements and expressions, `while`, nested loops, `break`,
   `continue`, early returns, lexical scopes, and short-circuit `and`/`or`.
 - Signed int64 wrapping at runtime, division/remainder checks with source paths,
@@ -60,7 +66,8 @@ print(message)
 ```
 
 Imports, shared global reads inside functions, `for`/ranges, collections,
-error channels, closures, generics, nominal types, FFI, and library exports are
+non-string error channels, nested or context-free results, binary result
+operators, optional channels, closures, generic functions, nominal types, FFI, and library exports are
 outside this profile. Statements after a terminating path, terminating conditions,
 and expressions with unreachable operands remain explicit profile limits.
 Unsupported constructs produce `W2013` at an explicit profile boundary before
@@ -70,12 +77,21 @@ checker's diagnostics. Numeric literals outside
 signed int64 or finite binary64 produce `W0002`. The normal C99 route has its own
 broader measured coverage.
 
-String parameters remain borrowed; reads clone them into owned slots, and stores
-move owned values. Lowering and verification share the storage classification for
+String and result parameters remain borrowed; reads clone them into owned slots,
+and stores move owned values. `Ok`/`Err` consume owned payloads; channel extraction
+borrows the box and returns an owned payload. Lowering and verification share the storage classification for
 cleanup. Escaping string values are moved to protected slots before lexical
 cleanup on normal exits, returns, `break`, and `continue`. Compiler currently emits
 conservative parameter clones; Seed may remove read-only clones in its optimization
 pass. These operation sequences need not match when their lifetimes and results do.
+
+The checker records call/binding type facts and unit-result tail identities only
+when requested by the MIR producer. Lowering translates those facts into a
+self-contained arena with canonical, deduplicated result entries; semantic TypeIds
+are not reused as interchange identities. Normal C99 checking does not retain
+these optional facts. Payload extraction requires a dominating channel test in
+both verifiers. Rewriting the tested value or predicate invalidates the proof;
+mutable predicates with multiple definitions cannot establish one.
 
 `tests/unit/test_selfhost_mir.py` compares both producers' executable results,
 evaluation order, CFG joins/backedges, loop transfers, cleanup, scalar boundaries
@@ -85,7 +101,9 @@ uninitialized joins, consumed operands and owned-value leaks. It also checks sem
 rejection, unsupported features, stage1/stage2 IR determinism, and corrupted
 interchange rejection. String parity cases run with ASan/UBSan and logical
 allocation checks; Linux also enables LeakSanitizer. The three-stage bootstrap
-checks the compiler itself.
+checks the compiler itself. Result cases also cover payload ownership, handler
+control flow, checked-fact isolation, type-arena canonicalization and forged or
+stale channel proofs.
 
 ## Representation
 
@@ -97,7 +115,7 @@ Fields use offsets in the complete layout, including inherited fields. Mutable p
 
 `clone` retains, `store` moves, and `release` frees. Constructors, calls, reads, writes, and checks have explicit effect categories. Calls declare consumed operands. Managed parameters are borrowed; results are owned. Lowering inserts LIFO cleanup on normal exits, returns, propagation, `break`, and `continue`. Escaping values are protected before cleanup.
 
-`mir/Verifier.py` checks identities, the type arena, signatures, offsets, storage, arity, effects, and successors. Dataflow intersects definitely initialized slots and joins possibly live references at joins and backedges. It rejects reads from consumed values, moves from borrowed values, and returns with owned references still pending. The default native emitter consumes this verified representation. Verification does not prove the C helpers correct or track external `opaque` handles. Runtime helpers have explicit arity and operand/result relationships; compatibility uses canonical TypeIds, and enum payload reads retain the resolved variant.
+`mir/Verifier.py` checks identities, the type arena, signatures, offsets, storage, arity, effects, and successors. Dataflow intersects definitely initialized slots and joins possibly live references at joins and backedges. It rejects reads from consumed values, moves from borrowed values, returns with owned references still pending, and result payload extraction without a current channel proof. The default native emitter consumes this verified representation. Verification does not prove the C helpers correct or track external `opaque` handles. Runtime helpers have explicit arity and operand/result relationships; compatibility uses canonical TypeIds, and enum payload reads retain the resolved variant.
 
 Before emission, an ownership pass removes copies of immutable `str` parameters when the temporary has a single definition and no consuming use, return, or mutable-place use. Read-only uses then borrow the parameter whose lifetime is protected by the caller. Copies that escape through moves keep their ownership; globals, locals, and other parameter types are excluded. MIR is verified before and after this pass, and `wysna mir` shows the optimized representation.
 

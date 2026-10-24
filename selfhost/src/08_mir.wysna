@@ -1,6 +1,6 @@
 # Backend-independent typed CFG and ownership data.
 struct MirLiteral { type_id: int, integer: int, floating: float, boolean: bool, text: str }
-struct MirSlot { type_id: int, name: str, parameter: bool, origin: int }
+struct MirSlot { type_id: int, name: str, parameter: bool, origin: int, predicate: bool }
 struct MirOperation { opcode: str, result: int, args: list[int], name: str, value: MirLiteral, source: Token }
 struct MirTerminator { kind: str, targets: list[int], value: int, source: Token }
 struct MirBlock { operations: list[MirOperation], terminator: MirTerminator }
@@ -8,7 +8,9 @@ struct MirFunction { name: str, return_type: int, slots: list[MirSlot], blocks: 
 struct MirBinding { name: str, slot: int, mutable: bool }
 struct MirScope { slots: list[int] }
 struct MirLoop { after: int, header: int, depth: int }
-struct MirState { seen: bool, defined: list[bool], live: list[bool] }
+struct MirState { seen: bool, defined: list[bool], live: list[bool], facts: list[int] }
+struct MirResultType { ok: int, error: int }
+let mut mir_result_types: list[MirResultType] = []
 
 let mut mir_functions: list[MirFunction] = []
 let mut mir_slots: list[MirSlot] = []
@@ -29,10 +31,10 @@ fn mir_literal_str(value: str) -> MirLiteral {
     return MirLiteral { type_id: 5, integer: 0, floating: 0.0, boolean: false, text: value }
 }
 
-fn mir_value_storage(type_id: int) -> bool { return type_id == 1 or type_id == 5 }
+fn mir_value_storage(type_id: int) -> bool { return type_id == 1 or type_id == 5 or type_id >= 7 }
 
 fn mir_unsupported(token: Token, feature: str) {
-    report_error_at("W2013", token, "Compiler MIR managed-cfg-v1 does not support " + feature)
+    report_error_at("W2013", token, "Compiler MIR result-cfg-v1 does not support " + feature)
 }
 
 fn mir_expect(kind: str) -> Token {
@@ -47,8 +49,33 @@ fn mir_type(type_id: int, source: Token) -> int {
     if kind == "int" { return 3 }
     if kind == "float" { return 4 }
     if kind == "str" { return 5 }
+    if kind == "result" {
+        let args_ = sem_types[type_id].args
+        let ok = mir_type(args_[0], source)
+        let error = mir_type(args_[1], source)
+        if ok > 5 or error != 5 { mir_unsupported(source, "nested results or non-string error channels") }
+        for i in 0..len(mir_result_types) { if mir_result_types[i].ok == ok and mir_result_types[i].error == error { return i + 7 } }
+        mir_result_types.append(MirResultType { ok: ok, error: error })
+        return len(mir_result_types) + 6
+    }
     mir_unsupported(source, "type " + kind)
     return 0
+}
+
+fn mir_valid_type(type_id: int) -> bool {
+    return type_id >= 1 and type_id <= 5 or type_id >= 7 and type_id < len(mir_result_types) + 7
+}
+
+fn mir_is_result(type_id: int) -> bool { return type_id >= 7 and type_id < len(mir_result_types) + 7 }
+
+fn mir_consumes(operation: MirOperation) -> bool {
+    return operation.opcode == "store" or operation.opcode == "runtime" and (operation.name == "wysna_ok" or operation.name == "wysna_err")
+}
+
+fn mir_checked_fact(facts: list[SemMirFact], position: int, source: Token) -> int {
+    for fact in facts { if fact.position == position + 1 { return mir_type(fact.type_id, source) } }
+    report_error_at("W9999", source, "missing checked MIR type fact")
+    return -1
 }
 
 fn mir_new_block(source: Token) -> int {
@@ -85,7 +112,7 @@ fn mir_begin(source: Token, returned: int) {
 
 fn mir_raw_slot(type_id: int, name: str, parameter: bool) -> int {
     let id = len(mir_slots)
-    mir_slots.append(MirSlot { type_id: type_id, name: name, parameter: parameter, origin: -1 })
+    mir_slots.append(MirSlot { type_id: type_id, name: name, parameter: parameter, origin: -1, predicate: false })
     if parameter { mir_params.append(id) }
     return id
 }
@@ -148,8 +175,9 @@ fn mir_jump(target: int, source: Token) { mir_terminate("goto", [target], -1, so
 
 fn mir_return(value: int, source: Token) {
     if mir_current < 0 { return }
+    let checked = mir_coerce(value, mir_return_type, true, source)
     let escaped = mir_raw_slot(mir_return_type, "", false)
-    mir_store(escaped, value, source)
+    mir_store(escaped, checked, source)
     mir_cleanup(0, source)
     let targets: list[int] = []
     mir_terminate("return", targets, escaped, source)
@@ -225,7 +253,9 @@ fn mir_operation_json(operation: MirOperation) -> str {
     elif operation.opcode == "clone" { effect = "retain" }
     elif operation.opcode == "store" { effect = "move" moves = [0] }
     elif operation.opcode == "release" { effect = "release" result = "null" }
+    elif operation.opcode == "test" { effect = "read" data = "{\"kind\":\"err\"}" }
     else {
+        if mir_consumes(operation) { moves = [0] }
         data = "{\"name\":" + mir_quote(operation.name)
         if operation.name == "wysna_div_at" or operation.name == "wysna_mod_at" or operation.name == "wysna_index_get_owned_at" { data = data + ",\"source\":true" }
         data = data + "}"
@@ -239,7 +269,7 @@ fn mir_function_json(function: MirFunction) -> str {
         if i > 0 { slots = slots + "," }
         let slot = function.slots[i]
         let mut storage = "value"
-        if slot.type_id == 2 { storage = "boolean" }
+        if slot.type_id == 2 { storage = if slot.predicate { "predicate" } else { "boolean" } }
         elif slot.type_id == 3 { storage = "integer" }
         elif slot.type_id == 4 { storage = "float" }
         let ownership = if slot.parameter { "borrowed" } else { "owned" }
@@ -277,6 +307,10 @@ fn mir_arena_json() -> str {
         let retain = str(i == 5)
         let key = str(i == 2 or i == 3 or i == 5)
         capabilities = capabilities + "{\"needs_retain\":" + retain + ",\"needs_release\":" + retain + ",\"is_value\":true,\"is_reference\":false,\"is_copyable\":true,\"has_identity\":false,\"is_comparable\":true,\"is_valid_dict_key\":" + key + "}"
+    }
+    for type_ in mir_result_types {
+        entries = entries + ",{\"tag\":\"result\",\"data\":[" + str(type_.ok) + "," + str(type_.error) + "]}"
+        capabilities = capabilities + ",{\"needs_retain\":true,\"needs_release\":true,\"is_value\":true,\"is_reference\":false,\"is_copyable\":true,\"has_identity\":false,\"is_comparable\":false,\"is_valid_dict_key\":false}"
     }
     return "{\"version\":1,\"entries\":" + entries + "],\"capabilities\":" + capabilities + "],\"structs\":{},\"enums\":{},\"interfaces\":{},\"classes\":{}}"
 }
