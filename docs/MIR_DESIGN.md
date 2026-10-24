@@ -17,10 +17,12 @@ temporary identities and operation sequences need not be identical. Files are
 published atomically after verification. Source-file destinations are rejected.
 
 Compiler's `result-cfg-v1` profile checks source with its own semantic checker,
-builds typed slots, operations and basic blocks, verifies them, then serializes
-the interchange. The implementation separates the model and serialization
-(`08_mir.wysna`), lowering (`08_mir_lowering.wysna`), and independent structure
-and dataflow verification (`08_mir_verifier.wysna`) under `selfhost/src/`.
+produces a session-owned checked node program, builds typed slots, operations and
+basic blocks, verifies them, then serializes the interchange. The implementation
+separates checked nodes and their boundary verifier (`08_checked.wysna`), the MIR
+model and serialization (`08_mir.wysna`), lowering (`08_mir_lowering.wysna`), and
+independent structure and dataflow verification (`08_mir_verifier.wysna`) under
+`selfhost/src/`.
 A prebuilt binary can run without Seed:
 
 ```sh
@@ -85,13 +87,43 @@ cleanup on normal exits, returns, `break`, and `continue`. Compiler currently em
 conservative parameter clones; Seed may remove read-only clones in its optimization
 pass. These operation sequences need not match when their lifetimes and results do.
 
-The checker records call/binding type facts and unit-result tail identities only
-when requested by the MIR producer. Lowering translates those facts into a
-self-contained arena with canonical, deduplicated result entries; semantic TypeIds
-are not reused as interchange identities. Normal C99 checking does not retain
-these optional facts. Payload extraction requires a dominating channel test in
-both verifiers. Rewriting the tested value or predicate invalidates the proof;
-mutable predicates with multiple definitions cannot establish one.
+The checker builds `CheckedProgram` with typed nodes, resolved binding and call
+target IDs, function bodies and explicit unit-result tail markers for the MIR
+profile. Node IDs belong to that checked value; whitespace and comments do not
+renumber them. Lowering traverses this tree and never reparses source tokens,
+searches token-position facts or queries a live semantic checker. Its type mapping
+produces a self-contained arena with canonical, deduplicated result entries;
+semantic TypeIds are not reused as interchange identities. Payload extraction
+requires a dominating channel test in both MIR verifiers. Rewriting the tested
+value or predicate invalidates the proof; mutable predicates with multiple
+definitions cannot establish one.
+
+## Compiler phase ownership
+
+Lexical scopes use checked variable-count/depth checkpoints rather than copying
+and restoring variable arrays in each construct. Module expansion is the single
+import loader; the obsolete loader in C emission has been removed.
+
+Every invocation owns its mutable state: `ModuleLoader` owns import expansion,
+`SemanticContext` owns semantic checking, `CEmitter` owns the direct C99 route,
+and `MirBuilder` owns MIR construction. There are no mutable module globals in
+`selfhost/src/`. Diagnostics receive their source file explicitly.
+
+`CheckedProgram` and `MirModule` are value snapshots. Their lists use the language's
+copy-on-write semantics, so a consumer's modified copy does not mutate another
+consumer. The checker context is not part of the lowering interface. The checked
+boundary validates type/node references, acyclic node edges, binding/call IDs,
+function signatures and bodies before lowering indexes them. MIR verification and
+serialization receive a module value, independently of a builder's current state.
+
+The direct C99 route consumes the checked snapshot's `CEmissionMetadata` with
+expanded tokens and C-specific semantic annotations. Shared `CheckedSignature`
+records contain resolved declarations without parser body offsets. Its source parser remains broader than the MIR
+profile. It does not yet consume the checked node tree: completing that migration
+requires extending the declared MIR profile and implementing its native consumer.
+Normal C99 checking explicitly returns metadata without MIR nodes or binding IDs; passing
+that result to MIR lowering is rejected. This boundary does not claim that all
+Compiler language constructs already have typed node lowering.
 
 `tests/unit/test_selfhost_mir.py` compares both producers' executable results,
 evaluation order, CFG joins/backedges, loop transfers, cleanup, scalar boundaries
@@ -102,8 +134,14 @@ rejection, unsupported features, stage1/stage2 IR determinism, and corrupted
 interchange rejection. String parity cases run with ASan/UBSan and logical
 allocation checks; Linux also enables LeakSanitizer. The three-stage bootstrap
 checks the compiler itself. Result cases also cover payload ownership, handler
-control flow, checked-fact isolation, type-arena canonicalization and forged or
+control flow, checked-program isolation, type-arena canonicalization and forged or
 stale channel proofs.
+
+`tests/unit/test_selfhost_compilation_context.py` exercises interleaved builders,
+multiple checked programs and C emitters in one process, import graph isolation,
+source-specific diagnostics, copy-on-write consumer isolation, stable node/binding
+IDs under trivia changes, and lowering after removing source tokens. It also
+rejects malformed checked programs with ASan/UBSan enabled where available.
 
 ## Representation
 

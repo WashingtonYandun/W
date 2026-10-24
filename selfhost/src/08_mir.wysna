@@ -5,22 +5,12 @@ struct MirOperation { opcode: str, result: int, args: list[int], name: str, valu
 struct MirTerminator { kind: str, targets: list[int], value: int, source: Token }
 struct MirBlock { operations: list[MirOperation], terminator: MirTerminator }
 struct MirFunction { name: str, return_type: int, slots: list[MirSlot], blocks: list[MirBlock], params: list[int], source: Token }
-struct MirBinding { name: str, slot: int, mutable: bool }
+struct MirBinding { symbol: int, slot: int }
 struct MirScope { slots: list[int] }
 struct MirLoop { after: int, header: int, depth: int }
 struct MirState { seen: bool, defined: list[bool], live: list[bool], facts: list[int] }
 struct MirResultType { ok: int, error: int }
-let mut mir_result_types: list[MirResultType] = []
 
-let mut mir_functions: list[MirFunction] = []
-let mut mir_slots: list[MirSlot] = []
-let mut mir_blocks: list[MirBlock] = []
-let mut mir_params: list[int] = []
-let mut mir_bindings: list[MirBinding] = []
-let mut mir_scopes: list[MirScope] = []
-let mut mir_loops: list[MirLoop] = []
-let mut mir_current = -1
-let mut mir_return_type = 1
 
 fn mir_literal_unit() -> MirLiteral { return MirLiteral { type_id: 1, integer: 0, floating: 0.0, boolean: false, text: "" } }
 fn mir_literal_bool(value: bool) -> MirLiteral { return MirLiteral { type_id: 2, integer: 0, floating: 0.0, boolean: value, text: "" } }
@@ -37,163 +27,152 @@ fn mir_unsupported(token: Token, feature: str) {
     report_error_at("W2013", token, "Compiler MIR result-cfg-v1 does not support " + feature)
 }
 
-fn mir_expect(kind: str) -> Token {
-    if not check_kind(kind) { mir_unsupported(at_tok(), "token " + at_tok().kind + " here (expected " + kind + ")") }
-    return advance_tok()
-}
-
-fn mir_type(type_id: int, source: Token) -> int {
-    let kind = sem_kind(type_id)
+fn mir_type(context: MirBuilder, type_id: int, source: Token) -> int {
+    let kind = context.program.types[type_id].kind
     if kind == "unit" { return 1 }
     if kind == "bool" { return 2 }
     if kind == "int" { return 3 }
     if kind == "float" { return 4 }
     if kind == "str" { return 5 }
     if kind == "result" {
-        let args_ = sem_types[type_id].args
-        let ok = mir_type(args_[0], source)
-        let error = mir_type(args_[1], source)
+        let args_ = context.program.types[type_id].args
+        let ok = mir_type(context, args_[0], source)
+        let error = mir_type(context, args_[1], source)
         if ok > 5 or error != 5 { mir_unsupported(source, "nested results or non-string error channels") }
-        for i in 0..len(mir_result_types) { if mir_result_types[i].ok == ok and mir_result_types[i].error == error { return i + 7 } }
-        mir_result_types.append(MirResultType { ok: ok, error: error })
-        return len(mir_result_types) + 6
+        for i in 0..len(context.result_types) { if context.result_types[i].ok == ok and context.result_types[i].error == error { return i + 7 } }
+        context.result_types.append(MirResultType { ok: ok, error: error })
+        return len(context.result_types) + 6
     }
     mir_unsupported(source, "type " + kind)
     return 0
 }
 
-fn mir_valid_type(type_id: int) -> bool {
-    return type_id >= 1 and type_id <= 5 or type_id >= 7 and type_id < len(mir_result_types) + 7
+fn mir_valid_type(types: list[MirResultType], type_id: int) -> bool {
+    return type_id >= 1 and type_id <= 5 or type_id >= 7 and type_id < len(types) + 7
 }
 
-fn mir_is_result(type_id: int) -> bool { return type_id >= 7 and type_id < len(mir_result_types) + 7 }
+fn mir_is_result(types: list[MirResultType], type_id: int) -> bool { return type_id >= 7 and type_id < len(types) + 7 }
 
 fn mir_consumes(operation: MirOperation) -> bool {
     return operation.opcode == "store" or operation.opcode == "runtime" and (operation.name == "wysna_ok" or operation.name == "wysna_err")
 }
 
-fn mir_checked_fact(facts: list[SemMirFact], position: int, source: Token) -> int {
-    for fact in facts { if fact.position == position + 1 { return mir_type(fact.type_id, source) } }
-    report_error_at("W9999", source, "missing checked MIR type fact")
-    return -1
-}
-
-fn mir_new_block(source: Token) -> int {
+fn mir_new_block(context: MirBuilder, source: Token) -> int {
     let operations: list[MirOperation] = []
     let targets: list[int] = []
     let terminator = MirTerminator { kind: "", targets: targets, value: -1, source: source }
-    let id = len(mir_blocks)
-    mir_blocks.append(MirBlock { operations: operations, terminator: terminator })
+    let id = len(context.blocks)
+    context.blocks.append(MirBlock { operations: operations, terminator: terminator })
     return id
 }
 
-fn mir_push_scope() {
+fn mir_push_scope(context: MirBuilder) {
     let slots: list[int] = []
-    mir_scopes.append(MirScope { slots: slots })
+    context.scopes.append(MirScope { slots: slots })
 }
 
-fn mir_begin(source: Token, returned: int) {
+fn mir_begin(context: MirBuilder, source: Token, returned: int) {
     let slots: list[MirSlot] = []
     let blocks: list[MirBlock] = []
     let params: list[int] = []
     let bindings: list[MirBinding] = []
     let scopes: list[MirScope] = []
     let loops: list[MirLoop] = []
-    mir_slots = slots
-    mir_blocks = blocks
-    mir_params = params
-    mir_bindings = bindings
-    mir_scopes = scopes
-    mir_loops = loops
-    mir_return_type = returned
-    mir_push_scope()
-    mir_current = mir_new_block(source)
+    context.slots = slots
+    context.blocks = blocks
+    context.params = params
+    context.bindings = bindings
+    context.scopes = scopes
+    context.loops = loops
+    context.return_type = returned
+    mir_push_scope(context)
+    context.current = mir_new_block(context, source)
 }
 
-fn mir_raw_slot(type_id: int, name: str, parameter: bool) -> int {
-    let id = len(mir_slots)
-    mir_slots.append(MirSlot { type_id: type_id, name: name, parameter: parameter, origin: -1, predicate: false })
-    if parameter { mir_params.append(id) }
+fn mir_raw_slot(context: MirBuilder, type_id: int, name: str, parameter: bool) -> int {
+    let id = len(context.slots)
+    context.slots.append(MirSlot { type_id: type_id, name: name, parameter: parameter, origin: -1, predicate: false })
+    if parameter { context.params.append(id) }
     return id
 }
 
-fn mir_track(id: int) {
-    if mir_value_storage(mir_slots[id].type_id) and not mir_slots[id].parameter {
-        mir_scopes[len(mir_scopes) - 1].slots.append(id)
+fn mir_track(context: MirBuilder, id: int) {
+    if mir_value_storage(context.slots[id].type_id) and not context.slots[id].parameter {
+        context.scopes[len(context.scopes) - 1].slots.append(id)
     }
 }
 
-fn mir_slot(type_id: int, name: str, parameter: bool) -> int {
-    let id = mir_raw_slot(type_id, name, parameter)
-    mir_track(id)
+fn mir_slot(context: MirBuilder, type_id: int, name: str, parameter: bool) -> int {
+    let id = mir_raw_slot(context, type_id, name, parameter)
+    mir_track(context, id)
     return id
 }
 
-fn mir_append(operation: MirOperation) {
-    if mir_current < 0 { report_error_at("W9999", operation.source, "MIR emission requires a live block") }
-    mir_blocks[mir_current].operations.append(operation)
+fn mir_append(context: MirBuilder, operation: MirOperation) {
+    if context.current < 0 { report_error_at("W9999", operation.source, "MIR emission requires a live block") }
+    context.blocks[context.current].operations.append(operation)
 }
 
-fn mir_op(opcode: str, type_id: int, args_: list[int], name: str, value: MirLiteral, source: Token) -> int {
-    let id = mir_slot(type_id, "", false)
-    mir_append(MirOperation { opcode: opcode, result: id, args: args_, name: name, value: value, source: source })
+fn mir_op(context: MirBuilder, opcode: str, type_id: int, args_: list[int], name: str, value: MirLiteral, source: Token) -> int {
+    let id = mir_slot(context, type_id, "", false)
+    mir_append(context, MirOperation { opcode: opcode, result: id, args: args_, name: name, value: value, source: source })
     return id
 }
 
-fn mir_store(destination: int, value: int, source: Token) {
-    mir_append(MirOperation { opcode: "store", result: destination, args: [value], name: "", value: mir_literal_unit(), source: source })
+fn mir_store(context: MirBuilder, destination: int, value: int, source: Token) {
+    mir_append(context, MirOperation { opcode: "store", result: destination, args: [value], name: "", value: mir_literal_unit(), source: source })
 }
 
-fn mir_constant(value: MirLiteral, type_id: int, source: Token) -> int {
+fn mir_constant(context: MirBuilder, value: MirLiteral, type_id: int, source: Token) -> int {
     let empty: list[int] = []
-    return mir_op("const", type_id, empty, "", value, source)
+    return mir_op(context, "const", type_id, empty, "", value, source)
 }
 
-fn mir_release(id: int, source: Token) {
-    if mir_value_storage(mir_slots[id].type_id) and not mir_slots[id].parameter {
-        mir_append(MirOperation { opcode: "release", result: -1, args: [id], name: "", value: mir_literal_unit(), source: source })
+fn mir_release(context: MirBuilder, id: int, source: Token) {
+    if mir_value_storage(context.slots[id].type_id) and not context.slots[id].parameter {
+        mir_append(context, MirOperation { opcode: "release", result: -1, args: [id], name: "", value: mir_literal_unit(), source: source })
     }
 }
 
-fn mir_cleanup(depth: int, source: Token) {
-    let mut scope = len(mir_scopes) - 1
+fn mir_cleanup(context: MirBuilder, depth: int, source: Token) {
+    let mut scope = len(context.scopes) - 1
     while scope >= depth {
-        let slots = mir_scopes[scope].slots
+        let slots = context.scopes[scope].slots
         let mut index = len(slots) - 1
-        while index >= 0 { mir_release(slots[index], source) index = index - 1 }
+        while index >= 0 { mir_release(context, slots[index], source) index = index - 1 }
         scope = scope - 1
     }
 }
 
-fn mir_terminate(kind: str, targets: list[int], value: int, source: Token) {
-    if mir_current < 0 { report_error_at("W9999", source, "MIR block already terminated") }
-    mir_blocks[mir_current].terminator = MirTerminator { kind: kind, targets: targets, value: value, source: source }
-    mir_current = -1
+fn mir_terminate(context: MirBuilder, kind: str, targets: list[int], value: int, source: Token) {
+    if context.current < 0 { report_error_at("W9999", source, "MIR block already terminated") }
+    context.blocks[context.current].terminator = MirTerminator { kind: kind, targets: targets, value: value, source: source }
+    context.current = -1
 }
 
-fn mir_jump(target: int, source: Token) { mir_terminate("goto", [target], -1, source) }
+fn mir_jump(context: MirBuilder, target: int, source: Token) { mir_terminate(context, "goto", [target], -1, source) }
 
-fn mir_return(value: int, source: Token) {
-    if mir_current < 0 { return }
-    let checked = mir_coerce(value, mir_return_type, true, source)
-    let escaped = mir_raw_slot(mir_return_type, "", false)
-    mir_store(escaped, checked, source)
-    mir_cleanup(0, source)
+fn mir_return(context: MirBuilder, value: int, source: Token) {
+    if context.current < 0 { return }
+    let checked = mir_coerce(context, value, context.return_type, true, source)
+    let escaped = mir_raw_slot(context, context.return_type, "", false)
+    mir_store(context, escaped, checked, source)
+    mir_cleanup(context, 0, source)
     let targets: list[int] = []
-    mir_terminate("return", targets, escaped, source)
+    mir_terminate(context, "return", targets, escaped, source)
 }
 
-fn mir_finish(name: str, source: Token) {
+fn mir_finish(context: MirBuilder, name: str, source: Token) {
     let targets: list[int] = []
-    for i in 0..len(mir_blocks) {
-        if mir_blocks[i].terminator.kind == "" {
-            mir_blocks[i].terminator = MirTerminator { kind: "unreachable", targets: targets, value: -1, source: source }
+    for i in 0..len(context.blocks) {
+        if context.blocks[i].terminator.kind == "" {
+            context.blocks[i].terminator = MirTerminator { kind: "unreachable", targets: targets, value: -1, source: source }
         }
     }
-    mir_functions.append(MirFunction { name: name, return_type: mir_return_type, slots: mir_slots, blocks: mir_blocks, params: mir_params, source: source })
+    context.functions.append(MirFunction { name: name, return_type: context.return_type, slots: context.slots, blocks: context.blocks, params: context.params, source: source })
 }
 
-fn mir_integer(text: str, negative: bool, source: Token) -> int {
+fn mir_integer(context: MirBuilder, text: str, negative: bool, source: Token) -> int {
     let mut start = 0
     while start + 1 < len(text) and text[start] == "0" { start = start + 1 }
     let digits = slice(text, start, len(text))
@@ -207,7 +186,7 @@ fn mir_integer(text: str, negative: bool, source: Token) -> int {
     }
     if too_large { report_error_at("W0002", source, "integer literal is outside signed int64 range") }
     let number = int(if negative { "-" + digits } else { digits })
-    return mir_constant(mir_literal_int(number), 3, source)
+    return mir_constant(context, mir_literal_int(number), 3, source)
 }
 
 fn mir_quote(text: str) -> str {
@@ -294,7 +273,7 @@ fn mir_function_json(function: MirFunction) -> str {
     return "{\"$type\":\"Function\",\"name\":" + mir_quote(function.name) + ",\"return_type\":" + str(function.return_type) + ",\"slots\":" + slots + ",\"blocks\":" + blocks + "],\"params\":" + mir_ids(function.params, false) + ",\"source\":" + mir_source_json(function.source) + "}"
 }
 
-fn mir_arena_json() -> str {
+fn mir_arena_json(types: list[MirResultType]) -> str {
     # Reserved TypeIds and capabilities are the wysna.mir/1 contract.
     let names: list[str] = ["", "unit", "bool", "int", "float", "str", "none"]
     let mut entries = "[{\"tag\":\"error\",\"data\":null}"
@@ -308,9 +287,45 @@ fn mir_arena_json() -> str {
         let key = str(i == 2 or i == 3 or i == 5)
         capabilities = capabilities + "{\"needs_retain\":" + retain + ",\"needs_release\":" + retain + ",\"is_value\":true,\"is_reference\":false,\"is_copyable\":true,\"has_identity\":false,\"is_comparable\":true,\"is_valid_dict_key\":" + key + "}"
     }
-    for type_ in mir_result_types {
+    for type_ in types {
         entries = entries + ",{\"tag\":\"result\",\"data\":[" + str(type_.ok) + "," + str(type_.error) + "]}"
         capabilities = capabilities + ",{\"needs_retain\":true,\"needs_release\":true,\"is_value\":true,\"is_reference\":false,\"is_copyable\":true,\"has_identity\":false,\"is_comparable\":false,\"is_valid_dict_key\":false}"
     }
     return "{\"version\":1,\"entries\":" + entries + "],\"capabilities\":" + capabilities + "],\"structs\":{},\"enums\":{},\"interfaces\":{},\"classes\":{}}"
+}
+
+struct MirModule { file: str, functions: list[MirFunction], result_types: list[MirResultType], source: Token }
+class MirBuilder {
+    program: CheckedProgram
+    result_types: list[MirResultType]
+    functions: list[MirFunction]
+    slots: list[MirSlot]
+    blocks: list[MirBlock]
+    params: list[int]
+    bindings: list[MirBinding]
+    scopes: list[MirScope]
+    loops: list[MirLoop]
+    current: int
+    return_type: int
+    fn init(program: CheckedProgram) {
+        this.program = program
+        let initial_result_types: list[MirResultType] = []
+        this.result_types = initial_result_types
+        let initial_functions: list[MirFunction] = []
+        this.functions = initial_functions
+        let initial_slots: list[MirSlot] = []
+        this.slots = initial_slots
+        let initial_blocks: list[MirBlock] = []
+        this.blocks = initial_blocks
+        let initial_params: list[int] = []
+        this.params = initial_params
+        let initial_bindings: list[MirBinding] = []
+        this.bindings = initial_bindings
+        let initial_scopes: list[MirScope] = []
+        this.scopes = initial_scopes
+        let initial_loops: list[MirLoop] = []
+        this.loops = initial_loops
+        this.current = -1
+        this.return_type = 1
+    }
 }

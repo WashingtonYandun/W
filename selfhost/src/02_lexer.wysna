@@ -1,18 +1,14 @@
-fn report_error(code: str, line: int, col: int, msg: str) -> unit {
-    let mut file = g_diag_file
-    if file == "" { file = g_in_path }
+fn report_error(file: str, code: str, line: int, col: int, msg: str) -> unit {
     eprint("[" + code + "] " + file + ":" + str(line) + ":" + str(col) + " - " + msg)
     exit(1)
 }
 
 fn report_error_at(code: str, token: Token, msg: str) -> unit {
-    g_diag_file = token.file
-    report_error(code, token.line, token.col, msg)
+    report_error(token.file, code, token.line, token.col, msg)
 }
 
 fn report_error_at_location(code: str, file: str, line: int, col: int, msg: str) -> unit {
-    g_diag_file = file
-    report_error(code, line, col, msg)
+    report_error(file, code, line, col, msg)
 }
 
 fn is_alpha(c: int) -> bool {
@@ -149,7 +145,6 @@ fn keyword_kind(word: str) -> str {
 }
 
 fn tokenize(src: str, file: str) -> list[Token] {
-    g_diag_file = file
     let mut tokens: list[Token] = []
     let n = len(src)
     let mut i = 0
@@ -208,7 +203,7 @@ fn tokenize(src: str, file: str) -> list[Token] {
                 col = col + 1
             }
             if last_was_under or sep_err {
-                report_error("W0002", line, start_col, "malformed numeric separator")
+                report_error(file, "W0002", line, start_col, "malformed numeric separator")
             }
             if i + 1 < n and src[i] == "." and is_digit(ord(src[i + 1])) {
                 is_flt = true
@@ -229,10 +224,10 @@ fn tokenize(src: str, file: str) -> list[Token] {
                     col = col + 1
                 }
                 if last_was_under or sep_err {
-                    report_error("W0002", line, start_col, "malformed numeric separator")
+                    report_error(file, "W0002", line, start_col, "malformed numeric separator")
                 }
             } elif i < n and src[i] == "." and not (i + 1 < n and src[i + 1] == ".") {
-                report_error("W0002", line, start_col, "malformed float literal: trailing dot")
+                report_error(file, "W0002", line, start_col, "malformed float literal: trailing dot")
             }
             if is_flt {
                 tokens.append(Token { kind: "FLOAT", val: clean_num, line: line, col: start_col, file: file })
@@ -240,7 +235,7 @@ fn tokenize(src: str, file: str) -> list[Token] {
                 tokens.append(Token { kind: "INT", val: clean_num, line: line, col: start_col, file: file })
             }
         } elif ch == "." and i + 1 < n and is_digit(ord(src[i + 1])) {
-            report_error("W0002", line, col, "malformed float literal: leading dot")
+            report_error(file, "W0002", line, col, "malformed float literal: leading dot")
         } elif ch == "\"" {
             let start_col = col
             let start_line = line
@@ -250,7 +245,7 @@ fn tokenize(src: str, file: str) -> list[Token] {
             while i < n and src[i] != "\"" {
                 if src[i] == "\\" {
                     if i + 1 >= n {
-                        report_error("W0004", line, col, "unterminated string escape")
+                        report_error(file, "W0004", line, col, "unterminated string escape")
                     }
                     i = i + 1
                     col = col + 1
@@ -281,7 +276,7 @@ fn tokenize(src: str, file: str) -> list[Token] {
                         col = col + 1
                     } elif esc == "u" {
                         if i + 1 >= n or src[i + 1] != "{" {
-                            report_error("W0005", line, col - 1, "invalid Unicode scalar escape sequence")
+                            report_error(file, "W0005", line, col - 1, "invalid Unicode scalar escape sequence")
                         }
                         i = i + 2
                         col = col + 2
@@ -299,13 +294,13 @@ fn tokenize(src: str, file: str) -> list[Token] {
                             col = col + 1
                         }
                         if i >= n or src[i] != "}" or not has_hex or not valid_hex {
-                            report_error("W0005", line, col, "invalid Unicode scalar escape sequence")
+                            report_error(file, "W0005", line, col, "invalid Unicode scalar escape sequence")
                         }
                         i = i + 1
                         col = col + 1
                         s_val = s_val + chr(u_cp)
                     } else {
-                        report_error("W0004", line, col - 1, "invalid string escape sequence")
+                        report_error(file, "W0004", line, col - 1, "invalid string escape sequence")
                     }
                 } else {
                     s_val = s_val + src[i]
@@ -314,7 +309,7 @@ fn tokenize(src: str, file: str) -> list[Token] {
                 }
             }
             if i >= n {
-                report_error("W0003", start_line, start_col, "unterminated string literal")
+                report_error(file, "W0003", start_line, start_col, "unterminated string literal")
             }
             i = i + 1
             col = col + 1
@@ -410,7 +405,7 @@ fn tokenize(src: str, file: str) -> list[Token] {
                     kind = "QUESTION"
                 }
                 if kind == "OP" {
-                    report_error("W0001", line, start_col, "unexpected character '" + ch + "'")
+                    report_error(file, "W0001", line, start_col, "unexpected character '" + ch + "'")
                 }
                 tokens.append(Token { kind: kind, val: ch, line: line, col: start_col, file: file })
                 if kind == "LPAREN" { paren_depth = paren_depth + 1

@@ -1,4 +1,4 @@
-fn mir_verify_runtime(operation: MirOperation, slots: list[MirSlot]) -> bool {
+fn mir_verify_runtime(module: MirModule, operation: MirOperation, slots: list[MirSlot]) -> bool {
     let name = operation.name
     let returned = slots[operation.result].type_id
     if name == "wysna_builtin_print" or name == "wysna_builtin_eprint" { return returned == 1 }
@@ -9,13 +9,13 @@ fn mir_verify_runtime(operation: MirOperation, slots: list[MirSlot]) -> bool {
         let argument = operation.args[0]
         let type_ = slots[argument].type_id
         if name == "wysna_ok" or name == "wysna_err" {
-            if not mir_is_result(returned) { return false }
-            let channel = mir_result_types[returned - 7]
+            if not mir_is_result(module.result_types, returned) { return false }
+            let channel = module.result_types[returned - 7]
             return type_ == (if name == "wysna_ok" { channel.ok } else { channel.error })
         }
         if name == "wysna_unwrap_ok" or name == "wysna_unwrap_err" {
-            if not mir_is_result(type_) { return false }
-            let channel = mir_result_types[type_ - 7]
+            if not mir_is_result(module.result_types, type_) { return false }
+            let channel = module.result_types[type_ - 7]
             return returned == (if name == "wysna_unwrap_ok" { channel.ok } else { channel.error })
         }
         if name == "wysna_builtin_str" { return returned == 5 }
@@ -31,7 +31,7 @@ fn mir_verify_runtime(operation: MirOperation, slots: list[MirSlot]) -> bool {
     let first = slots[operation.args[0]].type_id
     let second = slots[operation.args[1]].type_id
     if name == "wysna_index_get_owned_at" { return first == 5 and second == 3 and returned == 5 }
-    if first != second or mir_is_result(first) { return false }
+    if first != second or mir_is_result(module.result_types, first) { return false }
     if name == "wysna_add" and first == 5 { return returned == 5 }
     if name == "wysna_equal" or name == "wysna_not_equal" { return returned == 2 }
     if first != 3 and first != 4 { return false }
@@ -41,11 +41,11 @@ fn mir_verify_runtime(operation: MirOperation, slots: list[MirSlot]) -> bool {
 }
 
 # Validate structure before indexed access, then solve definite initialization and cleanup.
-fn mir_verify_shape(function: MirFunction) {
-    if not mir_valid_type(function.return_type) or len(function.blocks) == 0 { report_error_at("W9999", function.source, "invalid MIR function signature or entry") }
+fn mir_verify_shape(module: MirModule, function: MirFunction) {
+    if not mir_valid_type(module.result_types, function.return_type) or len(function.blocks) == 0 { report_error_at("W9999", function.source, "invalid MIR function signature or entry") }
     let mut parameters: list[bool] = []
     for slot in function.slots {
-        if not mir_valid_type(slot.type_id) { report_error_at("W9999", function.source, "invalid MIR slot type") }
+        if not mir_valid_type(module.result_types, slot.type_id) { report_error_at("W9999", function.source, "invalid MIR slot type") }
         if slot.predicate and (slot.type_id != 2 or slot.parameter) { report_error_at("W9999", function.source, "invalid MIR predicate storage") }
         parameters.append(false)
     }
@@ -82,10 +82,10 @@ fn mir_verify_shape(function: MirFunction) {
                     }
                 } elif operation.opcode == "test" {
                     valid = type_ == 2 and function.slots[result].predicate and operation.name == "err" and len(operation.args) == 1
-                    if valid { valid = mir_is_result(function.slots[operation.args[0]].type_id) }
-                } elif operation.opcode == "runtime" { valid = mir_verify_runtime(operation, function.slots) }
+                    if valid { valid = mir_is_result(module.result_types, function.slots[operation.args[0]].type_id) }
+                } elif operation.opcode == "runtime" { valid = mir_verify_runtime(module, operation, function.slots) }
                 elif operation.opcode == "call" {
-                    for callee in mir_functions {
+                    for callee in module.functions {
                         if callee.name == operation.name and len(callee.params) == len(operation.args) and callee.return_type == type_ {
                             valid = true
                             for i in 0..len(callee.params) {
@@ -125,7 +125,7 @@ fn mir_forget_facts(facts: list[int], value: int, guards: list[MirGuard]) -> lis
     return next
 }
 
-fn mir_verify_flow(function: MirFunction) {
+fn mir_verify_flow(module: MirModule, function: MirFunction) {
     let mut initial: list[bool] = []
     let mut empty: list[bool] = []
     let mut unknown: list[int] = []
@@ -207,16 +207,16 @@ fn mir_verify_flow(function: MirFunction) {
     }
 }
 
-fn mir_verify() {
-    for i in 0..len(mir_result_types) {
-        let type_ = mir_result_types[i]
-        if type_.ok < 1 or type_.ok > 5 or type_.error != 5 { report_error_at("W9999", at_tok(), "invalid MIR result type arena") }
-        for j in 0..i { if mir_result_types[j].ok == type_.ok { report_error_at("W9999", at_tok(), "duplicate MIR result type") } }
+fn mir_verify(module: MirModule) {
+    for i in 0..len(module.result_types) {
+        let type_ = module.result_types[i]
+        if type_.ok < 1 or type_.ok > 5 or type_.error != 5 { report_error_at("W9999", module.source, "invalid MIR result type arena") }
+        for j in 0..i { if module.result_types[j].ok == type_.ok { report_error_at("W9999", module.source, "duplicate MIR result type") } }
     }
     let mut names: list[str] = []
     let mut entry = false
     # Validate every signature first so call validation cannot index malformed callees.
-    for function in mir_functions {
+    for function in module.functions {
         for name in names { if name == function.name { report_error_at("W9999", function.source, "duplicate MIR function") } }
         names.append(function.name)
         if function.name == "wysna_program" { entry = true }
@@ -224,7 +224,7 @@ fn mir_verify() {
             if parameter < 0 or parameter >= len(function.slots) { report_error_at("W9999", function.source, "invalid MIR parameter") }
         }
     }
-    if not entry { report_error_at("W9999", at_tok(), "missing MIR program entry") }
-    for function in mir_functions { mir_verify_shape(function) }
-    for function in mir_functions { mir_verify_flow(function) }
+    if not entry { report_error_at("W9999", module.source, "missing MIR program entry") }
+    for function in module.functions { mir_verify_shape(module, function) }
+    for function in module.functions { mir_verify_flow(module, function) }
 }

@@ -137,119 +137,121 @@ class CompilerMirTests(unittest.TestCase):
     def test_native_cfg_verifier_rejects_corruption(self):
         from tools.bundle_selfhost import MODULE_ORDER
         driver = r'''
+fn test_module(source: str, file: str) -> MirModule { return mir_build(check_mir_source(source, file)) }
 let cli = args()
-let payload = emit_mir_module("fn choose(flag: bool) -> int { let output = print(8)\nlet chosen = if flag { 2 } else { 3 }\nchosen }\nprint(choose(true))", "verifier.wysna")
+let mut module = test_module("fn choose(flag: bool) -> int { let output = print(8)\nlet chosen = if flag { 2 } else { 3 }\nchosen }\nprint(choose(true))", "verifier.wysna")
 let fault = cli[1]
-if fault == "target" { mir_functions[0].blocks[0].terminator.targets[0] = 999 }
+if fault == "target" { module.functions[0].blocks[0].terminator.targets[0] = 999 }
 if fault == "condition" {
-    for i in 0..len(mir_functions[0].slots) {
-        if mir_functions[0].slots[i].type_id == 1 { mir_functions[0].blocks[0].terminator.value = i break }
+    for i in 0..len(module.functions[0].slots) {
+        if module.functions[0].slots[i].type_id == 1 { module.functions[0].blocks[0].terminator.value = i break }
     }
 }
-if fault == "parameter" { mir_functions[0].params.append(0) }
-if fault == "opcode" { mir_functions[0].blocks[0].operations[0].opcode = "invalid" }
-if fault == "terminator" { mir_functions[0].blocks[0].terminator.kind = "" }
+if fault == "parameter" { module.functions[0].params.append(0) }
+if fault == "opcode" { module.functions[0].blocks[0].operations[0].opcode = "invalid" }
+if fault == "terminator" { module.functions[0].blocks[0].terminator.kind = "" }
 if fault == "join" {
     # Each arm ends by moving its escaped value to the common result slot.
-    mir_functions[0].blocks[1].operations.pop()
+    module.functions[0].blocks[1].operations.pop()
 }
 if fault == "leak" {
-    for i in 0..len(mir_functions[0].blocks) {
+    for i in 0..len(module.functions[0].blocks) {
         let mut operations: list[MirOperation] = []
-        for operation in mir_functions[0].blocks[i].operations {
+        for operation in module.functions[0].blocks[i].operations {
             if operation.opcode != "release" { operations.append(operation) }
         }
-        mir_functions[0].blocks[i].operations = operations
+        module.functions[0].blocks[i].operations = operations
     }
 }
 if fault == "consumed" {
-    for i in 0..len(mir_functions[0].blocks) {
-        if mir_functions[0].blocks[i].terminator.kind == "return" {
-            let block = mir_functions[0].blocks[i]
+    for i in 0..len(module.functions[0].blocks) {
+        if module.functions[0].blocks[i].terminator.kind == "return" {
+            let block = module.functions[0].blocks[i]
             let mut moved = -1
             for operation in block.operations { if operation.opcode == "store" { moved = operation.args[0] } }
             let returned = block.terminator.value
-            mir_functions[0].blocks[i].operations.append(MirOperation { opcode: "clone", result: returned, args: [moved], name: "", value: mir_literal_unit(), source: block.terminator.source })
+            module.functions[0].blocks[i].operations.append(MirOperation { opcode: "clone", result: returned, args: [moved], name: "", value: mir_literal_unit(), source: block.terminator.source })
         }
     }
 }
 if fault == "backedge" or fault == "live_backedge" {
-    let ignored = emit_mir_module("let mut i = 0\nwhile i < 2 { i = i + 1 }\nprint(i)", "loop.wysna")
-    let function = mir_functions[0]
+    module = test_module("let mut i = 0\nwhile i < 2 { i = i + 1 }\nprint(i)", "loop.wysna")
+    let function = module.functions[0]
     let source = function.source
     let slot = len(function.slots)
     if fault == "backedge" {
-        mir_functions[0].slots.append(MirSlot { type_id: 3, name: "", parameter: false, origin: -1, predicate: false })
+        module.functions[0].slots.append(MirSlot { type_id: 3, name: "", parameter: false, origin: -1, predicate: false })
         let binding = function.blocks[0].operations[1].result
-        mir_functions[0].blocks[2].operations.append(MirOperation { opcode: "store", result: slot, args: [binding], name: "", value: mir_literal_unit(), source: source })
+        module.functions[0].blocks[2].operations.append(MirOperation { opcode: "store", result: slot, args: [binding], name: "", value: mir_literal_unit(), source: source })
     } else {
-        mir_functions[0].slots.append(MirSlot { type_id: 1, name: "", parameter: false, origin: -1, predicate: false })
+        module.functions[0].slots.append(MirSlot { type_id: 1, name: "", parameter: false, origin: -1, predicate: false })
         let operands: list[int] = []
-        mir_functions[0].blocks[2].operations.append(MirOperation { opcode: "const", result: slot, args: operands, name: "", value: mir_literal_unit(), source: source })
+        module.functions[0].blocks[2].operations.append(MirOperation { opcode: "const", result: slot, args: operands, name: "", value: mir_literal_unit(), source: source })
     }
 }
 if fault == "string_leak" or fault == "string_borrow" or fault == "string_move" or fault == "string_helper" or fault == "string_literal" {
-    let ignored = emit_mir_module("fn copy(value: str) -> str { let temp = value + \"!\"\ntemp }\nprint(copy(\"a\"))", "string.wysna")
-    for i in 0..len(mir_functions[0].blocks) {
+    module = test_module("fn copy(value: str) -> str { let temp = value + \"!\"\ntemp }\nprint(copy(\"a\"))", "string.wysna")
+    for i in 0..len(module.functions[0].blocks) {
         let mut operations: list[MirOperation] = []
-        for operation in mir_functions[0].blocks[i].operations {
+        for operation in module.functions[0].blocks[i].operations {
             let mut candidate = operation
             if fault == "string_move" and candidate.opcode == "store" { candidate.args = [0] }
             if fault == "string_helper" and candidate.opcode == "runtime" { candidate.name = "wysna_mul" }
             if fault == "string_literal" and candidate.opcode == "const" { candidate.value.type_id = 3 }
             if fault != "string_leak" or candidate.opcode != "release" { operations.append(candidate) }
         }
-        mir_functions[0].blocks[i].operations = operations
-        if fault == "string_borrow" and mir_functions[0].blocks[i].terminator.kind == "return" { mir_functions[0].blocks[i].terminator.value = 0 }
+        module.functions[0].blocks[i].operations = operations
+        if fault == "string_borrow" and module.functions[0].blocks[i].terminator.kind == "return" { module.functions[0].blocks[i].terminator.value = 0 }
     }
 }
 if len(fault) >= 7 and slice(fault, 0, 7) == "result_" {
-    let ignored = emit_mir_module("fn value(flag: bool) -> str ! str { if flag { return Ok(\"ok\") }\nErr(\"bad\") }\nfn forward(flag: bool) -> str ! str { let local = \"held-\" + str(1)\nlet result = value(flag)?\nresult }\nprint(forward(false) else error { error })", "result.wysna")
-    if fault == "result_arena" { mir_result_types[0].error = 3 }
-    if fault == "result_duplicate" { mir_result_types.append(mir_result_types[0]) }
-    for i in 0..len(mir_functions[1].blocks) {
-        let block = mir_functions[1].blocks[i]
+    module = test_module("fn value(flag: bool) -> str ! str { if flag { return Ok(\"ok\") }\nErr(\"bad\") }\nfn forward(flag: bool) -> str ! str { let local = \"held-\" + str(1)\nlet result = value(flag)?\nresult }\nprint(forward(false) else error { error })", "result.wysna")
+    if fault == "result_arena" { module.result_types[0].error = 3 }
+    if fault == "result_duplicate" { module.result_types.append(module.result_types[0]) }
+    for i in 0..len(module.functions[1].blocks) {
+        let block = module.functions[1].blocks[i]
         let mut operations: list[MirOperation] = []
         for operation in block.operations {
             if fault == "result_guard" and operation.opcode == "test" {
                 let term = block.terminator
-                mir_functions[1].blocks[i].terminator.targets = [term.targets[1], term.targets[0]]
+                module.functions[1].blocks[i].terminator.targets = [term.targets[1], term.targets[0]]
             }
             if fault == "result_reuse" and operation.opcode == "test" { operations.append(operation) }
             if fault == "result_stale" and operation.name == "wysna_unwrap_err" {
                 let value = operation.args[0]
-                let copy = len(mir_functions[1].slots)
-                mir_functions[1].slots.append(MirSlot { type_id: mir_functions[1].slots[value].type_id, name: "", parameter: false, origin: -1, predicate: false })
+                let copy = len(module.functions[1].slots)
+                module.functions[1].slots.append(MirSlot { type_id: module.functions[1].slots[value].type_id, name: "", parameter: false, origin: -1, predicate: false })
                 operations.append(MirOperation { opcode: "clone", result: copy, args: [value], name: "", value: mir_literal_unit(), source: operation.source })
                 operations.append(MirOperation { opcode: "store", result: value, args: [copy], name: "", value: mir_literal_unit(), source: operation.source })
             }
             if fault != "result_leak" or operation.opcode != "release" { operations.append(operation) }
         }
-        mir_functions[1].blocks[i].operations = operations
+        module.functions[1].blocks[i].operations = operations
     }
     if fault == "result_move" {
-        let replacement = emit_mir_module("fn copy(payload: str) -> str ! str { Ok(payload) }\nprint(copy(\"a\") else { \"bad\" })", "borrow.wysna")
-        for i in 0..len(mir_functions[0].blocks) {
-            for j in 0..len(mir_functions[0].blocks[i].operations) {
-                if mir_functions[0].blocks[i].operations[j].name == "wysna_ok" { mir_functions[0].blocks[i].operations[j].args = [0] }
+        module = test_module("fn copy(payload: str) -> str ! str { Ok(payload) }\nprint(copy(\"a\") else { \"bad\" })", "borrow.wysna")
+        for i in 0..len(module.functions[0].blocks) {
+            for j in 0..len(module.functions[0].blocks[i].operations) {
+                if module.functions[0].blocks[i].operations[j].name == "wysna_ok" { module.functions[0].blocks[i].operations[j].args = [0] }
             }
         }
     }
     if fault == "result_const" {
-        let slot = len(mir_functions[1].slots)
-        mir_functions[1].slots.append(MirSlot { type_id: 7, name: "", parameter: false, origin: -1, predicate: false })
+        let slot = len(module.functions[1].slots)
+        module.functions[1].slots.append(MirSlot { type_id: 7, name: "", parameter: false, origin: -1, predicate: false })
         let mut literal = mir_literal_unit()
         literal.type_id = 7
         let operands: list[int] = []
-        mir_functions[1].blocks[0].operations.append(MirOperation { opcode: "const", result: slot, args: operands, name: "", value: literal, source: mir_functions[1].source })
+        module.functions[1].blocks[0].operations.append(MirOperation { opcode: "const", result: slot, args: operands, name: "", value: literal, source: module.functions[1].source })
     }
     if fault == "result_facts" {
-        if len(sem_mir_calls) == 0 or len(sem_mir_bindings) == 0 { report_error_at("W9999", at_tok(), "missing checked facts") }
-        check_source("print(1)", "normal.wysna")
-        if len(sem_mir_calls) != 0 or len(sem_mir_bindings) != 0 or len(sem_mir_unit_choices) != 0 { report_error_at("W9999", at_tok(), "MIR facts leaked across check sessions") }
+        let before = mir_module_json(module)
+        let normal = check_source("print(1)", "normal.wysna")
+        if normal.has_nodes or len(normal.nodes) != 0 { report_error_at("W9999", module.source, "unexpected MIR nodes in metadata check") }
+        if mir_module_json(module) != before { report_error_at("W9999", module.source, "MIR module changed across check sessions") }
     }
 }
-mir_verify()
+mir_verify(module)
 print("verified")
 '''
         modules = [(ROOT / "selfhost/src" / name).read_text() for name in MODULE_ORDER if name != "09_main.wysna"]

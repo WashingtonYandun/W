@@ -12,6 +12,7 @@ import sys
 MODULE_ORDER = [
     "01_ast.wysna",
     "02_lexer.wysna",
+    "04_context.wysna",
     "03_token_stream.wysna",
     "03_modules.wysna",
     "04_emitter.wysna",
@@ -19,6 +20,7 @@ MODULE_ORDER = [
     "06_parser_expr.wysna",
     "07_parser_decl.wysna",
     "08_checker.wysna",
+    "08_checked.wysna",
     "08_semantics.wysna",
     "08_mir.wysna",
     "08_mir_channels.wysna",

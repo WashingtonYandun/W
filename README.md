@@ -26,7 +26,7 @@ Wysna distinguishes the language from its two compiler implementations. The self
 
 ### Wysna Seed Compiler Pipeline
 
-Wysna Seed uses multiple stages for type analysis and portable native code generation. Wysna Compiler has a direct C99 route and an experimental MIR producer with scalar, string and basic result support. `wysna emit-mir --implementation=seed|compiler` exports versioned IR; see the [supported profile](docs/MIR_DESIGN.md#interchange-and-the-compiler-profile).
+Wysna Seed uses multiple stages for type analysis and portable native code generation. Wysna Compiler owns compilation state per invocation and has a direct C99 route plus an experimental MIR producer over checked nodes, with scalar, string and basic result support. `wysna emit-mir --implementation=seed|compiler` exports versioned IR; see the [supported profile](docs/MIR_DESIGN.md#interchange-and-the-compiler-profile).
 
 | Stage | Component | Responsibility | Output representation |
 | :--- | :--- | :--- | :--- |
