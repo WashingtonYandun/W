@@ -792,16 +792,14 @@ class CCodeGen:
         return self._bind_call(f"wysna_call({function}, {len(values)}, {array})", out)
 
     def emit_expr(self, expr: Expr, out: List[str]) -> str:
-        value = self._emit_expr_impl(expr, out)
+        handler = EXPRESSION_RULES.handler_for(expr, self.file)
+        if hasattr(expr, "function_reference"):
+            value = self.function_value(expr.function_reference, len(expr.inferred_type.params), out)
+        else:
+            value = handler(self, expr, out)
         if hasattr(expr, "force_result_wrap_id"):
             return self._bind_call(f"wysna_ok({self._own_expr(value)})", out)
         return value
-
-    def _emit_expr_impl(self, expr: Expr, out: List[str]) -> str:
-        handler = EXPRESSION_RULES.handler_for(expr, self.file)
-        if hasattr(expr, "function_reference"):
-            return self.function_value(expr.function_reference, len(expr.inferred_type.params), out)
-        return handler(self, expr, out)
 
     def _emit_elif_chain(self, elifs: List, idx: int, else_branch: Optional[Block], res_var: str, out: List[str]) -> None:
         if idx < len(elifs):

@@ -155,16 +155,42 @@ class ArchitectureContractTests(unittest.TestCase):
             self.assertEqual(source.count('#include "' + name + '"'), 1, name)
         self.assertIn('runtime = ["*.h"]', (ROOT / 'pyproject.toml').read_text())
 
-    def test_dispatchers_remain_dispatchers_and_instantiation_owns_algorithms(self):
-        for path, name in (('checker/TypeChecker.py', '_check_expr_impl'),
-                           ('runtime/Interpreter.py', '_eval_expr_impl'),
-                           ('codegen/CCodeGen.py', '_emit_expr_impl')):
-            tree = ast.parse((ROOT / path).read_text())
-            function = next(node for node in ast.walk(tree)
-                            if isinstance(node, ast.FunctionDef) and node.name == name)
-            self.assertLessEqual(len(function.body), 3, path)
+    def test_dispatchers_preserve_stack_depth_and_instantiation_owns_algorithms(self):
+        import sys
+        from runtime.Values import WysnaInt
+
+        owners = ((TypeChecker(), '_check_expr', '_check_expr_impl', 'checker.TypeChecker', IntType),
+                  (Interpreter(), 'eval_expr', '_eval_expr_impl', 'runtime.Interpreter', WysnaInt(7)),
+                  (CCodeGen(), 'emit_expr', '_emit_expr_impl', 'codegen.CCodeGen', 'wysna_int(7)'))
+        for owner, method, redundant, module, value in owners:
+            callers = []
+
+            def handle(*arguments):
+                callers.append(sys._getframe(1).f_code.co_name)
+                return value
+
+            dispatch = ExpressionDispatch('test', {N.IntLiteral: handle})
+            arguments = (() if isinstance(owner, TypeChecker) else
+                         (owner.global_env,) if isinstance(owner, Interpreter) else ([],))
+            with patch(module + '.EXPRESSION_RULES', dispatch):
+                getattr(owner, method)(N.IntLiteral(7), *arguments)
+            self.assertEqual(callers, [method], module)
+            self.assertFalse(hasattr(owner, redundant), module)
         for name in ('_monomorphize_struct_impl', '_monomorphize_fn_impl', '_monomorphize_enum_impl'):
             self.assertFalse(hasattr(TypeChecker, name))
+
+    def test_json_depth_budget_does_not_exhaust_the_host_stack(self):
+        import io
+        import sys
+        from compiler.CompilerService import CompilerService
+
+        recursion_limit = sys.getrecursionlimit()
+        service = CompilerService(project_root=str(ROOT))
+        checked = service.check_file(ROOT / 'tests/stdlib/json.wysna')
+        output = io.StringIO()
+        service.interpret(checked, stdout=output)
+        self.assertEqual(output.getvalue(), (ROOT / 'tests/stdlib/json.expected').read_text())
+        self.assertEqual(sys.getrecursionlimit(), recursion_limit)
 
     def test_specialization_failure_preserves_original_diagnostic_and_context(self):
         checker = TypeChecker()

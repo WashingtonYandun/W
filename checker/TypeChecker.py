@@ -776,7 +776,8 @@ class TypeChecker:
         return symbol.type if symbol and isinstance(symbol.type, ModuleType) else None
 
     def _check_expr(self, expr: Expr, is_statement_context: bool = False, allow_module: bool = False) -> WysnaType:
-        inferred_type = self._check_expr_impl(expr, is_statement_context)
+        handler = EXPRESSION_RULES.handler_for(expr, self.file)
+        inferred_type = handler(self, expr, is_statement_context)
         if isinstance(inferred_type, ModuleType) and not allow_module:
             raise TypeError("Module namespaces cannot be used as runtime values", file=self.file,
                             line=expr.line, col=expr.col, code="W2003")
@@ -786,10 +787,6 @@ class TypeChecker:
         expr.inferred_type_id = self.interner.from_type(inferred_type)
         expr.session_arena_id = self.interner.arena_id
         return inferred_type
-
-    def _check_expr_impl(self, expr: Expr, is_statement_context: bool = False) -> WysnaType:
-        handler = EXPRESSION_RULES.handler_for(expr, self.file)
-        return handler(self, expr, is_statement_context)
 
     def _pattern_matrix_exhaustive(self, types: List[WysnaType], rows: List[List[Any]]) -> bool:
         from checker.PatternCoverage import pattern_matrix_exhaustive

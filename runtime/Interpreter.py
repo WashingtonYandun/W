@@ -247,7 +247,8 @@ class Interpreter:
     # ==========================================
 
     def eval_expr(self, expr: Expr, env: Environment) -> WysnaValue:
-        value = self._eval_expr_impl(expr, env)
+        handler = EXPRESSION_RULES.handler_for(expr, self.file)
+        value = handler(self, expr, env)
         return WysnaOk(value) if hasattr(expr, "force_result_wrap_id") else value
 
     def range_bounds(self, expression, env):
@@ -265,10 +266,6 @@ class Interpreter:
     def eval_value(self, expr: Expr, env: Environment) -> WysnaValue:
         """Freeze an evaluated value before later expressions can mutate its owner."""
         return self.eval_expr(expr, env).clone_value()
-
-    def _eval_expr_impl(self, expr: Expr, env: Environment) -> WysnaValue:
-        handler = EXPRESSION_RULES.handler_for(expr, self.file)
-        return handler(self, expr, env)
 
     # ==========================================
     # Helper Call & OOP Methods

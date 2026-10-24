@@ -44,7 +44,10 @@ failed cache entry rather than publishing a partial declaration.
 The interpreter and AST C99 backend retain independent expression algorithms in
 `runtime/ExpressionRules.py` and `codegen/ExpressionRules.py`. Their shared
 `ExpressionDispatch` supplies only exact-class lookup and invariant diagnostics.
-It does not implement evaluation, typing, ownership or emission.
+It does not implement evaluation, typing, ownership or emission. The semantic
+wrapper invokes its handler directly: a separate forwarding frame per expression
+would reduce the supported recursion budget on Python 3.11. Stack-depth and bounded
+JSON regressions enforce this without increasing Python's recursion limit.
 
 Dispatch tables are read-only snapshots. A new AST class, including a subclass of
 an existing expression, requires an explicit engine policy. Unknown nodes raise
